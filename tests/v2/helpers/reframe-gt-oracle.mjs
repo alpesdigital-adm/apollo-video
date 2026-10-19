@@ -5,10 +5,16 @@
 //   the same frames, produces the detector rows the product writers consume. The "detector" is therefore a STAND-IN: its boxes are the
 //   generator's boxes, not the output of a model. Nothing here says anything about a real detector on real video.
 // - Everything downstream of the rows is the product: raw tensor -> V9 decoder -> sealed envelope -> source evidence stream -> ROI ->
-//   policy-sealed plan -> keyframed render plan -> FFmpeg crop expression -> encoded mp4.
-// - The measurements below read the DECODED pixels of that mp4. The crop window of each frame is recovered from fiducial markers drawn
-//   at known source positions (not from the RenderInput), and then compared with the RenderInput arithmetic. Only the foreground band of
-//   the canvas is read: the rest of a vertical canvas is a blurred copy of the picture, which is no evidence of anything.
+//   policy-sealed plan -> keyframed render plan -> FFmpeg graph -> encoded mp4.
+//
+// What the oracle expects, and where that expectation comes from:
+// - The expectation comes from the SPECIFICATION of a reframe, never from the layout a renderer happens to produce: a range the plan reframes
+//   (`plan` or `manual`) shows the crop window FILLING the variant canvas (a cover fit: no letterbox band, no blurred backdrop); an unreframed
+//   range (`fallback`) shows the whole source frame. The measurements read the DECODED pixels and know nothing about the composition: a render
+//   that lays the crop out some other way is reported as a mismatch, it is not accommodated here.
+// - Every measurement is made in OUTPUT frame coordinates: where the sharp picture is (a texture that a blurred backdrop cannot reproduce),
+//   how much of the canvas it covers, where the subjects are, and - through fiducials whose gaps are irregular, so that any four of them name
+//   themselves - which part of the source the picture shows.
 //
 // This module is pure (no FFmpeg, no PG), so its arithmetic is unit-tested without a render (`reframe-gt-oracle.test.mjs`).
 
@@ -16,22 +22,33 @@ export const W = 1280
 export const H = 720
 export const FPS = 30
 
-/** Dark grey background: distinguishable from the black pad the renderer adds around a contained frame. */
-export const BACKGROUND = [40, 40, 40]
-/** White vertical fiducials at known source columns; the renderer cannot change where they are, only where the crop shows them. */
-export const MARKER_SPACING = 48
-export const MARKER_CENTERS = Object.freeze(Array.from({ length: 26 }, (_unused, index) => 24 + MARKER_SPACING * index))
+/** Checker texture of the background: fine enough that every 8 px block of a filled canvas holds an edge, and lost by any blur. */
+export const TEXTURE_CELL = 10
+export const TEXTURE_LOW = [28, 28, 28]
+export const TEXTURE_HIGH = [52, 52, 52]
+/**
+ * White vertical fiducials at known source columns. The gaps are irregular and all different, so the pattern of any few consecutive stripes
+ * identifies which stripes they are without being told where the picture is (the measurement needs no layout hint).
+ */
+// (Found by a search over random gap sequences for one whose alignments are never ambiguous at the three scales the renders use, with up to
+// 1 canvas px of noise on the stripe centres; see the fiducial test.)
+const MARKER_GAPS = [86, 50, 98, 87, 33, 87, 45, 44, 31, 64, 46, 41, 47, 76, 78, 95, 65, 52, 41]
+export const MARKER_CENTERS = Object.freeze(MARKER_GAPS.reduce((centers, gap) => [...centers, centers.at(-1) + gap], [24]))
 export const MARKER_HALF_WIDTH = 4
 export const SUBJECT_COLORS = Object.freeze({ A: [230, 30, 30], B: [30, 200, 30], screen: [0, 220, 220] })
 
-/** Tolerances, in SOURCE pixels. Named so the evidence can quote them. */
+/** Tolerances. Named so the evidence can quote them. Source pixels unless said otherwise. */
 export const TOLERANCE = Object.freeze({
   /** The even-pixel crop quantization (<= 2 px) plus the sub-pixel blur of scaling and encoding. */
   window: 3,
   /** Where a decoded subject may sit against where the generator put it. */
   position: 6,
-  /** The first and last non-black column of the foreground against the window the fit gives: two canvas pixels at the 0.42 scale of a vertical canvas. */
-  footprint: 5.5,
+  /** CANVAS pixels: where a decoded subject sits on the output frame against where the specification puts it. */
+  outputPosition: 8,
+  /** Share of the canvas width and of the canvas height that a reframed range's sharp picture must cover. */
+  coverage: 0.98,
+  /** Relative: the scale of the picture on the canvas against the cover scale of the crop. */
+  scale: 0.02,
 })
 
 const face = (x, y = 0.2) => [x, y, x + 0.1, y + 0.3]
@@ -95,10 +112,16 @@ export const standInDetectorRows = (scene, sourceFrame) =>
 
 const pixelBox = (box) => [Math.round(box[0] * W), Math.round(box[1] * H), Math.round(box[2] * W), Math.round(box[3] * H)]
 
-/** The empty source frame: background and the fiducials. */
+/** The empty source frame: the checker texture and the fiducials. */
 export function makeBaseFrame() {
   const base = Buffer.alloc(W * H * 3)
-  base.fill(Buffer.from(BACKGROUND))
+  const low = Buffer.from(TEXTURE_LOW), high = Buffer.from(TEXTURE_HIGH)
+  for (let y = 0; y < H; y += 1) {
+    for (let x0 = 0; x0 < W; x0 += TEXTURE_CELL) {
+      const colour = (Math.floor(x0 / TEXTURE_CELL) + Math.floor(y / TEXTURE_CELL)) % 2 === 0 ? low : high
+      base.fill(colour, (y * W + x0) * 3, (y * W + Math.min(W, x0 + TEXTURE_CELL)) * 3)
+    }
+  }
   for (const center of MARKER_CENTERS) {
     for (let y = 0; y < H; y += 1) {
       const offset = (y * W + center - MARKER_HALF_WIDTH) * 3
@@ -120,7 +143,8 @@ export function drawSourceFrame(target, base, subjects) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------
-// What the renderer was told: the crop window of a frame, from the RenderInput alone (the same even-pixel arithmetic as the FFmpeg expression).
+// What the specification says the render shows: the crop window of a frame, from the RenderInput alone (the same even-pixel arithmetic as the
+// FFmpeg expression), and where a reframed range puts it on the canvas.
 // ---------------------------------------------------------------------------------------------------------------------------------------
 
 function cropAtFrame(range, frame) {
@@ -147,34 +171,22 @@ export function oracleWindow(renderPlan, timelineFrame) {
 }
 
 /**
- * Where the foreground of the render lands on the canvas, the way the composition graph (and `caption-canvas-projection`) build it:
- *   1. the crop window is fitted into the STAGING frame (the largest video source: here the 1280x720 source) and centred (`pad`);
- *   2. the staging frame is fitted into the canvas (`decrease`), multiplied by `foregroundScale` and overlaid centred horizontally at
- *      `verticalPosition`; the rest of the canvas is a blurred copy of the picture (no face-bearing content, never measured).
- * A 9:16 crop of a 16:9 source therefore appears as a strip inside a 16:9 band of the vertical canvas; the 16:9 variant fills its canvas.
- *
- * Returns the scale (canvas px per source px), the canvas x of the window's left edge (`padX`), the canvas y of source row 0 (`padY`), and the
- * rows of the foreground band (`band`), all in canvas pixels. It is computed from the RenderInput alone.
+ * Where a REFRAMED range's picture lands on the canvas, by the specification: the crop window (full source height) is scaled by the cover
+ * factor and centred, so it fills the canvas whole. `visibleLeft`/`visibleWidth` are the source columns the canvas then shows (the whole crop
+ * when the crop has the canvas's aspect ratio, a centred part of it otherwise); `offsetY` is the canvas row of source row 0.
  */
-export function foregroundMapping(window, canvas, composition = { foregroundScale: 1, verticalPosition: 0.5 }) {
-  const staging = { width: W, height: H }
-  const toStaging = Math.min(staging.width / window.width, staging.height / H)
-  const stagePadX = (staging.width - window.width * toStaging) / 2, stagePadY = (staging.height - H * toStaging) / 2
-  const toCanvas = Math.min(canvas.width / staging.width, canvas.height / staging.height) * composition.foregroundScale
-  const foregroundWidth = staging.width * toCanvas, foregroundHeight = staging.height * toCanvas
-  const originX = (canvas.width - foregroundWidth) / 2
-  const originY = Math.max(0, Math.min(canvas.height - foregroundHeight, canvas.height * composition.verticalPosition - foregroundHeight / 2))
-  return {
-    scale: toStaging * toCanvas,
-    padX: originX + stagePadX * toCanvas,
-    padY: originY + stagePadY * toCanvas,
-    band: { top: originY, bottom: originY + foregroundHeight },
-  }
+export function coverExpectation(window, canvas) {
+  const scale = Math.max(canvas.width / window.width, canvas.height / H)
+  const visibleWidth = canvas.width / scale
+  return { scale, visibleLeft: window.x0 + (window.width - visibleWidth) / 2, visibleWidth, offsetY: -(scale * H - canvas.height) / 2 }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------
-// What the pixels say: the visible window and the subjects of one decoded frame.
+// What the pixels say, with no idea how the composition was laid out: the sharp picture, the fiducials and the subjects of one decoded frame.
 // ---------------------------------------------------------------------------------------------------------------------------------------
+
+const SHARP_GRADIENT = 8
+const MIN_SHARP_PIXELS = 8
 
 function tally(width, height) {
   return { cols: new Uint32Array(width), rows: new Uint32Array(height) }
@@ -187,43 +199,69 @@ function boundsOf(counts, minimum) {
 }
 
 /**
- * Reads one decoded RGB24 frame, looking ONLY at the rows of the foreground band (the blurred backdrop copies the subjects and the
- * fiducials, dimmed and smeared, and is never evidence). `hint` is the RenderInput's own prediction (window + mapping); it says where the
- * band is and which fiducial is which (they are `MARKER_SPACING` source px apart and the prediction is good to a few pixels). It is never
- * the source of a measurement: the position of the crop is the linear fit `canvas x = scale * source x + offset` of the fiducials found.
- *
- * Returns
- *  - `fit`: that line (scale, offset) with the number of fiducials and the RMS residual;
- *  - `window`: the source columns shown by the foreground footprint the composition fixes on the canvas (left, right), through the fit;
- *  - `footprint`: the same, from the first and last non-black columns of the band (black is the staging pad), to cross-check the width;
- *  - `subjects`: each colour's box in source pixels, or null when the colour is absent.
+ * Finds which fiducials a list of stripe centres (canvas px, ascending) is, from their irregular gaps alone: the consecutive run of
+ * `MARKER_CENTERS` whose best linear fit `canvas x = scale * source x + offset` has the smallest residual, accepted only when it is clearly
+ * better than every other alignment. Returns null when no alignment is clear.
  */
-export function analyzeFrame(buffer, width, height, hint) {
-  const band = hint.mapping.band
-  const rowFrom = Math.max(0, Math.ceil(band.top) + 2), rowTo = Math.min(height, Math.floor(band.bottom) - 2)
+export function matchFiducials(centres) {
+  const n = centres.length
+  if (n < 4) return null
+  const candidates = []
+  for (let first = 0; first + n <= MARKER_CENTERS.length; first += 1) {
+    const sources = MARKER_CENTERS.slice(first, first + n)
+    const meanSrc = sources.reduce((sum, value) => sum + value, 0) / n
+    const meanOut = centres.reduce((sum, value) => sum + value, 0) / n
+    let sxx = 0, sxy = 0
+    for (let index = 0; index < n; index += 1) { sxx += (sources[index] - meanSrc) ** 2; sxy += (sources[index] - meanSrc) * (centres[index] - meanOut) }
+    const scale = sxy / sxx
+    const offset = meanOut - scale * meanSrc
+    const residual = Math.sqrt(centres.reduce((sum, value, index) => sum + (value - (scale * sources[index] + offset)) ** 2, 0) / n)
+    if (scale >= 0.3 && scale <= 2.6) candidates.push({ first, scale, offset, residualRms: residual })
+  }
+  candidates.sort((left, right) => left.residualRms - right.residualRms)
+  const best = candidates[0]
+  if (!best || best.residualRms > 1.2) return null
+  const second = candidates[1]
+  if (second && second.residualRms < Math.max(3 * best.residualRms, 2.5)) return null
+  return { scale: best.scale, offset: best.offset, markers: n, residualRms: best.residualRms, firstMarker: best.first }
+}
+
+/**
+ * Reads one decoded RGB24 frame. It is told nothing about the composition. Returns
+ *  - `footprint`: the box of the SHARP picture on the canvas (first/last column and row with edge content, snapped to the canvas edge when it
+ *    reaches it) and `coverage`: the share of canvas columns and of canvas rows that hold sharp picture;
+ *  - `fit`: `canvas x = scale * source x + offset`, from the fiducials found (null when they do not name themselves);
+ *  - `window`: the source columns the footprint shows, through the fit;
+ *  - `subjects`: each colour's box on the canvas (`canvas`) and in source pixels (`source`), or null when absent. Only the footprint is read:
+ *    a blurred backdrop copies the subjects smeared and is never evidence.
+ */
+export function analyzeFrame(buffer, width, height) {
   const white = new Uint32Array(width)
-  const classes = { A: tally(width, height), B: tally(width, height), screen: tally(width, height) }
-  let contentX0 = width, contentX1 = -1, contentY0 = height, contentY1 = -1
-  for (let y = rowFrom; y < rowTo; y += 1) {
+  const sharp = tally(width, height)
+  for (let y = 1; y < height; y += 1) {
     let offset = y * width * 3
-    for (let x = 0; x < width; x += 1, offset += 3) {
+    for (let x = 1; x < width; x += 1) {
+      offset += 3
       const r = buffer[offset], g = buffer[offset + 1], b = buffer[offset + 2]
-      if (r > 24 || g > 24 || b > 24) {
-        if (x < contentX0) contentX0 = x
-        if (x > contentX1) contentX1 = x
-        if (y < contentY0) contentY0 = y
-        if (y > contentY1) contentY1 = y
-      }
       if (r > 175 && g > 175 && b > 175) white[x] += 1
-      else if (r > 150 && g < 100 && b < 100) { classes.A.cols[x] += 1; classes.A.rows[y] += 1 }
-      else if (g > 130 && r < 100 && b < 100) { classes.B.cols[x] += 1; classes.B.rows[y] += 1 }
-      else if (r < 90 && g > 150 && b > 150) { classes.screen.cols[x] += 1; classes.screen.rows[y] += 1 }
+      const gradient = Math.abs(g - buffer[offset - 3 + 1]) + Math.abs(g - buffer[offset - width * 3 + 1])
+      if (gradient > SHARP_GRADIENT) { sharp.cols[x] += 1; sharp.rows[y] += 1 }
     }
   }
-  const none = { content: null, fit: null, window: null, footprint: null, subjects: { A: null, B: null, screen: null } }
-  if (contentX1 < 0) return none
-  const contentHeight = contentY1 - contentY0 + 1
-  const threshold = Math.max(8, Math.floor(contentHeight * 0.2))
+  const none = { footprint: null, coverage: { width: 0, height: 0 }, fit: null, window: null, subjects: { A: null, B: null, screen: null } }
+  // A white fiducial is a flat tall stripe: it has no texture of its own, but it is picture (it is as sharp as it gets).
+  const stripeThreshold = Math.max(24, Math.floor(height * 0.08))
+  const pictureColumns = Uint32Array.from(sharp.cols, (value, x) => (value >= MIN_SHARP_PIXELS || white[x] >= stripeThreshold ? MIN_SHARP_PIXELS : 0))
+  const sharpBounds = boundsOf({ cols: pictureColumns, rows: sharp.rows }, MIN_SHARP_PIXELS)
+  if (!sharpBounds) return none
+  const snap = (value, limit) => (value <= 2 ? 0 : value >= limit - 3 ? limit - 1 : value)
+  const footprint = { x0: snap(sharpBounds.x0, width), x1: snap(sharpBounds.x1, width), y0: snap(sharpBounds.y0, height), y1: snap(sharpBounds.y1, height) }
+  const columnsWithPicture = pictureColumns.reduce((count, value) => count + (value >= MIN_SHARP_PIXELS ? 1 : 0), 0)
+  const rowsWithPicture = sharp.rows.reduce((count, value) => count + (value >= MIN_SHARP_PIXELS ? 1 : 0), 0)
+  const coverage = { width: columnsWithPicture / width, height: rowsWithPicture / height }
+
+  // Fiducials: columns where white is a tall stripe. A stripe cut by the edge of the picture is truncated and is not used.
+  const threshold = stripeThreshold
   const runs = []
   let run = null
   for (let x = 0; x < width; x += 1) {
@@ -235,53 +273,38 @@ export function analyzeFrame(buffer, width, height, hint) {
     }
   }
   if (run) runs.push(run)
-  // A fiducial cut by the edge of the footprint is a truncated stripe whose centroid is biased: it is not used.
   const centres = runs
-    .filter((candidate) => candidate.last - candidate.first + 1 >= 2 && candidate.first > contentX0 + 1 && candidate.last < contentX1 - 1)
+    .filter((candidate) => candidate.last - candidate.first + 1 >= 2 && candidate.first > footprint.x0 + 1 && candidate.last < footprint.x1 - 1)
     .map((candidate) => candidate.moment / candidate.sum)
-  const predicted = (outX) => hint.window.x0 + (outX - hint.mapping.padX) / hint.mapping.scale
-  const points = []
-  for (const centre of centres) {
-    const source = predicted(centre)
-    const index = Math.round((source - MARKER_CENTERS[0]) / MARKER_SPACING)
-    if (index < 0 || index >= MARKER_CENTERS.length || Math.abs(source - MARKER_CENTERS[index]) > MARKER_SPACING * 0.4) continue
-    points.push({ out: centre, src: MARKER_CENTERS[index] })
-  }
-  let fit = null
-  if (points.length >= 3) {
-    const n = points.length
-    const meanSrc = points.reduce((sum, point) => sum + point.src, 0) / n
-    const meanOut = points.reduce((sum, point) => sum + point.out, 0) / n
-    let sxx = 0, sxy = 0
-    for (const point of points) { sxx += (point.src - meanSrc) ** 2; sxy += (point.src - meanSrc) * (point.out - meanOut) }
-    const scale = sxy / sxx
-    const offset = meanOut - scale * meanSrc
-    const residual = Math.sqrt(points.reduce((sum, point) => sum + (point.out - (scale * point.src + offset)) ** 2, 0) / n)
-    fit = { scale, offset, markers: n, residualRms: residual }
-  }
-  const content = { x0: contentX0, x1: contentX1, y0: contentY0, y1: contentY1 }
-  if (!fit) return { ...none, content }
+  const fit = matchFiducials(centres)
+  if (!fit) return { ...none, footprint, coverage }
   const toSourceX = (outX) => (outX - fit.offset) / fit.scale
-  // The vertical placement of the band is the composition's geometry (the backdrop above it is not black, so its top row cannot be told
-  // from the pixels); what the pixels measure is the horizontal crop, through the fiducials, and the vertical scale through the same fit.
-  const toSourceY = (outY) => (outY - hint.mapping.padY) / fit.scale
+  const toSourceY = (outY) => (outY - footprint.y0) / fit.scale
+
+  // Subjects: only inside the footprint.
+  const classes = { A: tally(width, height), B: tally(width, height), screen: tally(width, height) }
+  for (let y = footprint.y0; y <= footprint.y1; y += 1) {
+    let offset = (y * width + footprint.x0) * 3
+    for (let x = footprint.x0; x <= footprint.x1; x += 1, offset += 3) {
+      const r = buffer[offset], g = buffer[offset + 1], b = buffer[offset + 2]
+      if (r > 150 && g < 100 && b < 100) { classes.A.cols[x] += 1; classes.A.rows[y] += 1 }
+      else if (g > 130 && r < 100 && b < 100) { classes.B.cols[x] += 1; classes.B.rows[y] += 1 }
+      else if (r < 90 && g > 150 && b > 150) { classes.screen.cols[x] += 1; classes.screen.rows[y] += 1 }
+    }
+  }
   const subjects = { A: null, B: null, screen: null }
   for (const [name, counts] of Object.entries(classes)) {
     const bounds = boundsOf(counts, 3)
-    if (bounds) subjects[name] = { x0: toSourceX(bounds.x0), x1: toSourceX(bounds.x1 + 1), y0: toSourceY(bounds.y0), y1: toSourceY(bounds.y1 + 1) }
+    if (!bounds) continue
+    const canvasBox = { x0: bounds.x0, x1: bounds.x1 + 1, y0: bounds.y0, y1: bounds.y1 + 1 }
+    subjects[name] = { canvas: canvasBox, x0: toSourceX(canvasBox.x0), x1: toSourceX(canvasBox.x1), y0: toSourceY(canvasBox.y0), y1: toSourceY(canvasBox.y1) }
   }
-  // The footprint the composition fixes on the canvas: where the window's left and right edges are, through the measured fit.
-  const footLeft = hint.mapping.padX, footRight = hint.mapping.padX + hint.window.width * hint.mapping.scale
-  return {
-    content, fit,
-    window: { left: toSourceX(footLeft), right: toSourceX(footRight) },
-    footprint: { left: toSourceX(contentX0), right: toSourceX(contentX1 + 1) },
-    subjects,
-  }
+  return { footprint, coverage, fit, window: { left: toSourceX(footprint.x0), right: toSourceX(footprint.x1 + 1) }, subjects }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------
-// The verdict of one scene: per decoded frame, the subjects against the measured crop; over the range, the measured velocity/acceleration.
+// The verdict of one scene: per decoded frame, the picture and the subjects against the specification; over the range, the measured
+// velocity/acceleration of the crop.
 // ---------------------------------------------------------------------------------------------------------------------------------------
 
 /**
@@ -289,6 +312,10 @@ export function analyzeFrame(buffer, width, height, hint) {
  * @param renderPlan the RenderReframePlanV1 the renderer was given
  * @param issues the localized issues of the record (timeline frame ranges)
  * @param policy the pinned REFRAME_POLICY
+ * @param canvas the output canvas of the variant
+ *
+ * A frame has `reasons` that a reported issue excuses (the crop lost a subject the plan said it could not keep) and `structural` ones that
+ * nothing excuses: a reframed range whose picture does not fill the canvas, or whose scale is not the cover scale of its crop.
  */
 export function judgeScene({ scene, analyses, renderPlan, issues, policy, canvas }) {
   const margin = policy.tracking.safetyMargin
@@ -298,24 +325,40 @@ export function judgeScene({ scene, analyses, renderPlan, issues, policy, canvas
   for (let t = 0; t < analyses.length; t += 1) {
     const analysis = analyses[t]
     const oracle = oracleWindow(renderPlan, t)
+    const reframed = oracle.rangeSource !== 'fallback'
+    const cover = reframed ? coverExpectation(oracle, canvas) : null
+    const expected = cover ? { x0: cover.visibleLeft, width: cover.visibleWidth } : oracle
     const measured = analysis.window
     const sourceFrame = sourceFrameOf(scene, t)
     const flagged = flaggedAt(t)
     const reasons = []
+    const structural = []
     const subjects = []
+    if (reframed) {
+      if (analysis.coverage.width < TOLERANCE.coverage || analysis.coverage.height < TOLERANCE.coverage) structural.push('foreground-does-not-fill-canvas')
+      if (analysis.fit && Math.abs(analysis.fit.scale - cover.scale) / cover.scale > TOLERANCE.scale) structural.push('scale-differs-from-cover')
+    }
     if (!measured) reasons.push('window-not-measurable')
-    const windowError = measured ? Math.max(Math.abs(measured.left - oracle.x0), Math.abs(measured.right - (oracle.x0 + oracle.width))) : Number.POSITIVE_INFINITY
+    const windowError = measured ? Math.max(Math.abs(measured.left - expected.x0), Math.abs(measured.right - (expected.x0 + expected.width))) : Number.POSITIVE_INFINITY
     if (windowError > TOLERANCE.window) reasons.push('window-differs-from-render-input')
-    const footprintError = analysis.footprint && measured ? Math.max(Math.abs(analysis.footprint.left - measured.left), Math.abs(analysis.footprint.right - measured.right)) : Number.POSITIVE_INFINITY
-    if (footprintError > TOLERANCE.footprint) reasons.push('footprint-differs-from-window')
     for (const subject of scene.subjectsAtSource(sourceFrame)) {
       const truth = { x0: subject.box[0] * W, y0: subject.box[1] * H, x1: subject.box[2] * W, y1: subject.box[3] * H }
       const seen = analysis.subjects[subject.color]
-      const entry = { id: subject.id, positionError: null, slack: null, visible: seen !== null }
+      const entry = { id: subject.id, positionError: null, outputError: null, slack: null, visible: seen !== null }
       if (!seen) reasons.push(`subject-${subject.id}-not-visible`)
       else {
         entry.positionError = Math.max(Math.abs(seen.x0 - truth.x0), Math.abs(seen.x1 - truth.x1), Math.abs(seen.y0 - truth.y0), Math.abs(seen.y1 - truth.y1))
         if (entry.positionError > TOLERANCE.position) reasons.push(`subject-${subject.id}-position`)
+        if (reframed) {
+          // OUTPUT frame coordinates, straight from the pixels, against where the specification puts the subject on the canvas.
+          const expectedBox = {
+            x0: cover.scale * (truth.x0 - cover.visibleLeft), x1: cover.scale * (truth.x1 - cover.visibleLeft),
+            y0: cover.scale * truth.y0 + cover.offsetY, y1: cover.scale * truth.y1 + cover.offsetY,
+          }
+          entry.outputError = Math.max(Math.abs(seen.canvas.x0 - expectedBox.x0), Math.abs(seen.canvas.x1 - expectedBox.x1),
+            Math.abs(seen.canvas.y0 - expectedBox.y0), Math.abs(seen.canvas.y1 - expectedBox.y1))
+          if (entry.outputError > TOLERANCE.outputPosition) reasons.push(`subject-${subject.id}-output-position`)
+        }
       }
       if (measured) {
         // The safety margin is owed up to the edge of the frame, never beyond it.
@@ -325,7 +368,7 @@ export function judgeScene({ scene, analyses, renderPlan, issues, policy, canvas
       }
       subjects.push(entry)
     }
-    frames.push({ t, flagged, oracle, measured, windowError, footprintError, subjects, reasons })
+    frames.push({ t, flagged, oracle, measured, windowError, coverage: analysis.coverage, reframed, subjects, reasons, structural })
   }
   // Velocity and acceleration of the MEASURED crop centre, over windows of K frames so a 2 px quantization step is not read as motion.
   const K = 15
@@ -361,22 +404,30 @@ export function judgeScene({ scene, analyses, renderPlan, issues, policy, canvas
       oracleDynamics.maxAcceleration = Math.max(oracleDynamics.maxAcceleration, Math.abs(next.oracle - v.oracle) / seconds)
     }
   }
-  const failing = frames.filter((frame) => frame.reasons.length > 0)
-  const unflaggedFailing = failing.filter((frame) => !frame.flagged)
+  const failing = frames.filter((frame) => frame.reasons.length > 0 || frame.structural.length > 0)
+  const unflaggedFailing = failing.filter((frame) => frame.structural.length > 0 || !frame.flagged)
   const slacks = frames.flatMap((frame) => frame.subjects.map((entry) => entry.slack)).filter((value) => value !== null)
   const positionErrors = frames.flatMap((frame) => frame.subjects.map((entry) => entry.positionError)).filter((value) => value !== null)
+  const outputErrors = frames.flatMap((frame) => frame.subjects.map((entry) => entry.outputError)).filter((value) => value !== null)
+  const reframedFrames = frames.filter((frame) => frame.reframed)
+  const allReasons = (frame) => [...frame.structural, ...frame.reasons]
   return {
     frames: frames.length,
+    reframedFrames: reframedFrames.length,
     flaggedFrames: frames.filter((frame) => frame.flagged).length,
     failingFrames: failing.length,
     unflaggedFailingFrames: unflaggedFailing.length,
-    firstUnflaggedFailure: unflaggedFailing[0] ? { t: unflaggedFailing[0].t, reasons: unflaggedFailing[0].reasons } : null,
-    reasonCounts: Object.fromEntries([...new Set(failing.flatMap((frame) => frame.reasons))].sort().map((reason) =>
-      [reason, failing.filter((frame) => frame.reasons.includes(reason)).length])),
+    firstUnflaggedFailure: unflaggedFailing[0] ? { t: unflaggedFailing[0].t, reasons: allReasons(unflaggedFailing[0]) } : null,
+    reasonCounts: Object.fromEntries([...new Set(failing.flatMap(allReasons))].sort().map((reason) =>
+      [reason, failing.filter((frame) => allReasons(frame).includes(reason)).length])),
     maxWindowError: Math.max(...frames.map((frame) => frame.windowError)),
-    maxFootprintError: Math.max(...frames.map((frame) => frame.footprintError)),
     maxSubjectPositionError: positionErrors.length ? Math.max(...positionErrors) : null,
+    maxSubjectOutputError: outputErrors.length ? Math.max(...outputErrors) : null,
     minMarginSlackPx: slacks.length ? Math.min(...slacks) : null,
+    // The share of the canvas the sharp picture covers on the worst reframed frame, per axis (the specification asks for >= `TOLERANCE.coverage`).
+    minCoverage: reframedFrames.length
+      ? { width: Math.min(...reframedFrames.map((frame) => frame.coverage.width)), height: Math.min(...reframedFrames.map((frame) => frame.coverage.height)) }
+      : null,
     allSubjectsVisibleEveryFrame: frames.every((frame) => frame.subjects.every((entry) => entry.visible)),
     dynamics, oracleDynamics,
     canvas,

@@ -18,8 +18,7 @@ import { measureReframeTrajectory } from '../../src/v2/domain/variant-reframe-re
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import { sealedSourceWindow, sourceExpectation } from './helpers/face-source-envelope-v3.mjs'
 import {
-  analyzeFrame, drawSourceFrame, foregroundMapping, FPS, H, judgeScene, makeBaseFrame, oracleWindow, SCENES, sceneDurationFrames,
-  standInDetectorRows, TOLERANCE, W,
+  analyzeFrame, drawSourceFrame, FPS, H, judgeScene, makeBaseFrame, SCENES, sceneDurationFrames, standInDetectorRows, TOLERANCE, W,
 } from './helpers/reframe-gt-oracle.mjs'
 import { buildRecord, clipFacts, SOURCE, SPECS } from './helpers/reframe-trajectory-fixtures.mjs'
 
@@ -178,8 +177,8 @@ async function renderAndJudge({ name, format, renderPlan, issues, keep = true })
   const analyses = []
   judgeSequence += 1
   const decoded = await decodeFrames(rendered.outputPath, canvas.width, canvas.height, (buffer, index) => {
-    const window = oracleWindow(renderPlan, index)
-    analyses.push(analyzeFrame(buffer, canvas.width, canvas.height, { window, mapping: foregroundMapping(window, canvas) }))
+    // The measurement is told nothing about the composition: it reads the picture where it is.
+    analyses.push(analyzeFrame(buffer, canvas.width, canvas.height))
     if (evidenceDir && keep && KEPT_FRAMES.has(index)) {
       execFileSync(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-video_size', `${canvas.width}x${canvas.height}`, '-i', 'pipe:0', '-frames:v', '1',
         join(evidenceDir, `${String(judgeSequence).padStart(2, '0')}-${name}-${format.replace(':', 'x')}-f${String(index).padStart(3, '0')}.png`)], { input: buffer, windowsHide: true })
@@ -222,8 +221,19 @@ const assertPixelsKeepSubject = (verdict, name) => {
   assert.equal(verdict.failingFrames, 0, `${name}: ${JSON.stringify(verdict.reasonCounts)}`)
   assert.equal(verdict.allSubjectsVisibleEveryFrame, true, `${name}: a subject is missing from a decoded frame`)
   assert.ok(verdict.maxWindowError <= TOLERANCE.window, `${name}: the measured crop differs from the RenderInput by ${verdict.maxWindowError}px`)
-  assert.ok(verdict.maxFootprintError <= TOLERANCE.footprint, `${name}: the foreground footprint differs from the measured window by ${verdict.maxFootprintError}px`)
   assert.ok(verdict.maxSubjectPositionError <= TOLERANCE.position, `${name}: a decoded subject is ${verdict.maxSubjectPositionError}px from the generator`)
+  assertFillsCanvas(verdict, name)
+}
+/**
+ * The specification of a reframe: the crop FILLS the variant canvas. The sharp picture of every reframed frame covers at least
+ * `TOLERANCE.coverage` of the canvas width and of the canvas height, at the cover scale of its crop, with the subject where that puts it.
+ */
+const assertFillsCanvas = (verdict, name) => {
+  assert.ok(verdict.reframedFrames > 0, `${name}: the scene has reframed frames`)
+  assert.ok(verdict.minCoverage.width >= TOLERANCE.coverage && verdict.minCoverage.height >= TOLERANCE.coverage,
+    `${name}: the picture covers ${(verdict.minCoverage.width * 100).toFixed(1)}% of the canvas width and ${(verdict.minCoverage.height * 100).toFixed(1)}% of its height on the worst reframed frame (needs ${TOLERANCE.coverage * 100}%)`)
+  assert.ok(verdict.maxSubjectOutputError <= TOLERANCE.outputPosition, `${name}: a subject is ${verdict.maxSubjectOutputError} canvas px from where the specification puts it`)
+  for (const reason of ['foreground-does-not-fill-canvas', 'scale-differs-from-cover']) assert.equal(verdict.reasonCounts[reason] ?? 0, 0, `${name}: ${reason}`)
 }
 const assertPolicyDynamics = (verdict, exact, name) => {
   for (const range of exact) {
@@ -279,6 +289,7 @@ test('W66r GT two people far apart: no crop shows both, the variant is blocked, 
   report('does-not-fit', { name, spec: SPECS.vertical, ...built, ...judged })
   assert.equal(judged.verdict.failingFrames, 0, JSON.stringify(judged.verdict.reasonCounts))
   assert.equal(judged.verdict.allSubjectsVisibleEveryFrame, true, 'both people are on every decoded frame')
+  assert.equal(judged.verdict.reframedFrames, 0, 'an unreframed range keeps the layout it always had and is not held to the fill')
   assert.ok(judged.verdict.perFrame.every((frame) => frame.measured.left <= 3 && frame.measured.right >= W - 3), 'the whole frame is shown')
   assert.equal(judged.verdict.flaggedFrames, 150, 'every frame is inside the localized issue')
 })
@@ -291,6 +302,7 @@ test('W66r GT a screen with no face: no subject observation, the variant needs a
   report('screen-only', { name, spec: SPECS.vertical, ...built, ...judged })
   assert.equal(judged.verdict.failingFrames, 0, JSON.stringify(judged.verdict.reasonCounts))
   assert.equal(judged.verdict.allSubjectsVisibleEveryFrame, true, 'the screen is on every decoded frame')
+  assert.equal(judged.verdict.reframedFrames, 0, 'an unreframed range keeps the layout it always had and is not held to the fill')
   assert.ok(judged.verdict.perFrame.every((frame) => frame.measured.left <= 3 && frame.measured.right >= W - 3))
 })
 
@@ -304,6 +316,7 @@ test('W66r GT a subject faster than the policy allows: the variant is blocked, a
   assert.equal(judged.verdict.unflaggedFailingFrames, 0, `a frame lost the subject without an issue: ${JSON.stringify(judged.verdict.firstUnflaggedFailure)}`)
   assert.ok(judged.verdict.failingFrames > 0, 'the crop really loses the subject here: the report is what makes this honest')
   assert.ok(judged.verdict.maxWindowError <= TOLERANCE.window)
+  assertFillsCanvas(judged.verdict, name)
   for (const range of exact) assert.ok(range.maxSpeed <= speedLimit + 1e-6, 'the plan never exceeds the speed limit even where it cannot keep up')
 })
 
