@@ -132,11 +132,17 @@ export class PrismaServerPerceptionEvidenceReader implements ServerPerceptionEvi
         where: { id: words.transcriptId, workspaceId: input.workspaceId },
         select: { id: true, sourceArtifactId: true, provider: true, model: true, transcriptHash: true },
       })
-      if (!row || (words.transcriptHash !== null && words.transcriptHash !== row.transcriptHash)) {
-        conflict('The transcript the EditPlan was retimed from is unavailable or differs from the sealed one')
+      if (row && words.transcriptHash !== null && words.transcriptHash !== row.transcriptHash) {
+        conflict('The transcript row differs from the one the EditPlan was retimed from')
       }
-      transcript = { transcript: Object.freeze({ id: row!.id, provider: row!.provider, model: row!.model,
-        transcriptHash: row!.transcriptHash, sourceArtifactId: row!.sourceArtifactId }), words: words.words }
+      // A transcript no row of this workspace holds is not hidden: its words are still the sealed EditPlan's own. They are bound to
+      // that snapshot instead (its hash is the envelope hash) and the producer says it could not be resolved, never a guess.
+      transcript = row
+        ? { transcript: Object.freeze({ id: row.id, provider: row.provider, model: row.model,
+            transcriptHash: row.transcriptHash, sourceArtifactId: row.sourceArtifactId }), words: words.words }
+        : { transcript: Object.freeze({ id: words.transcriptId, provider: 'unresolved', model: 'unresolved-transcript',
+            transcriptHash: words.transcriptHash ?? version.editPlanSnapshot.contentHash, sourceArtifactId: sourceIds[0]! }),
+          words: words.words }
     }
     return Object.freeze({
       workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: version.id,

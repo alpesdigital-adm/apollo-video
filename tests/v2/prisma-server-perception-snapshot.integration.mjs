@@ -50,26 +50,36 @@ test('W63a PostgreSQL server perception snapshot: fuses the sealed evidence, sta
       assert.equal(first.id, serverPerceptionSnapshotId(first.snapshot.snapshotHash))
 
       // every input is a sealed row of this Version/source, named by its id and hash
-      assert.deepEqual(first.snapshot.inputs.map((input) => input.kind), ['face', 'face', 'ocr', 'temporal'])
+      assert.deepEqual(first.snapshot.inputs.map((input) => input.kind), ['face', 'face', 'ocr', 'temporal', 'transcript'])
       const sealed = new Map([[stats.ocr.id, stats.ocr.envelopeHash], [stats.temporal.id, stats.temporal.envelopeHash],
         ...stats.faceWindows.map((row) => [row.id, row.envelopeHash])])
       for (const input of first.snapshot.inputs) {
-        assert.equal(sealed.get(input.envelopeId), input.envelopeHash, input.kind)
         assert.equal(input.sourceArtifactId, world.sourceId)
         assert.equal(input.sourceSha256, world.sourceSha256)
+        if (input.kind === 'transcript') {
+          // the words are the sealed EditPlan's own retimed transcript: bound to the plan, with no clock of a producer
+          assert.equal(input.sourceClock, null)
+          assert.equal(input.observationCount, 2)
+          continue
+        }
+        assert.equal(sealed.get(input.envelopeId), input.envelopeHash, input.kind)
         assert.deepEqual(input.sourceClock.fps, { num: 30, den: 1 })
       }
       assert.deepEqual(first.snapshot.rejected, [])
       for (const observation of first.result.observations) {
         assert.equal(observation.provenance.origin, 'server')
+        if (observation.kind === 'transcript-word') {
+          assert.equal(observation.provenance.confidenceBasis, 'policy-prior', 'the plan carries no ASR confidence: it is not presented as measured')
+          continue
+        }
         assert.equal(sealed.get(observation.provenance.envelopeId), observation.provenance.envelopeHash)
       }
 
       // per kind: what was examined, and a reason for what was not
       const states = Object.fromEntries(first.result.coverage.map((entry) => [entry.kind, entry.state]))
-      assert.deepEqual(states, { 'transcript-word': 'absent', speaker: 'absent', silence: 'absent', face: 'partial', object: 'absent',
+      assert.deepEqual(states, { 'transcript-word': 'partial', speaker: 'absent', silence: 'absent', face: 'partial', object: 'absent',
         shot: 'partial', motion: 'partial', ocr: 'partial', 'image-insert': 'absent' })
-      assert.equal(coverageOf(first, 'transcript-word').reasonCode, 'NO_TRANSCRIPT_WORDS')
+      assert.equal(coverageOf(first, 'transcript-word').reasonCode, 'RECOGNIZED_WORD_SPANS_ONLY')
       assert.equal(coverageOf(first, 'object').reasonCode, 'NO_VERIFIED_DETECTOR')
       assert.equal(coverageOf(first, 'speaker').reasonCode, 'DIARIZATION_UNAVAILABLE')
       assert.equal(coverageOf(first, 'silence').reasonCode, 'SILENCE_PRODUCER_UNAVAILABLE')
@@ -170,8 +180,8 @@ test('W63a PostgreSQL server perception snapshot: another Version, workspace or 
       const foreign = await built.service()({ workspaceId: other.workspaceId, projectId: other.projectId })
       const ours = new Set(v1.snapshot.inputs.map((input) => input.envelopeHash))
       assert.equal(foreign.snapshot.inputs.some((input) => ours.has(input.envelopeHash)), false)
-      assert.equal(foreign.snapshot.inputs.length, 0)
-      assert.ok(foreign.result.coverage.every((entry) => entry.state === 'absent'))
+      assert.deepEqual(foreign.snapshot.inputs.map((input) => input.kind), ['transcript'], 'only the words of its own EditPlan')
+      assert.ok(foreign.result.coverage.filter((entry) => entry.kind !== 'transcript-word').every((entry) => entry.state === 'absent'))
       await assert.rejects(built.service()({ ...ask, projectVersionId: '' }), { code: 'INVALID_ARGUMENT' })
     } catch (error) {
       primaryError = error
