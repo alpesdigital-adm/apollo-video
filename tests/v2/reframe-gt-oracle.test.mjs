@@ -51,7 +51,9 @@ function renderBanded(source, window, canvas) {
   const bandTop = Math.round(originY), bandBottom = Math.round(originY + foregroundHeight)
   // the blurred copy of a saturated subject (a cyan screen) lies right against the band, as in the real composition, fading smoothly away from it
   for (let distance = 0; distance < 70; distance += 1) {
-    const weight = 1 - distance / 70, colour = Buffer.from([Math.round(90 - 90 * weight), Math.round(90 + 100 * weight), Math.round(90 + 130 * weight)])
+    const weight = 1 - distance / 70
+    // the second row past a hard edge rings (scaling and encoding): a step the picture's own edge does not have
+    const colour = distance === 1 ? Buffer.from([0, 168, 196]) : Buffer.from([Math.round(90 - 90 * weight), Math.round(90 + 100 * weight), Math.round(90 + 130 * weight)])
     for (const y of [bandBottom + distance, bandTop - 1 - distance]) if (y >= 0 && y < canvas.height) out.fill(colour, y * canvas.width * 3, (y + 1) * canvas.width * 3)
   }
   // The backdrop is a BLURRED copy of the picture: smooth, so no hard edge and no near-white stripe. Its decoys are a soft red blob (as red as the
@@ -139,8 +141,8 @@ test('W66r GT the measurement reports what it sees without knowing the layout: t
   // today's layout of an UNREFRAMED clip: the whole source frame in the band
   const whole = analyzeFrame(renderBanded(frameBuffer, { x0: 0, width: W }, CANVAS), CANVAS.width, CANVAS.height)
   assert.ok(whole.coverage.width >= TOLERANCE.coverage && whole.coverage.height < 0.4, JSON.stringify(whole.coverage))
-  // the footprint is the band itself: no row of the saturated backdrop beside it is read as the picture
-  assert.ok(Math.abs(whole.footprint.y0 - 328) <= 1 && Math.abs(whole.footprint.y1 - 631) <= 1, JSON.stringify(whole.footprint))
+  // the footprint is the band itself, within the couple of pixels an edge rings over (the subjects are read a few pixels inside it)
+  assert.ok(Math.abs(whole.footprint.y0 - 328) <= 3 && Math.abs(whole.footprint.y1 - 631) <= 3, JSON.stringify(whole.footprint))
   drawSourceFrame(frameBuffer, base, SCENES['screen-only'].subjectsAtSource(0))
   const screen = analyzeFrame(renderBanded(frameBuffer, { x0: 0, width: W }, CANVAS), CANVAS.width, CANVAS.height)
   const truth = SCENES['screen-only'].subjectsAtSource(0)[0].box

@@ -284,11 +284,17 @@ export function analyzeFrame(buffer, width, height) {
   const toSourceX = (outX) => (outX - fit.offset) / fit.scale
   const toSourceY = (outY) => (outY - footprint.y0) / fit.scale
 
-  // Subjects: only inside the footprint.
+  // Subjects: only inside the footprint, and a few pixels inside it where it does not reach the canvas edge: its edge blends with whatever lies
+  // beyond (a blurred copy of a saturated subject is just as saturated as the subject), and that blend is not the picture.
+  const EDGE_BLEND = 3
+  const inner = {
+    x0: footprint.x0 === 0 ? 0 : footprint.x0 + EDGE_BLEND, x1: footprint.x1 >= width - 1 ? width - 1 : footprint.x1 - EDGE_BLEND,
+    y0: footprint.y0 === 0 ? 0 : footprint.y0 + EDGE_BLEND, y1: footprint.y1 >= height - 1 ? height - 1 : footprint.y1 - EDGE_BLEND,
+  }
   const classes = { A: tally(width, height), B: tally(width, height), screen: tally(width, height) }
-  for (let y = footprint.y0; y <= footprint.y1; y += 1) {
-    let offset = (y * width + footprint.x0) * 3
-    for (let x = footprint.x0; x <= footprint.x1; x += 1, offset += 3) {
+  for (let y = inner.y0; y <= inner.y1; y += 1) {
+    let offset = (y * width + inner.x0) * 3
+    for (let x = inner.x0; x <= inner.x1; x += 1, offset += 3) {
       const r = buffer[offset], g = buffer[offset + 1], b = buffer[offset + 2]
       if (r > 150 && g < 100 && b < 100) { classes.A.cols[x] += 1; classes.A.rows[y] += 1 }
       else if (g > 130 && r < 100 && b < 100) { classes.B.cols[x] += 1; classes.B.rows[y] += 1 }
