@@ -119,8 +119,11 @@ const EXPECTED_CUES = Object.freeze([
  * in 9:16 and 16:9 — that is the whole point of the per-variant evidence.
  *
  * 9:16 (540x960): `subject-lower` sits on the reserved caption band and
- * `subject-face` sits in the top strip the pillarboxed presenter never covers
- * (presenter = y 328..632 of 960).
+ * `subject-face` sits in the top strip. W66r: a reframed 9:16 range FILLS the
+ * canvas (it used to be a pillarboxed presenter at y 328..632 of 960 that never
+ * covered `subject-face`), so both subjects are inside the picture and geometry
+ * can no longer put a protected subject outside it; the hard stop of the 9:16
+ * output in these journeys is the one its reframe plan reports (below).
  * 16:9 (960x540): the presenter fills the canvas and both subjects sit far above
  * the caption band, so neither reason code can fire.
  */
@@ -134,6 +137,16 @@ const SUBJECTS = Object.freeze({
     Object.freeze({ id: 'subject-lower', startFrame: 0, endFrame: DURATION_FRAMES, bounds: Object.freeze({ x: 0.35, y: 0.3, width: 0.3, height: 0.2 }), critical: false }),
   ]),
 })
+
+// W66r. The plan of the 9:16 output reports that the two people of the master cannot be framed together over the whole timeline: a HARD issue of
+// that variant alone (the 16:9 output frames them both and reports nothing). The renderer carries it to the critic, which blocks the 9:16
+// output and no other.
+const PORTRAIT_REFRAME_RECORD_HASH = 'c'.repeat(64)
+const PORTRAIT_REFRAME_EVIDENCE = `face-envelope:${'d'.repeat(64)}`
+const portraitReframeIssues = () => Object.freeze([Object.freeze({
+  code: 'SUBJECTS_DO_NOT_FIT', severity: 'hard', disposition: 'blocked', variantId: RENDER_VARIANT['9:16'], aspectRatio: '9:16', clipId: null,
+  startFrame: 0, endFrame: DURATION_FRAMES, observationIds: Object.freeze([]), evidenceIds: Object.freeze([PORTRAIT_REFRAME_EVIDENCE]), reasonCode: null,
+})])
 
 const colorMetadata = Object.freeze({
   colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709',
@@ -406,6 +419,7 @@ function renderSourceFor(input) {
     criticIssues: Object.freeze([]),
     subtitleResolution: resolution,
     reframePlan: input.reframePlan,
+    ...(input.format === '9:16' ? { reframeIssues: portraitReframeIssues(), reframeRecordHash: PORTRAIT_REFRAME_RECORD_HASH } : {}),
     formatSubjects: SUBJECTS[input.format],
   }), renderConsumption(input.projectVersionId, input.format))
 }
@@ -837,11 +851,16 @@ test('T-WAVE9-E variants share one StoryPlan and own geometry; unknown face cove
     EXPECTED_CUES.map(([id, startFrame, endFrame]) => ['warning', portraitPreset.spec.id, portraitPlacement.placementPlanHash,
       portraitReframe.reframePlanHash, '9:16', startFrame, endFrame, `subtitle:${id}`]))
     assert.deepEqual([...unavailable[0].rangeMs], [200, 1_333])
-    const notVisible = portraitIssues.find((issue) => issue.code === 'SUBJECT_NOT_VISIBLE')
-    assert.ok(notVisible, 'the pillarboxed 9:16 presenter never covers subject-face')
-    assert.equal(notVisible.severity, 'hard')
-    assert.deepEqual({ ...notVisible.evidenceRange }, { startFrame: 0, endFrame: DURATION_FRAMES })
-    assert.deepEqual([...notVisible.evidenceIds], ['subject-face'])
+    // W66r: the reframed 9:16 picture fills the canvas, so subject-face is inside it and nothing is "not visible" ...
+    assert.equal(portraitIssues.some((issue) => issue.code === 'SUBJECT_NOT_VISIBLE'), false, 'a reframed 9:16 picture fills the canvas: subject-face is covered')
+    // ... and the hard stop of the 9:16 output is the one its own reframe plan reported, localized to that output
+    const doNotFit = portraitIssues.find((issue) => issue.code === 'REFRAME_SUBJECTS_DO_NOT_FIT')
+    assert.ok(doNotFit, 'the 9:16 plan reports two subjects no crop can frame together')
+    assert.equal(doNotFit.severity, 'hard')
+    assert.equal(doNotFit.format, '9:16')
+    assert.deepEqual({ ...doNotFit.evidenceRange }, { startFrame: 0, endFrame: DURATION_FRAMES })
+    assert.deepEqual([...doNotFit.evidenceIds], [PORTRAIT_REFRAME_EVIDENCE, `reframe-plan-record:${PORTRAIT_REFRAME_RECORD_HASH}`])
+    assert.equal(landscape.review.criticIssues.some((issue) => issue.code.startsWith('REFRAME_')), false, 'the other output reports nothing')
 
     // --- Journey 4: the decision is per variant -----------------------------
     assert.equal(portrait.review.formatQuality.status, 'blocked')
@@ -897,6 +916,7 @@ test('T-WAVE9-E variants share one StoryPlan and own geometry; unknown face cove
       reframePlanHash: rendered.renderInput.reframePlan.reframePlanHash,
       subjects: SUBJECTS[rendered.renderInput.format],
       subtitleAnchorPlan: rendered.renderInput.placementPlan.subtitleAnchorPlan,
+      ...(rendered.renderInput.format === '9:16' ? { reframeIssues: portraitReframeIssues(), reframeRecordHash: PORTRAIT_REFRAME_RECORD_HASH } : {}),
     }))
     assert.equal(reports[0].reportHash, portrait.review.formatQuality.reportHash)
     assert.equal(reports[1].reportHash, landscape.review.formatQuality.reportHash)
@@ -909,7 +929,7 @@ test('T-WAVE9-E variants share one StoryPlan and own geometry; unknown face cove
       // order, so 16:9 precedes 9:16 regardless of the input order.
       [
         ['16:9', 'warning', true, [], ['FACE_PERCEPTION_UNAVAILABLE']],
-        ['9:16', 'blocked', false, ['SUBJECT_NOT_VISIBLE'], ['FACE_PERCEPTION_UNAVAILABLE']],
+        ['9:16', 'blocked', false, ['REFRAME_SUBJECTS_DO_NOT_FIT'], ['FACE_PERCEPTION_UNAVAILABLE']],
       ],
     )
     t.diagnostic(JSON.stringify({ proofScope: 'controlled-worker-render-mechanics', faceSafety: 'unknown',

@@ -428,9 +428,12 @@ export function judgeScene({ scene, analyses, renderPlan, issues, policy, canvas
   }
   const failing = frames.filter((frame) => frame.reasons.length > 0 || frame.structural.length > 0)
   const unflaggedFailing = failing.filter((frame) => frame.structural.length > 0 || !frame.flagged)
-  const slacks = frames.flatMap((frame) => frame.subjects.map((entry) => entry.slack)).filter((value) => value !== null)
-  const positionErrors = frames.flatMap((frame) => frame.subjects.map((entry) => entry.positionError)).filter((value) => value !== null)
-  const outputErrors = frames.flatMap((frame) => frame.subjects.map((entry) => entry.outputError)).filter((value) => value !== null)
+  // Where a reported issue says the crop cannot keep the subject, the subject is rightly somewhere else: those frames do not count against the
+  // position and margin maxima (the structural reasons above never excuse anything).
+  const kept = frames.filter((frame) => !frame.flagged)
+  const slacks = kept.flatMap((frame) => frame.subjects.map((entry) => entry.slack)).filter((value) => value !== null)
+  const positionErrors = kept.flatMap((frame) => frame.subjects.map((entry) => entry.positionError)).filter((value) => value !== null)
+  const outputErrors = kept.flatMap((frame) => frame.subjects.map((entry) => entry.outputError)).filter((value) => value !== null)
   const reframedFrames = frames.filter((frame) => frame.reframed)
   const allReasons = (frame) => [...frame.structural, ...frame.reasons]
   return {

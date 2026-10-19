@@ -163,7 +163,9 @@ export function buildEditorialCompositionPrefix(input: Readonly<PreparedEditoria
     `[${from}]split=2[background0${tag}][foreground0${tag}]`,
     `[background0${tag}]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=28[background${tag}]`,
     `[foreground0${tag}]scale=${width}:${height}:force_original_aspect_ratio=decrease,scale=iw*${foregroundScale.toFixed(4)}:ih*${foregroundScale.toFixed(4)}[foreground${tag}]`,
-    `[background${tag}][foreground${tag}]overlay=(W-w)/2:max(0\\,min(H-h\\,H*${verticalPosition.toFixed(4)}-h/2)):shortest=1,format=yuv420p[${to}]`,
+    // `scale` keeps the display aspect ratio by adjusting the sample aspect ratio when it rounds a size (5120:5121 here), and `concat` refuses to
+    // join streams whose sample aspect ratios differ: the composed clip is a plain square-pixel frame like every other clip of the join.
+    `[background${tag}][foreground${tag}]overlay=(W-w)/2:max(0\\,min(H-h\\,H*${verticalPosition.toFixed(4)}-h/2)):shortest=1,format=yuv420p,setsar=1[${to}]`,
   ]
   composition.clips.forEach((clip, index) => {
     const videoIndex = renderSources.length + index

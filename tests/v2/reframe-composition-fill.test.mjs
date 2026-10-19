@@ -62,8 +62,11 @@ test('W66r with a reframed clip, the clips that are not reframed keep their stag
   // clip a: the cover fit; clip b: staged exactly as before, then composed over its own blurred copy, then joined
   assert.ok(filters.includes(`[1:v:0]trim=start_frame=0:end_frame=30,setpts=PTS-STARTPTS,crop=404:720:128:0,${COVER}${TAIL}[v0]`))
   assert.ok(filters.includes(`[2:v:0]trim=start_frame=0:end_frame=30,setpts=PTS-STARTPTS,${STAGED}${TAIL}[staged1]`))
+  // the unreframed clip is joined with a reframed one, so it must have the same square pixels (`concat` refuses streams whose sample aspect ratios differ):
+  // that is the one thing added to its historical composition
   const relabel = (line, tag) => line.replaceAll('background0', `background0${tag}`).replaceAll('foreground0', `foreground0${tag}`)
-    .replaceAll('[background]', `[background${tag}]`).replaceAll('[foreground]', `[foreground${tag}]`).replace('[joinedv]', '[staged1]').replace('[composed]', `[v${tag}]`)
+    .replaceAll('[background]', `[background${tag}]`).replaceAll('[foreground]', `[foreground${tag}]`).replace('[joinedv]', '[staged1]')
+    .replace('format=yuv420p[composed]', `format=yuv420p,setsar=1[v${tag}]`)
   const historicComposition = historic.slice(historic.indexOf('[joinedv]split=2[background0][foreground0]'))
   for (const line of historicComposition) assert.ok(filters.includes(relabel(line, '1')), `the unreframed clip keeps: ${line}`)
   assert.equal(filters.at(-1), '[joinedv]null[composed]')
