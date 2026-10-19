@@ -691,7 +691,14 @@ implements GovernanceAdmissionRepository {
           })
         }
         return admission
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted })
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+        // Every API request starts here. Prisma gives an interactive transaction 2 s to get a connection (P2028 "Unable to start a
+        // transaction in the given time", surfaced as a 500), while an ordinary query waits for `pool_timeout`; on a bounded pool (the
+        // dashboard CI role has one connection) a burst of requests, each holding that connection for its own work, queued the
+        // admission of the next one past 2 s. The wait is the pool's own bound (10 s) - the work itself still has its default budget.
+        maxWait: 10_000,
+      })
     } catch (error) {
       if (
         typeof error === 'object' && error !== null && 'code' in error &&
