@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { access, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -104,7 +105,16 @@ test('V2 FFmpeg ingest creates an inspectable proxy and speech derivative from a
   }, 'Controlled master must have measured BT.709 colorimetry before normalization')
 
   const processor = new FfmpegIngestProcessor({ workRoot: join(root, 'work'), ffmpegPath })
-  const result = await processor.normalize({ sourcePath, operationId: 'operation-real-ingest-1' })
+  // The processor is owned (W66): an operation hands it the attempt's owner, the exact source it admitted and both absolute deadlines,
+  // none of which any stage renews. The test is the operation here and admits the master it just wrote.
+  const sourceBytes = await readFile(sourcePath)
+  const admittedAt = performance.now()
+  const owner = Object.freeze({
+    attempt: 1, leaseOwner: 'test-ingest-lease',
+    sourceSha256: createHash('sha256').update(sourceBytes).digest('hex'), sourceByteSize: sourceBytes.byteLength,
+    workEndMonotonicMs: admittedAt + 5 * 60_000, hardEndMonotonicMs: admittedAt + 5 * 60_000 + 5_000,
+  })
+  const result = await processor.normalize({ sourcePath, operationId: 'operation-real-ingest-1', owner })
 
   assert.equal(result.probe.width, 720)
   assert.equal(result.probe.height, 1280)
