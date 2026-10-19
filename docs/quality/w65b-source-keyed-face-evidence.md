@@ -156,59 +156,57 @@ amostra `unknown`, lacuna acima do limite ou evidência não confiável perto da
 
 ## 10. Provas
 
-Rodadas em um cluster PostgreSQL descartável pelo harness supervisionado, sob o lock global de carga (sem outras cargas locais).
-Os números e os caminhos de evidência estão no relatório da entrega; esta seção lista **o que cada prova estabelece**.
+Todas as execuções abaixo rodaram sob o lock global de carga, em um cluster PostgreSQL 16 descartável do harness supervisionado
+(`run-local-pg-w65b.mjs`: initdb em porta livre, migrações aplicadas, cluster e backends provados ausentes depois). Caminhos relativos
+a `C:/Users/leand/Documents/Apollo/w61-70-20261008/`.
 
-- Domínio e planejamento (testes unitários): `tests/v2/face-producer-envelope-v3.test.mjs`, `face-source-evidence-stream.test.mjs`,
-  `face-source-windows-plan.test.mjs`, `caption-face-clearance.test.mjs` (projeção por clipe: deslocamento, vários clipes, trims,
-  salto, vizinhança, `rate !== 1`), `plan-caption-placement.test.mjs`, `face-source-window-admission.test.mjs`,
-  `run-face-source-window-worker.test.mjs`, `face-source-window-persistence.test.mjs`, `public-operation-contracts.test.mjs` (contrato
-  estrito, 21 mutações negativas do envelope).
-- PostgreSQL, persistência: `tests/v2/prisma-face-source-window.integration.mjs` - admissão (o projeto toca a fonte, anexada,
-  fps inteiro, janela dentro da fonte e com amostra), isolamento dos três perfis, publicação selada com os 30 tensores, reuso
-  por um corte do Diretor posterior e por um projeto irmão com a fonte anexada, nada para quem não tem a fonte, direitos reavaliados
-  com o locale do projeto consumidor, identidade da fonte reverificada, adulterações recusadas, fences de lease e direitos, e cabeça
-  que se moveu **não** descarta a evidência.
-- PostgreSQL, planejamento sobre janelas reais: `tests/v2/prisma-caption-placement.integration.mjs` - cues de um corte do Diretor
-  com três clipes lendo janelas produzidas sob uma versão anterior, com resposta diferente da de uma leitura pelo tempo da linha do
-  tempo.
-- PostgreSQL + FFmpeg + pixels, final real num corte do Diretor: `tests/v2/prisma-final-caption-source-evidence.integration.mjs` -
-  F0 controle; F1 as duas cues queimadas (a sobre o rosto sai da banda de baixo, a outra fica nela); F2 a cue sem cobertura omitida
-  e listada; F3 evidência posta no tempo da linha do tempo derruba o final pelo crítico de pixels.
-- Pixels, mesma maquinaria sem banco: `tests/v2/caption-placement-pixels.integration.mjs` (migrado para o leitor por fonte).
-- Composição: `tests/v2/face-window-composition.integration.mjs` (os dois workers V9 recusam plataforma sem recibo, pin ausente e
-  runtime alterado antes de tocar o banco).
+**Rodada limpa `w65b-pg-runs/w65b-p2d-099f4015` (`summary.json`, `result.json` com `success: true`), na cabeça com todas as correções:**
 
-## 11. Estado em 2026-10-18 (pausa) e próximos passos
+| passo | resultado | o que estabelece |
+| --- | --- | --- |
+| `face-tables-drift` (`w65b-drift-face-tables.mjs`) | exit 0 | `prisma migrate diff` do banco migrado contra `schema.prisma` não menciona `face_producer_operations`, `face_source_window_envelopes` nem `face_source_window_raw_outputs`; controle positivo: o diff a partir do banco vazio cria as três. O drift preexistente do repositório (267 comandos, tabelas sem relação) não é desta mudança e não foi tocado. |
+| `prisma-face-source-window.integration.mjs` | 3/3 | admissão (o projeto toca a fonte, anexada, fps inteiro, janela dentro da fonte e com amostra; `PRECONDITION_REQUIRED` para quem não a toca), CHECKs de tabela, isolamento dos três perfis, publicação selada com 30 tensores de 5600 bytes na transação que conclui a operação, **reuso por um corte do Diretor posterior à produção e por um projeto irmão com a fonte anexada**, nada para workspace/projeto sem a fonte, **direitos reavaliados com o locale do projeto consumidor** (`en-US` bloqueado, `pt-BR` segue lendo), identidade da fonte reverificada (sha trocado), adulterações recusadas (bytes brutos, linha ausente, conteúdo, hash), direitos revogados = `ASSET_RIGHTS_BLOCKED`, produtor Linux não autenticado não publica nada, janela de outra operação recusada, takeover de lease, fences de lease e de direitos com espera real de lock, e **a cabeça que se moveu não descarta a evidência** (move antes do claim e antes da publicação; publica e lê). |
+| `prisma-caption-placement.integration.mjs` | 1/1 | o planejador lendo janelas reais do banco: cue limpa colocada, cue sobre rosto movida para banda certificada, janelas adjacentes num único stream, cue sem janela retida com a janela **da fonte** a pedir (`{ startSourceFrame, endSourceFrame }`, limitada ao último frame tocado), escopo por workspace e por projeto com a fonte, bytes da fonte trocados = não confiável, identidade da evidência no hash do plano, e **um corte do Diretor de três clipes sob uma Version que não existia quando as janelas foram produzidas**, com resposta diferente da de uma leitura pelo tempo da linha do tempo; adulteração de saída bruta para o render. |
+| `prisma-final-caption-source-evidence.integration.mjs` | 1/1 | o final real, pelo gate real, num corte do Diretor (abaixo). |
+| `prisma-final-caption-certification.integration.mjs` | 1/1 | regressão da Parte 1, já lendo janelas por fonte. |
+| `caption-placement-pixels.integration.mjs` | 11/11 | os pixels do W65 nos dois canvases com o leitor por fonte (migrado). |
 
-**Feito e verde** (unitário, `tsc`, lint de arquitetura): domínio v3, stream, projeção por clipes, persistência, worker, composição, rotas,
-contrato público (linha de base só por adição), 14 mutações de comportamento todas mortas, `face-window-composition` com os dois
-workers V9 (a refatoração da fábrica manteve um único ponto de construção auditado). Suíte unitária completa em `claude/w65b-part2-wip`:
-3376 testes, 3 falhas, uma preexistente (`stored-projection-manifest`, ver relatório) e duas da refatoração da fábrica, já corrigidas.
+**Prova de pixels no corte do Diretor** (`w65b-p2-evidence-03/w65b-final-source-evidence-proof.json` e seis PNGs). Fonte retrato de 6 s
+com moldura verde e retângulo magenta (o "rosto") nos frames 120-179 da fonte; corte: timeline 0-59 <- fonte 0-59 (sem rosto),
+timeline 60-119 <- fonte 120-179 (rosto na tela). As janelas (fonte 0-179) foram pedidas com a cabeça na Version BASE (um clipe, a fonte
+inteira) e o final foi exportado da Version do Diretor, posterior. O detector é um substituto que devolve tensores V9 reais para os
+frames da fonte onde o marcador existe; nada depois dele é substituto (armazenamento, leitura, projeção pelos clipes, planejamento, gate,
+render e crítico de pixels, este com um detector de rosto por chave de cor próprio).
 
-**Prova PostgreSQL de `w65b-p2a` (`w65b-pg-runs/w65b-p2a-e7f3165a`)**: só `prisma-final-caption-certification` (regressão da Parte 1,
-já lendo janelas por fonte) passou, 1/1. Os demais passos falharam **antes de executar qualquer asserção**:
+- F0 (controle, sem cues): o oráculo confirma a premissa nos pixels entregues: marcador ausente nos frames de timeline 15/30/45 e presente em 75/90/105.
+- F1 (janelas sobre a fonte inteira): `2 caption(s) burned in certified bands, confirmed by the pixel critic (ran); 0 omitted`. A cue sobre o trecho livre (timeline 10-49) fica
+  na banda de baixo preferida, 10 241 pixels alterados em cada frame medido, dentro da banda. A cue sobre o rosto (timeline 70-109) sai
+  da banda de baixo para `upper-third`, 9 849 pixels, sem tocar o marcador. Fora das cues: 0 pixels alterados em 2, 55, 65 e 115. A
+  primeira cue vem antes de propósito: o solver de âncoras mantém a banda anterior enquanto ela for elegível (histerese), então uma cue
+  livre DEPOIS de uma movida ficaria onde a outra foi, por desenho.
+- F2 (janelas só sobre a fonte 0-149): `1 caption(s) burned ...; 1 omitted and listed for review: cue-face (FACE_PERCEPTION_UNAVAILABLE)`. Nos três frames da cue omitida, 0 pixels
+  alterados contra o controle; a outra cue segue queimada na banda de baixo.
+- F3 (mutação, evidência posta no tempo da linha do tempo em vez da fonte): o crítico de pixels reprova (`SUBTITLE_FACE_OVERLAP_IN_PIXELS` nos frames 70, 90 e 109),
+  o gate falha (`render_output_invalid`) e nenhum final é entregue.
+- O relatório do Diretor seguiu `review-required` com `faceSafety` unknown no banco, em F1 e F2 (a recusa de relatório adulterado é da Parte 1; sua regressão passou 1/1).
 
-- `migration-drift` (`prisma migrate diff --exit-code`) sai 2 por drift preexistente em 59 tabelas sem relação (FKs, defaults); nenhuma
-  linha cita `face_producer_operations`, `face_source_window_envelopes` nem `face_source_window_raw_outputs`. O passo deve virar uma
-  asserção sobre essas três tabelas (e não um `--exit-code` global).
-- as suítes que carregam `tests/v2/helpers/face-envelope-v2.mjs` sob `tsx` falham na importação: `tsx` roda módulo `.ts` como CommonJS e
-  o Node não detecta `import { ACCEPTED_FACE_PRODUCERS, FACE0204_OUTPUT_POLICY_ID, ... }` estático. Isto vale também para
-  `prisma-face-window.integration.mjs` (W62, nunca executada). Correção em andamento: importar por namespace com fallback em `.default`
-  (feito para `face-producer-registry.ts`; falta o mesmo para `face-detector-output.ts` e `face-evidence-policy.ts` no mesmo helper e
-  conferir `face-source-envelope-v3.mjs`).
+**Unitário e mutação.** Domínio e planejamento: `face-producer-envelope-v3`, `face-source-evidence-stream`, `face-source-windows-plan`,
+`caption-face-clearance` (projeção por clipe: deslocamento, vários clipes, trims, salto, vizinhança, `rate !== 1`), `plan-caption-placement`,
+`face-source-window-admission`, `run-face-source-window-worker`, `face-source-window-persistence`, `public-operation-contracts`
+(contrato estrito, 21 mutações negativas do envelope). Catorze mutações do comportamento (sinal do deslocamento, `rate`, consistência do
+mapa, fusão de corridas entre clipes, sha da fonte, relógio, workspace, produtor não autenticado, fps inteiro, cadência da política,
+cobertura exata da janela, janela além da fonte, janela sem amostra, chaves do pedido) foram aplicadas uma a uma e todas foram mortas.
+O composition `face-window-composition.integration.mjs` cobre os dois workers V9 (plataforma sem recibo, pin ausente, runtime alterado, antes de tocar o banco).
 
-**Próximos passos exatos**
+**Limites do que foi provado.** O detector é um substituto; nenhum pixel foi analisado pelo OpenVINO e o runtime Linux segue sem recibo de
+paridade. Taxa diferente de 1 é `unknown` e não foi exercitada em PostgreSQL (só em unitário). As suítes são locais, sem contrapartida em CI.
 
-1. Terminar o helper tsx-safe e confirmar que cada suíte carrega: `node node_modules/tsx/dist/cli.mjs --test <suíte>` sem
-   `V2_DATABASE_URL` deve mostrar `skipped 1`, nunca `SyntaxError`.
-2. Trocar o passo de drift por uma asserção das três tabelas; rodar `w65b-pg-plan-p2a.json` (BASE) pelo harness
-   `run-local-pg-w65b.mjs` (de `C:/dev/apollo-video-worktrees/w65b-final-gate-source-evidence`, com `--keep-going`), na ordem:
-   `prisma-face-source-window`, `prisma-caption-placement`, `prisma-face-window` (regressão W62), `prisma-final-caption-source-evidence`
-   (`APOLLO_FINAL_SOURCE_EVIDENCE_E2E=1`), `prisma-final-caption-certification`, `caption-placement-pixels`. As suítes novas ainda
-   **nunca executaram**: espere correções de fixture (por exemplo `fps`/duração do probe do mundo, nomes de bandas, o texto exato da
-   falha do crítico de pixels no mundo F3).
-3. Preencher a seção 10 com os números dessa rodada; registrar a evidência em `docs/quality/project-status.json` (W65) e regenerar
-   `docs/PROJECT-STATUS.md` (`npm run project:status`, depois `:check`).
-4. No cabeçote final: suíte unitária completa e as 13 suítes físicas (`run-w69-physical-suites.mjs`), ambas sob o lock global.
-5. Decisão da Astra na integração: remover o recurso `face-window-operations` da W62 (sem consumidor).
+## 11. Pendências e acompanhamentos
+
+- **Suíte W62 `prisma-face-window.integration.mjs`** (nunca executada antes; agora carrega sob `tsx`): na rodada `w65b-pg-runs/w65b-p2b-1814fb89`
+  passaram 2 de 3 (admissão/CHECKs; isolamento, publicação selada, leitura e adulterações). O terceiro falha no fence `head` com
+  "publisher never reached the PostgreSQL lock wait"; os fences `lease` e `rights` do mesmo teste passam. Causa **não confirmada**; suspeita:
+  o claim usa lease de 10 s e `commitFenceChildVersion` (um commit selado) pode consumi-la nesta máquina, de modo que a publicação falha
+  antes de esperar o lock. É da suíte da W62, não do perfil por fonte (que não tem fence de cabeça de propósito); não foi alterada.
+- **Recurso `face-window-operations` da W62**: mantido por ora (decisão da Astra); sem consumidor desde que o planejador lê só v3. Seguimento: removê-lo antes da primeira publicação.
+- Os dois perfis V9 compartilham uma única composição auditada (`createFaceWindowWorker(..., profile)`); a auditoria de binários (`ffmpeg-binary-resolution`) segue verde.
