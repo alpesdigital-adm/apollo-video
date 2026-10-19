@@ -307,9 +307,16 @@ test('localization subtitles-only persists a snapshot-bound proxy through Postgr
     const approve = approveLocalizationMediaService({ runs: approvalRepository, clock: () => approvalAt })
     const approvalInput = { workspaceId: fixture.workspaceId, projectId: fixture.projectId, variantId: fixture.variant.id, runId: outcome.id, expectedRevision: outcome.revision, expectedRunHash: outcome.runHash, actorClientId: fixture.clientId, authenticationAudit: fixture.audit, idempotencyKey: `approve-${fixture.suffix}`, note: 'Measured proxy reviewed' }
     const review = await prisma.v2ProxyReview.findUniqueOrThrow({ where: { operationId: proof.proxyOperationId } })
-    assert.equal(review.status, 'blocked'); assert.equal(review.finalAllowed, false)
-    assert.ok(JSON.parse(review.criticIssuesJson).some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' &&
-      issue.severity === 'hard'), 'real snapshot render cannot certify facial clearance from absent evidence')
+    // W65b (final-caption-certification/v1): a caption nobody can certify is omitted and LISTED, so the real render of this snapshot is a
+    // review that asks for an acknowledgement, not a hard stop. Nothing grants facial clearance from absent evidence, and the human
+    // approval below is still refused: a review that is not ready-for-final (finalAllowed false) never approves a localization run.
+    const reviewIssues = [...JSON.parse(review.technicalIssuesJson), ...JSON.parse(review.criticIssuesJson)]
+    const reviewIssueCodes = JSON.stringify(reviewIssues.map((issue) => [issue.code, issue.severity]))
+    assert.equal(review.status, 'warning-ack-required', reviewIssueCodes); assert.equal(review.finalAllowed, false)
+    assert.equal(review.warningsAcknowledged, false)
+    assert.deepEqual(reviewIssues.filter((issue) => issue.severity === 'hard'), [], reviewIssueCodes)
+    assert.ok(reviewIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'),
+      `the omitted caption is listed as a face-perception warning, from absent evidence: ${reviewIssueCodes}`)
     const { calculateProxyReviewHash } = await import('../../src/v2/application/render-workflow.ts')
     const { PrismaProxyReviewRepository } = await import('../../src/v2/infrastructure/prisma/proxy-review-repository.ts')
     const reviewBody = { schemaVersion: 'proxy-review/v1', projectVersionId: review.projectVersionId, proxyArtifactId: review.proxyArtifactId, proxyManifestId: review.proxyManifestId, inputHash: review.inputHash, outputSpecId: review.outputSpecId, rangeCacheKey: review.rangeCacheKey, spec: JSON.parse(review.specJson), status: review.status, technicalIssues: JSON.parse(review.technicalIssuesJson), criticIssues: JSON.parse(review.criticIssuesJson), ...(review.formatQualityJson === null ? {} : { formatQuality: JSON.parse(review.formatQualityJson) }), warningsAcknowledged: review.warningsAcknowledged, finalAllowed: review.finalAllowed, uploadReceivedAt: review.uploadReceivedAt.toISOString(), renderCompletedAt: review.renderCompletedAt.toISOString(), timeToFirstProxyMs: Number(review.timeToFirstProxyMs) }
