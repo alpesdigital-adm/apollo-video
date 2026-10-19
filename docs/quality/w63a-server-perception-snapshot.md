@@ -146,9 +146,11 @@ Suítes (todas fora do CI hospedado, declaradas em `KNOWN_UNRUN_SUITES`; rodam n
 
 Interferência anterior à W63a, medida na linha de base (`origin/main` 9b03d7bf, run `w63a-base2-51fbab8c`): `prisma-vertical-smoke` roda o worker de proxy
 render, que reivindica a PRÓXIMA operação da fila do cluster; executada no mesmo cluster depois de `prisma-manual-edit` ela falha com
-"Project proxy worker returned no persisted failure detail", com ou sem esta mudança (N=1 na linha de base, N=2 no branch: `w63a-final-53a1cae4`
-e `w63a-vs1-01df846d` passos b/c repetidos no mesmo cluster). Sozinha passa (`w63a-vs2-47940039`, `w63a-vs1-01df846d` passo a, `w63a-reg1-b46a34c2`). O CI
-roda cada suíte num banco novo.
+"Project proxy worker returned no persisted failure detail", com ou sem esta mudança: N=1 na linha de base (`w63a-base2-51fbab8c`) e N=1 no branch
+(`w63a-final-53a1cae4`), a mesma asserção. (Repetida duas vezes no MESMO banco depois de passar, `w63a-vs1-01df846d` passos b/c, ela falha por outra causa, uma
+violação de unicidade do Prisma: a suíte assume um banco novo.) Sozinha passa (N=4 no branch: `w63a-vs2-47940039`, `w63a-vs1-01df846d` passo a, `w63a-reg1-b46a34c2`,
+e a linha de base `w63a-base1-ec6fd1d9`). O CI roda cada suíte num banco novo. Isto é uma hipótese confirmada por contraste (mesma falha antes e depois, passa isolada);
+a causa dentro do worker de proxy não foi investigada.
 
 Domínio e contrato (sem banco): `npm test` completo no commit final: 3591 testes, 3578 passam, 0 falham, 13 pulados (os pulados já existiam). Gates:
 `typecheck`, `lint`, `lint:code`, `lint:whitespace`, `db:v2:validate` (320 tabelas, 1429 índices, 1112 FKs), `api:v1:validate` (392 capabilities, 707 schemas),
