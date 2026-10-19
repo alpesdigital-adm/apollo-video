@@ -116,7 +116,10 @@ resumo à cobertura da própria timeline, em vez de exigir `absent`); `visualCov
 - `image-insert`: o EditPlan compilado só tem clips de vídeo e CTA; cenas `image-insert` nascem em compiladores de render específicos,
   não em snapshot de versão, e o `RenderElementMap` não distingue imagem de b-roll.
 - O produtor temporal só existe para linhas do tempo de ≤300 quadros (≤10 s) de uma fonte; versões maiores ficam `NO_PRODUCER_RUN`.
-- `GET` com leitor que revoga direitos ou encontra selo violado falha por inteiro (403/409), em vez de omitir parte da evidência.
+- `GET` cujo leitor encontra direitos revogados ou um selo violado falha por inteiro (`ASSET_RIGHTS_BLOCKED` 422, `PERSISTENCE_CONFLICT` 409), em vez de omitir parte da evidência; o domínio, em contrapartida, recusa e LISTA em `rejected` o envelope que não pertence a esta versão/plano/fonte/relógio.
+- A evidência de rosto é da FONTE e compartilhada: quando surge uma janela nova para a fonte, o snapshot de uma versão antiga (pedida por `versionId`) passa a ter conteúdo diferente — é outra linha, endereçada pelo novo hash; as linhas já gravadas nunca mudam. OCR e temporal são presos à versão e não crescem.
+- `GET` materializa (grava) o snapshot com o escopo `projects:read`: o conteúdo é função determinística de evidência já selada e o chamador não o escolhe; o efeito é idempotente (mesma evidência, mesma linha).
+- Palavras cujo registro de transcrição não está no workspace seguem presas ao EditPlan selado (produtor `unresolved`, hash do plano), e não são escondidas.
 - A cobertura de rosto é a dos quadros amostrados (nenhuma interpolação por `maxSampleGapFrames`, que é política de legenda da W65).
 - Não há passo de CI hospedado para as suítes PG (declaradas em `KNOWN_UNRUN_SUITES`).
 
