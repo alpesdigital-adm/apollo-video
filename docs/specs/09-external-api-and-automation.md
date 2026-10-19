@@ -1011,15 +1011,41 @@ intervalo pedido (`fromMs`/`toMs`, semiaberto) e nunca inventa `complete`:
 `unexaminedRanges`; `absent` traz `reasonCode` (`NO_PRODUCER_RUN`,
 `NO_VERIFIED_DETECTOR` para `object`, `DIARIZATION_UNAVAILABLE`,
 `SILENCE_PRODUCER_UNAVAILABLE`, `INSERT_GEOMETRY_NOT_COMPILED`,
-`TIMELINE_FPS_NOT_INTEGER`, `NO_UNIT_RATE_CLIP`…). `object` é sempre `absent`:
-não há detector verificado. Envelope violado, de outra versão, plano, workspace,
-fonte (SHA) ou relógio é recusado e listado em `snapshot.rejected`; os direitos
-da fonte e o selo de cada envelope são reverificados a cada leitura. O snapshot
-é endereçado pelo conteúdo (`snapshotHash`), gravado uma só vez por versão e
-idempotente: a mesma evidência é a mesma linha. A timeline manual do `PUT
+`TIMELINE_FPS_NOT_INTEGER`, `NO_UNIT_RATE_CLIP`,
+`SOURCE_TIMELINE_LENGTH_MISMATCH`, `FACE_WINDOW_LIMIT_EXCEEDED`…). `object` é
+sempre `absent`: não há detector verificado. O que nenhuma amostra poderia
+cobrir por um fato estrutural (clip de outra velocidade, spans de comprimento
+desigual, fps não inteiro, fonte cujas janelas não foram lidas) vem em
+`snapshot.unexaminedSpans` com o PRÓPRIO motivo, e na leitura por intervalo
+`coverage[].unexaminedReasons` parte o não examinado onde o motivo muda; ele não
+aparece como se o produtor apenas tivesse deixado de amostrar.
+
+Dois lugares recusam evidência, com efeitos diferentes. No caminho real de
+leitura (o `GET`), o selo de cada envelope, os bytes da fonte (SHA) e os
+direitos de análise são reverificados a cada leitura; envelope adulterado,
+envelope selado para outros bytes que os da fonte (SHA divergente) ou direito
+revogado fazem a leitura inteira falhar — 409 `PERSISTENCE_CONFLICT` ou 422
+`ASSET_RIGHTS_BLOCKED` —, sem servir parte da evidência e sem gravar nada (um SHA
+divergente NÃO é listado em `snapshot.rejected`: é 409). O montador lista em
+`snapshot.rejected` o que recusa da evidência recebida: outra versão, plano,
+workspace ou relógio, duplicata, conflito entre janelas de rosto
+(`EVIDENCE_CONFLICT`), palavra que o plano põe fora da linha do tempo
+(`WORD_OUTSIDE_TIMELINE`/`WORD_SPAN_INVALID`, com os ids das palavras em
+`subjects`: nunca grudada na borda) e fonte cujas janelas de rosto excedem o
+orçamento de 1000 por snapshot (`FACE_WINDOW_LIMIT_EXCEEDED`; todas as janelas de
+uma fonte são lidas, por keyset, ou nenhuma é usada, e a fonte sem janelas lidas
+fica sem cobertura de rosto, dita). A fonte da transcrição é a da linha de
+transcrição; sem a linha, a única fonte que a linha do tempo toca, e havendo
+várias `inputs[].sourceArtifactId` é `null`: nunca a primeira da lista.
+
+O snapshot é endereçado pelo conteúdo (`snapshotHash`), gravado uma só vez por
+versão e idempotente: a mesma evidência é a mesma linha. **O próprio `GET` grava
+essa linha** quando ela ainda não existe (com `projects:read`: o conteúdo é função
+determinística de evidência já selada e o chamador não escolhe nenhum byte dele);
+a Director grava a mesma linha no seu commit. A timeline manual do `PUT
 /perception` (`manual-controlled`) nunca entra no snapshot
 (`origin.manualTimelinesIncluded=false`) e continua em `GET /perception`.
-Detalhes e limites: `docs/quality/w63a-server-perception-snapshot.md`.
+Detalhes, limites e o custo medido: `docs/quality/w63a-server-perception-snapshot.md`.
 
 `POST /v1/projects/{projectId}/perception-producer-operations` exige
 `projects:write`, `Idempotency-Key` e corpo limitado a `projectVersionId`,

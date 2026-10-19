@@ -20,9 +20,9 @@ const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/se
 
 /**
  * W63a: GET /v1/projects/{projectId}/perception/snapshot through a REAL Next server (`next start` on a production build), over a
- * PostgreSQL world with sealed OCR, temporal and face evidence written by the products' own writers (supervised harness with
- * `--build`; not run in hosted CI). The in-process route suite proves the cases; this one proves the same contract survives the
- * framework: routing of the nested path, authentication on the wire, the published schema served by the API itself, and the
+ * PostgreSQL world with sealed OCR, temporal and face evidence written by the products' own writers. It runs in the hosted
+ * perception job (production build, namespace launcher, `APOLLO_PERCEPTION_HTTP_E2E=1`) and in the supervised harness with `--build`.
+ * The in-process route suite (tsx, local) proves the cases; this one proves the same contract survives the framework: routing of the nested path, authentication on the wire, the published schema served by the API itself, and the
  * OpenAPI document that lists the path.
  */
 function freePort() {
@@ -58,7 +58,7 @@ async function stopServer(child) {
 }
 
 test('W63a real Next server: the snapshot route, its published schema and the OpenAPI path agree, with auth on the wire',
-  { skip: !process.env.V2_DATABASE_URL || process.env.APOLLO_SNAPSHOT_SERVER_E2E !== '1', timeout: 600_000 }, async () => {
+  { skip: !process.env.V2_DATABASE_URL || process.env.APOLLO_PERCEPTION_HTTP_E2E !== '1', timeout: 600_000 }, async () => {
     const db = new PrismaClient()
     let server, serverLog, primaryError
     try {

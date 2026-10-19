@@ -402,6 +402,7 @@ SUITES = frozenset((
     "tesseract-ocr-video-adapter", "ffmpeg-temporal-video-analyzer",
     "prisma-perception-producer-admission", "prisma-perception-producer-worker",
     "prisma-perception-producer-http", "prisma-director-ocr", "prisma-temporal-producer",
+    "prisma-server-perception-snapshot", "prisma-director-server-perception", "server-perception-snapshot-server",
     "prisma-face-producer", "perception-namespace-observer",
 ))
 CONTROLLED_FAULTS = frozenset(("guardian-stop", "init-stop", "node-owner-death", "ipc-death", "ipc-truncated", "ipc-oversized", "deadline"))
