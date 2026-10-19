@@ -73,6 +73,8 @@ function sidecarWorld({ stored, versions = [V1], currentVersionId = versions[0],
     v2MediaArtifact: fakeTable(artifactIds.map((id) => ({ id, workspaceId: W, artifactKey: `renders/${id}.mp4`, sha256: sha('e'), status: 'available' }))),
     v2RenderElementMap: fakeTable(versions.flatMap((projectVersionId) => artifactIds.map((artifactId) => ({ ...renderElementMapRow({ id: `map-${artifactId}`, proxyHash: sha('e') }),
       workspaceId: W, projectId: P, projectVersionId, proxyArtifactId: artifactId })))),
+    // W69: the sidecar is derived only from a render a review judged. This world's renders are judged and releasable.
+    v2ProxyReview: { async findFirst() { return { status: 'ready-for-final', finalAllowed: true, reviewHash: sha('d') } } },
   }
   // `variantId` is the stable State variant of the output aligned (variant-a is the 9:16 output of every single-output State here).
   const read = (input = {}) => new PrismaSubtitleSidecarRepository(client).readRenderedAlignment({ workspaceId, projectId: P, variantId: 'variant-a', ...input })
