@@ -21,13 +21,26 @@ export interface RenderReframeKeyframeV1 {
   crop: Readonly<NormalizedBounds>
 }
 
+/** A stretch of a range that the editor framed by hand (W66r): its crop is held exactly and the automatic trajectory resumes after it. */
+export interface RenderReframeManualSpanV1 {
+  id: string
+  startFrame: number
+  endFrame: number
+}
+
 export interface RenderReframeRangeV1 {
   clipId: string
   startFrame: number
   endFrame: number
   interpolation: 'linear' | 'hold'
-  source: 'plan' | 'manual'
+  /**
+   * `plan`: the automatic trajectory. `manual`: the whole range is one editor crop. `fallback` (W66r): nothing in this clip could be
+   * tracked, so it plays uncropped (the whole frame, letterboxed into the canvas) and carries NO keyframe.
+   */
+  source: 'plan' | 'manual' | 'fallback'
   keyframes: readonly Readonly<RenderReframeKeyframeV1>[]
+  /** Editor-framed stretches inside an automatic range. Absent when there are none. */
+  manualSpans?: readonly Readonly<RenderReframeManualSpanV1>[]
 }
 
 export interface RenderReframePlanV1 {
@@ -82,6 +95,7 @@ export function interpolateReframeCrop(range: Readonly<RenderReframeRangeV1>, fr
     Number.isSafeInteger(frame) && frame >= range.startFrame && frame < range.endFrame,
     'INVALID_RENDER_INPUT', 'Reframe frame is outside its range', { frame, range: { startFrame: range.startFrame, endFrame: range.endFrame } },
   )
+  assertDomain(range.keyframes.length >= 1, 'INVALID_RENDER_INPUT', 'A fallback reframe range has no crop to interpolate')
   let previous = range.keyframes[0]!
   let next: Readonly<RenderReframeKeyframeV1> | undefined
   for (const keyframe of range.keyframes) {
@@ -104,7 +118,7 @@ export function createRenderReframePlan(input: Readonly<{
   fps: number
   durationFrames: number
   source: Readonly<{ width: number; height: number }>
-  ranges: readonly Readonly<Omit<RenderReframeRangeV1, 'source'>>[]
+  ranges: readonly Readonly<Omit<RenderReframeRangeV1, 'source'> & { source?: 'plan' | 'fallback' }>[]
   overrides?: readonly Readonly<RenderReframeOverrideV1>[]
 }>): Readonly<RenderReframePlanV1> {
   assertDomain(OUTPUT_ASPECT_RATIOS.includes(input.format), 'INVALID_RENDER_INPUT', 'Reframe plan format is not registered')
@@ -123,9 +137,11 @@ export function createRenderReframePlan(input: Readonly<{
   const ranges = input.ranges.map((range) => {
     const override = overrides.find((candidate) => candidate.startFrame === range.startFrame && candidate.endFrame === range.endFrame)
     if (!override) {
+      const { source: _source, manualSpans, ...rest } = range
       return Object.freeze({
-        ...range, source: 'plan' as const,
+        ...rest, source: (range.source ?? 'plan') as 'plan' | 'fallback',
         keyframes: Object.freeze(range.keyframes.map((keyframe) => Object.freeze({ frame: keyframe.frame, crop: assertCrop(keyframe.crop, `keyframe ${keyframe.frame} crop`) }))),
+        ...(manualSpans && manualSpans.length ? { manualSpans: Object.freeze(manualSpans.map((span) => Object.freeze({ ...span }))) } : {}),
       })
     }
     return Object.freeze({
@@ -176,7 +192,13 @@ export function validateRenderReframePlan(plan: Readonly<RenderReframePlanV1>): 
     assertDomain(ID.test(range.clipId), 'INVALID_RENDER_INPUT', 'Reframe range clip id is invalid')
     assertDomain(range.startFrame === cursor && range.endFrame > range.startFrame && range.endFrame <= plan.durationFrames, 'INVALID_RENDER_INPUT', 'Reframe plan ranges must tile the timeline without gaps or overlap', { clipId: range.clipId, startFrame: range.startFrame, expected: cursor })
     assertDomain(range.interpolation === 'linear' || range.interpolation === 'hold', 'INVALID_RENDER_INPUT', 'Reframe interpolation is unsupported')
-    assertDomain(range.source === 'plan' || range.source === 'manual', 'INVALID_RENDER_INPUT', 'Reframe range source is unsupported')
+    assertDomain(range.source === 'plan' || range.source === 'manual' || range.source === 'fallback', 'INVALID_RENDER_INPUT', 'Reframe range source is unsupported')
+    if (range.source === 'fallback') {
+      // An untracked clip is shown whole: a crop here would be a claim the plan could not make.
+      assertDomain(range.keyframes.length === 0 && range.manualSpans === undefined, 'INVALID_RENDER_INPUT', 'A fallback reframe range carries no keyframe', { clipId: range.clipId })
+      cursor = range.endFrame
+      continue
+    }
     assertDomain(range.keyframes.length >= 1 && range.keyframes.length <= MAX_KEYFRAMES, 'INVALID_RENDER_INPUT', 'Reframe range requires 1 to 600 keyframes', { clipId: range.clipId })
     const first = range.keyframes[0]!
     assertDomain(first.frame === range.startFrame, 'INVALID_RENDER_INPUT', 'Reframe range must open with a keyframe on its first frame', { clipId: range.clipId })
@@ -190,6 +212,24 @@ export function validateRenderReframePlan(plan: Readonly<RenderReframePlanV1>): 
         Math.abs(keyframe.crop.width - first.crop.width) <= EPSILON && Math.abs(keyframe.crop.height - first.crop.height) <= EPSILON,
         'INVALID_RENDER_INPUT', 'A reframe trajectory pans with a constant crop size; a zoom cannot be rendered deterministically', { clipId: range.clipId, frame: keyframe.frame },
       )
+    }
+    for (const [position, span] of (range.manualSpans ?? []).entries()) {
+      assertDomain(
+        ID.test(span.id) && Number.isSafeInteger(span.startFrame) && Number.isSafeInteger(span.endFrame) &&
+        span.startFrame >= range.startFrame && span.endFrame > span.startFrame && span.endFrame <= range.endFrame &&
+        (position === 0 || span.startFrame >= range.manualSpans![position - 1]!.endFrame),
+        'INVALID_RENDER_INPUT', 'Reframe manual span is invalid, outside its range or overlapping', { clipId: range.clipId, span: span.id },
+      )
+      // The editor's crop is held exactly: the trajectory evaluated on every keyframe inside the span and on both of its ends is one crop.
+      const held = interpolateReframeCrop(range, span.startFrame)
+      const probes = [span.endFrame - 1, ...range.keyframes.map((keyframe) => keyframe.frame).filter((frame) => frame > span.startFrame && frame < span.endFrame)]
+      for (const frame of probes) {
+        const crop = interpolateReframeCrop(range, frame)
+        assertDomain(
+          Math.abs(crop.x - held.x) <= EPSILON && Math.abs(crop.y - held.y) <= EPSILON,
+          'INVALID_RENDER_INPUT', 'A manual span must hold one crop', { clipId: range.clipId, span: span.id, frame },
+        )
+      }
     }
     cursor = range.endFrame
   }
