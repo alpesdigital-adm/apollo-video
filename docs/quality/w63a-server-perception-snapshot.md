@@ -207,6 +207,7 @@ HTTP", depois do passo temporal) **e** no harness supervisionado de PostgreSQL d
 | `w63a-final2-3a0c809a` (`--build`, migração aplicada do zero) | `prisma-server-perception-snapshot` 4 testes; `prisma-director-server-perception` 1; `server-perception-snapshot-http` 1; `server-perception-snapshot-server` (Next real, build de produção) 1; regressão: `director-copy-editorial-cut.pg` 1, `multi-output-project-wide.pg` 1, `prisma-director-ocr` 6 (inclui o teste W64 com OCR real: 32 s), `prisma-manual-edit` 1 | 16/16 passam; `success: true`, pós-voo limpo (cluster parado, zero backends) |
 | `w63a-vs2-47940039` | `prisma-vertical-smoke` isolada | 1/1 passa |
 | `w63a-reg1-b46a34c2` e `w63a-final-53a1cae4` | rodadas anteriores (mesmo código) | as suítes W63a e a regressão passaram; `a1-manual` precisa de `--build` (falhou sem ele, passou com ele); a suíte real-server falhou por um nome de cabeçalho errado no TESTE (corrigido) |
+| `w63a-r2b-86ec159d` (`--build`, commit `eb898e2e`, na ordem e na forma do job `perception`: `node --experimental-transform-types --test`, sem tsx, `CI=true`, `APOLLO_PERCEPTION_HTTP_E2E=1`, pool 2) | regressão `prisma-director-ocr` 6; depois `prisma-server-perception-snapshot` 5 (76,6 s no passo), `prisma-director-server-perception` 1 (16,8 s), `server-perception-snapshot-server` (Next real, **Node nativo**) 1 (16,8 s); e a suíte de rota em processo (tsx) 1 (31,7 s) | 14/14 passam, 0 pulados; `success: true`, pós-voo limpo |
 | `w63a-r2a-a957865e` (commit `9aad5617`, ambiente do job `perception`: `CI=true`, pool `connection_limit=2`, nome de aplicação do job) | `prisma-server-perception-snapshot` 5 testes (61,5 s no passo; o de 213 janelas 43,1 s); `prisma-director-server-perception` 1 (16,5 s); `prisma-server-perception-cost` 1 (196,5 s) | 7/7 passam; `success: true`, pós-voo limpo |
 
 Interferência anterior à W63a, medida na linha de base (`origin/main` 9b03d7bf, run `w63a-base2-51fbab8c`): `prisma-vertical-smoke` roda o worker de proxy
@@ -217,7 +218,7 @@ violação de unicidade do Prisma: a suíte assume um banco novo.) Sozinha passa
 e a linha de base `w63a-base1-ec6fd1d9`). O CI roda cada suíte num banco novo. Isto é uma hipótese confirmada por contraste (mesma falha antes e depois, passa isolada);
 a causa dentro do worker de proxy não foi investigada.
 
-Domínio e contrato (sem banco): `npm test` completo no commit final: 3591 testes, 3578 passam, 0 falham, 13 pulados (os pulados já existiam). Gates:
+Domínio e contrato (sem banco): `npm test` completo em `eb898e2e`: 3601 testes, 3588 passam, 0 falham, 13 pulados (os pulados já existiam). Gates:
 `typecheck`, `lint`, `lint:code`, `lint:whitespace`, `db:v2:validate` (320 tabelas, 1429 índices, 1112 FKs), `api:v1:validate` (392 capabilities, 707 schemas),
 `api:parity:validate`: todos exit 0.
 
