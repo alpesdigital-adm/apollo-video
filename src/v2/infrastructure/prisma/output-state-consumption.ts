@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { DomainError } from '../../domain/errors.ts'
 import { creationProjectMetadataV2, validateProjectCreationOutputCommandV2, type ProjectCreationOutputCommandV2 } from '../../domain/project-creation-command.ts'
 import { buildCreationOutputVersionBundleV2, validateCreationOutputVersionBundleV2, type CreationOutputVersionBundleV2 } from '../../domain/output-version-bundle.ts'
-import { calculateOutputCanonicalHash, serializeOutputCanonicalJson } from '../../domain/output-canonical-policy.ts'
+import { serializeOutputCanonicalJson } from '../../domain/output-canonical-policy.ts'
 
 type Reader = Pick<PrismaClient | Prisma.TransactionClient, '$queryRawUnsafe'>
 export async function readPersistedCreationOutputBundleV2(client: Reader,
@@ -307,10 +307,16 @@ export async function readStoredOutputStateV3(client:Reader,input:Readonly<{work
   const expectedSchema=row.outputContractVersion===2?'project-output-state/v2':'project-output-state/v3'
   if(row.stateJson===null||row.stateHash===null||row.schemaVersion!==expectedSchema||row.outputStateHash!==row.stateHash)
     throw new DomainError('PERSISTENCE_CONFLICT','Stored output State differs from the State its Version seals')
+  // The State hash is the SHA-256 of the canonical text (`calculateOutputCanonicalHash`), so the stored text is that text exactly when its own SHA-256 is the
+  // hash the Version seals: no need to parse, re-serialize canonically and hash again. This runs on the event loop of every consumer right after a claim (a
+  // sealed State of a 30 s master is over a megabyte), and the re-serialization alone was ~20 ms: more than the 30 ms in which a `tsx` launcher waits for a
+  // worker to acknowledge a relayed SIGTERM before it kills the worker with its claim still running (Wave 23 journey 2).
+  if(createHash('sha256').update(row.stateJson,'utf8').digest('hex')!==row.stateHash)
+    throw new DomainError('PERSISTENCE_CONFLICT','Stored output State failed its own seal')
   let document:ProjectOutputStateV2['document']|ProjectOutputStateV3['document']
   try { document=JSON.parse(row.stateJson) } catch { throw new DomainError('PERSISTENCE_CONFLICT','Stored output State is not valid JSON') }
   if(document.schemaVersion!==expectedSchema||document.resultVersionId!==input.versionId||document.projectId!==input.projectId||document.workspaceId!==input.workspaceId||
-    document.id!==row.outputStateId||serializeOutputCanonicalJson(document)!==row.stateJson||calculateOutputCanonicalHash(document)!==row.stateHash)
+    document.id!==row.outputStateId)
     throw new DomainError('PERSISTENCE_CONFLICT','Stored output State failed its own seal')
   return Object.freeze({version:Object.freeze({id:input.versionId,baseHash:row.baseHash}),
     state:Object.freeze({document,stateHash:row.stateHash}) as OutputConsumptionState})
