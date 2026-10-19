@@ -1145,6 +1145,10 @@ export async function runDashboardRuntimeJourney(input) {
       }
       for (const [layout, viewport] of [['desktop', { width: 1440, height: 1000 }], ['mobile', { width: 390, height: 844 }]]) {
         markBrowserPage(page, stage, layout)
+        // A viewport change makes the dashboard poll the event feed at once (about 30 ms later; the evidence of a CI run shows a fetch 20 to
+        // 40 ms after the intent in several navigations), so it is applied here, before the barriers below, and not between the navigation intent and the `goto`: there that
+        // poll was still in flight when the new document committed and was cancelled with the old one.
+        await page.setViewportSize(viewport)
         await drainBrowserResponses({ label: 'before-main-foreground' })
         const visibilityBefore = await page.evaluate(() => document.visibilityState)
         await page.bringToFront()
@@ -1152,7 +1156,6 @@ export async function runDashboardRuntimeJourney(input) {
         evidence.foregroundObservations ??= []
         evidence.foregroundObservations.push({ stage, layout, before: visibilityBefore, after: await page.evaluate(() => document.visibilityState) })
         await drainBrowserResponses({ label: 'before-dashboard-navigation' })
-        await page.setViewportSize(viewport)
         await leaveDocument(page)
         const dashboardNavigation = beginBrowserNavigation(page, stage, layout, '/')
         await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
