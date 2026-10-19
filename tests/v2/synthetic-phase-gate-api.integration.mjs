@@ -355,7 +355,9 @@ test('T-F3-GATE public HTTP run/list enforces auth, scope, tenant, closed input 
       post({ authorization, 'idempotency-key': 'synthetic-gate-http-concurrent' }),
       post({ authorization, 'idempotency-key': 'synthetic-gate-http-concurrent' }),
     ])
-    assert.deepEqual(concurrent.map((response) => response.status).sort(), [200, 201])
+    // The bodies go into the message: a loser that answers anything but a replay has to say which error it was.
+    assert.deepEqual(concurrent.map((response) => response.status).sort(), [200, 201],
+      JSON.stringify(await Promise.all(concurrent.map(async (response) => ({ status: response.status, body: await response.clone().json().catch(() => null) })))))
     const concurrentPayloads = await Promise.all(concurrent.map((response) => response.json()))
     assert.equal(concurrentPayloads[0].data.gate.id, concurrentPayloads[1].data.gate.id)
     assert.deepEqual(
