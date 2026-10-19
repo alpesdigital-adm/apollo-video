@@ -262,7 +262,15 @@ export async function verifyProducerPublishFences({ db, world, repository, Repos
           return { beforeExpiry, afterExpiry }
         }
       } else {
+        // The claim's lease is short (10 s). Commit the child, then say how much of it is left: a publisher that arrives after the
+        // lease ended fails on the lease before it ever waits for the project lock, which is a different fact from the head fence.
+        const commitStartedAt = Date.now()
         childVersionId = (await commitFenceChildVersion(db, world, `${label}-${kind}`)).version.id
+        const commitMs = Date.now() - commitStartedAt
+        const [{ now: afterCommit }] = await db.$queryRaw`SELECT clock_timestamp() AS now`
+        const leaseRow = await db.v2PublicOperation.findUniqueOrThrow({ where: { id: operationId } })
+        console.log(`producer-publish-fence ${label}-head commitFenceChildVersionMs=${commitMs} ` +
+          `leaseRemainingMs=${leaseRow.leaseExpiresAt ? leaseRow.leaseExpiresAt.getTime() - afterCommit.getTime() : 'none'}`)
         lockedTable = 'projects'; lockedId = world.projectId
         whileLocked = (tx) => tx.v2Project.update({ where: { id: world.projectId },
           data: { currentVersionId: childVersionId } })
