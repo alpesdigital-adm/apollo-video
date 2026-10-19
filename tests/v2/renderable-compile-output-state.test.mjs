@@ -240,7 +240,10 @@ test('the database guard and the dispatch name exactly what the domain declares,
   assert.deepEqual([...new Set([...sql.matchAll(/ALTER TABLE (\S+)/g)].map((match) => match[1]))], ['"edit_commands"'])
   // The Command type list of the table constraint is the registry, including the new type.
   const constraint = quoted(sql.match(/CHECK \("type" IN \(([\s\S]*?)\)\)/)[1]).sort()
-  assert.deepEqual(constraint, [...EDIT_COMMAND_TYPES].sort())
+  // This migration wrote the CHECK with the registry of its day; W66r rewrote it with one more type, and that one is pinned to the registry as it is now.
+  assert.deepEqual(constraint, [...EDIT_COMMAND_TYPES].filter((type) => type !== 'apply-variant-reframe-override').sort())
+  const live = await readFile(new URL('../../prisma/v2/migrations/20261019100000_variant_reframe_v1/migration.sql', import.meta.url), 'utf8')
+  assert.deepEqual(quoted(live.match(/CHECK \("type" IN \(([\s\S]*?)\)\)/)[1]).sort(), [...EDIT_COMMAND_TYPES].sort())
   assert.ok(constraint.includes(command.type))
   // The origin: exact keys, the kind and the Command type.
   assert.deepEqual(quoted(sql.match(/w66_v3_exact_keys\(o,ARRAY\[([^\]]*)\]\)/)[1]).sort(), Object.keys(bundle.origin).sort())

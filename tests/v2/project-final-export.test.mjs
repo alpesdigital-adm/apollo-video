@@ -838,7 +838,8 @@ test('final export worker keeps a disabled subtitle style disabled, exactly as t
 
 test('final export worker forwards the persisted reframe plan of the exported Version', async () => {
   const reframeFor = (durationFrames) => createRenderReframePlan({
-    format: '9:16', variantId: '9:16', fps: 30, durationFrames, source: { width: 1920, height: 1080 },
+    // W66r: the plan names the stable variant the exported Version is sealed to, not its aspect ratio.
+    format: '9:16', variantId: 'variant-main', fps: 30, durationFrames, source: { width: 1920, height: 1080 },
     ranges: [{
       clipId: 'clip-final-1', startFrame: 0, endFrame: durationFrames, interpolation: 'hold',
       keyframes: [{ frame: 0, crop: { x: 0.3, y: 0, width: 0.31640625, height: 1 } }],

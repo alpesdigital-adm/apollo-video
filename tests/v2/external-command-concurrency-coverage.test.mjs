@@ -462,6 +462,12 @@ const coverage = Object.freeze({
   'apollo.projects.subtitle-segment-overrides.apply': {
     mode: 'durable-covered', evidence: 'serializable exact ProjectVersion, per-(variant, segment) head compare-and-swap against previousOverrideId, compiled-segment range recheck, typed EditCommand, immutable override and actor-bound replay',
   },
+  'apollo.projects.reframe-plans.create': {
+    mode: 'durable-covered', evidence: 'the plan record is content-addressed per (version, variant): the same inputs replay the same row, and a new record is the next sequence of the chain written under a unique successor index and a Serializable transaction, so two planners converge on one chain',
+  },
+  'apollo.projects.variant-reframe-overrides.apply': {
+    mode: 'durable-covered', evidence: 'serializable exact ProjectVersion, per-(variant, clip, range) head compare-and-swap against previousOverrideId, plan record recheck, typed EditCommand, immutable override, the plan records of the result Version written in the same transaction and actor-bound replay',
+  },
   'apollo.synthetic-presenters.register': {
     mode: 'durable-covered', evidence: 'serializable next-version recheck, exact consent-evidence digest, actor-bound idempotency and immutable content-addressed profile snapshot',
   },
@@ -615,7 +621,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    182,
+    184,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

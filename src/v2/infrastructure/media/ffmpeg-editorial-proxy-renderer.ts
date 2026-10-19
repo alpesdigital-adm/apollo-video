@@ -566,7 +566,8 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         if (range.keyframes.length > 1 && clip.rate !== 1) {
           throw new DomainError('INVALID_RENDER_INPUT', 'A reframe trajectory requires a real-time clip')
         }
-        reframeRangeByClipId.set(clip.id, range)
+        // A `fallback` range says this plan did not reframe the clip: it plays as it always did (its own static crop, else the whole frame).
+        if (range.source !== 'fallback') reframeRangeByClipId.set(clip.id, range)
       }
     }
     // W65. A caption that was PLACED was placed on a projection of the sources onto this canvas. The renderer rebuilds that
@@ -844,7 +845,8 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         artifactId,
         { width: sourceProbe.width, height: sourceProbe.height },
       ])),
-      clips: input.clips,
+      // A clip under an active reframe range is laid on the canvas by the cover rule: the map says so, it does not describe a band.
+      clips: input.clips.map((clip) => (reframeRangeByClipId.has(clip.id) ? Object.freeze({ ...clip, reframed: true }) : clip)),
       subtitleCues: input.subtitleCues,
       ctaOverlays: input.ctaOverlays,
       composition: input.composition,

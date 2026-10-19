@@ -949,14 +949,33 @@ anterior calculava um hash sobre caixas fornecidas pelo próprio cliente, que
 não autenticava detector, fonte ou coverage. A ruptura é deliberada e está no
 baseline; os schemas v1 permanecem somente como histórico.
 
-O resultado `reframe-plan-request-result/v2` informa `review-required`,
-`plan=null` e `FACE_PERCEPTION_UNAVAILABLE` depois de conferir projeto, versão,
-fonte única vinculada ao transcript no EditPlan e direitos atuais. Múltiplas
-fontes ainda recebem precondição explícita. Isso é o resultado da solicitação, não um
-crop aprovado. A geometria automática exige evidência facial server-owned com
-escopo e aptidão comprovados; o overlay manual por variante continua separado
-da percepção. Persistência, RenderInput por variante e prova do MP4 seguem
-pendentes no slice W66.
+### W66r — Plano de reframe persistido por variante e override por faixa
+
+`apollo.projects.reframe-plans.create` passa a 3.0.0 (ruptura deliberada, no
+baseline; os schemas v1 e v2 ficam como histórico). O request
+`reframe-plan-request/v3` contém `baseVersionId` e `variantId`: o id estável da
+variante no State selado (uma proporção não é variante e é recusada com
+`output-variant-unknown`). Como o pedido agora persiste um registro, o escopo é
+`projects:write`. O resultado `reframe-plan-request-result/v3` é
+`review-required`, `plan=null`, `FACE_PERCEPTION_UNAVAILABLE` e a lista de
+janelas a pedir (`requiredFaceWindows`) enquanto não há evidência facial
+autenticada; com evidência, devolve o registro persistido
+(`variant-reframe-plan/v1`: hash da política, observações do servidor, plano do
+servidor, plano final, keyframes por clipe e issues localizadas) com
+`status` `ready`, `review-required` ou `blocked`. O mesmo pedido é a mesma linha
+(`replayed`); evidência nova acrescenta o próximo registro da cadeia daquela
+(Versão, variante).
+
+Capacidades novas: `apollo.projects.reframe-plans.read` (1.0.0, o último registro
+de uma variante), `apollo.projects.variant-reframe-overrides.apply` (1.0.0, Command
+`apply-variant-reframe-override`: `set` com crop só de pan ou `reset`, de UMA faixa
+semiaberta de UM clipe de UMA variante, em Versão nova, com `Idempotency-Key`;
+base velha = `VERSION_CONFLICT`, outro corpo com a mesma chave =
+`IDEMPOTENCY_PAYLOAD_MISMATCH`, direitos revogados = `ASSET_RIGHTS_BLOCKED`) e
+`apollo.projects.variant-reframe-overrides.read` (1.0.0, os overrides vigentes
+de uma variante). O override nunca altera a observação nem o plano do servidor, e o
+plano da outra variante segue idêntico. Política, regras, issues por variante, método de
+prova e limites: `docs/quality/w66r-reframe-trajectory.md`.
 
 ### W61 — Status explícito de segurança facial
 

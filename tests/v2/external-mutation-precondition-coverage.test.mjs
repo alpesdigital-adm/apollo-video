@@ -466,6 +466,12 @@ const coverage = Object.freeze({
   'apollo.projects.subtitle-segment-overrides.apply': {
     mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion, the compiled segment range of the target variant and the per-segment override head the command claims to replace',
   },
+  'apollo.projects.reframe-plans.create': {
+    mode: 'natural-idempotent-create', evidence: 'the record is content-addressed per (Version, variant): the same inputs are the same row, new evidence appends to the chain, and the planner refuses a stale baseVersionId with VERSION_CONFLICT before reading any evidence',
+  },
+  'apollo.projects.variant-reframe-overrides.apply': {
+    mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion, the variant plan record the override was decided over and the per-range override head the command claims to replace',
+  },
   'apollo.synthetic-presenters.register': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds the next immutable profile version, actor context, consent scope and exact evidence artifact digest; serializable persistence rechecks all of them',
   },
@@ -831,11 +837,11 @@ test('the current public surface has no unguarded state replacement', () => {
     'explicit-precondition': 10,
     'idempotent-create': 77,
     'identity-bound-action': 11,
-    'natural-idempotent-create': 10,
+    'natural-idempotent-create': 11,
     'state-machine-action': 20,
     'single-flight-action': 4,
     'revision-bound-action': 16,
-    'base-version-bound-action': 27,
+    'base-version-bound-action': 28,
     'fenced-natural-idempotent-action': 5,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,

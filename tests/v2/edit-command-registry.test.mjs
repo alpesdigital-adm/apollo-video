@@ -21,6 +21,7 @@ import {
   createManualCommandImpact,
   createReviewPatchCommandImpact,
   createSubtitleSegmentOverrideCommandImpact,
+  createVariantReframeOverrideCommandImpact,
   parseCommandImpact,
 } from '../../src/v2/domain/command-impact.ts'
 import {
@@ -284,6 +285,37 @@ function compareActionImpact(action = 'accept') {
 }
 
 /**
+ * W66r — the manual reframe covers clip-1 frames 30..90 of a 180-frame timeline, for one variant. Its impact is nevertheless the whole timeline
+ * of that ONE variant (a render made from a reframe plan is always a full render), and nothing of another output.
+ */
+function variantReframeOverrideImpact() {
+  return createVariantReframeOverrideCommandImpact({
+    commandId: 'edit-command-registry-variant-reframe',
+    baseVersionId,
+    resultVersionId,
+    variantId: '9:16',
+    clipId: 'clip-1',
+    action: 'set',
+    range: { startFrame: 30, endFrame: 90 },
+    durationFrames,
+    outputReferences: outputs,
+  })
+}
+
+test('W66r a manual reframe invalidates the whole proxy of ITS variant and nothing of another output, whatever range was framed', () => {
+  const impact = variantReframeOverrideImpact()
+  assert.deepEqual(impact.affectedRanges, [{ startFrame: 0, endFrame: durationFrames }])
+  assert.deepEqual(impact.minimalRenders.map((render) => [render.variantId, render.ranges]), [['9:16', [{ startFrame: 0, endFrame: durationFrames }]]])
+  assert.deepEqual(impact.affectedVariantIds, ['9:16'])
+  assert.ok(impact.affectedArtifacts.length > 0 && impact.affectedArtifacts.every((artifact) => artifact.variantId === '9:16'))
+  // a stored document that promises a narrower render than the renderer can give is a defect, not a conservative invalidation
+  const narrow = { ...impact, minimalRenders: [{ ...impact.minimalRenders[0], ranges: [{ startFrame: 30, endFrame: 90 }] }] }
+  assert.throws(() => parseCommandImpact(narrow), (error) => error.code === 'PERSISTENCE_CONFLICT')
+  const narrowStale = { ...impact, affectedRanges: [{ startFrame: 30, endFrame: 90 }], minimalRenders: [{ ...impact.minimalRenders[0], ranges: [{ startFrame: 30, endFrame: 90 }] }] }
+  assert.throws(() => parseCommandImpact(narrowStale), (error) => error.code === 'PERSISTENCE_CONFLICT')
+})
+
+/**
  * F1.037 — the exception covers cue-1 only (frames 15..45 of a 180-frame timeline),
  * so the fixture itself proves the type can invalidate less than the whole timeline.
  */
@@ -343,6 +375,7 @@ const IMPACT_FIXTURES = {
   ...OUTPUT_STATE_IMPACTS,
   'attach-media-library-reference': { build: () => createMediaLibraryAttachmentImpact({ commandId: 'command-library', baseVersionId: 'version-base', resultVersionId: 'version-result', preservedEditPlanSnapshotId: 'snapshot-edit', selectionKind: 'asset', selectionId: 'asset-source', parentArtifactId: 'asset-source', sourceSha256: 'a'.repeat(64), rightsSnapshotId: 'rights-source' }), parse: parseMediaLibraryAttachmentImpact },
   'apply-subtitle-segment-override': { build: () => subtitleSegmentOverrideImpact(), parse: parseCommandImpact },
+  'apply-variant-reframe-override': { build: () => variantReframeOverrideImpact(), parse: parseCommandImpact },
   'compile-renderable-plan': { build: () => createRenderableCompileImpact({ commandId: 'command-renderable', baseVersionId: 'version-base', resultVersionId: 'version-result', preservedEditPlanSnapshotId: 'snapshot-edit', renderablePlanSnapshotId: 'renderable-snapshot-1', renderablePlanHash: 'a'.repeat(64) }), parse: parseRenderableCompileImpact },
   'compare-action': { build: () => compareActionImpact(), parse: parseCompareActionImpact },
   'direct-multicam-session': { build: () => multicamDirectionImpact(), parse: parseMulticamDirectionImpact },
@@ -377,7 +410,7 @@ function command(type, overrides = {}) {
 
 test('T-F0-027 the registry is frozen, exhaustive and internally consistent', () => {
   assert.ok(Object.isFrozen(EDIT_COMMAND_POLICIES))
-  assert.equal(EDIT_COMMAND_TYPES.length, 17)
+  assert.equal(EDIT_COMMAND_TYPES.length, 18)
   assert.deepEqual([...EDIT_COMMAND_TYPES], Object.keys(EDIT_COMMAND_POLICIES).toSorted())
 
   for (const type of EDIT_COMMAND_TYPES) {
@@ -478,7 +511,7 @@ test('T-F0-027 every registered type is produced by an application service and v
       discovered.add(literals[0])
     }
   }
-  assert.equal(callSites, 15, 'expected one createEditCommand call site per classic Command type')
+  assert.equal(callSites, 16, 'expected one createEditCommand call site per classic Command type')
   assert.equal(outputFactorySites, 1, 'expected one application call site of the output Command constructor')
   assert.deepEqual(
     [...NOT_YET_PRODUCED_BY_AN_APPLICATION_SERVICE.keys()].filter((type) => discovered.has(type)), [],
@@ -529,7 +562,9 @@ test('T-F0-027 partial-range types narrow renders to the edited region', () => {
 test('T-F0-027 full-timeline types always invalidate from frame zero', () => {
   assert.deepEqual(
     [...editCommandTypesByRenderPolicy('full-timeline')],
-    ['create-output-variant', 'remove-spoken-content', 'revise-output-spec', 'run-director', 'set-project-color-plan', 'set-project-lut-selection', 'set-project-subtitle-mode'],
+    // W66r: a manual reframe is variant-scoped but a render made from a reframe plan is always a full render, so its impact is the whole timeline
+    // of its one variant (it used to be declared partial-range, which promised a narrower render than the renderer can give).
+    ['apply-variant-reframe-override', 'create-output-variant', 'remove-spoken-content', 'revise-output-spec', 'run-director', 'set-project-color-plan', 'set-project-lut-selection', 'set-project-subtitle-mode'],
   )
   for (const type of editCommandTypesByRenderPolicy('full-timeline')) {
     const impact = IMPACT_FIXTURES[type].build()

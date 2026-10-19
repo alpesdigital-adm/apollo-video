@@ -16,6 +16,11 @@ export interface ApprovedProjectFinalExportSource extends ProjectProxyRenderSour
   proxyReviewId: string
   proxyReviewHash: string
   proxyArtifactId: string
+  /**
+   * W66r. The content address of the render reframe plan the approved proxy was drawn from, or null when it was drawn without one. The final
+   * is made from the same plan: a plan persisted after the approval is not the geometry the reviewer approved.
+   */
+  approvedReframePlanHash: string | null
 }
 
 export interface ProjectFinalExportAttemptHistory {

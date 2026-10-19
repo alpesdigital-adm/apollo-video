@@ -123,6 +123,8 @@ import type { ProjectLutSelectionRepository } from '../application/ports/project
 import type { ProjectColorPlanRepository } from '../application/ports/project-color-plan-repository.ts'
 import type { ProjectSubtitleConfigurationRepository } from '../application/ports/project-subtitle-configuration-repository.ts'
 import type { SubtitleSegmentOverrideRepository } from '../application/ports/subtitle-segment-override-repository.ts'
+import type { VariantReframeOverrideRepository } from '../application/ports/variant-reframe-override-repository.ts'
+import type { VariantReframePlanRepository } from '../application/ports/variant-reframe-plan-repository.ts'
 import type { ProjectPolicyOverridesRepository } from '../application/ports/project-policy-overrides-repository.ts'
 import type { ContiguousEvidenceRepository } from '../application/ports/contiguous-evidence-repository.ts'
 import type { ContiguousEvaluationRepository } from '../application/ports/contiguous-evaluation-provider.ts'
@@ -365,6 +367,8 @@ import { PrismaProjectLutSelectionRepository } from './prisma/project-lut-select
 import { PrismaProjectColorPlanRepository } from './prisma/project-color-plan-repository.ts'
 import { PrismaProjectSubtitleConfigurationRepository } from './prisma/project-subtitle-configuration-repository.ts'
 import { PrismaSubtitleSegmentOverrideRepository } from './prisma/subtitle-segment-override-repository.ts'
+import { PrismaVariantReframeOverrideRepository } from './prisma/variant-reframe-override-repository.ts'
+import { PrismaVariantReframePlanRepository } from './prisma/variant-reframe-plan-repository.ts'
 import { PrismaProjectPolicyOverridesRepository } from './prisma/project-policy-overrides-repository.ts'
 import { PrismaContiguousEvidenceRepository } from './prisma/contiguous-evidence-repository.ts'
 import { PrismaContiguousEvaluationRepository } from './prisma/contiguous-evaluation-repository.ts'
@@ -713,6 +717,15 @@ export function createProjectSubtitleConfigurationRepository(): ProjectSubtitleC
 
 export function createSubtitleSegmentOverrideRepository(): SubtitleSegmentOverrideRepository {
   return new PrismaSubtitleSegmentOverrideRepository(resolveV2Client())
+}
+
+/** W66r. The persisted reframe plan of one variant of one Version, and the context it is decided from. */
+export function createVariantReframePlanRepository(): VariantReframePlanRepository {
+  return new PrismaVariantReframePlanRepository(resolveV2Client())
+}
+
+export function createVariantReframeOverrideRepository(): VariantReframeOverrideRepository {
+  return new PrismaVariantReframeOverrideRepository(resolveV2Client())
 }
 
 export function createProjectPolicyOverridesRepository(): ProjectPolicyOverridesRepository {

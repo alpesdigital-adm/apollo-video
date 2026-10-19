@@ -5,6 +5,7 @@ import { OUTPUT_ASPECT_RATIOS, type NormalizedBounds, type OutputAspectRatio } f
 import type { CaptionPixelIssueV1 } from './caption-pixel-verdict.ts'
 import type { RenderElementMap } from './review-system.ts'
 import type { SubtitleAnchorPlan } from './subtitle-anchor-plan.ts'
+import type { VariantReframeIssueV1 } from './variant-reframe-plan.ts'
 
 export const FORMAT_QUALITY_CODES = [
   'OUTPUT_CLIPPING', 'OUTPUT_SAFE_AREA', 'SUBJECT_NOT_VISIBLE',
@@ -15,6 +16,9 @@ export const FORMAT_QUALITY_CODES = [
   'FACE_PERCEPTION_UNAVAILABLE',
   // W65: where the captions of the delivered MP4 really are, measured on its pixels (see caption-pixel-verdict.ts).
   'CAPTION_PLACEMENT_MISMATCH', 'SUBTITLE_FACE_OVERLAP_IN_PIXELS', 'FACE_PIXEL_CHECK_UNAVAILABLE',
+  // W66r: the persisted reframe plan of THIS output reports into its own verdict, localized by range and evidence. Two of them block the
+  // output (the trajectory cannot keep the subject in frame); two ask a person to look (no subject, or evidence that is absent or uncertain).
+  'REFRAME_SUBJECTS_DO_NOT_FIT', 'REFRAME_TRACKING_LIMIT_EXCEEDED', 'REFRAME_PERCEPTION_UNCERTAIN', 'REFRAME_NO_SUBJECT_OBSERVATION',
 ] as const
 export type FormatQualityCode = (typeof FORMAT_QUALITY_CODES)[number]
 
@@ -130,6 +134,12 @@ export function critiqueOutputFormat(input: Readonly<{
    * that is not where the plan put it, or that covers a face a veto detector found, blocks this output.
    */
   captionPixelIssues?: readonly Readonly<CaptionPixelIssueV1>[]
+  /**
+   * W66r. The localized issues of the reframe plan record these frames were made from. Each carries its severity from the record (the policy
+   * decided it), its range in timeline frames and the evidence it came from; the variant is blocked or reviewable by them, and no other output is.
+   */
+  reframeIssues?: readonly Readonly<VariantReframeIssueV1>[]
+  reframeRecordHash?: string | null
 }>): Readonly<FormatQualityReportV2> {
   assertDomain(ID.test(input.outputSpecId) && OUTPUT_ASPECT_RATIOS.includes(input.format), 'INVALID_OUTPUT_SPEC', 'Format critic output identity is invalid')
   assertDomain(SHA256.test(input.proxyHash) && input.map.proxyHash === input.proxyHash, 'INVALID_RENDER_INPUT', 'Format critic proxy evidence is inconsistent')
@@ -203,6 +213,24 @@ export function critiqueOutputFormat(input: Readonly<{
       code: issue.code, severity: issue.severity, message: issue.message,
       evidenceRange: issue.evidenceRange, elementIds: issue.elementIds,
       evidenceIds: [...issue.evidenceIds, `render-map:${input.proxyHash}`],
+    })
+  }
+  for (const issue of input.reframeIssues ?? []) {
+    assertDomain(
+      issue.startFrame >= 0 && issue.endFrame > issue.startFrame && issue.endFrame <= input.map.durationFrames,
+      'INVALID_RENDER_INPUT', 'Reframe issue is outside the rendered timeline',
+    )
+    assertDomain(issue.aspectRatio === input.format, 'INVALID_RENDER_INPUT', 'Reframe issue belongs to another output')
+    const messages: Readonly<Record<VariantReframeIssueV1['code'], string>> = {
+      SUBJECTS_DO_NOT_FIT: `The subjects cannot be framed together in ${input.format}; no crop shows them all.`,
+      TRACKING_LIMIT_EXCEEDED: `The ${input.format} crop cannot follow the subject within its speed and acceleration limits.`,
+      PERCEPTION_UNCERTAIN: `The ${input.format} crop rests on evidence that is absent, refused or under the confidence floor.`,
+      NO_SUBJECT_OBSERVATION: `No subject was observed in this stretch of ${input.format}; its crop is carried over from the nearest framed subject, or the whole clip is shown when none was framed in it.`,
+    }
+    add({
+      code: `REFRAME_${issue.code}` as FormatQualityCode, severity: issue.severity, message: messages[issue.code],
+      evidenceRange: { startFrame: issue.startFrame, endFrame: issue.endFrame }, elementIds: [],
+      evidenceIds: [...issue.evidenceIds, ...(input.reframeRecordHash ? [`reframe-plan-record:${input.reframeRecordHash}`] : [])],
     })
   }
   for (const subject of subjects.filter((item) => item.critical)) {
