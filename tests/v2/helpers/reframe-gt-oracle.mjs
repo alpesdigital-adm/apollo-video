@@ -254,8 +254,11 @@ export function analyzeFrame(buffer, width, height) {
   const pictureColumns = Uint32Array.from(sharp.cols, (value, x) => (value >= MIN_SHARP_PIXELS || white[x] >= stripeThreshold ? MIN_SHARP_PIXELS : 0))
   const sharpBounds = boundsOf({ cols: pictureColumns, rows: sharp.rows }, MIN_SHARP_PIXELS)
   if (!sharpBounds) return none
-  const snap = (value, limit) => (value <= 2 ? 0 : value >= limit - 3 ? limit - 1 : value)
-  const footprint = { x0: snap(sharpBounds.x0, width), x1: snap(sharpBounds.x1, width), y0: snap(sharpBounds.y0, height), y1: snap(sharpBounds.y1, height) }
+  // A hard edge puts its gradient on the first pixel past it: the near edge of the picture is its first row/column, the far edge is the first
+  // row/column of what lies beyond, so the far edge moves back by one unless the picture reaches the canvas edge.
+  const snapNear = (value) => (value <= 2 ? 0 : value)
+  const snapFar = (value, limit) => (value >= limit - 3 ? limit - 1 : value - 1)
+  const footprint = { x0: snapNear(sharpBounds.x0), x1: snapFar(sharpBounds.x1, width), y0: snapNear(sharpBounds.y0), y1: snapFar(sharpBounds.y1, height) }
   const columnsWithPicture = pictureColumns.reduce((count, value) => count + (value >= MIN_SHARP_PIXELS ? 1 : 0), 0)
   const rowsWithPicture = sharp.rows.reduce((count, value) => count + (value >= MIN_SHARP_PIXELS ? 1 : 0), 0)
   const coverage = { width: columnsWithPicture / width, height: rowsWithPicture / height }

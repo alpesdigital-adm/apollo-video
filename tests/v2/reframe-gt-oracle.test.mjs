@@ -48,6 +48,12 @@ function renderBanded(source, window, canvas) {
   const scale = toStaging * toCanvas, padX = originX + stagePadX * toCanvas
   const out = Buffer.alloc(canvas.width * canvas.height * 3)
   out.fill(Buffer.from([90, 90, 90]))
+  const bandTop = Math.round(originY), bandBottom = Math.round(originY + foregroundHeight)
+  // the blurred copy of a saturated subject (a cyan screen) lies right against the band, as in the real composition, fading smoothly away from it
+  for (let distance = 0; distance < 70; distance += 1) {
+    const weight = 1 - distance / 70, colour = Buffer.from([Math.round(90 - 90 * weight), Math.round(90 + 100 * weight), Math.round(90 + 130 * weight)])
+    for (const y of [bandBottom + distance, bandTop - 1 - distance]) if (y >= 0 && y < canvas.height) out.fill(colour, y * canvas.width * 3, (y + 1) * canvas.width * 3)
+  }
   // The backdrop is a BLURRED copy of the picture: smooth, so no hard edge and no near-white stripe. Its decoys are a soft red blob (as red as the
   // blurred subject gets, ~(190, 36, 36) at its centre) and a soft brighter column.
   for (let y = 0; y < 200; y += 1) {
@@ -58,14 +64,13 @@ function renderBanded(source, window, canvas) {
       out[at] = Math.round(90 + 100 * weight); out[at + 1] = Math.round(90 - 54 * weight); out[at + 2] = Math.round(90 - 54 * weight)
     }
   }
-  for (let y = 0; y < canvas.height; y += 1) {
+  for (let y = 0; y < 200; y += 1) {
     for (let x = 270; x < 330; x += 1) {
-      const level = Math.round(90 + 40 * Math.max(0, 1 - Math.abs(x - 300) / 30))
+      const level = Math.round(90 + 40 * Math.max(0, 1 - Math.abs(x - 300) / 30) * Math.max(0, 1 - Math.abs(y - 100) / 100))
       const at = (y * canvas.width + x) * 3
       if (out[at] === 90 && out[at + 1] === 90) { out[at] = level; out[at + 1] = level; out[at + 2] = level }
     }
   }
-  const bandTop = Math.round(originY), bandBottom = Math.round(originY + foregroundHeight)
   for (let y = bandTop; y < bandBottom; y += 1) out.fill(0, y * canvas.width * 3, (y + 1) * canvas.width * 3)
   const left = Math.round(padX), right = Math.round(padX + window.width * scale), top = Math.round(originY), bottom = Math.round(originY + H * scale)
   for (let oy = top; oy < bottom; oy += 1) {
@@ -134,6 +139,13 @@ test('W66r GT the measurement reports what it sees without knowing the layout: t
   // today's layout of an UNREFRAMED clip: the whole source frame in the band
   const whole = analyzeFrame(renderBanded(frameBuffer, { x0: 0, width: W }, CANVAS), CANVAS.width, CANVAS.height)
   assert.ok(whole.coverage.width >= TOLERANCE.coverage && whole.coverage.height < 0.4, JSON.stringify(whole.coverage))
+  // the footprint is the band itself: no row of the saturated backdrop beside it is read as the picture
+  assert.ok(Math.abs(whole.footprint.y0 - 328) <= 1 && Math.abs(whole.footprint.y1 - 631) <= 1, JSON.stringify(whole.footprint))
+  drawSourceFrame(frameBuffer, base, SCENES['screen-only'].subjectsAtSource(0))
+  const screen = analyzeFrame(renderBanded(frameBuffer, { x0: 0, width: W }, CANVAS), CANVAS.width, CANVAS.height)
+  const truth = SCENES['screen-only'].subjectsAtSource(0)[0].box
+  assert.ok(Math.abs(screen.subjects.screen.x0 - truth[0] * W) <= 6 && Math.abs(screen.subjects.screen.x1 - truth[2] * W) <= 6 &&
+    Math.abs(screen.subjects.screen.y0 - truth[1] * H) <= 6 && Math.abs(screen.subjects.screen.y1 - truth[3] * H) <= 6, JSON.stringify(screen.subjects.screen))
   assert.ok(Math.abs(whole.window.left) <= 3 && Math.abs(whole.window.right - W) <= 3, JSON.stringify(whole.window))
 })
 
