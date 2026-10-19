@@ -4,6 +4,7 @@ import type { FormatSubjectEvidenceV1 } from '../../domain/format-quality-critic
 import type { OutputConsumptionSealV3 } from '../../domain/output-consumption.ts'
 import type { PerceptionTimeline } from '../../domain/perception-timeline.ts'
 import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
+import type { VariantReframeIssueV1 } from '../../domain/variant-reframe-plan.ts'
 import type { SubtitlePresetId, SubtitlePresetSnapshot } from '../../domain/subtitle-system.ts'
 import type { ProxyQualityIssue, ProxyReview } from '../render-workflow.ts'
 
@@ -110,6 +111,13 @@ export interface ProjectProxyRenderSource {
    * persisted and fails closed when it does not describe this render.
    */
   reframePlan?: Readonly<RenderReframePlanV1>
+  /**
+   * W66r. The localized issues of the persisted reframe plan record this `reframePlan` came from (range, variant, evidence), and the record's
+   * content address. They travel with the plan so the critic judges the very frames that plan produced, and so a render's identity moves when
+   * the plan does. Absent exactly when no plan was persisted for this Version and output.
+   */
+  reframeIssues?: readonly Readonly<VariantReframeIssueV1>[]
+  reframeRecordHash?: string
   /**
    * Protected subject evidence already projected onto **this** variant's canvas, as perception
    * persisted it. Without it two of the five format reason codes — `SUBTITLE_SUBJECT_COLLISION`

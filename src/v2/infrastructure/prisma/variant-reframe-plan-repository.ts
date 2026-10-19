@@ -76,7 +76,11 @@ export async function readVariantReframePlanHead(client: Reader, input: Readonly
 }
 
 export class PrismaVariantReframePlanRepository implements VariantReframePlanRepository {
-  constructor(private readonly client: PrismaClient = getV2PostgresClient()) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
+  }
 
   async readContext(input: { workspaceId: string; projectId: string; variantId: string }): Promise<Readonly<VariantReframePlanContext> | null> {
     const head = await this.client.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { currentVersionId: true } })

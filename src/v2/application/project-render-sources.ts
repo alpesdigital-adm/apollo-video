@@ -104,6 +104,9 @@ export function projectProxyRenderInputHash(input: {
     format: source.format,
     // The persisted consumption verdict this source was read through: Version, State, variant revision and materialization.
     outputConsumptionSealHash: requireConsumptionSealHash(source.outputConsumption?.sealHash),
+    // W66r. The persisted reframe plan changes the pixels, so another plan is another input. Absent when none was persisted, which keeps the
+    // identity of every render made before plans existed.
+    ...(source.reframeRecordHash ? { reframeRecordHash: source.reframeRecordHash } : {}),
   }
   return calculateVersionHash(source.unchangedReuse
     ? {

@@ -31,9 +31,11 @@ function parse(value: string, field: string): Record<string, unknown> {
 }
 
 export class PrismaVariantReframeOverrideRepository implements VariantReframeOverrideRepository {
+  private readonly client: PrismaClient
   private readonly plans: PrismaVariantReframePlanRepository
 
-  constructor(private readonly client: PrismaClient = getV2PostgresClient()) {
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
     this.plans = new PrismaVariantReframePlanRepository(client)
   }
 

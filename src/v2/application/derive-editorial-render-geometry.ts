@@ -5,6 +5,7 @@ import {
   type RenderPlacementRequestV1,
 } from '../domain/render-placement-plan.ts'
 import { validateRenderReframePlan } from '../domain/render-reframe-plan.ts'
+import { sourceOutputVariantId } from './project-render-sources.ts'
 import { emittedSubtitleTracks } from '../domain/subtitle-emission-tracks.ts'
 import {
   requireSubtitlePresetSnapshot,
@@ -38,7 +39,7 @@ import type { ProjectProxyRenderSource } from './ports/project-proxy-render-repo
 export async function deriveEditorialRenderGeometry(input: Readonly<{
   source: Pick<
     ProjectProxyRenderSource,
-    'editPlan' | 'format' | 'trustedOcr' | 'subtitleResolution' | 'reframePlan' | 'renderSources' | 'sourceArtifactId'
+    'editPlan' | 'format' | 'trustedOcr' | 'subtitleResolution' | 'reframePlan' | 'reframeIssues' | 'renderSources' | 'sourceArtifactId' | 'outputConsumption'
   >
   canvas: Readonly<{ width: number; height: number }>
   workspaceId: string
@@ -90,8 +91,10 @@ export async function deriveEditorialRenderGeometry(input: Readonly<{
   const reframePlan = source.reframePlan
   if (reframePlan) {
     validateRenderReframePlan(reframePlan)
+    // W66r. The plan names the STABLE output variant the render is sealed to; the aspect ratio only has to agree. Two outputs of one aspect
+    // ratio can never be told apart by it, which is exactly what keying the plan by format used to allow.
     if (
-      reframePlan.variantId !== source.format ||
+      reframePlan.variantId !== sourceOutputVariantId(source) ||
       reframePlan.format !== source.format ||
       reframePlan.durationFrames !== durationFrames ||
       Math.abs(reframePlan.fps - source.editPlan.fps) > 0.01
@@ -127,6 +130,6 @@ export async function deriveEditorialRenderGeometry(input: Readonly<{
   )
   validateRenderPlacementPlan(placementPlan)
   return Object.freeze({
-    subtitleCues, subtitlePresetId, subtitleResolution, ctaOverlays, placementPlan, reframePlan, requiredFaceWindows,
+    subtitleCues, subtitlePresetId, subtitleResolution, ctaOverlays, placementPlan, reframePlan, reframeIssues: source.reframeIssues ?? [], requiredFaceWindows,
   })
 }

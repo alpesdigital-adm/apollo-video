@@ -332,7 +332,8 @@ function reframePlanFor(format) {
     ? { x: (1 - PORTRAIT_CROP_WIDTH) / 2, y: 0, width: PORTRAIT_CROP_WIDTH, height: 1 }
     : { x: 0, y: 0, width: 1, height: 1 }
   return createRenderReframePlan({
-    format, variantId: format, fps: FPS, durationFrames: DURATION_FRAMES,
+    // W66r: the plan names the STABLE variant the render is sealed to (the render derives geometry by that identity, not by aspect ratio).
+    format, variantId: RENDER_VARIANT[format], fps: FPS, durationFrames: DURATION_FRAMES,
     source: { width: SOURCE_WIDTH, height: SOURCE_HEIGHT },
     ranges: CLIPS.map((clip) => ({
       clipId: clip.id, startFrame: clip.timelineInFrame, endFrame: clip.timelineOutFrame,
@@ -813,8 +814,8 @@ test('T-WAVE9-E variants share one StoryPlan and own geometry; unknown face cove
     const portraitReframe = portrait.renderInput.reframePlan
     const landscapeReframe = landscape.renderInput.reframePlan
     assert.notEqual(portraitReframe.reframePlanHash, landscapeReframe.reframePlanHash)
-    assert.equal(portraitReframe.variantId, '9:16')
-    assert.equal(landscapeReframe.variantId, '16:9')
+    assert.equal(portraitReframe.variantId, RENDER_VARIANT['9:16'])
+    assert.equal(landscapeReframe.variantId, RENDER_VARIANT['16:9'])
     assert.notEqual(
       portraitReframe.ranges[0].keyframes[0].crop.width,
       landscapeReframe.ranges[0].keyframes[0].crop.width,
