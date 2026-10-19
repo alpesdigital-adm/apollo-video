@@ -421,3 +421,143 @@ test('W63a the OCR projection is the one the Director and the snapshot share', (
   assert.equal(coverageOf(nothing, 'ocr').reasonCode, 'NO_SAMPLES_OBSERVED')
   assert.equal(digest('x').length, 64)
 })
+
+test('W63a a clip that cannot be mapped keeps its OWN reason on its span, in the snapshot and in every range query', () => {
+  const clips = [
+    { id: 'clip-real', sourceArtifactId: 'source-1', sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 },
+    { id: 'clip-fast', sourceArtifactId: 'source-1', sourceInFrame: 30, sourceOutFrame: 90, timelineInFrame: 30, timelineOutFrame: 60, rate: 2 },
+  ]
+  const snapshot = assembleServerPerceptionSnapshot(assemblyBase({ clips, extra: { faceWindows: [faceWindow({ rowsAt: () => FACE_ROWS })] } }))
+  assert.deepEqual(snapshot.unexaminedSpans, [{ kind: 'face', startMs: 1_000, endMs: 2_000, reasonCode: 'NO_UNIT_RATE_CLIP' }])
+  assert.equal(coverageOf(snapshot, 'face').state, 'partial')
+  // wholly inside the span: the reason is the span's, not the generic one
+  const inside = queryServerPerceptionSnapshot(snapshot, { fromMs: 1_100, toMs: 1_900, kinds: ['face'] }).coverage[0]
+  assert.equal(inside.state, 'absent')
+  assert.equal(inside.reasonCode, 'NO_UNIT_RATE_CLIP')
+  assert.deepEqual(inside.unexaminedReasons, [{ startMs: 1_100, endMs: 1_900, reasonCode: 'NO_UNIT_RATE_CLIP' }])
+  // across the boundary: every unexamined piece says why, and the kind-level reason stays the generic one
+  const across = queryServerPerceptionSnapshot(snapshot, { fromMs: 500, toMs: 1_500, kinds: ['face'] }).coverage[0]
+  assert.deepEqual([...new Set(across.unexaminedReasons.map((entry) => entry.reasonCode))].toSorted(), ['NO_UNIT_RATE_CLIP', 'SAMPLED_FRAMES_ONLY'])
+  assert.deepEqual(across.unexaminedReasons.filter((entry) => entry.reasonCode === 'NO_UNIT_RATE_CLIP'), [{ startMs: 1_000, endMs: 1_500, reasonCode: 'NO_UNIT_RATE_CLIP' }])
+  assert.equal(across.reasonCode, 'SAMPLED_FRAMES_ONLY')
+  // the pieces add up to exactly the unexamined ranges
+  const lengthOf = (pieces) => pieces.reduce((sum, piece) => sum + (Array.isArray(piece) ? piece[1] - piece[0] : piece.endMs - piece.startMs), 0)
+  assert.equal(lengthOf(across.unexaminedReasons), lengthOf(across.unexaminedRanges))
+  // a range a producer simply never reached keeps the generic reason: that is not a structural fact
+  const ocrOnly = assembleServerPerceptionSnapshot(assemblyBase({ extra: { ocr: [ocrEnvelope({ frames: [0] })] } }))
+  assert.equal(queryServerPerceptionSnapshot(ocrOnly, { fromMs: 2_000, toMs: 3_000, kinds: ['ocr'] }).coverage[0].reasonCode, 'RANGE_NOT_EXAMINED')
+  assert.deepEqual(ocrOnly.unexaminedSpans, [])
+  // a clip whose source and timeline spans differ in length is not a pure frame offset either, and says so
+  const odd = [{ id: 'clip-odd', sourceArtifactId: 'source-1', sourceInFrame: 0, sourceOutFrame: 40, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 }]
+  const mismatch = assembleServerPerceptionSnapshot(assemblyBase({ clips: odd, extra: { faceWindows: [faceWindow({ rowsAt: () => FACE_ROWS })] } }))
+  assert.deepEqual(mismatch.unexaminedSpans, [{ kind: 'face', startMs: 0, endMs: 1_000, reasonCode: 'SOURCE_TIMELINE_LENGTH_MISMATCH' }])
+  assert.equal(coverageOf(mismatch, 'face').state, 'absent')
+  assert.equal(coverageOf(mismatch, 'face').reasonCode, 'SOURCE_TIMELINE_LENGTH_MISMATCH')
+  // a fractional timeline rate is a structural fact about the whole timeline
+  const fractional = assembleServerPerceptionSnapshot(assemblyBase({ fps: 29.97, extra: { faceWindows: [faceWindow()] } }))
+  assert.deepEqual(fractional.unexaminedSpans, [{ kind: 'face', startMs: 0, endMs: fractional.timeline.durationMs, reasonCode: 'TIMELINE_FPS_NOT_INTEGER' }])
+  assert.equal(queryServerPerceptionSnapshot(fractional, { fromMs: 0, toMs: 1_000, kinds: ['face'] }).coverage[0].unexaminedReasons[0].reasonCode, 'TIMELINE_FPS_NOT_INTEGER')
+})
+
+test('W63a the stored form of a snapshot refuses a span that is not a span', () => {
+  const clips = [
+    { id: 'clip-real', sourceArtifactId: 'source-1', sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 },
+    { id: 'clip-fast', sourceArtifactId: 'source-1', sourceInFrame: 30, sourceOutFrame: 90, timelineInFrame: 30, timelineOutFrame: 60, rate: 2 },
+  ]
+  const snapshot = assembleServerPerceptionSnapshot(assemblyBase({ clips, extra: { faceWindows: [faceWindow({ rowsAt: () => FACE_ROWS })] } }))
+  const resealed = (spans) => {
+    const { snapshotHash: _old, ...body } = JSON.parse(JSON.stringify(snapshot))
+    const next = { ...body, unexaminedSpans: spans }
+    return { ...next, snapshotHash: calculateCanonicalHash(next) }
+  }
+  assert.equal(verifyServerPerceptionSnapshot(resealed(snapshot.unexaminedSpans)).snapshotHash, resealed(snapshot.unexaminedSpans).snapshotHash)
+  const good = { kind: 'face', startMs: 0, endMs: 10, reasonCode: 'NO_UNIT_RATE_CLIP' }
+  for (const bad of [
+    { ...good, startMs: 10, endMs: 5 }, { ...good, endMs: 99_999 }, { ...good, kind: 'lighting' }, { ...good, reasonCode: 'no_unit_rate' },
+    { ...good, extra: 1 }, { ...good, startMs: -1 }, { ...good, startMs: 0.5 },
+  ]) assert.throws(() => verifyServerPerceptionSnapshot(resealed([bad])), /unexamined span/)
+  assert.throws(() => verifyServerPerceptionSnapshot(resealed(null)), /unexamined spans/)
+  // a snapshot stored without the field is not a snapshot of this version of the contract
+  const { snapshotHash: _ignored, unexaminedSpans: _spans, ...without } = JSON.parse(JSON.stringify(snapshot))
+  assert.throws(() => verifyServerPerceptionSnapshot({ ...without, snapshotHash: calculateCanonicalHash(without) }))
+})
+
+test('W63a a transcript word the plan places outside the timeline is rejected and named, never clamped onto the edge', () => {
+  const words = transcriptWords()
+  const outside = { text: 'depois', sourceStartSeconds: 9, sourceEndSeconds: 9.4, timelineStartFrame: 160, timelineEndFrame: 172 }
+  const straddling = { text: 'metade', sourceStartSeconds: 4.8, sourceEndSeconds: 5.4, timelineStartFrame: 144, timelineEndFrame: 162 }
+  const empty = { text: 'vazio', sourceStartSeconds: 1, sourceEndSeconds: 1, timelineStartFrame: 20, timelineEndFrame: 20 }
+  const snapshot = assembleServerPerceptionSnapshot(assemblyBase({ extra: { transcript: { transcript: transcriptRef(), words: [...words, outside, straddling, empty] } } }))
+  const placed = observationsOf(snapshot, 'transcript-word')
+  assert.equal(placed.length, words.length, 'only the words the plan really places')
+  assert.ok(placed.every((item) => item.endMs <= 5_000 && item.endMs - item.startMs >= 33))
+  assert.equal(placed.some((item) => item.startMs === 4_999 && item.endMs === 5_000), false, 'nothing is clamped onto [4999, 5000]')
+  assert.deepEqual(snapshot.rejected.filter((item) => item.kind === 'transcript').map((item) => [item.reasonCodes, item.subjects]), [
+    [['WORD_OUTSIDE_TIMELINE'], [`transcript-word-${words.length + 1}`, `transcript-word-${words.length + 2}`]],
+    [['WORD_SPAN_INVALID'], [`transcript-word-${words.length + 3}`]],
+  ])
+  assert.ok(snapshot.rejected.every((item) => item.envelopeId === 'transcript-1' && item.envelopeHash === sha('f')))
+  assert.equal(snapshot.inputs.find((input) => input.kind === 'transcript').observationCount, words.length)
+  // a word keeps the position it has in the plan, so a rejection names exactly the word it dropped
+  assert.deepEqual(placed.map((item) => item.id), words.map((_word, index) => `transcript-word-${index + 1}`))
+  assert.equal(stableSerialize(verifyServerPerceptionSnapshot(JSON.parse(JSON.stringify(snapshot)))), stableSerialize(snapshot))
+  // a word that ends exactly at the end of the timeline is inside it
+  const last = { text: 'fim', sourceStartSeconds: 4.6, sourceEndSeconds: 5, timelineStartFrame: 138, timelineEndFrame: 150 }
+  const edge = assembleServerPerceptionSnapshot(assemblyBase({ extra: { transcript: { transcript: transcriptRef(), words: [last] } } }))
+  assert.deepEqual(edge.rejected, [])
+  assert.deepEqual(observationsOf(edge, 'transcript-word').map((item) => [item.startMs, item.endMs]), [[4_600, 5_000]])
+  // if nothing is placeable the kind is absent for THAT reason, and no transcript input is listed
+  const none = assembleServerPerceptionSnapshot(assemblyBase({ extra: { transcript: { transcript: transcriptRef(), words: [outside] } } }))
+  assert.equal(coverageOf(none, 'transcript-word').state, 'absent')
+  assert.equal(coverageOf(none, 'transcript-word').reasonCode, 'WORD_OUTSIDE_TIMELINE')
+  assert.equal(none.inputs.length, 0)
+  const invalid = assembleServerPerceptionSnapshot(assemblyBase({ extra: { transcript: { transcript: transcriptRef(), words: [empty] } } }))
+  assert.equal(coverageOf(invalid, 'transcript-word').reasonCode, 'WORD_SPAN_INVALID')
+})
+
+test('W63a a source whose face windows were not read says so: no coverage from it, its clips carry the reason, the other sources are unaffected', () => {
+  const clips = [
+    { id: 'clip-a', sourceArtifactId: 'source-1', sourceInFrame: 0, sourceOutFrame: 60, timelineInFrame: 0, timelineOutFrame: 60, rate: 1 },
+    { id: 'clip-b', sourceArtifactId: 'source-2', sourceInFrame: 0, sourceOutFrame: 60, timelineInFrame: 60, timelineOutFrame: 120, rate: 1 },
+  ]
+  const windowOf = (sourceArtifactId) => faceWindow({ end: 60, rowsAt: () => FACE_ROWS, id: `face-window-${sourceArtifactId}`, overrides: { sourceArtifactId } })
+  const refusal = { sourceArtifactId: 'source-1', reasonCode: 'FACE_WINDOW_LIMIT_EXCEEDED' }
+  const base = assemblyBase({ clips })
+  const only = assembleServerPerceptionSnapshot({ ...base, faceWindowRefusals: [refusal], faceWindows: [windowOf('source-1')] })
+  assert.equal(coverageOf(only, 'face').state, 'absent', 'a refused source contributes nothing, even if its windows were passed in')
+  assert.equal(coverageOf(only, 'face').reasonCode, 'FACE_WINDOW_LIMIT_EXCEEDED')
+  assert.equal(observationsOf(only, 'face').length, 0)
+  assert.deepEqual(only.rejected, [{ kind: 'face', envelopeId: 'source-1', envelopeHash: sha('b'), reasonCodes: ['FACE_WINDOW_LIMIT_EXCEEDED'] }])
+  assert.deepEqual(only.unexaminedSpans, [{ kind: 'face', startMs: 0, endMs: 2_000, reasonCode: 'FACE_WINDOW_LIMIT_EXCEEDED' }])
+  const range = queryServerPerceptionSnapshot(only, { fromMs: 500, toMs: 1_500, kinds: ['face'] }).coverage[0]
+  assert.equal(range.reasonCode, 'FACE_WINDOW_LIMIT_EXCEEDED')
+  assert.deepEqual(range.unexaminedReasons, [{ startMs: 500, endMs: 1_500, reasonCode: 'FACE_WINDOW_LIMIT_EXCEEDED' }])
+  // another source of the same timeline still contributes, and only the refused one is named
+  const mixed = assembleServerPerceptionSnapshot({ ...base, faceWindowRefusals: [refusal], faceWindows: [windowOf('source-2')] })
+  assert.equal(coverageOf(mixed, 'face').state, 'partial')
+  assert.ok(observationsOf(mixed, 'face').length > 0)
+  assert.ok(observationsOf(mixed, 'face').every((item) => item.startMs >= 2_000))
+  assert.deepEqual(mixed.rejected.map((item) => [item.kind, item.envelopeId, item.reasonCodes]), [['face', 'source-1', ['FACE_WINDOW_LIMIT_EXCEEDED']]])
+  assert.equal(stableSerialize(verifyServerPerceptionSnapshot(JSON.parse(JSON.stringify(mixed)))), stableSerialize(mixed))
+  // without the refusal the same windows are used, so the refusal is what removed them
+  const unrefused = assembleServerPerceptionSnapshot({ ...base, faceWindows: [windowOf('source-1')] })
+  assert.equal(coverageOf(unrefused, 'face').state, 'partial')
+  assert.ok(observationsOf(unrefused, 'face').length > 0)
+  assert.deepEqual(unrefused.rejected, [])
+})
+
+test('W63a words whose transcript source cannot be established stay on the plan with no source named, never an arbitrary one', () => {
+  const unresolved = { transcript: transcriptRef({ sourceArtifactId: null }), words: transcriptWords() }
+  const snapshot = assembleServerPerceptionSnapshot(assemblyBase({ clips: [
+    { id: 'clip-a', sourceArtifactId: 'source-1', sourceInFrame: 0, sourceOutFrame: 75, timelineInFrame: 0, timelineOutFrame: 75, rate: 1 },
+    { id: 'clip-b', sourceArtifactId: 'source-2', sourceInFrame: 0, sourceOutFrame: 75, timelineInFrame: 75, timelineOutFrame: 150, rate: 1 },
+  ], extra: { transcript: unresolved } }))
+  const input = snapshot.inputs.find((item) => item.kind === 'transcript')
+  assert.equal(input.sourceArtifactId, null, 'with two sources there is no honest default')
+  assert.equal(input.sourceSha256, null)
+  assert.equal(coverageOf(snapshot, 'transcript-word').state, 'partial')
+  assert.equal(stableSerialize(verifyServerPerceptionSnapshot(JSON.parse(JSON.stringify(snapshot)))), stableSerialize(snapshot))
+  // a transcript that names its source still gets that source's bytes hash
+  const named = assembleServerPerceptionSnapshot(assemblyBase({ extra: { transcript: { transcript: transcriptRef(), words: transcriptWords() } } }))
+  assert.deepEqual([named.inputs[0].sourceArtifactId, named.inputs[0].sourceSha256], ['source-1', sha('b')])
+})

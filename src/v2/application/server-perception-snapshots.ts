@@ -72,6 +72,7 @@ export function readServerPerceptionSnapshotService(dependencies: {
         sources: snapshot.sources,
         inputs: snapshot.inputs,
         rejected: snapshot.rejected,
+        unexaminedSpans: snapshot.unexaminedSpans,
       }),
       result: queryServerPerceptionSnapshot(snapshot, { fromMs: request.fromMs, toMs: request.toMs, kinds: request.kinds }),
     })

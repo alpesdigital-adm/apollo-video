@@ -51,6 +51,8 @@ export const PERCEPTION_REASON = Object.freeze({
   noSamplesObserved: 'NO_SAMPLES_OBSERVED',
   timelineFpsNotInteger: 'TIMELINE_FPS_NOT_INTEGER',
   noUnitRateClip: 'NO_UNIT_RATE_CLIP',
+  sourceTimelineLengthMismatch: 'SOURCE_TIMELINE_LENGTH_MISMATCH',
+  faceWindowLimitExceeded: 'FACE_WINDOW_LIMIT_EXCEEDED',
   sampledFramesOnly: 'SAMPLED_FRAMES_ONLY',
   adjacentPairWindowOnly: 'ADJACENT_PAIR_WINDOW_ONLY',
   recognizedWordSpansOnly: 'RECOGNIZED_WORD_SPANS_ONLY',
@@ -69,6 +71,8 @@ export const PERCEPTION_REJECTION = Object.freeze({
   sourceNotInTimeline: 'SOURCE_NOT_IN_TIMELINE',
   duplicateEnvelope: 'DUPLICATE_ENVELOPE',
   timelineFpsNotInteger: 'TIMELINE_FPS_NOT_INTEGER',
+  wordOutsideTimeline: 'WORD_OUTSIDE_TIMELINE',
+  wordSpanInvalid: 'WORD_SPAN_INVALID',
 } as const)
 
 export type PerceptionSnapshotClip = Readonly<{
@@ -84,7 +88,9 @@ export type PerceptionSnapshotWord = Readonly<{
   timelineStartFrame: number; timelineEndFrame: number
 }>
 export type PerceptionSnapshotTranscript = Readonly<{
-  id: string; provider: string; model: string; transcriptHash: string; sourceArtifactId: string
+  id: string; provider: string; model: string; transcriptHash: string
+  /** The source the transcript was made from; `null` when it cannot be established (the words are then bound to the plan alone). */
+  sourceArtifactId: string | null
 }>
 
 export type ServerPerceptionAssemblyInput = Readonly<{
@@ -105,6 +111,11 @@ export type ServerPerceptionAssemblyInput = Readonly<{
   ocr?: readonly Readonly<PerceptionProducerEnvelope>[]
   temporal?: readonly Readonly<TemporalProducerEnvelope>[]
   faceWindows?: readonly Readonly<FaceProducerEnvelopeV3>[]
+  /**
+   * Sources whose face windows the caller refused to read because there are more than it will trust a partial list of. The snapshot
+   * says so for that source, and takes no face evidence from it.
+   */
+  faceWindowRefusals?: readonly Readonly<{ sourceArtifactId: string; reasonCode: 'FACE_WINDOW_LIMIT_EXCEEDED' }>[]
 }>
 
 export type PerceptionSnapshotUnexamined = Readonly<{ startFrame: number; endFrame: number; reasonCode: string }>
@@ -114,7 +125,7 @@ export type PerceptionSnapshotInputRecord = Readonly<{
   schemaVersion: string
   envelopeId: string
   envelopeHash: string
-  sourceArtifactId: string
+  sourceArtifactId: string | null
   sourceSha256: string | null
   /** The producer's own clock, kept as measured: the snapshot never re-derives a frame rate or a PTS. */
   sourceClock: Readonly<{
@@ -126,12 +137,20 @@ export type PerceptionSnapshotInputRecord = Readonly<{
   /** Timeline frames the producer did not examine, with its reason, as it declared them (temporal gaps, face windows). */
   unexamined: readonly PerceptionSnapshotUnexamined[]
 }>
+/**
+ * Something the snapshot refused to use, and why. `envelopeId`/`envelopeHash` name the evidence record it is about: an envelope, a
+ * transcript, or - for a source whose windows were not read or whose clips could not be mapped - the source (id and bytes hash).
+ * `subjects` names what inside that record was dropped (words, clips), when it is not the whole record.
+ */
 export type PerceptionSnapshotRejection = Readonly<{
-  kind: 'ocr' | 'temporal' | 'face'
+  kind: 'ocr' | 'temporal' | 'face' | 'transcript'
   envelopeId: string
   envelopeHash: string
   reasonCodes: readonly string[]
+  subjects?: readonly string[]
 }>
+/** A span of the timeline a kind could not examine for a structural reason (not merely because it was not sampled). */
+export type PerceptionSnapshotUnexaminedSpan = Readonly<{ kind: PerceptionKind; startMs: number; endMs: number; reasonCode: string }>
 
 export type ServerPerceptionSnapshot = Readonly<{
   schemaVersion: typeof SERVER_PERCEPTION_SNAPSHOT_SCHEMA
@@ -145,6 +164,8 @@ export type ServerPerceptionSnapshot = Readonly<{
   sources: readonly Readonly<{ artifactId: string; sha256: string | null }>[]
   inputs: readonly PerceptionSnapshotInputRecord[]
   rejected: readonly PerceptionSnapshotRejection[]
+  /** Spans no sample could ever cover, with the reason (a clip played at another speed, windows not read): never interpolated. */
+  unexaminedSpans: readonly PerceptionSnapshotUnexaminedSpan[]
   timeline: Readonly<PerceptionTimeline>
   snapshotHash: string
 }>
@@ -209,6 +230,7 @@ type Accumulator = {
   partialReason: Map<PerceptionKind, string>
   inputs: PerceptionSnapshotInputRecord[]
   rejected: PerceptionSnapshotRejection[]
+  spans: PerceptionSnapshotUnexaminedSpan[]
 }
 
 function addFrames(acc: Accumulator, kind: PerceptionKind, ranges: readonly FrameRange[]) {
@@ -249,9 +271,16 @@ function bindingReasons(envelope: Bound, input: ServerPerceptionAssemblyInput, k
   return reasons
 }
 
-function reject(acc: Accumulator, kind: PerceptionSnapshotRejection['kind'], envelope: { id: string; envelopeHash: string }, reasonCodes: readonly string[]) {
+function reject(acc: Accumulator, kind: PerceptionSnapshotRejection['kind'], envelope: { id: string; envelopeHash: string }, reasonCodes: readonly string[],
+  subjects?: readonly string[]) {
   acc.rejected.push(Object.freeze({ kind, envelopeId: envelope.id, envelopeHash: envelope.envelopeHash,
-    reasonCodes: Object.freeze([...new Set(reasonCodes)].sort(compareText)) }))
+    reasonCodes: Object.freeze([...new Set(reasonCodes)].sort(compareText)),
+    ...(subjects && subjects.length ? { subjects: Object.freeze([...subjects].sort(compareText)) } : {}) }))
+}
+
+function addSpan(acc: Accumulator, kind: PerceptionKind, span: FrameRange, reasonCode: string, input: ServerPerceptionAssemblyInput, durationMs: number) {
+  const [startMs, endMs] = frameSpanToMs(span, input.editPlan.fps, input.editPlan.durationFrames, durationMs)
+  acc.spans.push(Object.freeze({ kind, startMs, endMs, reasonCode }))
 }
 
 function serverProvenance(input: {
@@ -267,21 +296,35 @@ function assembleTranscript(acc: Accumulator, input: ServerPerceptionAssemblyInp
   const transcript = input.transcript
   if (!transcript || transcript.words.length === 0) return
   const fps = input.editPlan.fps
+  const durationFrames = input.editPlan.durationFrames
   const provenance = serverProvenance({
     source: transcript.transcript.id, model: tokenOf(`${transcript.transcript.provider}/${transcript.transcript.model}`),
     version: transcript.transcript.transcriptHash, confidence: 0.82, producer: tokenOf(transcript.transcript.provider),
     envelopeId: transcript.transcript.id, envelopeHash: transcript.transcript.transcriptHash, confidenceBasis: 'policy-prior',
   })
-  const words = transcript.words.map((word, index): PerceptionObservation => {
-    const startMs = Math.max(0, Math.min(durationMs - 1, Math.round(word.timelineStartFrame / fps * 1000)))
-    const endMs = Math.max(0, Math.min(durationMs, Math.round(word.timelineEndFrame / fps * 1000)))
-    return {
-      id: `transcript-word-${index + 1}`, kind: 'transcript-word', startMs,
-      endMs: endMs <= startMs ? Math.min(durationMs, startMs + 1) : endMs,
+  // A word the plan does not place inside the timeline has no placement to report: it is dropped and named, never clamped onto an edge.
+  const outside: string[] = [], invalidSpan: string[] = []
+  const words: PerceptionObservation[] = []
+  transcript.words.forEach((word, index) => {
+    const id = `transcript-word-${index + 1}`
+    const start = word.timelineStartFrame, end = word.timelineEndFrame
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end <= start) { invalidSpan.push(id); return }
+    if (start < 0 || end > durationFrames) { outside.push(id); return }
+    const startMs = Math.min(durationMs - 1, Math.round(start / fps * 1000))
+    const endMs = Math.min(durationMs, Math.round(end / fps * 1000))
+    words.push({
+      id, kind: 'transcript-word', startMs, endMs: endMs <= startMs ? Math.min(durationMs, startMs + 1) : endMs,
       value: Object.freeze({ text: word.text, sourceStartSeconds: word.sourceStartSeconds, sourceEndSeconds: word.sourceEndSeconds }),
       provenance,
-    }
+    })
   })
+  const record = { id: transcript.transcript.id, envelopeHash: transcript.transcript.transcriptHash }
+  if (outside.length) reject(acc, 'transcript', record, [PERCEPTION_REJECTION.wordOutsideTimeline], outside)
+  if (invalidSpan.length) reject(acc, 'transcript', record, [PERCEPTION_REJECTION.wordSpanInvalid], invalidSpan)
+  if (words.length === 0) {
+    acc.absentReason.set('transcript-word', outside.length ? PERCEPTION_REJECTION.wordOutsideTimeline : PERCEPTION_REJECTION.wordSpanInvalid)
+    return
+  }
   acc.observations.push(...words)
   acc.msRanges.set('transcript-word', words.map((word) => [word.startMs, word.endMs] as const))
   acc.partialReason.set('transcript-word', PERCEPTION_REASON.recognizedWordSpansOnly)
@@ -379,14 +422,28 @@ function assembleTemporal(acc: Accumulator, input: ServerPerceptionAssemblyInput
   }
 }
 
-function assembleFace(acc: Accumulator, input: ServerPerceptionAssemblyInput, knownSources: ReadonlyMap<string, string | null>) {
-  const windows = input.faceWindows ?? []
+function assembleFace(acc: Accumulator, input: ServerPerceptionAssemblyInput, knownSources: ReadonlyMap<string, string | null>, durationMs: number) {
+  const refused = new Set((input.faceWindowRefusals ?? []).map((refusal) => refusal.sourceArtifactId))
+  for (const sourceArtifactId of [...refused].sort(compareText)) {
+    // The windows of this source were more than will be trusted as a partial list: none of them is used, and the clips say why.
+    const clips = input.editPlan.clips.filter((clip) => clip.sourceArtifactId === sourceArtifactId)
+    const sha = knownSources.get(sourceArtifactId)
+    acc.rejected.push(Object.freeze({ kind: 'face' as const, envelopeId: sourceArtifactId,
+      envelopeHash: sha ?? calculateCanonicalHash({ faceWindowSource: sourceArtifactId }),
+      reasonCodes: Object.freeze([PERCEPTION_REASON.faceWindowLimitExceeded]) }))
+    for (const clip of clips) {
+      addSpan(acc, 'face', { startFrame: clip.timelineInFrame, endFrame: clip.timelineOutFrame }, PERCEPTION_REASON.faceWindowLimitExceeded, input, durationMs)
+    }
+    acc.absentReason.set('face', PERCEPTION_REASON.faceWindowLimitExceeded)
+  }
+  const windows = (input.faceWindows ?? []).filter((envelope) => !refused.has(envelope.sourceArtifactId))
   if (windows.length === 0) return
   const fps = input.editPlan.fps
   if (!Number.isInteger(fps)) {
     // A source frame is mapped onto the timeline by an integer frame offset, which needs the same integer frame rate.
     for (const envelope of windows) reject(acc, 'face', envelope, [PERCEPTION_REJECTION.timelineFpsNotInteger])
     acc.absentReason.set('face', PERCEPTION_REASON.timelineFpsNotInteger)
+    addSpan(acc, 'face', { startFrame: 0, endFrame: input.editPlan.durationFrames }, PERCEPTION_REASON.timelineFpsNotInteger, input, durationMs)
     return
   }
   const bySource = new Map<string, FaceProducerEnvelopeV3[]>()
@@ -396,6 +453,7 @@ function assembleFace(acc: Accumulator, input: ServerPerceptionAssemblyInput, kn
   const frameClock = Object.freeze({ num: fps, den: 1 })
   const used = new Set<string>()
   let mappable = 0
+  const unmappedReasons = new Set<string>()
   for (const sourceArtifactId of [...bySource.keys()].sort(compareText)) {
     const envelopes = bySource.get(sourceArtifactId)!
     const unique: FaceProducerEnvelopeV3[] = []
@@ -416,6 +474,13 @@ function assembleFace(acc: Accumulator, input: ServerPerceptionAssemblyInput, kn
     const mapped = clips.filter((clip) => clip.rate === 1 &&
       clip.sourceOutFrame - clip.sourceInFrame === clip.timelineOutFrame - clip.timelineInFrame)
     mappable += mapped.length
+    for (const clip of clips) {
+      if (mapped.includes(clip)) continue
+      // A clip that is not a pure frame offset is not mapped: its span carries the reason, instead of looking merely unsampled.
+      const reasonCode = clip.rate !== 1 ? PERCEPTION_REASON.noUnitRateClip : PERCEPTION_REASON.sourceTimelineLengthMismatch
+      unmappedReasons.add(reasonCode)
+      addSpan(acc, 'face', { startFrame: clip.timelineInFrame, endFrame: clip.timelineOutFrame }, reasonCode, input, durationMs)
+    }
     const stream = collectFaceSourceEvidenceStream(unique, {
       workspaceId: input.workspaceId, sourceArtifactId, sourceSha256: sha, sourceFps: frameClock,
       sourceDurationFrames: Math.max(...clips.map((clip) => clip.sourceOutFrame)),
@@ -487,7 +552,10 @@ function assembleFace(acc: Accumulator, input: ServerPerceptionAssemblyInput, kn
       }))
     }
   }
-  if (mappable === 0 && !acc.absentReason.has('face')) acc.absentReason.set('face', PERCEPTION_REASON.noUnitRateClip)
+  // No clip is a pure frame offset: the kind says which structural reason it was, when it was only one.
+  if (mappable === 0 && !acc.absentReason.has('face')) {
+    acc.absentReason.set('face', unmappedReasons.size === 1 ? [...unmappedReasons][0]! : PERCEPTION_REASON.noUnitRateClip)
+  }
 }
 
 /** Fuses the sealed server evidence of one ProjectVersion into its canonical perception snapshot. */
@@ -514,12 +582,13 @@ export function assembleServerPerceptionSnapshot(input: ServerPerceptionAssembly
   }
   const knownSources = new Map(sourceIds.map((id) => [id, declared.get(id) ?? null] as const))
   const acc: Accumulator = { observations: [], frameRanges: new Map(), msRanges: new Map(), absentReason: new Map(),
-    partialReason: new Map(), inputs: [], rejected: [] }
+    partialReason: new Map(), inputs: [], rejected: [], spans: [] }
 
-  assembleTranscript(acc, input, durationMs, input.transcript ? (knownSources.get(input.transcript.transcript.sourceArtifactId) ?? null) : null)
+  const transcriptSource = input.transcript?.transcript.sourceArtifactId
+  assembleTranscript(acc, input, durationMs, transcriptSource ? (knownSources.get(transcriptSource) ?? null) : null)
   assembleOcr(acc, input, knownSources)
   assembleTemporal(acc, input, knownSources)
-  assembleFace(acc, input, knownSources)
+  assembleFace(acc, input, knownSources, durationMs)
 
   if (acc.observations.length > SERVER_PERCEPTION_MAX_OBSERVATIONS) {
     invalid(`Perception snapshot would exceed ${SERVER_PERCEPTION_MAX_OBSERVATIONS} observations`)
@@ -561,11 +630,14 @@ export function assembleServerPerceptionSnapshot(input: ServerPerceptionAssembly
     timeBase: Object.freeze({ unit: 'ms' as const, frameToMs: 'round-nearest' as const, fps: plan.fps, durationFrames: plan.durationFrames, durationMs }),
     sources: Object.freeze(sourceIds.map((artifactId) => Object.freeze({ artifactId, sha256: knownSources.get(artifactId) ?? null }))),
     inputs: Object.freeze(acc.inputs.toSorted((left, right) => compareText(left.kind, right.kind) ||
-      compareText(left.sourceArtifactId, right.sourceArtifactId) || compareText(left.envelopeHash, right.envelopeHash) ||
+      compareText(left.sourceArtifactId ?? '', right.sourceArtifactId ?? '') || compareText(left.envelopeHash, right.envelopeHash) ||
       compareText(left.envelopeId, right.envelopeId))),
     rejected: Object.freeze(acc.rejected.toSorted((left, right) => compareText(left.kind, right.kind) ||
       compareText(left.envelopeHash, right.envelopeHash) || compareText(left.envelopeId, right.envelopeId) ||
-      compareText(left.reasonCodes.join(','), right.reasonCodes.join(',')))),
+      compareText(left.reasonCodes.join(','), right.reasonCodes.join(',')) ||
+      compareText((left.subjects ?? []).join(','), (right.subjects ?? []).join(',')))),
+    unexaminedSpans: Object.freeze(acc.spans.toSorted((left, right) => PERCEPTION_KINDS.indexOf(left.kind) - PERCEPTION_KINDS.indexOf(right.kind) ||
+      left.startMs - right.startMs || left.endMs - right.endMs || compareText(left.reasonCode, right.reasonCode))),
     timeline,
   })
 }
@@ -576,7 +648,7 @@ function sealSnapshot(body: SnapshotBody): Readonly<ServerPerceptionSnapshot> {
 }
 
 const SNAPSHOT_KEYS = ['schemaVersion', 'authority', 'faceSafety', 'workspaceId', 'projectId', 'projectVersionId', 'editPlan',
-  'timeBase', 'sources', 'inputs', 'rejected', 'timeline', 'snapshotHash']
+  'timeBase', 'sources', 'inputs', 'rejected', 'unexaminedSpans', 'timeline', 'snapshotHash']
 const ENVELOPE_INPUT_KINDS: Readonly<Record<PerceptionKind, PerceptionSnapshotInputRecord['kind'] | null>> = Object.freeze({
   'transcript-word': 'transcript', speaker: null, silence: null, face: 'face', object: null, shot: 'temporal', motion: 'temporal',
   ocr: 'ocr', 'image-insert': null,
@@ -624,6 +696,13 @@ export function verifyServerPerceptionSnapshot(value: unknown): Readonly<ServerP
       fail(`${kind} has no producer bound to a version`)
     }
   }
+  if (!Array.isArray(stored.unexaminedSpans)) fail('unexamined spans')
+  for (const span of stored.unexaminedSpans) {
+    if (!span || typeof span !== 'object' || Object.keys(span).sort().join('|') !== 'endMs|kind|reasonCode|startMs' ||
+        !PERCEPTION_KINDS.includes(span.kind) || !Number.isSafeInteger(span.startMs) || !Number.isSafeInteger(span.endMs) ||
+        span.startMs < 0 || span.endMs <= span.startMs || span.endMs > stored.timeline.durationMs ||
+        typeof span.reasonCode !== 'string' || !/^[A-Z][A-Z0-9_]{2,63}$/.test(span.reasonCode)) fail('unexamined span')
+  }
   const inputs = new Map<string, PerceptionSnapshotInputRecord>()
   for (const input of stored.inputs) inputs.set(`${input.kind}|${input.envelopeId}|${input.envelopeHash}`, input)
   if (inputs.size !== stored.inputs.length) fail('duplicate input')
@@ -648,6 +727,8 @@ export type ServerPerceptionCoverageInRange = Readonly<{
   ranges: readonly PerceptionRange[]
   /** The part of the requested range this kind did NOT examine, as ranges; empty only when the state is `complete`. */
   unexaminedRanges: readonly PerceptionRange[]
+  /** The same unexamined ranges, split where the reason changes: a structural span (speed, unread windows) keeps its own reason. */
+  unexaminedReasons: readonly Readonly<{ startMs: number; endMs: number; reasonCode: string }>[]
   observedMs: number
   reasonCode?: string
 }>
@@ -681,9 +762,27 @@ export function queryServerPerceptionSnapshot(snapshot: Readonly<ServerPerceptio
       cursor = range[1]
     }
     if (cursor < toMs) unexamined.push(Object.freeze([cursor, toMs]) as PerceptionRange)
-    const reasonCode = state === 'complete' ? undefined
-      : whole.state === 'absent' ? whole.reasonCode : state === 'absent' ? 'RANGE_NOT_EXAMINED' : whole.reasonCode
-    return Object.freeze({ kind, state, ranges, unexaminedRanges: Object.freeze(unexamined), observedMs,
+    // What is not examined is either under a structural span (a clip that cannot be mapped, windows not read) with that span's reason,
+    // or simply not sampled / not reached, with the generic one.
+    const generic = whole.state === 'absent' ? (whole.reasonCode ?? 'NOT_EXAMINED')
+      : state === 'absent' ? 'RANGE_NOT_EXAMINED' : (whole.reasonCode ?? 'NOT_EXAMINED')
+    const spans = snapshot.unexaminedSpans.filter((span) => span.kind === kind).toSorted((left, right) => left.startMs - right.startMs || left.endMs - right.endMs)
+    const reasons: { startMs: number; endMs: number; reasonCode: string }[] = []
+    for (const piece of unexamined) {
+      let at = piece[0]
+      for (const span of spans) {
+        const start = Math.max(span.startMs, at), end = Math.min(span.endMs, piece[1])
+        if (end <= start) continue
+        if (start > at) reasons.push({ startMs: at, endMs: start, reasonCode: generic })
+        reasons.push({ startMs: start, endMs: end, reasonCode: span.reasonCode })
+        at = end
+      }
+      if (at < piece[1]) reasons.push({ startMs: at, endMs: piece[1], reasonCode: generic })
+    }
+    const distinct = [...new Set(reasons.map((entry) => entry.reasonCode))]
+    const reasonCode = state === 'complete' ? undefined : distinct.length === 1 ? distinct[0] : generic
+    return Object.freeze({ kind, state, ranges, unexaminedRanges: Object.freeze(unexamined),
+      unexaminedReasons: Object.freeze(reasons.map((entry) => Object.freeze(entry))), observedMs,
       ...(reasonCode ? { reasonCode } : {}) })
   })
   return Object.freeze({

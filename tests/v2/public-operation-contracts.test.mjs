@@ -565,7 +565,7 @@ test('the server perception snapshot capability is a scoped query that answers w
     createdAt: '2026-10-19T00:00:00.000Z', origin: { kind: 'server-assembled', manualTimelinesIncluded: false },
     snapshot: { schemaVersion: snapshot.schemaVersion, snapshotHash: snapshot.snapshotHash, timelineHash: snapshot.timeline.timelineHash,
       faceSafety: snapshot.faceSafety, editPlan: snapshot.editPlan, timeBase: snapshot.timeBase, sources: snapshot.sources,
-      inputs: snapshot.inputs, rejected: snapshot.rejected },
+      inputs: snapshot.inputs, rejected: snapshot.rejected, unexaminedSpans: snapshot.unexaminedSpans },
     result: queryServerPerceptionSnapshot(snapshot, { fromMs: 0, toMs: 2_000 }),
   }
   const envelope = (data) => ({ data, meta: { apiVersion: 'v1' } })
@@ -582,6 +582,9 @@ test('the server perception snapshot capability is a scoped query that answers w
     ['unknown confidence basis', (value) => { value.result.observations[0].provenance.confidenceBasis = 'believed' }],
     ['coverage state invented', (value) => { value.result.coverage[0].state = 'unknown' }],
     ['coverage without its unexamined ranges', (value) => { delete value.result.coverage[0].unexaminedRanges }],
+    ['coverage without the reason of each unexamined range', (value) => { delete value.result.coverage[0].unexaminedReasons }],
+    ['snapshot without its unexamined spans', (value) => { delete value.snapshot.unexaminedSpans }],
+    ['an unexamined span without a reason', (value) => { value.snapshot.unexaminedSpans.push({ kind: 'face', startMs: 0, endMs: 10 }) }],
     ['reason code in lower case', (value) => { value.result.coverage.find((entry) => entry.state === 'absent').reasonCode = 'no_verified_detector' }],
     ['extra field on the snapshot', (value) => { value.snapshot.manualTimeline = {} }],
     ['unhashed snapshot', (value) => { value.snapshot.snapshotHash = 'not-a-hash' }],
