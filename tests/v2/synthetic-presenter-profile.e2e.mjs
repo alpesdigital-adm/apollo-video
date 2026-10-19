@@ -46,6 +46,10 @@ async function waitForServer(baseUrl, server) {
   throw new Error('Timed out waiting for Next server')
 }
 
+// The outbox ids of this run are its own: the rows of a run stay in the database (the sealed rows are append-only) and the quality job
+// runs many suites against one database, so a fixed id collided with the suite that used the same one first.
+const EVENT_RUN = (await import('node:crypto')).randomUUID().slice(0, 8)
+
 test('T-FR-103 presenter lifecycle and generation gates hold from the browser to PostgreSQL', {
   skip: !process.env.V2_DATABASE_URL && 'V2_DATABASE_URL is required',
   timeout: 900_000,
@@ -106,7 +110,7 @@ test('T-FR-103 presenter lifecycle and generation gates hold from the browser to
     const project = await createProjectService({
       repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(),
       createId: (kind) => `${kind}-presenter-e2e-${++entity}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(300_000 + ++event).padStart(12, '0')}`,
+      createEventId: () => `${EVENT_RUN}-0000-4000-8000-${String(300_000 + ++event).padStart(12, '0')}`,
     })({ workspaceId, name: 'Projeto do presenter', objective: 'awareness', actor, idempotencyKey: 'presenter-e2e-project' })
     const projectId = project.projectAtCreation.id
     const projectVersionId = project.creationVersion.id

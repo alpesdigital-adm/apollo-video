@@ -8,6 +8,10 @@ const clientId = 'novelty-budget-int-client'
 const credentialId = 'novelty-budget-int-credential'
 const at = (second) => new Date(Date.parse('2029-03-01T00:00:00.000Z') + second * 1_000).toISOString()
 
+// The outbox ids of this run are its own: the rows of a run stay in the database (the sealed rows are append-only) and the quality job
+// runs many suites against one database, so a fixed id collided with the suite that used the same one first.
+const EVENT_RUN = (await import('node:crypto')).randomUUID().slice(0, 8)
+
 test('T-FR-114 persists a deterministic novelty verdict PostgreSQL itself refuses to contradict', {
   skip: !process.env.V2_DATABASE_URL && 'V2_DATABASE_URL is required',
   timeout: 240_000,
@@ -49,7 +53,7 @@ test('T-FR-114 persists a deterministic novelty verdict PostgreSQL itself refuse
       repository: new PrismaCreationOutputBundleRepositoryV2(client),
       clock: () => new Date(at(0)),
       createId: (kind) => `${kind}-novelty-${++entity}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(810_000 + ++event).padStart(12, '0')}`,
+      createEventId: () => `${EVENT_RUN}-0000-4000-8000-${String(810_000 + ++event).padStart(12, '0')}`,
     })({ workspaceId, name: 'Novelty project', objective: 'awareness', actor, idempotencyKey: 'novelty-project' })
 
     const projectId = created.projectAtCreation.id

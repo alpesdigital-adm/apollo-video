@@ -10,6 +10,10 @@ const credentialId = 'critic-report-int-credential'
 const hash = (character) => character.repeat(64)
 const at = (second) => new Date(Date.parse('2029-05-01T00:00:00.000Z') + second * 1_000).toISOString()
 
+// The outbox ids of this run are its own: the rows of a run stay in the database (the sealed rows are append-only) and the quality job
+// runs many suites against one database, so a fixed id collided with the suite that used the same one first.
+const EVENT_RUN = (await import('node:crypto')).randomUUID().slice(0, 8)
+
 test('T-FR-106 synthetic critic reports persist transactionally, stay queryable and fail closed on PostgreSQL', {
   skip: !process.env.V2_DATABASE_URL && 'V2_DATABASE_URL is required',
   timeout: 300_000,
@@ -60,7 +64,7 @@ test('T-FR-106 synthetic critic reports persist transactionally, stay queryable 
     const project = await createProjectService({
       repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(at(0)),
       createId: (kind) => `${kind}-critic-${++entity}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(800_000 + ++event).padStart(12, '0')}`,
+      createEventId: () => `${EVENT_RUN}-0000-4000-8000-${String(800_000 + ++event).padStart(12, '0')}`,
     })({ workspaceId, name: 'Crítica persistida', objective: 'awareness', actor, idempotencyKey: 'critic-project' })
     const projectId = project.projectAtCreation.id
     const projectVersionId = project.creationVersion.id
