@@ -33,6 +33,8 @@ export const CGROUP_ENVIRONMENT = Object.freeze([
 const safeError = (error) => { const message = String(error?.message ?? ''); return {
   name: error.name, code: error.code ?? null, messageSha256: digest(message), messageBytes: Buffer.byteLength(message),
   ...(error.linuxStatDiagnostic ? { linuxStatDiagnostic: error.linuxStatDiagnostic } : {}),
+  ...(error.linuxStatRecheckDiagnostic ? { linuxStatRecheckDiagnostic: error.linuxStatRecheckDiagnostic } : {}),
+  ...(error.admissionLockDiagnostic ? { admissionLockDiagnostic: error.admissionLockDiagnostic } : {}),
   ...(error.cgroupSnapshotDiagnostic ? { cgroupSnapshotDiagnostic: error.cgroupSnapshotDiagnostic } : {}) } }
 
 export function assertCgroupScope(scope) {
@@ -111,11 +113,92 @@ export async function readCgroupSnapshot(scope, deadlineAt, io = { readFile }) {
   Object.defineProperty(entries, 'statUnavailableRechecks', { value: statUnavailableRechecks, enumerable: false })
   const identityFacts = (value) => value ? { pid: value.pid, ppid: value.ppid, processGroupId: value.processGroupId,
     sessionId: value.sessionId, state: value.state, starttime: value.starttime.length <= 32 ? value.starttime : null } : null
+  // One bounded re-read window (<=500 ms, shared wall + monotonic budget) for a
+  // task whose /proc stat answered with the kernel's lock_task_sighand-failed
+  // tuple. The same window serves a sentinel at either stage; the sentinel is
+  // never returned, adopted, signaled or treated as terminal.
+  const openRecheck = (pid, known, initialStage, initialError) => {
+    const startedAt = Date.now(), startedMonotonic = performance.now()
+    const allocatedMs = Math.min(500, Math.max(0, deadlineAt - startedAt))
+    const recheckEnd = startedAt + allocatedMs
+    const monotonicEnd = startedMonotonic + allocatedMs
+    const record = { schemaVersion: 'cgroup-stat-unavailable-recheck/v1', requestedPid: pid, initialStage,
+      knownBefore: identityFacts(known), initialStatDiagnostic: initialError.linuxStatDiagnostic,
+      deadlineAt: recheckEnd, startedAt, allocatedMs, stage: 'recheck-stat', outcome: 'pending',
+      startedMonotonic, deadlineMonotonic: monotonicEnd,
+      identityEstablishedBySentinel: false, terminalityEstablished: false, recheckedIdentity: null }
+    let lastWall = startedAt
+    const read = async (path) => {
+      const beforeWall = Date.now()
+      assert.ok(beforeWall >= lastWall, 'Cgroup sentinel recheck wall clock rollback')
+      lastWall = beforeWall
+      const value = await text(path, recheckEnd, monotonicEnd)
+      const afterWall = Date.now()
+      assert.ok(afterWall >= lastWall, 'Cgroup sentinel recheck wall clock rollback')
+      lastWall = afterWall
+      return value
+    }
+    const complete = () => {
+      record.completedAt = Date.now()
+      record.completedMonotonic = performance.now()
+      assert.ok(record.completedAt < recheckEnd && record.completedMonotonic < monotonicEnd,
+        'Cgroup sentinel recheck deadline exhausted')
+    }
+    return { record, read, complete }
+  }
+  const recordRecheck = (record) => { if (statUnavailableRechecks.length < 8) statUnavailableRechecks.push(record) }
+  // Returns true when the recheck found the task gone (ENOENT/ESRCH): a reported
+  // disappearance, never a terminality proof. Anything else is inconclusive.
+  const closeFailedRecheck = (record, recheckError) => {
+    record.completedAt = Date.now()
+    record.completedMonotonic = performance.now()
+    const gone = ['ENOENT', 'ESRCH'].includes(recheckError.code)
+    record.outcome = gone ? 'read-disappearance-reported' : 'inconclusive'
+    record.readErrorCode = ['ENOENT', 'ESRCH', 'EACCES', 'EPERM', 'EIO', 'ABORT_ERR', 'ERR_ASSERTION'].includes(recheckError.code)
+      ? recheckError.code : null
+    record.errno = Number.isSafeInteger(recheckError.errno) ? recheckError.errno : null
+    record.recheckStatDiagnostic = recheckError.linuxStatDiagnostic ?? null
+    record.metadataBound = recheckError.cgroupMetadataDiagnostic ?? null
+    recordRecheck(record)
+    if (gone && disappearanceReads.length < 8) disappearanceReads.push({ schemaVersion: 'cgroup-snapshot-diagnostic/v1',
+      stage: record.stage, requestedPid: record.requestedPid, outcome: record.outcome,
+      readErrorCode: record.readErrorCode, errno: record.errno,
+      knownBefore: record.knownBefore, terminalityEstablished: false, unavailableRecheck: record })
+    return gone
+  }
   for (const pid of new Set(ids.map(Number))) {
     assert.ok(Number.isSafeInteger(pid))
     let before, stage = 'stat-before', unavailableRecheck, observedMembership
     try {
-      before = parseLinuxProcessStat(await text(`/proc/${pid}/stat`))
+      try { before = parseLinuxProcessStat(await text(`/proc/${pid}/stat`)) }
+      catch (firstError) {
+        // A task caught mid-exit can answer its FIRST read with the sentinel
+        // tuple (ppid 0, pgrp/session -1), exactly like a later read. No prior
+        // identity exists here, so the sentinel's own pid/starttime are only a
+        // consistency claim for the re-read, never an identity.
+        const claim = firstError.linuxStatDiagnostic?.unavailableObservation
+        if (!(claim?.schemaVersion === 'linux-task-sighand-unavailable/v1' && claim.pid === pid &&
+            claim.identityEstablished === false && claim.terminalityEstablished === false)) throw firstError
+        const recheck = openRecheck(pid, null, 'stat-before', firstError)
+        unavailableRecheck = recheck.record
+        try {
+          // ONE from-scratch stat read under ONE absolute window; membership and
+          // the confirming stat then follow the normal cycle on the adopted stat.
+          const verified = parseLinuxProcessStat(await recheck.read(`/proc/${pid}/stat`))
+          recheck.record.recheckedIdentity = identityFacts(verified)
+          assert.equal(verified.pid, pid, 'Cgroup sentinel recheck PID mismatch')
+          assert.equal(identityKey(verified), identityKey({ pid, starttime: claim.starttime }), 'Cgroup sentinel recheck PID recycled')
+          recheck.complete()
+          recheck.record.outcome = 'strict-identity-revalidated'
+          recordRecheck(recheck.record)
+          unavailableRecheck = undefined
+          before = verified
+        } catch (recheckError) {
+          if (closeFailedRecheck(recheck.record, recheckError)) continue
+          // Preserve the INITIAL AssertionError, not a replacement retry error.
+          throw firstError
+        }
+      }
       stage = 'membership-read'
       const membership = parseCgroupMembership(await text(`/proc/${pid}/cgroup`))
       observedMembership = membership
@@ -131,65 +214,28 @@ export async function readCgroupSnapshot(scope, deadlineAt, io = { readFile }) {
           unavailable?.schemaVersion === 'linux-task-sighand-unavailable/v1' &&
           unavailable.pid === before.pid && unavailable.starttime === before.starttime &&
           unavailable.identityEstablished === false && unavailable.terminalityEstablished === false) {
-        const startedAt = Date.now(), startedMonotonic = performance.now()
-        const allocatedMs = Math.min(500, Math.max(0, deadlineAt - startedAt))
-        const recheckEnd = startedAt + allocatedMs
-        const monotonicEnd = startedMonotonic + allocatedMs
-        unavailableRecheck = { schemaVersion: 'cgroup-stat-unavailable-recheck/v1', requestedPid: pid,
-          knownBefore: identityFacts(before), initialStatDiagnostic: error.linuxStatDiagnostic,
-          deadlineAt: recheckEnd, startedAt, allocatedMs, stage: 'recheck-stat', outcome: 'pending',
-          startedMonotonic, deadlineMonotonic: monotonicEnd,
-          identityEstablishedBySentinel: false, terminalityEstablished: false, recheckedIdentity: null }
+        const recheck = openRecheck(pid, before, 'stat-after', error)
+        unavailableRecheck = recheck.record
         try {
-          let lastWall = startedAt
-          const recheckText = async (path) => {
-            const beforeWall = Date.now()
-            assert.ok(beforeWall >= lastWall, 'Cgroup sentinel recheck wall clock rollback')
-            lastWall = beforeWall
-            const value = await text(path, recheckEnd, monotonicEnd)
-            const afterWall = Date.now()
-            assert.ok(afterWall >= lastWall, 'Cgroup sentinel recheck wall clock rollback')
-            lastWall = afterWall
-            return value
-          }
           // ONE stat/membership/stat attempt under ONE absolute window. The
           // sentinel is never returned, adopted, signaled or treated as terminal.
-          const verified = parseLinuxProcessStat(await recheckText(`/proc/${pid}/stat`))
-          unavailableRecheck.recheckedIdentity = identityFacts(verified)
+          const verified = parseLinuxProcessStat(await recheck.read(`/proc/${pid}/stat`))
+          recheck.record.recheckedIdentity = identityFacts(verified)
           assert.equal(identityKey(verified), identityKey(before), 'Cgroup sentinel recheck PID recycled')
-          unavailableRecheck.stage = 'recheck-membership'
-          const membership = parseCgroupMembership(await recheckText(`/proc/${pid}/cgroup`))
+          recheck.record.stage = 'recheck-membership'
+          const membership = parseCgroupMembership(await recheck.read(`/proc/${pid}/cgroup`))
           assert.equal(membership, scope.membership, 'Kernel cgroup membership escaped the admitted domain')
-          unavailableRecheck.stage = 'recheck-stat-final'
-          const after = parseLinuxProcessStat(await recheckText(`/proc/${pid}/stat`))
+          recheck.record.stage = 'recheck-stat-final'
+          const after = parseLinuxProcessStat(await recheck.read(`/proc/${pid}/stat`))
           assert.equal(identityKey(after), identityKey(before), 'Cgroup sentinel final PID recycled')
-          unavailableRecheck.recheckedIdentity = identityFacts(after)
-          unavailableRecheck.outcome = 'strict-identity-and-membership-revalidated'
-          unavailableRecheck.completedAt = Date.now()
-          unavailableRecheck.completedMonotonic = performance.now()
-          assert.ok(unavailableRecheck.completedAt < recheckEnd && unavailableRecheck.completedMonotonic < monotonicEnd,
-            'Cgroup sentinel recheck deadline exhausted')
-          if (statUnavailableRechecks.length < 8) statUnavailableRechecks.push(unavailableRecheck)
+          recheck.record.recheckedIdentity = identityFacts(after)
+          recheck.record.outcome = 'strict-identity-and-membership-revalidated'
+          recheck.complete()
+          recordRecheck(recheck.record)
           entries.push({ ...after, previousPpid: before.ppid, cgroupMembership: membership })
           continue
         } catch (recheckError) {
-          unavailableRecheck.completedAt = Date.now()
-          unavailableRecheck.completedMonotonic = performance.now()
-          unavailableRecheck.outcome = ['ENOENT', 'ESRCH'].includes(recheckError.code)
-            ? 'read-disappearance-reported' : 'inconclusive'
-          unavailableRecheck.readErrorCode = ['ENOENT', 'ESRCH', 'EACCES', 'EPERM', 'EIO', 'ABORT_ERR', 'ERR_ASSERTION'].includes(recheckError.code)
-            ? recheckError.code : null
-          unavailableRecheck.errno = Number.isSafeInteger(recheckError.errno) ? recheckError.errno : null
-          unavailableRecheck.recheckStatDiagnostic = recheckError.linuxStatDiagnostic ?? null
-          unavailableRecheck.metadataBound = recheckError.cgroupMetadataDiagnostic ?? null
-          if (statUnavailableRechecks.length < 8) statUnavailableRechecks.push(unavailableRecheck)
-          if (unavailableRecheck.outcome === 'read-disappearance-reported') {
-            if (disappearanceReads.length < 8) disappearanceReads.push({ schemaVersion: 'cgroup-snapshot-diagnostic/v1',
-              stage: unavailableRecheck.stage, requestedPid: pid, outcome: unavailableRecheck.outcome,
-              readErrorCode: unavailableRecheck.readErrorCode, errno: unavailableRecheck.errno,
-              knownBefore: identityFacts(before), terminalityEstablished: false, unavailableRecheck })
-            continue
-          }
+          if (closeFailedRecheck(recheck.record, recheckError)) continue
           // Preserve the INITIAL AssertionError, not a replacement retry error.
         }
       }

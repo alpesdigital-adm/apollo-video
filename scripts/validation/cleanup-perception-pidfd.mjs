@@ -77,7 +77,8 @@ export async function cleanupPidfd(env = process.env) {
   const report = { schemaVersion: 'perception-pidfd-cleanup/v1', buildRunId: registry.runId,
     sourceCommit: env.GITHUB_SHA, root: authority, cleanupOwner: readAuthorityIdentitySync(process.pid),
     success: false, removed: false, errors: [], owners: [], archivedFiles: [] }
-  const fail = (error) => report.errors.push({ name: error.name, code: error.code ?? null, message: String(error.message).slice(0, 512) })
+  const fail = (error) => report.errors.push({ name: error.name, code: error.code ?? null, message: String(error.message).slice(0, 512),
+    ...(error.admissionLockDiagnostic ? { admissionLockDiagnostic: error.admissionLockDiagnostic } : {}) })
   let preparedCgroups = []
   try {
     await registryLock(root, async () => {

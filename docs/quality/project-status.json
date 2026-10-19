@@ -6,7 +6,7 @@
     "total": 1259,
     "source": "TODO.md"
   },
-  "evidenceBaseCommit": "67bb41aa4d39f25a94537e494d0f8f5676d0fcec",
+  "evidenceBaseCommit": "16a6d04b870eac7a5aab5ec7d403a603c0c4a500",
   "coverage": {
     "unit": "todo-section",
     "total": 250,
@@ -30,7 +30,7 @@
       ],
       "state": "em-construcao",
       "construction": "in-progress",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
@@ -884,6 +884,30 @@
           "ref": "Apollo/w61-70-20261008/s2d-runs/w070-cefe3734/summary.json",
           "scope": "Sol1: passo 070 do plano de CI (jornada sintética Wave 24, não a W70 deste programa) 25/25 pass em PostgreSQL supervisionado, após build e migrate exit 0; success true, postflight limpo.",
           "role": "controlled-e2e"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/81",
+          "scope": "PR #81 merged into main as 16a6d04b (merge commit, head c7ee3d54 pinned).",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471491",
+          "scope": "main 16a6d04b CI: Quality and security and Isolated Compose green on attempt 1; Perception green on attempt 2 after the cgroup first-read flake (fix in progress on claude/ci-linux-flakes).",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471489",
+          "scope": "main 16a6d04b Dashboard runtime validation green.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471458",
+          "scope": "main 16a6d04b Media library validation green.",
+          "role": "integration"
         }
       ],
       "nextAction": "Integrar em main (PR #81) e confirmar o CI de main. Depois fechar a percepção fail-closed de ponta a ponta: detector com paridade Linux (W62), faces e temporal consumidos pelo Diretor (W64) e a jornada W70 com o master real. faceSafety só deixa de ser unknown com detector qualificado em corpus independente.",
@@ -906,7 +930,7 @@
       ],
       "state": "pendente-validacao",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
@@ -1134,6 +1158,30 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414164",
           "scope": "W62: CI central no head 67bb41aa (jobs Perception, Quality and security, Isolated Compose): SUCCESS, head SHA e conclusão conferidos pela API do GitHub. Cobre o código integrado deste recorte na suíte da CI; não é prova de mídia visual, implantação nem aceite.",
           "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/81",
+          "scope": "PR #81 merged into main as 16a6d04b (merge commit, head c7ee3d54 pinned).",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471491",
+          "scope": "main 16a6d04b CI: Quality and security and Isolated Compose green on attempt 1; Perception green on attempt 2 after the cgroup first-read flake (fix in progress on claude/ci-linux-flakes).",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471489",
+          "scope": "main 16a6d04b Dashboard runtime validation green.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471458",
+          "scope": "main 16a6d04b Media library validation green.",
+          "role": "integration"
         }
       ],
       "nextAction": "Fila W62: gerar o recibo de paridade Linux do V9 em execução supervisionada (60 imagens de desenvolvimento, byte a byte contra os tensores da V9, sem ajuste de parâmetros), que é gate de implantação; depois medir o V9 em vídeo real na jornada W70. Qualquer faceSafety diferente de unknown exige corpus independente; o holdout segue selado.",
@@ -1153,7 +1201,7 @@
       ],
       "state": "em-construcao",
       "construction": "in-progress",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
@@ -1193,6 +1241,30 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414164",
           "scope": "W63: CI central no head 67bb41aa (jobs Perception, Quality and security, Isolated Compose): SUCCESS, head SHA e conclusão conferidos pela API do GitHub. Cobre o código integrado deste recorte na suíte da CI; não é prova de mídia visual, implantação nem aceite.",
           "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/81",
+          "scope": "PR #81 merged into main as 16a6d04b (merge commit, head c7ee3d54 pinned).",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471491",
+          "scope": "main 16a6d04b CI: Quality and security and Isolated Compose green on attempt 1; Perception green on attempt 2 after the cgroup first-read flake (fix in progress on claude/ci-linux-flakes).",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471489",
+          "scope": "main 16a6d04b Dashboard runtime validation green.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471458",
+          "scope": "main 16a6d04b Media library validation green.",
+          "role": "integration"
         }
       ],
       "nextAction": "Fila W63: avaliação externa com labels independentes (OCR de texto pequeno e multilíngue, hard cut, crossfade, motion) e janela do master longo com PTS original, preservando medidas brutas, gaps e limites; depois a timeline canônica que funde faces (W62), OCR, shots e motion para o Diretor consumir (W64).",
@@ -1215,7 +1287,7 @@
       ],
       "state": "em-construcao",
       "construction": "in-progress",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "none",
       "deployment": "pending",
       "acceptance": "pending",
@@ -1255,6 +1327,30 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414164",
           "scope": "W64: CI central no head 67bb41aa (jobs Perception, Quality and security, Isolated Compose): SUCCESS, head SHA e conclusão conferidos pela API do GitHub. Cobre o código integrado deste recorte na suíte da CI; não é prova de mídia visual, implantação nem aceite.",
           "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/81",
+          "scope": "PR #81 merged into main as 16a6d04b (merge commit, head c7ee3d54 pinned).",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471491",
+          "scope": "main 16a6d04b CI: Quality and security and Isolated Compose green on attempt 1; Perception green on attempt 2 after the cgroup first-read flake (fix in progress on claude/ci-linux-flakes).",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471489",
+          "scope": "main 16a6d04b Dashboard runtime validation green.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471458",
+          "scope": "main 16a6d04b Media library validation green.",
+          "role": "integration"
         }
       ],
       "nextAction": "Fila W64: o Diretor pede face-source-windows para o corte que decidiu e consome faceCoverage no TreatmentPlan, no EditPlan, no decisions log e no critic (hoje fixo em absent em run-project-director.ts:234); depois agregar o temporal (W63) e provar HTTP e decisões por variante.",
@@ -1279,7 +1375,7 @@
       ],
       "state": "pendente-validacao",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
@@ -1409,6 +1505,30 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414165",
           "scope": "W65: Dashboard runtime validation no head 67bb41aa: SUCCESS. A jornada do dashboard segue a regra W65b (proxy real com cues não certificadas espera em reviewing-proxy com avisos listados); não é aceite visual.",
           "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/81",
+          "scope": "PR #81 merged into main as 16a6d04b (merge commit, head c7ee3d54 pinned).",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471491",
+          "scope": "main 16a6d04b CI: Quality and security and Isolated Compose green on attempt 1; Perception green on attempt 2 after the cgroup first-read flake (fix in progress on claude/ci-linux-flakes).",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471489",
+          "scope": "main 16a6d04b Dashboard runtime validation green.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471458",
+          "scope": "main 16a6d04b Media library validation green.",
+          "role": "integration"
         }
       ],
       "nextAction": "Fila W65: ligar o Diretor às janelas de rosto da fonte (W64) e repetir a prova com o detector real em OpenVINO no lugar do stand-in; obter a resposta do proprietário à Q1 (omitir e listar); depois comprovar API e browser (W68) e o critic dos pixels finais por variante (W67), revisando cada MP4 final com hash próprio.",
@@ -1428,13 +1548,17 @@
         "da5a414c29b3-1",
         "72babc1df6c4-1"
       ],
-      "state": "pendente-validacao",
-      "construction": "implemented",
-      "integration": "not-integrated",
+      "state": "em-construcao",
+      "construction": "in-progress",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
+        {
+          "kind": "implementation",
+          "text": "O escopo da W66 no plano (reframe com trajetória: ROI do snapshot do servidor, keyframes 9:16 e 16:9 separados, suavização de velocidade/aceleração, overrides por Command por variante/range e issue localizado com a variante bloqueada/revisável) NÃO está implementado: plan-project-reframe devolve sempre review-required e nenhum produtor chama createRenderReframePlan. No main está só a fundação de estado de output por ProjectVersion (variantes estáveis, overlay, fork, consumo selado), da qual o reframe depende."
+        },
         {
           "kind": "implementation",
           "text": "Lacunas nomeadas pelo Sol1 no código integrado: (1) quality-iteration e cleanup-mask sem variantId recusam saída múltipla; (2) o decision-log usa a final mais nova de qualquer output; (3) o mvp-core-gate usa o formato 9:16; (4) há um único status de projeto para todos os outputs; (5) o reuse não exclui os proxies de localização."
@@ -1608,10 +1732,34 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414164",
           "scope": "W66: CI central no head 67bb41aa (jobs Perception, Quality and security, Isolated Compose): SUCCESS, head SHA e conclusão conferidos pela API do GitHub. Cobre o código integrado deste recorte na suíte da CI; não é prova de mídia visual, implantação nem aceite.",
           "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/81",
+          "scope": "PR #81 merged into main as 16a6d04b (merge commit, head c7ee3d54 pinned).",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471491",
+          "scope": "main 16a6d04b CI: Quality and security and Isolated Compose green on attempt 1; Perception green on attempt 2 after the cgroup first-read flake (fix in progress on claude/ci-linux-flakes).",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471489",
+          "scope": "main 16a6d04b Dashboard runtime validation green.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471458",
+          "scope": "main 16a6d04b Media library validation green.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Fila W66: fechar as cinco lacunas (variantId obrigatório em quality-iteration e cleanup-mask, decision-log e mvp-core-gate por output, status de projeto por output, reuse sem proxies de localização) e provar em PostgreSQL o final de duas saídas; só então a jornada W70 em 9:16 e 16:9.",
-      "notes": "Estado de output selado por ProjectVersion (variantes, overlay, fork) integrado no head, fora de main. As cinco lacunas acima são as do Sol1 em 19/10/2026; nenhuma é aceite. Cronologia anterior: git show 67bb41aa:docs/quality/project-status.json e docs/quality/w66-version-overlay-integration-v1.md."
+      "nextAction": "Implementar o reframe com trajetória sobre a fundação de output (branch claude/w66r-reframe-trajectory): ROI de face v3 do servidor projetada pelos clipes, plano por variante estável com política versionada, persistência content-addressed, consumo pelo render por variantId, issues bloqueando só a variante afetada e Command apply-variant-reframe-override; depois fechar as cinco lacunas de multi-saída e provar em PostgreSQL o final de duas saídas.",
+      "notes": "Fundação de estado de output selado por ProjectVersion (variantes estáveis, overlay, fork, consumo selado) integrada no main em 16a6d04b. O reframe com trajetória, que é o escopo da W66 no plano, não começou. Cronologia: git show 67bb41aa:docs/quality/project-status.json e docs/quality/w66-version-overlay-integration-v1.md."
     },
     {
       "id": "W67",
@@ -1780,7 +1928,7 @@
       ],
       "state": "pendente-validacao",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
@@ -1885,6 +2033,30 @@
           "type": "ci",
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414164",
           "scope": "W69: CI central no head 67bb41aa (jobs Perception, Quality and security, Isolated Compose): SUCCESS, head SHA e conclusão conferidos pela API do GitHub. Cobre o código integrado deste recorte na suíte da CI; não é prova de mídia visual, implantação nem aceite.",
+          "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/81",
+          "scope": "PR #81 merged into main as 16a6d04b (merge commit, head c7ee3d54 pinned).",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471491",
+          "scope": "main 16a6d04b CI: Quality and security and Isolated Compose green on attempt 1; Perception green on attempt 2 after the cgroup first-read flake (fix in progress on claude/ci-linux-flakes).",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471489",
+          "scope": "main 16a6d04b Dashboard runtime validation green.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471458",
+          "scope": "main 16a6d04b Media library validation green.",
           "role": "integration"
         }
       ],

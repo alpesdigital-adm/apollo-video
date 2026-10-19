@@ -377,6 +377,111 @@ test('Linux unavailable task tuple remains a strict parser failure and only exac
   }
 })
 
+// CI job 118192911424: a task caught mid-exit answers /proc/<pid>/stat with the
+// sighand-unavailable tuple. Every single-shot identity read (supervisor snapshot,
+// terminality polls, birth rechecks) goes through readLinuxProcessIdentity.
+const dyingStat = (pid, starttime = '40', changes = {}) =>
+  statText({ 1: '0', 2: '-1', 3: '-1', 19: starttime, ...changes }).replace('123 (', `${pid} (`)
+const liveStat = (pid, starttime = '40', changes = {}) =>
+  statText({ 19: starttime, ...changes }).replace('123 (', `${pid} (`)
+const goneError = (code = 'ENOENT') => Object.assign(new Error('PRIVATE_GONE'), { code })
+function procStatIo(...answers) {
+  const calls = []
+  return { calls, async readFile(path, options) {
+    calls.push({ path, options })
+    const answer = answers[calls.length - 1]
+    assert.notEqual(answer, undefined, 'No read beyond the single bounded re-read')
+    if (answer instanceof Error) throw answer
+    return answer
+  } }
+}
+
+test('Linux stat read of a task caught mid-exit gets ONE bounded re-read: gone is absent, a strict same-identity stat is returned', async () => {
+  const expected = { pid: 20, state: 'S', ppid: 2, processGroupId: 3, sessionId: 4, starttime: '40' }
+  for (const code of ['ENOENT', 'ESRCH']) {
+    const io = procStatIo(dyingStat(20), goneError(code))
+    assert.equal(await readLinuxProcessIdentity(20, io), null)
+    assert.deepEqual(io.calls.map((call) => call.path), ['/proc/20/stat', '/proc/20/stat'])
+    assert.equal(io.calls[0].options, 'utf8', 'The first read is unchanged')
+    assert.equal(io.calls[1].options.encoding, 'utf8'); assert.ok(io.calls[1].options.signal instanceof AbortSignal)
+  }
+  const io = procStatIo(dyingStat(20), liveStat(20))
+  assert.deepEqual(await readLinuxProcessIdentity(20, io), expected)
+  assert.equal(io.calls.length, 2)
+  // First-sight behaviour without a sentinel is untouched: one read.
+  const missing = procStatIo(goneError())
+  assert.equal(await readLinuxProcessIdentity(20, missing), null); assert.equal(missing.calls.length, 1)
+  const live = procStatIo(liveStat(20))
+  assert.deepEqual(await readLinuxProcessIdentity(20, live), expected); assert.equal(live.calls.length, 1)
+})
+
+test('Linux stat re-read that is still the sentinel, mismatched, malformed, denied or late fails closed with the INITIAL error', async (t) => {
+  let wall = 1000, mono = 100.125, initial
+  t.mock.method(Date, 'now', () => wall)
+  t.mock.method(performance, 'now', () => mono)
+  try { parseLinuxProcessStat(dyingStat(20)) } catch (error) { initial = error }
+  const denied = Object.assign(new Error('PRIVATE_DENIAL'), { code: 'EACCES' })
+  for (const [name, answer, advance] of [
+    ['sentinel again', dyingStat(20)], ['sentinel again with the exit state', dyingStat(20, '40', { 0: 'X' })],
+    ['starttime changed', liveStat(20, '41')], ['other pid', liveStat(21)],
+    ['malformed', liveStat(20).split(' ').slice(0, -1).join(' ')], ['denied', denied],
+    ['wall at the exact 500 ms cap', liveStat(20), () => { wall = 1500 }],
+    ['wall past the cap', liveStat(20), () => { wall = 1501 }],
+    ['monotonic at the exact cap', liveStat(20), () => { mono = 600.125 }],
+    ['wall clock rollback', liveStat(20), () => { wall = 999 }]]) {
+    wall = 1000; mono = 100.125
+    const io = procStatIo(initial, answer), read = io.readFile
+    io.readFile = async (path, options) => { const value = await read(path, options); if (io.calls.length === 2) advance?.(); return value }
+    await assert.rejects(readLinuxProcessIdentity(20, io), (error) => {
+      assert.equal(error, initial, name); assert.equal(error.message, 'Incomplete Linux process identity')
+      const facts = error.linuxStatRecheckDiagnostic
+      assert.equal(facts.schemaVersion, 'linux-stat-unavailable-recheck/v1'); assert.equal(facts.requestedPid, 20)
+      assert.equal(facts.allocatedMs, 500); assert.equal(facts.outcome, 'inconclusive', name)
+      assert.equal(facts.terminalityEstablished, false)
+      if (name.startsWith('sentinel again')) assert.equal(facts.recheckStatDiagnostic.unavailableObservation.identityEstablished, false)
+      assert.doesNotMatch(JSON.stringify(facts), /PRIVATE_DENIAL|worker|spaces/)
+      return true
+    }, name)
+    assert.equal(io.calls.length, 2, name + ': exactly one re-read')
+    delete initial.linuxStatRecheckDiagnostic
+  }
+})
+
+test('Linux stat sentinel of another PID, a non-exact tuple, a malformed or denied first read is never re-read', async () => {
+  const denied = Object.assign(new Error('PRIVATE_DENIAL'), { code: 'EACCES' })
+  for (const [answer, message] of [
+    [dyingStat(21), 'Incomplete Linux process identity'], [dyingStat(20, '40', { 3: '-2' }), 'Incomplete Linux process identity'],
+    [dyingStat(20, '40', { 1: '1' }), 'Incomplete Linux process identity'],
+    [liveStat(20).split(' ').slice(0, -1).join(' '), 'Incomplete Linux process identity'],
+    [liveStat(21), 'Linux stat PID mismatch'], [denied, 'PRIVATE_DENIAL']]) {
+    const io = procStatIo(answer, liveStat(20))
+    await assert.rejects(readLinuxProcessIdentity(20, io), (error) => {
+      assert.ok(error.message.startsWith(message), error.message)
+      assert.equal(error.linuxStatRecheckDiagnostic, undefined, 'No recheck was attempted'); return true
+    })
+    assert.equal(io.calls.length, 1, message + ': exactly one read')
+  }
+})
+
+test('mid-exit sentinel no longer breaks the supervisor /proc snapshot or terminal verification, while a persistent one still fails closed', async () => {
+  for (const [answers, absent] of [[[dyingStat(20), goneError()], true], [[dyingStat(20), dyingStat(20)], false]]) {
+    const world = observationWorld(), baseIdentity = world.io.identity, dying = procStatIo(...answers)
+    world.io.identity = async (pid) => pid === 20 ? readLinuxProcessIdentity(20, dying) : baseIdentity(pid)
+    const context = await world.context()
+    if (absent) {
+      const snapshot = await observeLinuxProcesses('controlled-run', context, world.io)
+      assert.equal(snapshot.some((identity) => identity.pid === 20), false)
+      assert.equal(context.baseline.has('20:40'), false); assert.equal(context.baseline.has('100:100'), true)
+    } else await assert.rejects(observeLinuxProcesses('controlled-run', context, world.io), /Incomplete metadata inventory/)
+    assert.equal(dying.calls.length, 2)
+  }
+  const owned = entry(20, '40'), lookupRace = async () => ({ result: 'lookup-race' })
+  assert.equal((await signalObservedIdentity(owned, 'SIGKILL', { pidfdSignal: lookupRace,
+    readIdentity: (pid) => readLinuxProcessIdentity(pid, procStatIo(dyingStat(20), goneError())) })).result, 'absent')
+  await assert.rejects(signalObservedIdentity(owned, 'SIGKILL', { pidfdSignal: lookupRace,
+    readIdentity: (pid) => readLinuxProcessIdentity(pid, procStatIo(dyingStat(20), dyingStat(20))) }), /Incomplete Linux process identity/)
+})
+
 test('observed identities survive setsid and reparenting without adopting a reused root PID', () => {
   const observed = new Map()
   collectOwnedIdentities([entry(10, '100', { runMarked: true }), entry(11, '110', { ppid: 10 })], observed, 10)
