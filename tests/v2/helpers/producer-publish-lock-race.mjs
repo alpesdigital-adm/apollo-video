@@ -279,6 +279,12 @@ export async function verifyProducerPublishFences({ db, world, repository, Repos
         // races (the probe is stricter with it, never looser).
         const demonstrationDelayMs = Number(process.env.APOLLO_FENCE_HEAD_EXTRA_DELAY_MS ?? 0)
         if (demonstrationDelayMs > 0) await new Promise((done) => setTimeout(done, demonstrationDelayMs))
+        // The head fence asks whether a MOVED HEAD stops a publisher whose lease is live, so the lease must not depend on how fast this
+        // machine commits a sealed child (measured: the commit is ~2.3 s of the 10 s claim lease, and the whole lease is gone from
+        // roughly 4x that). Renew it before the race, exactly as the lease fence arms its own lease. If it is already gone (the
+        // demonstration delay above) nothing is renewed and the race below reports it; `assertProducerLeaseLive` still proves the lease
+        // was live when the head was refused.
+        await repository.heartbeat({ operationId, attempt: claim.attempt, leaseOwner: owner, now: new Date(), leaseMs: 30_000 })
         lockedTable = 'projects'; lockedId = world.projectId
         whileLocked = (tx) => tx.v2Project.update({ where: { id: world.projectId },
           data: { currentVersionId: childVersionId } })
