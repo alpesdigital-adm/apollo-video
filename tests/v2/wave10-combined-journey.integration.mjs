@@ -56,6 +56,8 @@ import {
 } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
 import { TemporaryFileSubtitleSidecarStaging } from '../../src/v2/infrastructure/media/subtitle-sidecar-staging.ts'
 import { replaceThenDirect, sealedMasterHead } from './helpers/retimed-journey-world.mjs'
+import { fakeOutputWorld, withConsumption } from './helpers/output-consumption-fakes.mjs'
+import { TWO_OUTPUT_SPECS } from './helpers/m1b-two-output-world.mjs'
 
 // ---------------------------------------------------------------------------
 // Wave 10 — ONE combined journey across F1.035, F1.036, F1.037 and F1.038.
@@ -104,6 +106,10 @@ const OVERRIDE_SEGMENT_ID = 'subtitle-cue-2'
 const OVERRIDE_TEXT = 'Correcao aprovada pelo dono'
 const OVERRIDE_VARIANT = '9:16'
 const SIBLING_VARIANT = '16:9'
+// S3: an output is named by its stable State variant id, never by its aspect ratio. The ratios above are the render FORMATS of the two outputs.
+const STABLE_VARIANT = Object.freeze(Object.fromEntries(TWO_OUTPUT_SPECS.map((spec) => [spec.aspectRatio, spec.variantId])))
+const OVERRIDE_VARIANT_ID = STABLE_VARIANT[OVERRIDE_VARIANT]
+const SIBLING_VARIANT_ID = STABLE_VARIANT[SIBLING_VARIANT]
 
 const CANVAS = Object.freeze({
   '9:16': Object.freeze({ width: 540, height: 960 }),
@@ -259,7 +265,7 @@ async function directOnce(masterPath) {
     workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, clientId: 'client-wave10', credentialId: 'credential-wave10',
     master: { artifactId: MASTER_ARTIFACT_ID, durationSeconds: 6, sourceKey: MASTER_ARTIFACT_KEY,
       sourceSha256: masterSha256, sourceByteSize: masterBytes.byteLength },
-    plan: compiledEditPlan(), suffix: 'wave10-base',
+    plan: compiledEditPlan(), suffix: 'wave10-base', twoOutputs: true,
   })
   const journey = await replaceThenDirect({
     head, actor,
@@ -379,7 +385,7 @@ class SubtitleSegmentOverrideRepository {
       parent: this.current,
       durationFrames: DURATION_FRAMES,
       segments: this.segments,
-      variantIds: [OVERRIDE_VARIANT, SIBLING_VARIANT],
+      variantIds: this.current.state.document.entries.map((entry) => entry.variantId),
       outputReferences: OUTPUT_REFERENCES(this.version.id),
       currentOverride: history.at(-1)?.subtitleOverride ?? null,
       previousOverride: history.at(-2)?.subtitleOverride ?? null,
@@ -614,12 +620,18 @@ const subtitleResolution = () => Object.freeze({
 // The render half: real enqueue service, real worker, real FFmpeg.
 // --------------------------------------------------------------------------
 
+// S3: a render consumes ONE persisted verdict (`render`) of the output it is made for and seals it into its input hash.
+const renderConsumption = (versionId, format) => fakeOutputWorld({
+  workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, versionId,
+  entries: TWO_OUTPUT_SPECS.map((spec) => ({ variantId: spec.variantId, aspectRatio: spec.aspectRatio })),
+}).consumption('render', STABLE_VARIANT[format])
+
 function renderSourceFor(input) {
   const editPlan = {
     ...input.directedPlan,
     subtitleTracks: input.directedPlan.subtitleTracks.map((track) => ({ ...track, cues: input.cues })),
   }
-  return Object.freeze({
+  return withConsumption(Object.freeze({
     projectId: PROJECT_ID,
     projectVersionId: input.projectVersionId,
     editPlanSnapshotId: input.editPlanSnapshotId,
@@ -642,7 +654,7 @@ function renderSourceFor(input) {
     criticIssues: Object.freeze([]),
     subtitleResolution: input.subtitleResolution,
     reframePlan: reframePlanFor(input.format),
-  })
+  }), renderConsumption(input.projectVersionId, input.format))
 }
 
 async function renderThroughRealWorker(input) {
@@ -753,7 +765,8 @@ async function renderThroughRealWorker(input) {
         assert.equal(attached.operationId, operation.id)
         assert.equal(attached.projectId, context.projectId)
         assert.equal(attached.projectVersionId, context.projectVersionId)
-        assert.equal(attached.variantId, source.format)
+        assert.equal(attached.variantId, STABLE_VARIANT[source.format], 'the render is attributed to the stable variant of its output')
+        assert.equal(attached.format, source.format)
         assert.equal(attached.originalFileName, context.originalFileName)
         assert.equal(attached.createdAt, attached.review.renderCompletedAt)
         assert.equal(attached.outputArtifactId, context.outputArtifactId)
@@ -1087,37 +1100,40 @@ test('T-WAVE10 controlled presets/overrides and real proxy; unknown suppresses c
       directedCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame, text: cue.text })),
     )
     let overrideCounter = 0
+    let materializationCounter = 0
     const applyOverride = applySubtitleSegmentOverrideService({
       repository: overrideRepository,
       clock: () => new Date(`2026-10-17T10:0${overrideCounter}:00.000Z`),
-      createId: (kind) => `${kind}-subtitle-override-${overrideCounter}`,
+      // every output of the State re-materializes from the new plan, each under its own materialization id
+      createId: (kind) => kind === 'materialization'
+        ? `${kind}-subtitle-override-${overrideCounter}-${++materializationCounter}` : `${kind}-subtitle-override-${overrideCounter}`,
     })
     overrideCounter += 1
     const applied = await applyOverride({
       workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
       baseVersionId: journey.directed.version.id, baseHash: journey.directed.version.baseHash,
-      variantId: OVERRIDE_VARIANT, segmentId: OVERRIDE_SEGMENT_ID, action: 'set',
+      variantId: OVERRIDE_VARIANT_ID, segmentId: OVERRIDE_SEGMENT_ID, action: 'set',
       dimensions: [{ kind: 'text', text: OVERRIDE_TEXT }], protected: true,
       actor: proxyActor(), idempotencyKey: 'wave10-subtitle-override-text',
       reason: 'Correcao pontual de uma fala, apenas no vertical.',
     })
     const exception = applied.subtitleOverride
-    assert.equal(exception.variantId, OVERRIDE_VARIANT)
+    assert.equal(exception.variantId, OVERRIDE_VARIANT_ID)
     assert.equal(exception.segmentId, OVERRIDE_SEGMENT_ID)
     assert.deepEqual({ ...exception.range }, { startFrame: 70, endFrame: 100 })
     assert.equal(exception.protected, true)
     assert.deepEqual(exception.dimensions.map((item) => item.kind), ['text'])
     assert.equal(applied.command.type, 'apply-subtitle-segment-override')
-    assert.deepEqual([...applied.command.scope.outputSpecIds], [OVERRIDE_VARIANT])
+    assert.deepEqual([...applied.command.scope.outputVariantIds], [OVERRIDE_VARIANT_ID])
     assert.deepEqual({ ...applied.command.scope.frameRange }, { startFrame: 70, endFrame: 100 })
     console.log(`R3 override ${exception.id} overrideHash=${exception.overrideHash.slice(0, 12)} version=${applied.version.id} range=[70,100) variant=${OVERRIDE_VARIANT}`)
 
-    const overrides = await overrideRepository.listCurrentByVariant({ variantId: OVERRIDE_VARIANT })
+    const overrides = await overrideRepository.listCurrentByVariant({ variantId: OVERRIDE_VARIANT_ID })
     const portraitApplication = applySubtitleSegmentOverrides({
-      cues: directedCues, overrides, variantId: OVERRIDE_VARIANT,
+      cues: directedCues, overrides, variantId: OVERRIDE_VARIANT_ID,
     })
     const siblingApplication = applySubtitleSegmentOverrides({
-      cues: directedCues, overrides, variantId: SIBLING_VARIANT,
+      cues: directedCues, overrides, variantId: SIBLING_VARIANT_ID,
     })
     assert.deepEqual(
       portraitApplication.applied.map((item) => [item.overrideId, item.segmentId, [...item.kinds]]),
@@ -1211,7 +1227,7 @@ test('T-WAVE10 controlled presets/overrides and real proxy; unknown suppresses c
     const unprotected = await applyOverride({
       workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
       baseVersionId: overrideRepository.version.id, baseHash: overrideRepository.version.baseHash,
-      variantId: OVERRIDE_VARIANT, segmentId: 'subtitle-cue-3', action: 'set',
+      variantId: OVERRIDE_VARIANT_ID, segmentId: 'subtitle-cue-3', action: 'set',
       dimensions: [{ kind: 'position', anchor: 'top' }], protected: false,
       actor: proxyActor(), idempotencyKey: 'wave10-subtitle-override-unprotected',
     })
@@ -1219,8 +1235,8 @@ test('T-WAVE10 controlled presets/overrides and real proxy; unknown suppresses c
     const recompiled = reapplyProtectedSubtitleSegmentOverrides({
       // A fresh Director pass produces the same ranges with the original texts.
       recompiledCues: directedCues,
-      overrides: await overrideRepository.listCurrentByVariant({ variantId: OVERRIDE_VARIANT }),
-      variantId: OVERRIDE_VARIANT,
+      overrides: await overrideRepository.listCurrentByVariant({ variantId: OVERRIDE_VARIANT_ID }),
+      variantId: OVERRIDE_VARIANT_ID,
     })
     assert.deepEqual(
       recompiled.cues.map((cue) => [cue.id, cue.text]),
@@ -1274,7 +1290,7 @@ test('T-WAVE10 controlled presets/overrides and real proxy; unknown suppresses c
       projectVersionId: applied.version.id,
       projectVersionSequence: applied.version.sequence,
       isCurrentVersion: true,
-      variantId: OVERRIDE_VARIANT,
+      variantId: OVERRIDE_VARIANT_ID,
       outputKind: 'proxy',
       outputArtifactId: 'artifact-override-9x16-proxy',
       outputManifestId: 'manifest-override-9x16-proxy',
@@ -1291,8 +1307,8 @@ test('T-WAVE10 controlled presets/overrides and real proxy; unknown suppresses c
       cueTexts,
       review: { status: 'ready-for-final', finalAllowed: true, reviewHash: 'd'.repeat(64) },
     })
-    const alignments = new Map([[`${applied.version.id}:${OVERRIDE_VARIANT}`, alignment]])
-    alignments.set(`head:${OVERRIDE_VARIANT}`, alignment)
+    const alignments = new Map([[`${applied.version.id}:${OVERRIDE_VARIANT_ID}`, alignment]])
+    alignments.set(`head:${OVERRIDE_VARIANT_ID}`, alignment)
     const sidecars = inMemorySidecars(alignments)
     const effects = { artifactPersistence: 0, promotion: 0, staging: 0 }
     const beforeArtifactCount = artifacts.size
@@ -1311,7 +1327,7 @@ test('T-WAVE10 controlled presets/overrides and real proxy; unknown suppresses c
       (error) => error.code === 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH')
     for (const format of ['srt', 'vtt']) await assert.rejects(exportSidecar({
       workspaceId: WORKSPACE_ID, actor: proxyActor(), projectId: PROJECT_ID,
-      variantId: OVERRIDE_VARIANT, format, idempotencyKey: `wave10-sidecar-${format}`,
+      variantId: OVERRIDE_VARIANT_ID, format, idempotencyKey: `wave10-sidecar-${format}`,
     }), (error) => error.code === 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH')
     assert.equal(sidecars.rows.length, 0, 'No sidecar may be invented from suppressed cues')
     const listed = await listProjectSubtitleSidecarsService({ sidecars })({
@@ -1321,11 +1337,11 @@ test('T-WAVE10 controlled presets/overrides and real proxy; unknown suppresses c
 
     // ===== Requirement 7 (sidecar half): a tampered map is refused ============
     const tamperedHash = { ...alignment, renderElementMapHash: 'f'.repeat(64) }
-    alignments.set(`head:${OVERRIDE_VARIANT}`, tamperedHash)
+    alignments.set(`head:${OVERRIDE_VARIANT_ID}`, tamperedHash)
     await assert.rejects(
       () => exportSidecar({
         workspaceId: WORKSPACE_ID, actor: proxyActor(), projectId: PROJECT_ID,
-        variantId: OVERRIDE_VARIANT, format: 'srt', idempotencyKey: 'wave10-sidecar-tamper-hash',
+        variantId: OVERRIDE_VARIANT_ID, format: 'srt', idempotencyKey: 'wave10-sidecar-tamper-hash',
       }),
       (error) => error.code === 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
     )
@@ -1339,17 +1355,17 @@ test('T-WAVE10 controlled presets/overrides and real proxy; unknown suppresses c
       },
     }
     assert.notEqual(renderElementMapHash(widened.map), mapHash, 'The geometry-tamper negative must change the real map')
-    alignments.set(`head:${OVERRIDE_VARIANT}`, widened)
+    alignments.set(`head:${OVERRIDE_VARIANT_ID}`, widened)
     await assert.rejects(
       () => exportSidecar({
         workspaceId: WORKSPACE_ID, actor: proxyActor(), projectId: PROJECT_ID,
-        variantId: OVERRIDE_VARIANT, format: 'srt', idempotencyKey: 'wave10-sidecar-tamper-map',
+        variantId: OVERRIDE_VARIANT_ID, format: 'srt', idempotencyKey: 'wave10-sidecar-tamper-map',
       }),
       (error) => error.code === 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
     )
     // An alignment redirected at an artifact that no render produced. The master
     // was ingested, not rendered, so its manifest recipe is not a render recipe.
-    alignments.set(`head:${OVERRIDE_VARIANT}`, {
+    alignments.set(`head:${OVERRIDE_VARIANT_ID}`, {
       ...alignment,
       outputArtifactId: MASTER_ARTIFACT_ID,
       outputManifestId: MASTER_MANIFEST_ID,
@@ -1359,14 +1375,14 @@ test('T-WAVE10 controlled presets/overrides and real proxy; unknown suppresses c
     await assert.rejects(
       () => exportSidecar({
         workspaceId: WORKSPACE_ID, actor: proxyActor(), projectId: PROJECT_ID,
-        variantId: OVERRIDE_VARIANT, format: 'srt', idempotencyKey: 'wave10-sidecar-tamper-artifact',
+        variantId: OVERRIDE_VARIANT_ID, format: 'srt', idempotencyKey: 'wave10-sidecar-tamper-artifact',
       }),
       (error) => error.code === 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
     )
     assert.equal(sidecars.rows.length, 0, 'No tampered attempt may persist a sidecar')
     assert.equal(artifacts.size, beforeArtifactCount)
     assert.deepEqual(effects, { artifactPersistence: 0, promotion: 0, staging: 0 })
-    alignments.set(`head:${OVERRIDE_VARIANT}`, alignment)
+    alignments.set(`head:${OVERRIDE_VARIANT_ID}`, alignment)
     t.diagnostic(JSON.stringify({ proofScope: 'controlled-worker-render-mechanics', faceSafety: 'unknown', editorialAcceptance: false,
       sidecarAdmission: { code: 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH', persistedRows: 0, effects },
       pending: ['authoritative perceptual placement', 'burned caption/override timing', 'rendered-cue SRT/VTT and replay/lineage'] }))

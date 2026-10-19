@@ -33,6 +33,7 @@ import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/
 import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from '../../src/v2/infrastructure/media/ffmpeg-binary.ts'
 import { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
 import { replaceThenDirect, sealedMasterHead } from './helpers/retimed-journey-world.mjs'
+import { fakeOutputWorld, withConsumption } from './helpers/output-consumption-fakes.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = resolveFfmpegBinary(process.env.FFMPEG_BIN)
@@ -367,7 +368,10 @@ async function renderThroughRealWorker(input) {
   const masterSha256 = createHash('sha256').update(masterBytes).digest('hex')
 
   const compilation = colorCompilation(MASTER_ARTIFACT_ID)
-  const source = Object.freeze({
+  // S3: a render consumes ONE persisted verdict (`render`) of the output it is made for and seals it into its input hash. This suite's
+  // renderer-side world is a controlled one, so the verdict is the fake State's: one 9:16 output, 'variant-main'.
+  const outputWorld = fakeOutputWorld({ workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, versionId: input.projectVersionId })
+  const source = withConsumption(Object.freeze({
     projectId: PROJECT_ID,
     projectVersionId: input.projectVersionId,
     editPlanSnapshotId: input.editPlanSnapshotId,
@@ -386,7 +390,7 @@ async function renderThroughRealWorker(input) {
     originalFileName: 'rate-master.mp4',
     uploadReceivedAt: UPLOAD_RECEIVED_AT,
     criticIssues: Object.freeze([]),
-  })
+  }), outputWorld.consumption('render'))
 
   const colorPipelines = {
     async listForSource({ sourceArtifactId, sourceManifestId }) {
@@ -767,7 +771,7 @@ function assertWorkerContract(rendered, expected) {
   assert.equal(rendered.review.timeToFirstProxyMs >= 1_800_000, true)
   assert.deepEqual(rendered.attached, {
     workspaceId: WORKSPACE_ID, operationId: expected.operationId, projectId: PROJECT_ID,
-    projectVersionId: expected.projectVersionId, variantId: '9:16',
+    projectVersionId: expected.projectVersionId, variantId: 'variant-main', format: '9:16',
     outputArtifactId: expected.outputArtifactId, outputManifestId: expected.outputManifestId,
     originalFileName: 'rate-master-editorial.mp4', createdAt: rendered.attached.createdAt,
     lease: { owner: `worker-${expected.operationId.slice('operation-'.length)}`, attempt: 1, now: rendered.attached.lease.now },

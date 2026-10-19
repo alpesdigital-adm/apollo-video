@@ -29,8 +29,8 @@ export const TWO_OUTPUT_SPECS = Object.freeze([
  * Root, 16:9 output, 9:16 output, one controlled ingest. `parent` is the ingested bundle (both entries materialized from its plan);
  * `wideVariantId` / `verticalVariantId` are the stable State variant ids of the outputs.
  */
-export async function twoOutputIngestedWorld({ sourceDurationSeconds = 6, slug, actor, specs = TWO_OUTPUT_SPECS } = {}) {
-  const world = outputWorld(actor)
+export async function twoOutputIngestedWorld({ sourceDurationSeconds = 6, slug, actor, specs = TWO_OUTPUT_SPECS, ids } = {}) {
+  const world = outputWorld(actor, { ids })
   const root = await world.create(creationRequest(world))
   const scope = { workspaceId: root.bundle.version.workspaceId, projectId: root.projectAtCreation.id }
   const audit = materializeActorAuditContext(world.actor)

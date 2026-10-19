@@ -5,11 +5,13 @@ import { replaceSourceTranscriptService } from '../../../src/v2/application/repl
 import { runProjectDirectorService } from '../../../src/v2/application/run-project-director.ts'
 import { calculateVersionHash } from '../../../src/v2/application/version-hash.ts'
 import { operationalBundlePlanV3 } from '../../../src/v2/domain/output-version-bundle.ts'
+import { outputEntryAspectRatio } from '../../../src/v2/domain/output-consumption.ts'
 import { createProductionBrief } from '../../../src/v2/domain/production-brief.ts'
 import { childCommandOf } from '../../../src/v2/domain/project-output-state-transition.ts'
 import { createSourceTranscriptArtifactInvalidations } from '../../../src/v2/domain/source-transcript-replacement.ts'
 import { createEvidenceBoundBriefCompiler } from '../../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { ingestedWorld, recompiledChild, worldActor } from './output-world.mjs'
+import { twoOutputIngestedWorld } from './m1b-two-output-world.mjs'
 
 /**
  * The physical retiming journeys (transcript-rate, wave9, wave10) start from a sealed ProjectVersion3/State3, the same way
@@ -18,15 +20,34 @@ import { ingestedWorld, recompiledChild, worldActor } from './output-world.mjs'
  * digest and size), and the head carries the suite's compiled EditPlan. Persistence is the only thing replaced.
  */
 
+/**
+ * The outputs of a project are the State's stable variants (S3): a render reference names one of them, never an aspect ratio. A suite
+ * that still names its output by aspect ratio ('9:16') is mapped to the stable id of the State entry that carries that ratio.
+ */
+export const variantIdsOf = (parent) => parent.state.document.entries.map((entry) => entry.variantId)
+export const stableOutputReferences = (parent, references) => {
+  const entries = parent.state.document.entries
+  return references.map((reference) => ({
+    ...reference,
+    // The pure world carries ONE output (whatever its own ratio is): a suite that names it by the ratio it renders ('9:16') means it.
+    variantId: entries.find((entry) => entry.variantId === reference.variantId || outputEntryAspectRatio(entry) === reference.variantId)?.variantId
+      ?? (entries.length === 1 ? entries[0].variantId : reference.variantId),
+  }))
+}
+
 /** The sealed head of a project whose single recording is `master` and whose EditPlan is `plan`. */
-export async function sealedMasterHead({ workspaceId, projectId, clientId, credentialId, environment = 'production', master, plan, suffix = 'journey-base' }) {
+export async function sealedMasterHead({ workspaceId, projectId, clientId, credentialId, environment = 'production', master, plan, suffix = 'journey-base', twoOutputs = false }) {
   const actor = worldActor({ workspaceId, clientId, credentialId, environment })
-  const world = await ingestedWorld({
-    actor, ids: { project: projectId }, slug: master.artifactId, sourceDurationSeconds: master.durationSeconds,
-    ...(master.sourceKey ? { sourceKey: master.sourceKey } : {}),
-    ...(master.sourceSha256 ? { sourceSha256: master.sourceSha256 } : {}),
-    ...(master.sourceByteSize ? { sourceByteSize: master.sourceByteSize } : {}),
-  })
+  // `twoOutputs`: the project carries a 16:9 and a 9:16 output (stable variants `variant-m1b-wide` / `variant-m1b-vertical`), the way a
+  // journey that renders and edits per format has them in the product; otherwise the single editorial output.
+  const world = twoOutputs
+    ? await twoOutputIngestedWorld({ actor, ids: { project: projectId }, slug: master.artifactId, sourceDurationSeconds: master.durationSeconds })
+    : await ingestedWorld({
+      actor, ids: { project: projectId }, slug: master.artifactId, sourceDurationSeconds: master.durationSeconds,
+      ...(master.sourceKey ? { sourceKey: master.sourceKey } : {}),
+      ...(master.sourceSha256 ? { sourceSha256: master.sourceSha256 } : {}),
+      ...(master.sourceByteSize ? { sourceByteSize: master.sourceByteSize } : {}),
+    })
   const head = recompiledChild(world.parent, actor, () => structuredClone(plan), { suffix })
   return Object.freeze({ world, actor, head })
 }
@@ -48,7 +69,7 @@ export class SealedReplacementRepository {
       parent: this.parent, editPlan: JSON.parse(snapshot.contentJson), editPlanHash: snapshot.contentHash,
       currentTranscript: this.currentTranscript,
       replacementTranscript: this.replacement,
-      outputReferences: this.outputReferences(this.parent.version.id),
+      outputReferences: stableOutputReferences(this.parent, this.outputReferences(this.parent.version.id)),
     }
   }
 
@@ -95,9 +116,9 @@ export class SealedDirectorRepository {
       policies: { automaticZoom: false, faceProtection: true, guardrails: [] },
       editPlan: this.editPlan,
       currentDurationFrames: this.editPlan.durationFrames,
-      proxyVariantId: '9:16',
+      variantIds: variantIdsOf(this.parent),
       sourceRights: { state: 'present', status: 'approved', consentStatus: 'not-required', ...this.sourceRights },
-      outputReferences: this.outputReferences(this.parent.version.id),
+      outputReferences: stableOutputReferences(this.parent, this.outputReferences(this.parent.version.id)),
       transcript: {
         id: this.transcript.id, sourceArtifactId: this.transcript.sourceArtifactId, language: 'pt-BR',
         provider: 'groq', model: 'whisper-large-v3', transcriptHash: this.transcript.transcriptHash,

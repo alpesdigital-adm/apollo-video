@@ -10,6 +10,8 @@ import test from 'node:test'
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
 import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
+import { fakeOutputWorld, withConsumption } from './helpers/output-consumption-fakes.mjs'
+import { TWO_OUTPUT_SPECS } from './helpers/m1b-two-output-world.mjs'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 import { setProjectSubtitleConfigurationService } from '../../src/v2/application/project-subtitle-configurations.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
@@ -232,7 +234,7 @@ async function directOnce(masterPath) {
     workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, clientId: 'client-wave9', credentialId: 'credential-wave9',
     master: { artifactId: MASTER_ARTIFACT_ID, durationSeconds: 6, sourceKey: MASTER_ARTIFACT_KEY,
       sourceSha256: masterSha256, sourceByteSize: masterBytes.byteLength },
-    plan: compiledEditPlan(), suffix: 'wave9-base',
+    plan: compiledEditPlan(), suffix: 'wave9-base', twoOutputs: true,
   })
   const journey = await replaceThenDirect({
     head, actor,
@@ -362,6 +364,14 @@ const subtitleResolutionFor = (presetId) => presetId === null
  * This is a fixture snapshot, not proof of the Prisma adapter's materialization.
  * The original directed document is retained; each track keeps its own cues.
  */
+// S3: a render consumes ONE persisted verdict (`render`) of the output it is made for and seals it into its input hash. The renderer-side
+// world is a controlled one with the two outputs this suite renders: the stable variant of each format.
+const RENDER_VARIANT = Object.freeze(Object.fromEntries(TWO_OUTPUT_SPECS.map((spec) => [spec.aspectRatio, spec.variantId])))
+const renderConsumption = (versionId, format) => fakeOutputWorld({
+  workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, versionId,
+  entries: TWO_OUTPUT_SPECS.map((spec) => ({ variantId: spec.variantId, aspectRatio: spec.aspectRatio })),
+}).consumption('render', RENDER_VARIANT[format])
+
 function renderSourceFor(input) {
   const resolution = input.subtitleResolution
   const editPlan = {
@@ -374,7 +384,7 @@ function renderSourceFor(input) {
   }
   const editPlanHash = calculateVersionHash(editPlan)
   const snapshotSeal = calculateCanonicalHash({ editPlanHash, subtitleResolution: resolution })
-  return Object.freeze({
+  return withConsumption(Object.freeze({
     projectId: PROJECT_ID,
     projectVersionId: input.projectVersionId,
     editPlanSnapshotId: `wave9-materialized-plan-${snapshotSeal}`,
@@ -396,7 +406,7 @@ function renderSourceFor(input) {
     subtitleResolution: resolution,
     reframePlan: input.reframePlan,
     formatSubjects: SUBJECTS[input.format],
-  })
+  }), renderConsumption(input.projectVersionId, input.format))
 }
 
 /**
@@ -527,7 +537,8 @@ async function renderThroughRealWorker(input) {
         assert.equal(attached.operationId, operation.id)
         assert.equal(attached.projectId, context.projectId)
         assert.equal(attached.projectVersionId, context.projectVersionId)
-        assert.equal(attached.variantId, source.format)
+        assert.equal(attached.variantId, RENDER_VARIANT[source.format], 'the render is attributed to the stable variant of its output')
+        assert.equal(attached.format, source.format)
         assert.equal(attached.originalFileName, context.originalFileName)
         assert.equal(attached.createdAt, attached.review.renderCompletedAt)
         assert.equal(attached.outputArtifactId, context.outputArtifactId)
@@ -920,17 +931,20 @@ test('T-WAVE9-E the subtitle configuration chain changes only the preset, never 
     // --- The chain: clean-color -> kinetic -> none -> revert ---------------
     const repository = new SubtitleConfigurationRepository(journey.directed.bundle)
     let counter = 0
+    let materializations = 0
     const setSubtitles = setProjectSubtitleConfigurationService({
       repository,
       clock: () => new Date(`2026-10-17T10:0${counter}:00.000Z`),
-      createId: (kind) => `${kind}-subtitle-${counter}`,
+      // every output of the State re-materializes from the new plan, each under its own materialization id
+      createId: (kind) => kind === 'materialization' ? `${kind}-subtitle-${counter}-${++materializations}` : `${kind}-subtitle-${counter}`,
     })
     const step = async (label, request) => {
       counter += 1
       return setSubtitles({
         workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
         baseVersionId: repository.version.id, baseHash: repository.version.baseHash,
-        variantId: '16:9', actor: proxyActor(),
+        // the stable variant of the 16:9 output the configuration is for
+        variantId: RENDER_VARIANT['16:9'], actor: proxyActor(),
         idempotencyKey: `wave9-subtitle-${label}`, ...request,
       })
     }
