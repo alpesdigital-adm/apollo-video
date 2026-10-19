@@ -59,7 +59,7 @@ async function checkFreeze(split, corpusDir, manifestBytes) {
   const frozen = freeze.corpus[split]
   const manifestSha = sha256(manifestBytes)
   if (!frozen || frozen.manifestSha256 !== manifestSha) problems.push(`corpus manifest ${manifestSha} != frozen ${frozen?.manifestSha256}`)
-  const dirty = await git('status', '--porcelain', '--', 'scripts/validation', 'docs/quality', 'tests/v2/w63b-label-metrics.test.mjs')
+  const dirty = await git('status', '--porcelain', '--', ...Object.keys(freeze.files), 'docs/quality/w63b-freeze.json')
   if (dirty) problems.push(`frozen paths have uncommitted changes:\n${dirty}`)
   const freezeCommit = await git('log', '-1', '--format=%H', '--', 'docs/quality/w63b-freeze.json')
   if (!freezeCommit) problems.push('docs/quality/w63b-freeze.json is not committed')
@@ -211,15 +211,19 @@ async function robustness(db, ctx, mainReports, producedByClip, entries) {
         !snapshot.result.coverage.some((item) => item.state === 'complete'),
       { states: Object.fromEntries(Object.entries(byKind).map(([kind, item]) => [kind, [item.state, item.reasonCode ?? null]])), ocrSampledRanges: sampled, ocrUnexaminedMs: complement })
 
-    // R3 reorder (evidence order): two OCR envelopes of one version assemble to the same snapshot in either order
-    const second = await s.enqueueOcr({ ...ask, sampleIntervalFrames: 30, idempotencyKey: `w63b-ocr-second-${world.suffix}` })
-    const secondRun = await s.runOcr(`w63b-ocr-worker-second-${world.suffix}`)
-    const input2 = await s.evidence.readForVersion({ workspaceId: world.workspaceId, projectId: world.projectId, projectVersionId: world.versionId, now: new Date() })
-    const forward = assembleServerPerceptionSnapshot(input2)
-    const reversed = assembleServerPerceptionSnapshot({ ...input2, ocr: [...input2.ocr].reverse(), temporal: [...input2.temporal].reverse() })
-    record('reordered-evidence-same-hash', 'the same evidence in another order is the same snapshot (same hash); two OCR runs of one version are both used',
-      secondRun?.status === 'succeeded' && input2.ocr.length === 2 && forward.snapshotHash === reversed.snapshotHash,
-      { secondOperation: second.operation.id, secondStatus: secondRun?.status, envelopes: input2.ocr.length, forward: forward.snapshotHash, reversed: reversed.snapshotHash })
+    // R3 reorder (evidence order): evidence of ANOTHER version is rejected and listed; the order the evidence is handed over in changes nothing
+    const otherKey = [...producedByClip.keys()].find((id) => id !== 'static-a' && id !== 'robustness-pts-gap-a' && producedByClip.get(id).produced.outcome.ocr.status === 'succeeded' && producedByClip.get(id).produced.outcome.temporal.status === 'succeeded')
+    if (otherKey) {
+      const otherWorld = producedByClip.get(otherKey).world
+      const foreign = await s.evidence.readForVersion({ workspaceId: otherWorld.workspaceId, projectId: otherWorld.projectId, projectVersionId: otherWorld.versionId, now: new Date() })
+      const own = await s.evidence.readForVersion({ workspaceId: world.workspaceId, projectId: world.projectId, projectVersionId: world.versionId, now: new Date() })
+      const forward = assembleServerPerceptionSnapshot({ ...own, ocr: [...own.ocr, ...foreign.ocr], temporal: [...own.temporal, ...foreign.temporal] })
+      const reversed = assembleServerPerceptionSnapshot({ ...own, ocr: [...foreign.ocr, ...own.ocr], temporal: [...foreign.temporal, ...own.temporal] })
+      const alone = assembleServerPerceptionSnapshot(own)
+      record('reordered-evidence-same-hash', 'the same evidence in another order is the same snapshot (same hash); evidence of another version is rejected and listed, never fused',
+        forward.snapshotHash === reversed.snapshotHash && forward.rejected.length === 2 && forward.timelineHash === alone.timelineHash && alone.rejected.length === 0,
+        { foreignClip: otherKey, forward: forward.snapshotHash, reversed: reversed.snapshotHash, rejected: forward.rejected.map((item) => [item.kind, item.reasonCodes]), timelineHashUnchanged: forward.timelineHash === alone.timelineHash })
+    } else record('reordered-evidence-same-hash', 'evidence order does not change the snapshot', false, { reason: 'no second successful clip in this run to borrow foreign evidence from' })
 
     // R4 adversarial source (i): envelope rows bound to other source bytes are refused at read, and restoring them restores the read
     const temporalRow = await db.v2TemporalProducerEnvelope.findFirstOrThrow({ where: { workspaceId: world.workspaceId, operationId: outcome.operations.temporal } })
@@ -248,8 +252,8 @@ async function robustness(db, ctx, mainReports, producedByClip, entries) {
     } finally { await fresh.$disconnect() }
     const rows = await db.v2ServerPerceptionSnapshot.count({ where: { workspaceId: world.workspaceId, projectVersionId: world.versionId } })
     record('replay-same-snapshot-hash', 'repeated reads and a fresh connection return the same snapshot hash and the same content-addressed row',
-      new Set([...reads, freshRead].map((item) => item.snapshot.snapshotHash)).size === 1 && new Set([...reads, freshRead].map((item) => item.id)).size === 1 && rows >= 1 && rows <= 2,
-      { hashes: [...reads, freshRead].map((item) => item.snapshot.snapshotHash), rowsForVersion: rows, note: 'the second OCR run of R3 legitimately created one more snapshot row for this version before the replay reads' })
+      new Set([...reads, freshRead].map((item) => item.snapshot.snapshotHash)).size === 1 && new Set([...reads, freshRead].map((item) => item.id)).size === 1 && rows === 1,
+      { hashes: [...reads, freshRead].map((item) => item.snapshot.snapshotHash), rowsForVersion: rows})
     void actor
   }
 
