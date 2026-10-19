@@ -13,7 +13,7 @@ import { lockProducerPublishOperation, lockProducerPublishProject, lockProducerP
 import { hydratePublicOperationRecord, OPERATION_INCLUDE, persistOperationStatusEvents,
   type StoredOperation } from './public-operation-repository.ts'
 
-function conflict(message: string): never { throw new DomainError('PERSISTENCE_CONFLICT', message) }
+export function conflict(message: string): never { throw new DomainError('PERSISTENCE_CONFLICT', message) }
 
 /** This first producer is pinned to the failed-gate V5 diagnosis, never a quality approval. */
 function assertDiagnosticProducer(envelope: FaceProducerEnvelope) {
@@ -31,7 +31,7 @@ function assertDiagnosticProducer(envelope: FaceProducerEnvelope) {
   }
 }
 
-async function emitOperationTransition(transaction: Prisma.TransactionClient,
+export async function emitOperationTransition(transaction: Prisma.TransactionClient,
   previous: StoredOperation, operationId: string) {
   const next = await transaction.v2PublicOperation.findUnique({
     where: { id: operationId }, include: OPERATION_INCLUDE,
@@ -45,7 +45,7 @@ async function emitOperationTransition(transaction: Prisma.TransactionClient,
   await persistOperationStatusEvents(transaction, before.status, after, randomUUID)
 }
 
-function sourceMap(contentJson: string, sourceArtifactId: string) {
+export function sourceMap(contentJson: string, sourceArtifactId: string) {
   let plan: unknown
   try { plan = JSON.parse(contentJson) } catch { conflict('Stored edit plan JSON is invalid') }
   const value = plan as Record<string, unknown>
@@ -133,7 +133,8 @@ export class PrismaFaceProducerEnvelopeRepository {
     }
     return this.client.$transaction(async (transaction) => {
       const candidates = await transaction.v2PublicOperation.findMany({
-        where: { type: 'perception-face-run',
+        // The V9 window profile is claimed by its own worker; this one never touches it.
+        where: { type: 'perception-face-run', faceProducerOperation: { is: { detectorProfile: 'yunet-v5-diagnostic' } },
           OR: [{ status: 'queued' }, { status: 'retrying', nextAttemptAt: { lte: input.now } },
             { status: 'running', leaseExpiresAt: { lte: input.now } }] },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -350,7 +351,8 @@ export class PrismaFaceProducerEnvelopeRepository {
       const run = await transaction.v2FaceProducerOperation.findUnique({
         where: { operationId: operation.id },
       })
-      if (!run || run.workspaceId !== envelope.workspaceId || run.projectId !== envelope.projectId ||
+      if (!run || run.detectorProfile !== 'yunet-v5-diagnostic' || run.workspaceId !== envelope.workspaceId ||
+          run.projectId !== envelope.projectId ||
           run.projectVersionId !== envelope.projectVersionId || run.sourceArtifactId !== envelope.sourceArtifactId ||
           run.sourceSha256 !== envelope.sourceSha256 || run.editPlanSnapshotId !== envelope.editPlanSnapshotId ||
           run.editPlanSnapshotHash !== envelope.editPlanSnapshotHash ||
@@ -416,6 +418,7 @@ export class PrismaFaceProducerEnvelopeRepository {
         editPlanSnapshotId: envelope.editPlanSnapshotId, editPlanSnapshotHash: envelope.editPlanSnapshotHash,
         timeMapHash: envelope.timeMapHash, detectorConfigHash: envelope.detectorConfigHash,
         contentJson: stableSerialize(envelope), envelopeHash: envelope.envelopeHash,
+        schemaVersion: 'face-producer-envelope/v1',
         createdAt: new Date(envelope.createdAt),
       } })
       await emitOperationTransition(transaction, operation, operation.id)
@@ -458,7 +461,8 @@ export async function readFaceProducerEnvelope(client: Prisma.TransactionClient,
     try { result = JSON.parse(row.operation.resultJson ?? '') as Record<string, unknown> }
     catch { conflict('Producer operation result is invalid') }
     const run = row.operation.faceProducerOperation
-    if (!run || run.workspaceId !== envelope.workspaceId || run.projectId !== envelope.projectId ||
+    if (!run || run.detectorProfile !== 'yunet-v5-diagnostic' || row.schemaVersion !== 'face-producer-envelope/v1' ||
+        run.workspaceId !== envelope.workspaceId || run.projectId !== envelope.projectId ||
         run.projectVersionId !== envelope.projectVersionId || run.projectVersionHash !== row.projectVersion.baseHash ||
         run.sourceArtifactId !== envelope.sourceArtifactId || run.sourceSha256 !== envelope.sourceSha256 ||
         run.editPlanSnapshotId !== envelope.editPlanSnapshotId ||

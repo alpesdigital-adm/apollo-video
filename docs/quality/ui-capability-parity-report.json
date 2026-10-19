@@ -4,9 +4,9 @@
     "uiActions": 176,
     "capabilities": 156,
     "endpoints": 156,
-    "registeredCapabilities": 387,
-    "operableCapabilities": 387,
-    "publicContractCapabilities": 387,
+    "registeredCapabilities": 391,
+    "operableCapabilities": 391,
+    "publicContractCapabilities": 391,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -5892,6 +5892,50 @@
       "endpoint": "GET /v1/projects/{projectId}/face-producer-operations/{operationId}",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/face-producer-operation-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.face-window-operations.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/face-window-operations",
+      "inputSchemaRef": "apollo://schemas/face-window-run-request/v1",
+      "outputSchemaRef": "apollo://schemas/face-window-operation-created/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.face-window-operations.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/face-window-operations/{operationId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/face-window-operation-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.face-source-windows.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/face-source-windows",
+      "inputSchemaRef": "apollo://schemas/face-source-window-run-request/v1",
+      "outputSchemaRef": "apollo://schemas/face-source-window-operation-created/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.face-source-windows.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/face-source-windows/{operationId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/face-source-window-operation-read/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

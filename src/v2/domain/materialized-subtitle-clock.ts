@@ -4,6 +4,12 @@ import { assertRenderInputSpec, type RenderInputSpecV1 } from './render-input.ts
 import { sealOutputSpecRevision, freezeOutputJson, requireOutputHash, requireOutputId,
   type OutputSpecRevision, type OutputJson } from './output-spec-revision.ts'
 import { calculateOutputCanonicalHash, OUTPUT_CANONICAL_POLICY_VERSION } from './output-canonical-policy.ts'
+import { LIBASS_NOW_CONVERSION_POLICY, assCentisecondTimestamp, createAssBoundaryBinder, derivePinnedLibassNowMs,
+  legalAssCentisecondPreimage, parseClockInt64 as signed, parseClockTimeBase as timeBase,
+  type ClockTimeBase } from './libass-clock-model.ts'
+
+export { assCentisecondTimestamp, derivePinnedLibassNowMs, legalAssCentisecondPreimage }
+export type { ClockTimeBase }
 
 /** Isolated contract only. No recipe/renderer/cache/publication activation.
  * nowMs is derived from pinned FFmpeg conversion, not observed inside libass.
@@ -11,8 +17,7 @@ import { calculateOutputCanonicalHash, OUTPUT_CANONICAL_POLICY_VERSION } from '.
  * implicit conversion at ass_render_frame truncates to signed long long.
  * Each binary/build must prove this FP64 policy before an adapter may use it. */
 export const MATERIALIZED_SUBTITLE_CLOCK_VERSION = 'materialized-subtitle-clock/v1' as const
-export const SUBTITLE_CLOCK_CONVERSION_POLICY = 'ffmpeg-ass-fp64-q2d-mul1000-trunc-int64/v1' as const
-export interface ClockTimeBase { numerator: string; denominator: string }
+export const SUBTITLE_CLOCK_CONVERSION_POLICY = LIBASS_NOW_CONVERSION_POLICY
 export interface ObservedClockFrame {
   frame: number
   pts: string
@@ -106,18 +111,6 @@ const integer = (value: unknown) => typeof value === 'number' && Number.isSafeIn
 function exact(value: object, keys: readonly string[]): void {
   check(Object.keys(value).length === keys.length && Object.keys(value).every((key) => keys.includes(key)), 'Clock document has missing or unsupported fields')
 }
-function signed(value: string): bigint {
-  check(typeof value === 'string' && /^(?:0|-?[1-9]\d{0,18})$/.test(value), 'Clock integer must be canonical signed int64')
-  const result = BigInt(value)
-  check(result >= MIN_I64 && result <= MAX_I64, 'Clock integer overflow')
-  return result
-}
-function timeBase(value: ClockTimeBase): readonly [bigint, bigint] {
-  exact(value, ['numerator', 'denominator'])
-  const num = signed(value.numerator), den = signed(value.denominator)
-  check(num > 0 && den > 0 && num <= MAX_I32 && den <= MAX_I32, 'Clock time_base must be positive AVRational int32')
-  return [num, den]
-}
 function file(value: ClockFileFact): void {
   requireOutputHash(value.sha256, 'clock bytes')
   check(integer(value.byteSize) && value.byteSize > 0, 'Clock binary/font bytes must be materialized')
@@ -126,38 +119,6 @@ function named(value: unknown, field: string): void {
   check(typeof value === 'string' && value.length > 0 && value.length <= 4096 && !/[\u0000-\u001f\u007f]/.test(value), field)
 }
 
-/** Deliberately preserves binary64 rounding at q2d and both multiplications.
- * Exact rational rescaling, n/fps, epsilon and reassociation are different policies. */
-export function derivePinnedLibassNowMs(pts: string, tb: ClockTimeBase): bigint {
-  const value = signed(pts)
-  check(value !== MIN_I64, 'AV_NOPTS_VALUE is not an observed timestamp')
-  const [num, den] = timeBase(tb)
-  const q2d = Number(num) / Number(den)
-  const seconds = Number(value) * q2d
-  const milliseconds = seconds * 1000
-  check(Number.isFinite(milliseconds), 'Non-finite libass clock conversion')
-  const result = BigInt(Math.trunc(milliseconds))
-  check(result >= MIN_I64 && result <= MAX_I64, 'Libass millisecond conversion overflows int64')
-  return result
-}
-function floorDiv(value: bigint, divisor: bigint): bigint {
-  const quotient = value / divisor
-  return value < BigInt(0) && value % divisor !== BigInt(0) ? quotient - BigInt(1) : quotient
-}
-export function legalAssCentisecondPreimage(previousMs: bigint, currentMs: bigint): Readonly<{ minimum: bigint; maximum: bigint }> {
-  check(typeof previousMs === 'bigint' && typeof currentMs === 'bigint' &&
-    previousMs >= MIN_I64 && previousMs <= MAX_I64 && currentMs >= MIN_I64 && currentMs <= MAX_I64 &&
-    currentMs > previousMs, 'ASS boundary requires ordered int64 milliseconds')
-  const minimum = floorDiv(previousMs, BigInt(10)) + BigInt(1), maximum = floorDiv(currentMs, BigInt(10))
-  check(maximum >= minimum && maximum >= BigInt(0), 'ASS interval is not representable in the materialized clock')
-  return Object.freeze({ minimum: minimum < BigInt(0) ? BigInt(0) : minimum, maximum })
-}
-export function assCentisecondTimestamp(cs: bigint): string {
-  check(typeof cs === 'bigint' && cs >= BigInt(0) && cs * BigInt(10) <= MAX_I64 &&
-    cs / BigInt(360000) <= MAX_I32, 'ASS timestamp overflows the millisecond/parser clock')
-  return cs / BigInt(360000) + ':' + String(cs % BigInt(360000) / BigInt(6000)).padStart(2, '0') + ':' +
-    String(cs % BigInt(6000) / BigInt(100)).padStart(2, '0') + '.' + String(cs % BigInt(100)).padStart(2, '0')
-}
 function immutable<T>(value: T): Readonly<T> {
   return freezeOutputJson(value as unknown as OutputJson) as unknown as Readonly<T>
 }
@@ -344,17 +305,10 @@ export function createMaterializedAssClockLookup(input: MaterializedSubtitleCloc
 }> {
   const clock = requireMaterializedSubtitleClock(input)
   const now = clock.frames.map(frameMs)
-  const first = signed(clock.fragment.domain.beforeFirstNowMs), last = signed(clock.fragment.domain.endExclusiveNowMs)
-  const boundary = (frame: number): bigint => {
-    check(integer(frame) && frame <= now.length, 'ASS boundary outside the fragment clock')
-    return legalAssCentisecondPreimage(frame === 0 ? first : now[frame - 1]!, frame === now.length ? last : now[frame]!).maximum
-  }
-  const interval = (start: number, end: number) => {
-    check(integer(start) && integer(end) && end > start, 'Invalid ASS local frame interval')
-    const startCs = boundary(start), endCs = boundary(end)
-    check(endCs > startCs, 'Materialized ASS interval collapses')
-    return Object.freeze({ startCs, endCs })
-  }
+  // One implementation of the representable-interval binder serves this observed
+  // clock and the closed-form clock of the pre-libass stage (see libass-clock-model.ts).
+  const { boundary, interval } = createAssBoundaryBinder({ frameCount: now.length, nowMsAt: (frame) => now[frame]!,
+    beforeFirstNowMs: signed(clock.fragment.domain.beforeFirstNowMs), endExclusiveNowMs: signed(clock.fragment.domain.endExclusiveNowMs) })
   return Object.freeze({ clock, boundary, interval })
 }
 export function materializedAssBoundary(clock: MaterializedSubtitleClock, frame: number): bigint {

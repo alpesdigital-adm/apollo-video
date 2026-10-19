@@ -1,57 +1,48 @@
 import { assertDomain } from './errors.ts'
+import { LIBASS_NOW_CONVERSION_POLICY, createClosedClockAssBoundaryBinder,
+  type AssBoundaryBinder, type AssFrameRate } from './libass-clock-model.ts'
 
-/** FFmpeg vf_subtitles forwards PTS * time_base * 1000 to libass. Events are
- * half-open in milliseconds; ASS stores centiseconds. Never round a boundary
- * into the next frame. A representable global interval does not authorize a
- * clipped/rebased fragment: validate the fragment in its own clock as well. */
+export type { AssBoundaryBinder, AssFrameRate }
+
+/** v3 keeps the v2 binder and changes only the stage that closes the clock. v2 replaced the
+ * reprobated exact-rational v1 arithmetic. FFmpeg vf_subtitles
+ * hands libass `trunc(pts * q2d * 1000)` in binary64, not the exact frame time;
+ * libass events are half-open in milliseconds and ASS stores centiseconds. The
+ * boundary of a frame is therefore an integer centisecond inside the window
+ * `previousNow < 10*cs <= currentNow` of the clock the subtitles filter really
+ * sees, never the centisecond of the ideal time, and an empty window is a typed
+ * refusal. The clock is closed-form because the last stage before the filter is
+ * `settb=1/<rate>,setpts=N`: the frames are numbered consecutively in the inverse
+ * of the rate (v2 used `fps=<rate>`, which lost the last frame on FFmpeg 6.1.1;
+ * see ffmpeg-editorial-composition-graph.ts). A representable global interval does not authorize a
+ * clipped/rebased fragment: every fragment is bound again in its own clock.
+ * Model, cause and proofs: libass-clock-model.ts. */
 export const ASS_EMISSION_POLICY = Object.freeze({
-  version: 'ass-frame-clock/v1',
-  boundary: 'floor-centiseconds-exact-frame-ceiling',
+  version: 'ass-frame-clock/v3',
+  clock: 'settb-setpts-consecutive-pts/v1',
+  conversion: LIBASS_NOW_CONVERSION_POLICY,
+  boundary: 'libass-now-preimage-maximum-centisecond',
+  domain: 'first-minus-one-ms-last-plus-ten-ms',
+  unrepresentable: 'typed-refusal-before-render',
   text: 'nfc-c0-del-reject-lf-wrap',
   fragment: 'revalidate-after-clip-and-rebase',
 } as const)
 
-export type AssFrameRate = number | Readonly<{ numerator: number; denominator: number }>
-const ONE = BigInt(1)
-const CS_PER_SECOND = BigInt(100)
-const CS_PER_MINUTE = BigInt(6000)
-const CS_PER_HOUR = BigInt(360000)
-
-function rational(fps: AssFrameRate): readonly [bigint, bigint] {
-  const numerator = typeof fps === 'number' ? fps : fps.numerator
-  const denominator = typeof fps === 'number' ? 1 : fps.denominator
-  assertDomain(Number.isSafeInteger(numerator) && Number.isSafeInteger(denominator) &&
-    numerator > 0 && denominator > 0,
-  'INVALID_RENDER_INPUT', 'ASS clock requires a positive safe integer rational frame rate')
-  const num = BigInt(numerator), den = BigInt(denominator)
-  assertDomain(num >= den && num <= BigInt(120) * den,
-    'INVALID_RENDER_INPUT', 'ASS frame rate must be between 1 and 120')
-  return [num, den]
+/** Binder of one fragment: `durationFrames` frames numbered from 0 at `fps`. */
+export function assFrameClockBinder(fps: AssFrameRate, durationFrames: number): AssBoundaryBinder {
+  assertDomain(Number.isSafeInteger(durationFrames) && durationFrames > 0,
+    'INVALID_RENDER_INPUT', 'ASS clock requires a positive fragment frame count')
+  return createClosedClockAssBoundaryBinder({ fps, frameCount: durationFrames })
 }
 
-export function assFrameCentiseconds(frame: number, fps: AssFrameRate): bigint {
-  assertDomain(Number.isSafeInteger(frame) && frame >= 0,
-    'INVALID_RENDER_INPUT', 'ASS boundary frame must be a non-negative safe integer')
-  const [num, den] = rational(fps)
-  const cs = BigInt(frame) * CS_PER_SECOND * den / num
-  const scale = CS_PER_SECOND * den
-  assertDomain((cs * num + scale - ONE) / scale === BigInt(frame),
-    'INVALID_RENDER_INPUT', 'ASS boundary cannot represent the exact frame at this frame rate', { frame })
-  return cs
-}
-
-export function assFrameTimestamp(frame: number, fps: AssFrameRate): string {
-  const cs = assFrameCentiseconds(frame, fps)
-  return `${cs / CS_PER_HOUR}:${String(cs % CS_PER_HOUR / CS_PER_MINUTE).padStart(2, '0')}:` +
-    `${String(cs % CS_PER_MINUTE / CS_PER_SECOND).padStart(2, '0')}.${String(cs % CS_PER_SECOND).padStart(2, '0')}`
-}
-
-export function assertAssFrameInterval(start: number, end: number, fps: AssFrameRate): void {
+/** Validates a half-open frame interval of a fragment against its own clock. */
+export function assertAssFrameInterval(start: number, end: number, fps: AssFrameRate, durationFrames: number): void {
   assertDomain(Number.isSafeInteger(start) && Number.isSafeInteger(end) && start >= 0 && end > start,
     'INVALID_RENDER_INPUT', 'ASS interval must be positive in safe integer frames')
-  const startCs = assFrameCentiseconds(start, fps)
-  const endCs = assFrameCentiseconds(end, fps)
-  assertDomain(endCs > startCs, 'INVALID_RENDER_INPUT', 'ASS interval collapses in centiseconds')
+  const binder = assFrameClockBinder(fps, durationFrames)
+  assertDomain(end <= durationFrames, 'INVALID_RENDER_INPUT',
+    'ASS interval ends after the fragment', { start, end, durationFrames })
+  binder.interval(start, end)
 }
 
 /** LF is the only accepted control; the renderer wraps it as ordinary word

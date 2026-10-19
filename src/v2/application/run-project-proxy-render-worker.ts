@@ -7,6 +7,10 @@ import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import { createDirectedAudioTimelineHash } from '../domain/director-run.ts'
 import { readOutputFormatPreset } from '../domain/output-format-registry.ts'
 import type { OutputAspectRatio } from '../domain/output-spec.ts'
+import { plannedCaptionsOverKeptFrames } from './plan-caption-placement.ts'
+import type { FaceSourceWindowEvidenceReader } from './ports/face-source-window-evidence-reader.ts'
+import type { CaptionPixelCritic } from './ports/caption-pixel-critic.ts'
+import { evaluateCaptionPixels, type CaptionPixelIssueV1 } from '../domain/caption-pixel-verdict.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
 import type { ArtifactSourceMaterializer, VerifiedMediaStorage } from './ports/media-ingest.ts'
 import {
@@ -58,6 +62,17 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   colorPlans: Pick<ProjectColorPlanRepository, 'readEffectiveForVersion'>
   luts: ProjectLutRenderMaterializer
   sources: ArtifactSourceMaterializer
+  /**
+   * W65. The sealed face windows of the Version being rendered. Optional: without it no source has evidence, so every band
+   * over the picture is unknown and its cue is not drawn.
+   */
+  faceEvidence?: FaceSourceWindowEvidenceReader
+  /**
+   * W65. Measures, on the delivered MP4, where the captions the plan placed really are, against the same render without the burned
+   * cues. Optional: a deployment without it ships the plan's decision unverified in pixels. When it is wired and a plan draws a
+   * cue, its issues land on the review; if it cannot run, that is a warning, never a pass.
+   */
+  captionPixelCritic?: CaptionPixelCritic
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
@@ -230,10 +245,19 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       // placement plan with its unknown-face anchor plan, and the persisted reframe plan); only the
       // canvas differs, because a placement plan is addressed against the pixels it is drawn on.
       const outputPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
-      const { subtitleCues, subtitleResolution, ctaOverlays, placementPlan, reframePlan } = deriveEditorialRenderGeometry({
+      const { subtitleCues, subtitleResolution, ctaOverlays, placementPlan, reframePlan } = await deriveEditorialRenderGeometry({
         source,
         canvas: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height },
+        workspaceId: operation.workspaceId, projectId: context.projectId, clips,
+        ...(composition ? { composition } : {}),
+        ...(dependencies.faceEvidence ? { faceEvidence: dependencies.faceEvidence } : {}),
+        clock,
+        // W65b. The proxy is what the final is approved from, so it plans under the final's rule: a cue that cannot be certified
+        // is left out and LISTED (a warning the reviewer acknowledges), instead of making the whole proxy unapprovable.
+        uncertifiedCues: 'omit-and-list',
       })
+      // The kept ranges of a reuse are base bytes without any caption; a plan that draws one over them needs the full render.
+      const rangeReuse = source.rangeReuse && !plannedCaptionsOverKeptFrames(placementPlan, source.rangeReuse.ranges) ? source.rangeReuse : undefined
       const ocrReceipt = source.trustedOcr ? Object.freeze({
         envelopeId: source.trustedOcr.envelopeId,
         envelopeHash: source.trustedOcr.envelopeHash,
@@ -256,15 +280,15 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           sha256: asset.sha256,
           byteSize: asset.byteSize,
         })))
-      const materializedRangeReuse = source.rangeReuse
+      const materializedRangeReuse = rangeReuse
         ? await dependencies.sources.materialize({
             operationId: operation.id,
-            artifactKey: source.rangeReuse.artifactKey,
-            sha256: source.rangeReuse.sha256,
-            byteSize: source.rangeReuse.byteSize,
+            artifactKey: rangeReuse.artifactKey,
+            sha256: rangeReuse.sha256,
+            byteSize: rangeReuse.byteSize,
           })
         : undefined
-      const render = () => dependencies.renderer.render({
+      const renderRequest: Parameters<typeof dependencies.renderer.render>[0] = {
         operationId: operation.id,
         renderKind: 'proxy',
         sources: source.renderSources.map((asset, index) => ({
@@ -281,14 +305,15 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         transitions, ...(composition ? { composition } : {}),
         placementPlan,
         ...(reframePlan ? { reframePlan } : {}),
-        ...(source.rangeReuse ? {
+        ...(rangeReuse ? {
           rangeReuse: {
-            ...source.rangeReuse,
+            ...rangeReuse,
             path: materializedRangeReuse!.path,
           },
         } : {}),
         signal: abortController.signal,
-      })
+      }
+      const render = () => dependencies.renderer.render(renderRequest)
       const rendered = dependencies.telemetry
         ? await runPublicOperationSpan({
             telemetry: dependencies.telemetry,
@@ -378,6 +403,30 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           }
         }
       }
+      // ---- W65. Where the captions really are, measured on the bytes that were rendered ----
+      // Only a plan that draws a cue is worth the control render (the same input without the burned cues). The verdict becomes
+      // issues on the review; it never edits the frames.
+      const captionPixelIssues: CaptionPixelIssueV1[] = []
+      const drawsCaptions = placementPlan.subtitleAnchorPlan?.decisions.some((decision) => decision.anchor !== null) === true
+      if (dependencies.captionPixelCritic && drawsCaptions) {
+        const controlOperationId = `${operation.id}-caption-control`
+        try {
+          const verification = await dependencies.captionPixelCritic.verify({
+            plan: placementPlan, deliveredPath: rendered.outputPath, signal: abortController.signal,
+            renderControl: async () => {
+              const control = await dependencies.renderer.render({ ...renderRequest, operationId: controlOperationId, subtitleCues: [] })
+              return { path: control.outputPath }
+            },
+          })
+          captionPixelIssues.push(...verification.issues)
+        } catch (error) {
+          // A critic that was wired and broke leaves the proxy waiting for a person; it does not fail a render that was made.
+          if (abortController.signal.aborted) throw error
+          captionPixelIssues.push(...evaluateCaptionPixels({ plan: placementPlan, samples: [], faceVeto: 'unavailable', measurementFailed: true }))
+        } finally {
+          await dependencies.renderer.cleanup(controlOperationId).catch(() => undefined)
+        }
+      }
       await enter('persisting')
       const stored = await dependencies.storage.promoteDerived({ workspaceId: operation.workspaceId, sourcePath: rendered.outputPath, sha256: rendered.sha256, extension: 'mp4', prefix: artifactOutputStoragePrefix('editorial-proxy', context.outputArtifactId) })
       const toolDigest = createHash('sha256')
@@ -392,16 +441,16 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         colorPipelineBindings: context.colorPipelineBindings,
         colorPlanHash: colorPlan?.plan.planHash ?? null,
         compiledColorPlanManifestHash: colorPlan?.compiled.manifestHash ?? null,
-        rangeReuse: source.rangeReuse ? {
-          schemaVersion: source.rangeReuse.schemaVersion,
-          commandId: source.rangeReuse.commandId,
-          impactHash: source.rangeReuse.impactHash,
-          baseVersionId: source.rangeReuse.baseVersionId,
-          ranges: source.rangeReuse.ranges,
-          artifactId: source.rangeReuse.artifactId,
-          manifestId: source.rangeReuse.manifestId,
-          sha256: source.rangeReuse.sha256,
-          byteSize: source.rangeReuse.byteSize,
+        rangeReuse: rangeReuse ? {
+          schemaVersion: rangeReuse.schemaVersion,
+          commandId: rangeReuse.commandId,
+          impactHash: rangeReuse.impactHash,
+          baseVersionId: rangeReuse.baseVersionId,
+          ranges: rangeReuse.ranges,
+          artifactId: rangeReuse.artifactId,
+          manifestId: rangeReuse.manifestId,
+          sha256: rangeReuse.sha256,
+          byteSize: rangeReuse.byteSize,
         } : null,
         projectLutSelectionId: materializedLut.selectionId,
         projectLutSelectionHash: materializedLut.selectionHash,
@@ -429,9 +478,9 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
             role: asset.role,
             execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } },
           })),
-          ...(source.rangeReuse ? [{
-            artifactKey: source.rangeReuse.artifactKey,
-            sha256: source.rangeReuse.sha256,
+          ...(rangeReuse ? [{
+            artifactKey: rangeReuse.artifactKey,
+            sha256: rangeReuse.sha256,
             role: 'reused-proxy-range',
             execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } },
           }] : []),
@@ -446,7 +495,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       })
       const persisted = await dependencies.artifacts.persistOrReplay({
         workspaceId: operation.workspaceId, artifactId: context.outputArtifactId, manifestId: context.outputManifestId,
-        lineageIds: [...source.renderSources, ...(source.rangeReuse ? [source.rangeReuse] : [])].map((asset, index) =>
+        lineageIds: [...source.renderSources, ...(rangeReuse ? [rangeReuse] : [])].map((asset, index) =>
           `lineage-${createHash('sha256')
             .update(`${operation.workspaceId}:${context.inputHash}:${asset.artifactId}:${index}`)
             .digest('hex')}`),
@@ -496,6 +545,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           // The anchor decision reports into the variant verdict: a cue that had no safe band
           // blocks this output instead of shipping a subtitle over a face.
           subtitleAnchorPlan: placementPlan.subtitleAnchorPlan,
+          ...(captionPixelIssues.length ? { captionPixelIssues } : {}),
         },
       })
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')

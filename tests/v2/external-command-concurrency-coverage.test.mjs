@@ -420,6 +420,12 @@ const coverage = Object.freeze({
   'apollo.projects.face-producer-operations.create': {
     mode: 'idempotent-create', evidence: 'W61 actor/key request fingerprint binds current ProjectVersion, source SHA, edit-plan snapshot and sample interval; serializable admission and fenced claim are exercised in PostgreSQL, while HTTP concurrency remains pending',
   },
+  'apollo.projects.face-window-operations.create': {
+    mode: 'idempotent-create', evidence: 'W62 actor/key request fingerprint binds current ProjectVersion, source SHA, edit-plan snapshot, window and the pinned evidence policy; serializable admission, profile-scoped claim and fenced publish are written for PostgreSQL (suite not yet run)',
+  },
+  'apollo.projects.face-source-windows.create': {
+    mode: 'idempotent-create', evidence: 'W65b actor/key request fingerprint binds the project, the source artifact, the SOURCE-frame window, the pinned evidence policy and the profile (never a Version); serializable admission, profile-scoped claim and fenced publish (lease, rights, source bytes and attachment; not the head Version) are exercised in PostgreSQL by tests/v2/prisma-face-source-window.integration.mjs',
+  },
   'apollo.media.segments.create': {
     mode: 'durable-covered', evidence: 'F1.013 serializable source/parent recheck, immutable content hash, database range constraints and natural replay identity',
   },

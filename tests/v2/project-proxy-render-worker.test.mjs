@@ -39,6 +39,7 @@ import { artifactOutputStoragePrefix } from '../../src/v2/domain/artifact-storag
 import { contentAddressedArtifactKey } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
 import { buildMeasurement } from './wave20-fixtures.mjs'
 import { alteredConsumption, fakeOutputWorld, withConsumption } from './helpers/output-consumption-fakes.mjs'
+import { sealedSourceWindow } from './helpers/face-source-envelope-v3.mjs'
 
 // The sealed State of the Version this worker's operations consume: the persisted `render` verdict every source below carries.
 const proxyWorld = fakeOutputWorld({ workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test', versionId: 'project-version-proxy-test' })
@@ -368,9 +369,10 @@ test('project proxy worker materializes, attaches and settles the exact immutabl
   assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' })
   assert.equal(operations.operation.status, 'succeeded')
   assert.deepEqual(operations.operation.result.resource, operations.operation.target)
-  assert.equal(attachedReview()?.status, 'blocked')
-  assert.equal(attachedReview()?.finalAllowed, false)
-  assert.ok(attachedReview()?.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'))
+  // W65b: the cue that could not be certified is omitted and LISTED as a review item (a warning to acknowledge), not a block
+  assert.equal(attachedReview()?.status, 'warning-ack-required')
+  assert.equal(attachedReview()?.finalAllowed, false, 'until the reviewer has acknowledged the listed cues')
+  assert.ok(attachedReview()?.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'))
   assert.deepEqual(calls, { attached: 1, cleaned: 1, lutCleaned: 1, persisted: 1, mapped: 1, reviewed: 1, cataloged: 1 })
 })
 
@@ -435,7 +437,7 @@ test('snapshot proxy worker rehydrates the fenced plan and attaches without muta
   assert.equal(snapshotAttached, 1)
   assert.equal(immutableSource.subtitleResolution, undefined)
   assert.equal(renderedInput.subtitleCues.length, 1)
-  assert.equal(renderedInput.placementPlan.subtitleAnchorPlan.schemaVersion, 'subtitle-anchor-plan/v2')
+  assert.equal(renderedInput.placementPlan.subtitleAnchorPlan.schemaVersion, 'subtitle-anchor-plan/v3')
   const decision = subtitleAnchorDecisionFor(renderedInput.placementPlan.subtitleAnchorPlan, 'cue-1')
   assert.equal(decision.suppressed, true)
   assert.equal(decision.anchor, null)
@@ -1272,11 +1274,11 @@ test('T-FR-173 project proxy worker does not trust manually supplied perception 
     let review = null
     base.deps.projects.attachCompletedOutput = async (input) => {
       review = input.review
-      assert.equal(review.status, 'blocked')
+      assert.equal(review.status, 'warning-ack-required')
       assert.equal(review.finalAllowed, false)
-      assert.equal(review.formatQuality?.exportAllowed, false)
+      assert.equal(review.formatQuality?.exportAllowed, true, 'the listed cue is a warning of the format report, not a block')
       assert.ok(review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' &&
-        issue.severity === 'hard' && issue.evidenceRange.startFrame === 0 && issue.evidenceRange.endFrame === 60))
+        issue.severity === 'warning' && issue.evidenceRange.startFrame === 0 && issue.evidenceRange.endFrame === 60))
       return attachWithFinalization(input)
     }
     base.deps.perceptionTimelines = { async findLatest() { return persisted(projectVersionId) } }
@@ -1303,7 +1305,7 @@ test('T-FR-173 project proxy worker does not trust manually supplied perception 
   )
   const anchorPlan = matched.render().placementPlan.subtitleAnchorPlan
   assert.ok(anchorPlan, 'the worker must hand the renderer a decided anchor plan')
-  assert.equal(anchorPlan.schemaVersion, 'subtitle-anchor-plan/v2')
+  assert.equal(anchorPlan.schemaVersion, 'subtitle-anchor-plan/v3')
   assert.equal(anchorPlan.perceptionTimelineHash, null)
   assert.equal(subtitleAnchorDecisionFor(anchorPlan, 'cue-1').anchor, null)
   assert.equal(subtitleAnchorDecisionFor(anchorPlan, 'cue-1').issues[0].code, 'FACE_PERCEPTION_UNAVAILABLE')
@@ -1433,7 +1435,8 @@ test('T-F4.014 a colour rejection reaches the proxy review as a hard issue and b
   assert.ok(hard.length >= 1, `the rejection never reached the review: ${JSON.stringify(run.review.criticIssues)}`)
   assert.ok(hard.some((issue) => issue.code === 'COLOR_CRITIC_REJECTED' &&
     issue.evidenceIds.some((ref) => ref.startsWith('color-critic-report:'))))
-  assert.ok(hard.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'))
+  assert.ok(run.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'),
+    'the cue that could not be certified is listed beside the colour rejection')
   assert.equal(run.review.status, 'blocked')
   assert.equal(run.review.finalAllowed, false)
   // The critic's intermediates and crops are released with the renderer's.
@@ -1447,7 +1450,7 @@ test('T-F4.014 a critic that was wired and could not run leaves a warning, not a
   assert.equal(warnings.length, 1)
   assert.equal(warnings[0].severity, 'warning')
   assert.match(warnings[0].message, /was not judged/)
-  assert.equal(run.review.status, 'blocked', 'the colour warning cannot override unknown facial safety')
+  assert.equal(run.review.status, 'warning-ack-required', 'the colour warning is not an approval: it, and the listed cue, wait for an acknowledgement')
   assert.equal(run.review.finalAllowed, false)
   assert.equal(run.runtime.calls.cleaned, 1, 'a failed evaluation still wrote intermediates')
 })
@@ -1462,7 +1465,7 @@ test('T-F4.014 a rejection whose report could not be written still blocks, and s
   const hard = run.review.criticIssues.filter((issue) => issue.severity === 'hard')
   assert.ok(hard.length >= 1, `a lost row must not lose the rejection: ${JSON.stringify(run.review.criticIssues)}`)
   assert.ok(hard.some((issue) => issue.code === 'COLOR_CRITIC_REJECTED'))
-  assert.ok(hard.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'))
+  assert.ok(run.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'))
   const unrecorded = run.review.criticIssues.filter((issue) => issue.code === 'COLOR_CRITIC_REPORT_UNRECORDED')
   assert.equal(unrecorded.length, 1)
   assert.match(unrecorded[0].message, /could not be recorded/)
@@ -1477,7 +1480,7 @@ test('T-F4.014 an approved colour adds nothing to the review and still releases 
   assert.equal(run.outcome.status, 'succeeded')
   assert.ok(run.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'))
   assert.ok(run.review.criticIssues.every((issue) => issue.code !== 'COLOR_CRITIC_REJECTED'))
-  assert.equal(run.review.status, 'blocked')
+  assert.equal(run.review.status, 'warning-ack-required', 'an approved colour leaves only the listed cue to acknowledge')
   assert.equal(run.review.finalAllowed, false)
   assert.equal(run.runtime.calls.cleaned, 1)
   assert.equal(run.runtime.rows.size, 1, 'the approving verdict is recorded too')
@@ -1979,4 +1982,175 @@ test('S3-MO partial and unchanged reuse carry over the base proxy of the SAME ou
   const unavailable = await missing.repository.attachRangeReuse(moWorkspace, project('command-select-mo', select, []), await moSource(missing.world, 'variant-wide'))
   assert.equal(unavailable.unchangedReuseRequired, true)
   assert.equal(unavailable.unchangedReuse, undefined, 'no 16:9 base proxy: the render-free change is refused at enqueue, never served the 9:16 one')
+})
+
+// ---------------------------------------------------------------------------------------------------------------------
+// W65/W65b: captions are decided on the variant's canvas from the sealed face windows of the SOURCES the render plays.
+// ---------------------------------------------------------------------------------------------------------------------
+const portraitMasterSource = (extra = {}) => Object.freeze({
+  ...source(),
+  // a 9:16 master on the 9:16 canvas: the picture fills the frame, so every caption band lies over it and needs evidence
+  renderSources: Object.freeze(source().renderSources.map((asset) => Object.freeze({ ...asset, probe: Object.freeze({ width: 720, height: 1280 }) }))),
+  subtitleResolution: Object.freeze({
+    presetId: 'kinetic', presetHash: subtitlePresetHash('kinetic'),
+    registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: true,
+    presetSnapshot: materializeSubtitlePresetSnapshot('kinetic'),
+  }),
+  ...extra,
+})
+const SEALED_SCOPE = Object.freeze({
+  workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test',
+  sourceArtifactId: 'artifact-project-proxy-source', sourceSha256: 'c'.repeat(64),
+})
+// A source window carries no project and no version: only the source (artifact and bytes) and the workspace it belongs to.
+const faceWindow = (rowsAt, overrides = {}) => sealedSourceWindow({ start: 0, end: 300, rowsAt,
+  overrides: { workspaceId: SEALED_SCOPE.workspaceId, sourceArtifactId: SEALED_SCOPE.sourceArtifactId, sourceSha256: SEALED_SCOPE.sourceSha256, ...overrides } })
+const FAR_FACE = [0.9, 0.0, 0.0, 0.03, 0.05]
+
+async function runCaptionWorker(immutableSource, envelopes) {
+  const operations = createOperations(immutableSource)
+  const requests = []
+  const base = dependencies(operations, envelopes ? {
+    faceEvidence: { async listSourceWindows(input) { requests.push(input); return envelopes.map((envelope) => ({ envelope })) } },
+  } : {})
+  base.deps.projects = { ...base.deps.projects, async readImmutableSource() { return immutableSource } }
+  let rendered = null
+  const originalRender = base.deps.renderer.render
+  base.deps.renderer = { ...base.deps.renderer, async render(input) { rendered = input; return originalRender(input) } }
+  let manifest = null
+  base.deps.artifacts = {
+    async persistOrReplay(input) { manifest = input.manifest; return { artifactId: input.artifactId, manifestId: input.manifestId, replayed: false } },
+  }
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-w65-captions')
+  return { outcome, rendered, review: base.attachedReview(), manifest, requests }
+}
+
+test('W65 proxy worker: a cue is drawn only where the sealed face windows of this Version certify its band', async () => {
+  // no reader wired: every band over the picture is unknown, the cue is not drawn and is LISTED for review (W65b)
+  const unknown = await runCaptionWorker(portraitMasterSource(), undefined)
+  assert.deepEqual(unknown.outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' })
+  const unknownPlan = unknown.rendered.placementPlan.subtitleAnchorPlan
+  assert.equal(unknownPlan.schemaVersion, 'subtitle-anchor-plan/v3')
+  assert.equal(subtitleAnchorDecisionFor(unknownPlan, 'cue-1').disposition, 'review-required')
+  assert.equal(unknownPlan.policy.onNoSafeRegion, 'omit-and-list')
+  assert.equal(unknown.review.status, 'warning-ack-required')
+  assert.ok(unknown.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'))
+
+  // a clean, complete, authenticated stream of this exact source (by its bytes) certifies the preferred band
+  const clean = await runCaptionWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE])])
+  assert.equal(clean.requests.length, 1)
+  assert.deepEqual({ ...clean.requests[0], now: undefined },
+    { workspaceId: SEALED_SCOPE.workspaceId, projectId: SEALED_SCOPE.projectId,
+      sourceArtifactId: SEALED_SCOPE.sourceArtifactId, fromSourceFrame: 0, toSourceFrame: 75, now: undefined, limit: 200 })
+  const cleanDecision = subtitleAnchorDecisionFor(clean.rendered.placementPlan.subtitleAnchorPlan, 'cue-1')
+  assert.equal(cleanDecision.disposition, 'placed'); assert.equal(cleanDecision.anchor, 'bottom')
+  assert.ok(!clean.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' || issue.code === 'NO_SAFE_SUBTITLE_REGION'))
+  // the placement identity is bound into the recipe: the evidence moves the hash
+  assert.notEqual(clean.manifest.recipe.parametersHash, unknown.manifest.recipe.parametersHash)
+
+  // a detected face under the bottom of the frame moves the caption up, onto a band that is certified clear
+  const faceBelow = await runCaptionWorker(portraitMasterSource(), [faceWindow((frame) => (frame === 30 ? [[0.9, 0.2, 0.74, 0.8, 0.96]] : [FAR_FACE]))])
+  const movedDecision = subtitleAnchorDecisionFor(faceBelow.rendered.placementPlan.subtitleAnchorPlan, 'cue-1')
+  assert.equal(movedDecision.bandAssessments.bottom.face.state, 'occupied')
+  assert.equal(movedDecision.disposition, 'placed'); assert.notEqual(movedDecision.anchor, 'bottom')
+
+  // evidence of other bytes (another source file) is not evidence of this one; evidence is NOT tied to a Version any more
+  const foreign = await runCaptionWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE], { sourceSha256: 'd'.repeat(64) })])
+  assert.equal(subtitleAnchorDecisionFor(foreign.rendered.placementPlan.subtitleAnchorPlan, 'cue-1').disposition, 'review-required')
+  assert.equal(foreign.review.status, 'warning-ack-required')
+})
+
+test('W65 proxy worker: without the source dimensions nothing is projected; on a 16:9 master the 9:16 bottom band is certified by geometry', async () => {
+  const noDimensions = await runCaptionWorker(Object.freeze({ ...portraitMasterSource(), renderSources: source().renderSources }), [faceWindow(() => [FAR_FACE])])
+  const plan = noDimensions.rendered.placementPlan.subtitleAnchorPlan
+  assert.equal(plan.faceClearance.projectionHash, null)
+  assert.equal(subtitleAnchorDecisionFor(plan, 'cue-1').disposition, 'review-required')
+  assert.equal(noDimensions.requests.length, 0)
+  // 1280x720 on the 9:16 canvas is a strip; the bottom band is over the blurred copy and no source pixel is under it
+  const landscapeMaster = portraitMasterSource({
+    renderSources: Object.freeze(source().renderSources.map((asset) => Object.freeze({ ...asset, probe: Object.freeze({ width: 1280, height: 720 }) }))),
+  })
+  const geometry = await runCaptionWorker(landscapeMaster, undefined)
+  const decision = subtitleAnchorDecisionFor(geometry.rendered.placementPlan.subtitleAnchorPlan, 'cue-1')
+  assert.equal(decision.disposition, 'placed'); assert.equal(decision.anchor, 'bottom')
+  assert.equal(decision.bandAssessments.bottom.face.evaluations[0].kind, 'geometry-outside-foreground')
+  assert.equal(geometry.rendered.placementPlan.subtitleAnchorPlan.faceClearance.faceSafety, 'unknown')
+})
+
+test('W65 proxy worker: a reused range cannot carry a caption the plan draws, so the render is done in full', async () => {
+  const reuse = Object.freeze({
+    schemaVersion: 'project-proxy-range-reuse/v1', commandId: 'manual-command-w65-reuse', impactHash: '7'.repeat(64),
+    baseVersionId: 'project-version-proxy-base', ranges: Object.freeze([Object.freeze({ startFrame: 30, endFrame: 60 })]),
+    artifactId: 'artifact-project-proxy-base', manifestId: 'manifest-project-proxy-base',
+    artifactKey: 'workspaces/project-proxy-test/editorial-proxies/w65-base.mp4', sha256: '8'.repeat(64), byteSize: 16_384,
+  })
+  // the cue is [0,60) and only [30,60) is re-rendered: a drawn caption over the kept [0,30) would be missing from the reused bytes
+  const placed = await runCaptionWorker(portraitMasterSource({ rangeReuse: reuse }), [faceWindow(() => [FAR_FACE])])
+  assert.equal(subtitleAnchorDecisionFor(placed.rendered.placementPlan.subtitleAnchorPlan, 'cue-1').disposition, 'placed')
+  assert.equal(placed.rendered.rangeReuse, undefined)
+  assert.ok(!placed.manifest.sources.some((entry) => entry.role === 'reused-proxy-range'))
+  // an undrawn cue leaves the reuse alone
+  const suppressed = await runCaptionWorker(portraitMasterSource({ rangeReuse: reuse }), undefined)
+  assert.equal(suppressed.rendered.rangeReuse.artifactId, 'artifact-project-proxy-base')
+  assert.ok(suppressed.manifest.sources.some((entry) => entry.role === 'reused-proxy-range'))
+})
+
+test('W65 proxy worker: the pixel critic is run on a plan that draws a cue, against a caption-free control render, and its verdict lands on the review', async () => {
+  const requests = []
+  const rendered = []
+  const cleaned = []
+  const operations = createOperations(portraitMasterSource())
+  const base = dependencies(operations, {
+    faceEvidence: { async listSourceWindows() { return [{ envelope: faceWindow(() => [FAR_FACE]) }] } },
+    captionPixelCritic: {
+      async verify(request) {
+        requests.push(request)
+        const control = await request.renderControl()
+        return { samples: [], issues: [{ code: 'CAPTION_PLACEMENT_MISMATCH', severity: 'hard', cueId: 'cue-1',
+          evidenceRange: { startFrame: 10, endFrame: 11 }, elementIds: ['subtitle:cue-1'], evidenceIds: [], message: `controlled mismatch ${control.path}` }] }
+      },
+    },
+  })
+  base.deps.projects = { ...base.deps.projects, async readImmutableSource() { return portraitMasterSource() } }
+  const originalRender = base.deps.renderer.render
+  base.deps.renderer = {
+    async render(input) { rendered.push(input); return originalRender(input) },
+    async cleanup(operationId) { cleaned.push(operationId) },
+  }
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-w65-pixel-critic')
+  assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' })
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].plan.subtitleAnchorPlan.decisions[0].disposition, 'placed')
+  assert.equal(requests[0].deliveredPath.endsWith('project-proxy-worker-output.mp4'), true)
+  // the control is the same input without the burned cues, in its own work directory
+  assert.equal(rendered.length, 2)
+  assert.equal(rendered[0].subtitleCues.length, 1)
+  assert.equal(rendered[1].subtitleCues.length, 0)
+  assert.equal(rendered[1].operationId, 'operation-project-proxy-test-caption-control')
+  assert.deepEqual({ ...rendered[1], operationId: rendered[0].operationId, subtitleCues: rendered[0].subtitleCues, signal: undefined },
+    { ...rendered[0], signal: undefined })
+  assert.ok(cleaned.includes('operation-project-proxy-test-caption-control'))
+  const review = base.attachedReview()
+  assert.equal(review.status, 'blocked')
+  const issue = review.criticIssues.find((entry) => entry.code === 'CAPTION_PLACEMENT_MISMATCH')
+  assert.ok(issue && issue.severity === 'hard')
+  assert.equal(issue.placementPlanHash, requests[0].plan.placementPlanHash)
+})
+
+test('W65 proxy worker: no control render is paid for when the plan draws nothing, and a critic that breaks is a warning, not a failed render', async () => {
+  const quiet = []
+  const none = dependencies(createOperations(portraitMasterSource()), { captionPixelCritic: { async verify(request) { quiet.push(request); return { issues: [], samples: [] } } } })
+  none.deps.projects = { ...none.deps.projects, async readImmutableSource() { return portraitMasterSource() } }
+  assert.equal((await runNextProjectProxyRenderOperationService(none.deps)('worker-w65-pixel-critic-idle')).status, 'succeeded')
+  assert.equal(quiet.length, 0, 'every cue is withheld here (no face windows), so there is nothing to verify')
+
+  const broken = dependencies(createOperations(portraitMasterSource()), {
+    faceEvidence: { async listSourceWindows() { return [{ envelope: faceWindow(() => [FAR_FACE]) }] } },
+    captionPixelCritic: { async verify() { throw new Error('W65_CONTROLLED_CRITIC_FAILURE') } },
+  })
+  broken.deps.projects = { ...broken.deps.projects, async readImmutableSource() { return portraitMasterSource() } }
+  assert.equal((await runNextProjectProxyRenderOperationService(broken.deps)('worker-w65-pixel-critic-broken')).status, 'succeeded')
+  const review = broken.attachedReview()
+  assert.equal(review.status, 'warning-ack-required')
+  assert.deepEqual(review.criticIssues.filter((entry) => entry.code === 'FACE_PIXEL_CHECK_UNAVAILABLE').map((entry) => entry.severity), ['warning'])
 })

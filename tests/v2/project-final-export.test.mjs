@@ -8,10 +8,12 @@ import test from 'node:test'
 import { enqueueProjectFinalExportService } from '../../src/v2/application/enqueue-project-final-export.ts'
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { projectRenderSourcesFingerprint } from '../../src/v2/application/project-render-sources.ts'
+import { planCaptionPlacement } from '../../src/v2/application/plan-caption-placement.ts'
 import { runNextProjectFinalExportOperationService } from '../../src/v2/application/run-project-final-export-worker.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { ASS_EMISSION_POLICY } from '../../src/v2/domain/ass-emission-policy.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
+import { FINAL_CAPTION_CERTIFICATION_POLICY_SHA256 } from '../../src/v2/domain/final-caption-certification.ts'
 import { artifactOutputStoragePrefix } from '../../src/v2/domain/artifact-storage-identity.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createRenderPlacementPlan, validateRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
@@ -159,10 +161,10 @@ function approvedSource() {
       id: 'edit-plan-final-export-test',
       projectVersionId,
       fps: 30.000000097244733,
-      movementPolicy: Object.freeze({ automaticZoom: false, protectedOpeningFrames: 120 }),
       durationFrames: 300,
+      movementPolicy: Object.freeze({ automaticZoom: false, protectedOpeningFrames: 120 }),
       // A Director plan always carries its captions with their persisted preset, which is what
-      // makes the renderer demand the unknown-face review plan for them.
+      // makes the renderer demand the caption review plan for them.
       subtitleTracks: Object.freeze([{ presetId: 'kinetic', cues: Object.freeze([
         Object.freeze({ id: 'cue-final-1', startFrame: 0, endFrame: 60, text: 'Legenda final segura', anchor: 'bottom' }),
       ]) }]),
@@ -195,15 +197,19 @@ function approvedSource() {
       mediaType: 'video',
       container: 'mp4',
       role: 'source-master',
+      // Observed dimensions: with them the caption planner can project the picture onto the 9:16 canvas, where the bottom band
+      // lies over the blurred copy and is certified by geometry (W65). Without them the cue would be review-required.
+      probe: Object.freeze({ width: 1280, height: 720 }),
     })]),
     originalFileName: 'gravacao-bruta.mp4',
   })
 }
 
-function finalInputHash(includePolicy = true, source = approvedSource()) {
+function finalInputHash(includePolicy = true, source = approvedSource(), captionPolicySha256 = FINAL_CAPTION_CERTIFICATION_POLICY_SHA256) {
   return calculateVersionHash({
     kind: 'project-final-export/v2',
     ...(includePolicy ? { assEmissionPolicy: ASS_EMISSION_POLICY } : {}),
+    ...(captionPolicySha256 ? { captionCertificationPolicySha256: captionPolicySha256 } : {}),
     projectId,
     projectVersionId,
     projectVersionHash: source.projectVersionHash,
@@ -415,11 +421,19 @@ function workerDependencies(
   const calls = { rights: 0, rendered: 0, persisted: 0, mapped: 0, converged: 0, attached: 0, attempts: 0, failed: 0, cleaned: 0, lutCleaned: 0, cataloged: 0 }
   const renderInputs = []
   const renderErrors = []
+  // W65b: the C1 pixel critic. By default it measures and finds every caption where the plan put it; a test overrides `verdict`.
+  const critic = {
+    requests: [],
+    verdict: () => ({ issues: [], samples: [], measurement: 'completed' }),
+    async verify(request) { critic.requests.push(request); return critic.verdict(request) },
+  }
   return {
     calls,
     renderInputs,
     renderErrors,
+    critic,
     dependencies: {
+      captionPixelCritic: critic,
       async catalogOutput(input) { calls.cataloged += 1; assert.equal(input.artifactId, persistedIdentity.artifactId) },
       operations: operations.repository,
       colorPipelines,
@@ -608,7 +622,7 @@ test('final export worker revalidates rights, persists lineage and completes the
   const { calls, dependencies } = workerDependencies(operations)
   const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-success')
 
-  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 1, mapped: 1, converged: 0, attached: 1, attempts: 1, failed: 0, cleaned: 1, lutCleaned: 1, cataloged: 1 })
+  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 1, mapped: 1, converged: 0, attached: 1, attempts: 1, failed: 0, cleaned: 2, lutCleaned: 1, cataloged: 1 })
   assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
   assert.equal(operations.operation.status, 'succeeded')
 })
@@ -667,7 +681,7 @@ test('final export worker fails closed if rights are revoked before persistence'
 
   assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' })
   assert.equal(operations.operation.status, 'failed')
-  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 0, mapped: 0, converged: 0, attached: 0, attempts: 1, failed: 1, cleaned: 1, lutCleaned: 1, cataloged: 0 })
+  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 0, mapped: 0, converged: 0, attached: 0, attempts: 1, failed: 1, cleaned: 2, lutCleaned: 1, cataloged: 0 })
 })
 
 test('final export worker does not complete the project before catalog convergence', async () => {
@@ -730,6 +744,23 @@ function expectedPlacementPlan(overrides = {}) {
   })
 }
 
+/**
+ * The placement the worker must have derived, computed here straight from the caption planner (domain + application, not through the
+ * worker): the plan is content-addressed, so an identical hash means the worker derived exactly what the proxy path derives.
+ */
+async function plannedFinalPlacement({ placementElements = [] } = {}) {
+  const source = approvedSource()
+  const { placementPlan } = await planCaptionPlacement({ clock: () => new Date('2026-07-19T01:06:00.000Z') }, {
+    workspaceId, projectId, format: '9:16', canvas: { width: 1080, height: 1920 },
+    editPlan: { fps: source.editPlan.fps, durationFrames: source.editPlan.durationFrames },
+    clips: source.editPlan.videoTracks[0].clips,
+    renderSources: source.renderSources.map((asset) => ({ artifactId: asset.artifactId, sha256: asset.sha256, mediaType: asset.mediaType, probe: asset.probe })),
+    subtitleCues: [{ id: 'cue-final-1', startFrame: 0, endFrame: 60 }], subtitlePresetId: 'kinetic', placementElements,
+    primarySourceArtifactId: source.sourceArtifactId, uncertifiedCues: 'omit-and-list',
+  })
+  return placementPlan
+}
+
 function serveSource(dependencies, change) {
   const source = approvedSource()
   const changed = Object.freeze({ ...source, ...change(source) })
@@ -757,14 +788,12 @@ test('final export worker hands the renderer the placement plan its captions req
   const [input] = renderInputs
   assert.deepEqual(input.subtitleCues.map((cue) => cue.id), ['cue-final-1'])
   assert.doesNotThrow(() => validateRenderPlacementPlan(input.placementPlan))
-  assert.equal(input.placementPlan.schemaVersion, 'render-placement-plan/v2')
+  assert.equal(input.placementPlan.schemaVersion, 'render-placement-plan/v3')
   assert.equal(input.placementPlan.format, input.format)
   assert.deepEqual(input.placementPlan.canvas, { width: input.outputSpec.width, height: input.outputSpec.height })
   assert.equal(input.placementPlan.durationFrames, 300)
-  assert.equal(input.placementPlan.subtitleAnchorPlan.schemaVersion, 'subtitle-anchor-plan/v2')
-  // Built here straight from the domain, not through the worker: the plan is content-addressed, so
-  // an identical hash means the worker derived exactly the plan the proxy path derives.
-  assert.equal(input.placementPlan.placementPlanHash, expectedPlacementPlan().placementPlanHash)
+  assert.equal(input.placementPlan.subtitleAnchorPlan.schemaVersion, 'subtitle-anchor-plan/v3')
+  assert.equal(input.placementPlan.placementPlanHash, (await plannedFinalPlacement()).placementPlanHash)
   assert.equal(input.reframePlan, undefined)
   assert.equal(input.ctaOverlays, undefined)
 })
@@ -782,12 +811,12 @@ test('final export worker draws the CTA overlays the approved proxy drew and pla
   assert.deepEqual(input.placementPlan.placements.filter((placement) => placement.kind === 'cta')
     .map((placement) => ({ elementId: placement.elementId, timeRange: placement.timeRange })),
   [{ elementId: 'cta-0-cta-final-1', timeRange: { startFrame: 120, endFrame: 240 } }])
-  assert.equal(input.placementPlan.placementPlanHash, expectedPlacementPlan({
-    elements: [{
+  assert.equal(input.placementPlan.placementPlanHash, (await plannedFinalPlacement({
+    placementElements: [{
       id: 'cta-0-cta-final-1', kind: 'cta', anchor: 'auto', priority: 80, readingOrder: 0,
       minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.5, timeRange: { startFrame: 120, endFrame: 240 },
     }],
-  }).placementPlanHash)
+  })).placementPlanHash)
 })
 
 test('final export worker keeps a disabled subtitle style disabled, exactly as the proxy does', async () => {
@@ -1239,4 +1268,238 @@ test('S3-MO a final worker refuses a source that is not the output its operation
   assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' })
   assert.equal(operations.operation.error.code, 'persistence_conflict')
   assert.deepEqual([calls.rendered, calls.persisted, calls.attached], [0, 0, 0])
+})
+
+test('W65 final worker decides its captions on the FINAL canvas and persists the placement its encode was decided with', async () => {
+  const operations = createOperations()
+  const { calls, dependencies } = workerDependencies(operations)
+  let rendered = null, persisted = null
+  const render = dependencies.renderer.render
+  dependencies.renderer.render = async (input) => { rendered = input; return render(input) }
+  const persist = dependencies.artifacts.persistOrReplay
+  dependencies.artifacts.persistOrReplay = async (input) => { persisted = input; return persist(input) }
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-captions')
+  assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
+  assert.equal(calls.rendered, 1)
+  const plan = rendered.placementPlan
+  assert.equal(plan.schemaVersion, 'render-placement-plan/v3')
+  assert.deepEqual({ ...plan.canvas }, { width: 1080, height: 1920 })
+  assert.equal(plan.subtitleAnchorPlan.schemaVersion, 'subtitle-anchor-plan/v3')
+  const decision = plan.subtitleAnchorPlan.decisions[0]
+  assert.equal(decision.cueId, 'cue-final-1'); assert.equal(decision.disposition, 'placed'); assert.equal(decision.anchor, 'bottom')
+  assert.equal(plan.subtitleAnchorPlan.faceClearance.faceSafety, 'unknown')
+  // the encode's placement is part of the RenderInput the final can be reconstructed from, and of its recipe identity
+  const props = JSON.parse(persisted.renderInput.canonicalJson).props
+  assert.equal(props.placementPlan.placementPlanHash, plan.placementPlanHash)
+  const parameters = JSON.parse(persisted.recipeParameters.canonicalJson)
+  assert.equal(parameters.placementPlanHash, plan.placementPlanHash)
+  assert.equal(parameters.subtitleAnchorPlanHash, plan.subtitleAnchorPlan.anchorPlanHash)
+})
+
+// ---- W65b: the final-caption certification rule ----
+const portraitMaster = (base = approvedSource()) => Object.freeze({
+  ...base, renderSources: Object.freeze(base.renderSources.map((asset) => Object.freeze({ ...asset, probe: Object.freeze({ width: 720, height: 1280 }) }))),
+})
+function capture(dependencies) {
+  const seen = { rendered: [], persisted: null, attempt: null }
+  const render = dependencies.renderer.render
+  dependencies.renderer.render = async (input) => { seen.rendered.push(input); return render(input) }
+  const persist = dependencies.artifacts.persistOrReplay
+  dependencies.artifacts.persistOrReplay = async (input) => { seen.persisted = input; return persist(input) }
+  const record = dependencies.projects.recordAttempt
+  dependencies.projects.recordAttempt = async (input) => { seen.attempt = input; return record(input) }
+  return seen
+}
+const certificationValidator = (attempt) => attempt.validators.find((validator) => validator.code === 'FINAL_CAPTION_CERTIFICATION')
+const hardPixelIssue = { code: 'CAPTION_PLACEMENT_MISMATCH', severity: 'hard', cueId: 'cue-final-1', evidenceRange: { startFrame: 10, endFrame: 11 },
+  elementIds: ['subtitle:cue-final-1'], evidenceIds: [], message: 'The caption is outside the band the plan decided.' }
+
+test('W65b a final burns a certified cue, confirms it in the delivered pixels and records the receipt it was admitted under', async () => {
+  const operations = createOperations()
+  const { calls, critic, dependencies } = workerDependencies(operations)
+  const seen = capture(dependencies)
+  let controlPath = null
+  critic.verdict = async (request) => {
+    controlPath = (await request.renderControl()).path
+    return { issues: [], samples: [], measurement: 'completed' }
+  }
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-certified')
+  assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
+  // the pixel critic looked at THIS plan and THIS delivered file, with a caption-free control of the same encode
+  assert.equal(critic.requests.length, 1)
+  const [final, control] = seen.rendered
+  assert.equal(critic.requests[0].plan.placementPlanHash, final.placementPlan.placementPlanHash)
+  assert.equal(critic.requests[0].deliveredPath, join(tmpdir(), 'apollo-final-export-output.mp4'))
+  assert.equal(seen.rendered.length, 2); assert.equal(calls.rendered, 2)
+  assert.equal(control.operationId, 'operation-final-export-test-caption-control')
+  assert.deepEqual(control.subtitleCues, []); assert.equal(control.renderKind, 'final')
+  assert.equal(controlPath, join(tmpdir(), 'apollo-final-export-output.mp4'))
+  // the receipt: what was burned and how its band was certified
+  const parameters = JSON.parse(seen.persisted.recipeParameters.canonicalJson)
+  assert.equal(seen.persisted.manifest.recipe.version, '1.14.0')
+  assert.equal(parameters.captionCertificationPolicySha256, FINAL_CAPTION_CERTIFICATION_POLICY_SHA256)
+  const receipt = parameters.captionCertification
+  assert.equal(receipt.faceSafety, 'unknown')
+  assert.equal(receipt.placementPlanHash, final.placementPlan.placementPlanHash)
+  assert.deepEqual(receipt.burned.map((entry) => [entry.cueId, entry.anchor, entry.certification]), [['cue-final-1', 'bottom', 'geometry-outside-foreground']])
+  assert.deepEqual(receipt.omitted, [])
+  assert.equal(receipt.pixelCritic, 'ran')
+  // and it is in the attempt record, where the caller reads it
+  const validator = certificationValidator(seen.attempt)
+  assert.equal(seen.attempt.status, 'promoted'); assert.equal(validator.passed, true)
+  assert.match(validator.message, /1 caption\(s\) burned in certified bands/)
+  assert.ok(validator.message.length <= 500)
+})
+
+test('W65b a cue that cannot be certified is omitted and listed: the final is delivered without it and nothing else is lost', async () => {
+  const operations = createOperations()
+  const { calls, critic, dependencies } = workerDependencies(operations)
+  const seen = capture(dependencies)
+  // a portrait master on the portrait canvas: every band is over the picture and no face window exists for it
+  dependencies.projects.readImmutableApprovedSource = async () => portraitMaster()
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-omitted')
+  assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
+  const plan = seen.rendered[0].placementPlan
+  const decision = plan.subtitleAnchorPlan.decisions[0]
+  assert.equal(decision.cueId, 'cue-final-1'); assert.equal(decision.anchor, null); assert.equal(decision.disposition, 'review-required')
+  assert.deepEqual(plan.subtitleAnchorPlan.issues.map((issue) => [issue.code, issue.severity]), [['FACE_PERCEPTION_UNAVAILABLE', 'warning']])
+  assert.equal(plan.subtitleAnchorPlan.policy.onNoSafeRegion, 'omit-and-list')
+  // nothing was burned, so there is nothing to confirm: no control render, no critic
+  assert.equal(critic.requests.length, 0); assert.equal(calls.rendered, 1)
+  const receipt = JSON.parse(seen.persisted.recipeParameters.canonicalJson).captionCertification
+  assert.deepEqual(receipt.burned, [])
+  assert.deepEqual(receipt.omitted.map((entry) => [entry.cueId, entry.code, entry.disposition]), [['cue-final-1', 'FACE_PERCEPTION_UNAVAILABLE', 'review-required']])
+  assert.equal(receipt.pixelCritic, 'not-needed'); assert.equal(receipt.faceSafety, 'unknown')
+  const validator = certificationValidator(seen.attempt)
+  assert.equal(validator.passed, true)
+  assert.match(validator.message, /0 caption\(s\) burned.*1 omitted and listed for review: cue-final-1 \(FACE_PERCEPTION_UNAVAILABLE\)/)
+  assert.equal(calls.persisted, 1); assert.equal(calls.attached, 1)
+})
+
+test('W65b a hard disagreement of the delivered pixels with the plan stops the final: it is not published', async () => {
+  const operations = createOperations()
+  const { calls, critic, dependencies } = workerDependencies(operations)
+  const seen = capture(dependencies)
+  critic.verdict = () => ({ issues: [hardPixelIssue], samples: [], measurement: 'completed' })
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-pixel-mismatch')
+  assert.equal(outcome.status, 'failed')
+  assert.equal(seen.attempt.status, 'failed')
+  assert.equal(seen.attempt.error.code, 'render_output_invalid'); assert.equal(seen.attempt.error.stage, 'output-verification')
+  const validator = certificationValidator(seen.attempt)
+  assert.equal(validator.passed, false)
+  assert.match(validator.message, /cue-final-1.*CAPTION_PLACEMENT_MISMATCH/)
+  assert.equal(calls.persisted, 0); assert.equal(calls.attached, 0); assert.equal(calls.cataloged, 0)
+})
+
+test('W65b a pixel critic that could not measure, or that broke, never lets a caption through unconfirmed', async () => {
+  for (const [label, verdict] of [
+    ['measurement failed', () => ({ issues: [], samples: [], measurement: 'failed' })],
+    ['no measurement field (an unknown critic)', () => ({ issues: [], samples: [] })],
+    ['threw', () => { throw new Error('ffmpeg exploded') }],
+  ]) {
+    const operations = createOperations()
+    const { calls, critic, dependencies } = workerDependencies(operations)
+    const seen = capture(dependencies)
+    critic.verdict = verdict
+    const outcome = await runNextProjectFinalExportOperationService(dependencies)(`worker-final-export-critic-${label.length}`)
+    assert.equal(outcome.status, 'failed', label)
+    assert.match(certificationValidator(seen.attempt).message, /could not measure/, label)
+    assert.equal(calls.persisted, 0, label); assert.equal(calls.attached, 0, label)
+  }
+})
+
+test('W65b a final that would burn a caption is refused BEFORE the encode when no pixel critic is wired', async () => {
+  const operations = createOperations()
+  const { calls, dependencies } = workerDependencies(operations)
+  const seen = capture(dependencies)
+  delete dependencies.captionPixelCritic
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-no-critic')
+  assert.equal(outcome.status, 'failed')
+  assert.equal(seen.attempt.error.code, 'invalid_render_input'); assert.equal(seen.attempt.error.stage, 'input-validation')
+  assert.equal(calls.rendered, 0); assert.equal(calls.persisted, 0); assert.equal(calls.attached, 0)
+  // ... but a final that burns nothing does not need one
+  const { dependencies: omitting } = workerDependencies(createOperations())
+  delete omitting.captionPixelCritic
+  omitting.projects.readImmutableApprovedSource = async () => portraitMaster()
+  assert.equal((await runNextProjectFinalExportOperationService(omitting)('worker-final-export-no-critic-omitting')).status, 'succeeded')
+})
+
+test('W65b the certification policy is part of the pre-render identity: an operation queued under another policy is rejected before any render', async () => {
+  for (const [label, hash] of [['another policy', finalInputHash(true, undefined, 'f'.repeat(64))], ['no policy', finalInputHash(true, undefined, null)]]) {
+    const operations = createOperations(hash)
+    const { calls, dependencies } = workerDependencies(operations)
+    const outcome = await runNextProjectFinalExportOperationService(dependencies)(`worker-final-export-policy-${label.length}`)
+    assert.equal(outcome.status, 'failed', label)
+    assert.equal(operations.operation.error.code, 'invalid_render_input', label)
+    assert.equal(calls.rendered, 0, label); assert.equal(calls.persisted, 0, label)
+  }
+  assert.notEqual(finalInputHash(true), finalInputHash(true, undefined, null))
+})
+
+// ---- the admission of the Director report (the gate nothing could pass) ----
+function directorReport({ rights = true, ...overrides } = {}) {
+  const rubric = resolveStrategicRubric('discovery')
+  const evaluatedAt = '2026-10-08T00:00:00.000Z'
+  const strategic = createQualityReport({ objective: 'discovery',
+    evidence: rubric.criteria.map((criterion) => ({ criterionId: criterion.id, score: 100, evidence: [`controlled:${criterion.id}`] })),
+    gates: { narrativeIntegrity: true, legibility: true, rights }, evaluatedAt })
+  return { rubric, report: {
+    schemaVersion: 'director-quality-report/v3', id: 'quality-controlled', desiredActionRef: { id: 'action-controlled' },
+    status: rights ? 'review-required' : 'blocked', score: strategic.score / 100, strategic, issues: [], criticVersion: 'project-director-critic/v2', evaluatedAt,
+    faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
+    hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true, subtitlesFaceSafe: false, subtitlesBounded: true,
+      forbiddenSpeechAbsent: true, timelineContinuous: true },
+    ...overrides,
+  } }
+}
+function approvalRepository(report, rubric) {
+  const observed = []
+  // The merged repository attributes a legacy proxy review to the Version's only output through its sealed State.
+  const world = fakeOutputWorld({ workspaceId, projectId: 'project-controlled', versionId: 'result-version', baseHash: 'b'.repeat(64) })
+  const repository = new PrismaProjectFinalExportRepository({
+    $queryRawUnsafe: (...args) => world.queryRawUnsafe(...args),
+    v2Project: { async findFirst() { return {
+      locale: 'pt-BR', versions: [{ id: 'result-version' }],
+      directorRuns: [{ id: 'director-run', baseVersionId: 'input-version', qualitySnapshotId: 'quality-snapshot', objective: 'discovery',
+        rubricRef: `${rubric.id}/v${rubric.version}`,
+        qualitySnapshot: { schemaVersion: 3, contentJson: JSON.stringify(report), contentHash: calculateVersionHash(report) } }],
+      proxyReviews: [{ id: 'proxy-review', reviewHash: 'a'.repeat(64), proxyArtifactId: 'proxy-artifact' }],
+    } } },
+  })
+  repository.perceptionEvidence = { async read(input) { observed.push(input); return null } }
+  return { repository, observed, world, request: { workspaceId, projectId: 'project-controlled', projectVersionId: 'result-version',
+    projectVersionHash: 'b'.repeat(64), outputSpecId: 'output-spec-controlled', outputVariantId: 'variant-main', requireCurrent: true } }
+}
+
+test('W65b the gate admits the Director report as the Director really produces it: review-required with an unknown face claim', async () => {
+  const { rubric, report } = directorReport()
+  const { repository, observed, request } = approvalRepository(report, rubric)
+  const approval = await repository.readApproval(request)
+  assert.ok(approval, 'the report that was unreachable before is admitted')
+  assert.equal(approval.qualityStatus, 'review-required')
+  assert.equal(approval.admissionBasis, 'per-cue-caption-certification')
+  assert.equal(approval.proxyReviewId, 'proxy-review')
+  assert.deepEqual(observed, [], 'no perception evidence is consulted: no face safety is being claimed')
+})
+
+test('W65b the gate still refuses everything the Director report does not honestly hold', async () => {
+  const { rubric, report } = directorReport()
+  const refuse = async (overrides, label) => {
+    const { repository, request } = approvalRepository({ ...report, ...overrides }, rubric)
+    assert.equal(await repository.readApproval(request), null, label)
+  }
+  await refuse({ hardChecks: { ...report.hardChecks, timelineContinuous: false } }, 'a hard check that failed')
+  await refuse({ hardChecks: { ...report.hardChecks, subtitlesBounded: false } }, 'subtitles not bounded')
+  await refuse({ issues: [{ code: 'STRATEGIC_RIGHTS_FAILED', severity: 'hard', category: 'policy', message: 'Rights failed.', correctable: true }] }, 'a hard issue')
+  // a report whose strategic gate failed is `blocked` (the parser holds that invariant), and blocked is never admitted
+  const failed = directorReport({ rights: false })
+  assert.equal(failed.report.status, 'blocked')
+  const { repository: blockedRepository, request: blockedRequest } = approvalRepository(failed.report, failed.rubric)
+  assert.equal(await blockedRepository.readApproval(blockedRequest), null, 'blocked')
+  // ... and a review-required report whose strategic gate did NOT pass is not even a readable report
+  const forged = approvalRepository({ ...failed.report, status: 'review-required' }, failed.rubric)
+  await assert.rejects(forged.repository.readApproval(forged.request), (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT')
+  const wrongRun = approvalRepository(report, rubric)
+  const stale = new PrismaProjectFinalExportRepository({ $queryRawUnsafe: (...args) => wrongRun.world.queryRawUnsafe(...args), v2Project: { async findFirst() { return { locale: 'pt-BR', versions: [], directorRuns: [], proxyReviews: [] } } } })
+  assert.equal(await stale.readApproval(wrongRun.request), null, 'no matching version, run or ready-for-final proxy review')
 })

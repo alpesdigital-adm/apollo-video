@@ -286,6 +286,10 @@ export function hydrateProxyRenderSources(project: NonNullable<Awaited<ReturnTyp
         throw new DomainError('ASSET_RIGHTS_BLOCKED', `Render source ${artifactId} no longer has approved current rights`)
       }
     }
+    const probe = (sourceBody as Record<string, unknown>).probe as Record<string, unknown> | undefined
+    const dimensions = link.artifact.mediaType === 'video' && probe && typeof probe === 'object' &&
+      Number.isSafeInteger(probe.width) && Number.isSafeInteger(probe.height) && Number(probe.width) >= 2 && Number(probe.height) >= 2
+      ? Object.freeze({ width: Number(probe.width), height: Number(probe.height) }) : undefined
     return Object.freeze({
       artifactId,
       manifestId: sourceManifest.id,
@@ -295,6 +299,7 @@ export function hydrateProxyRenderSources(project: NonNullable<Awaited<ReturnTyp
       mediaType: link.artifact.mediaType as 'video' | 'audio',
       container: link.artifact.container,
       role: musicTrack ? 'approved-music' as const : purpose.role,
+      ...(dimensions ? { probe: dimensions } : {}),
     })
   })
 }

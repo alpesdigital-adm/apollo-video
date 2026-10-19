@@ -157,5 +157,22 @@ test('W69 receipt retains 120 fps output but refuses unrepresentable cue boundar
   })))
   assert.throws(() => createRenderedSubtitleReceipt(fixture({ ...properties,
     drawnCues: [{ ...input.drawnCues[0], startFrame: 1, endFrame: 2, assEventLine: short }],
-  })), /cannot represent/)
+  })), (error) => error.code === 'INVALID_RENDER_INPUT' && error.details.reason === 'ASS_BOUNDARY_UNREPRESENTABLE' &&
+    /not representable/.test(error.message))
+})
+
+test('W69 receipt binds timestamps to the libass clock: the exact-rational v1 boundary of frame 111 at 30 fps is refused', () => {
+  const input = fixture()
+  const frames = { ...input.map, durationFrames: 150, elements: [] }
+  // The frame reaches libass as now = 3699 ms, one below the exact 3700: the event must start at 3.69, not 3.70.
+  const bound = event.replace('0:00:00.00,0:00:01.20', '0:00:03.69,0:00:03.73')
+  const reprobated = event.replace('0:00:00.00,0:00:01.20', '0:00:03.70,0:00:03.73')
+  const drawn = (line) => [{ ...input.drawnCues[0], startFrame: 111, endFrame: 112, assEventLine: line }]
+  assert.doesNotThrow(() => createRenderedSubtitleReceipt(fixture({ map: frames, drawnCues: drawn(bound), assBytes: Buffer.from(`[Events]
+${bound}
+`) })))
+  assert.throws(() => createRenderedSubtitleReceipt(fixture({ map: frames, drawnCues: drawn(reprobated), assBytes: Buffer.from(`[Events]
+${reprobated}
+`) })),
+    /timestamps differ/)
 })

@@ -19,8 +19,10 @@ export async function GET(request: NextRequest,
     requireScope(actor, 'projects:read')
     const { projectId, operationId } = await context.params
     const record = await createPublicOperationRepository().findById(actor.workspaceId, operationId)
+    // Window operations of the V9 profile are read through their own resource and envelope schema.
     if (!record || record.operation.projectId !== projectId ||
-        record.operation.type !== 'perception-face-run') {
+        record.operation.type !== 'perception-face-run' || record.context.kind !== 'perception-face-run' ||
+        (record.context.detectorProfile ?? 'yunet-v5-diagnostic') !== 'yunet-v5-diagnostic') {
       throw new DomainError('PUBLIC_OPERATION_NOT_FOUND', 'Face producer operation was not found')
     }
     let envelope

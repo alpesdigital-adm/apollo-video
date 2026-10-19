@@ -49,6 +49,8 @@ import { runNextProjectDirectorOperationService } from '../application/run-proje
 import { runNextPerceptionProducerOperationService } from '../application/run-perception-producer-worker.ts'
 import { runNextTemporalProducerOperationService } from '../application/run-temporal-producer-worker.ts'
 import { runNextFaceProducerOperationService } from '../application/run-face-producer-worker.ts'
+import { runNextFaceWindowOperationService } from '../application/run-face-window-worker.ts'
+import { runNextFaceSourceWindowOperationService } from '../application/run-face-source-window-worker.ts'
 import { runCaptureSyncWorker } from '../application/run-capture-sync-worker.ts'
 import { createEvidenceBoundBriefCompiler } from './brief/evidence-bound-brief-compiler-model.ts'
 import { produceContiguousEvidenceService } from '../application/contiguous-evidence.ts'
@@ -495,13 +497,21 @@ import { PrismaExportMatrixRepository } from './prisma/export-matrix-repository.
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
 import { PrismaPerceptionProducerRequestContextRepository,
   PrismaTemporalProducerRequestContextRepository,
-  PrismaFaceProducerRequestContextRepository } from './prisma/perception-producer-request-context-repository.ts'
+  PrismaFaceProducerRequestContextRepository, PrismaFaceWindowRequestContextRepository } from './prisma/perception-producer-request-context-repository.ts'
 import { PrismaPerceptionProducerEnvelopeRepository } from './prisma/perception-producer-envelope-repository.ts'
 import { PrismaTemporalProducerEnvelopeRepository } from './prisma/temporal-producer-envelope-repository.ts'
 import { PrismaFaceProducerEnvelopeRepository } from './prisma/face-producer-envelope-repository.ts'
 import { TesseractOcrVideoAdapter } from './perception/tesseract-ocr-video-adapter.ts'
 import { FfmpegTemporalVideoAnalyzer } from './perception/ffmpeg-temporal-video-analyzer.ts'
 import { FfmpegYunetFaceVideoAnalyzer } from './perception/ffmpeg-yunet-face-video-analyzer.ts'
+import { FfmpegOpenvinoFaceVideoAnalyzer } from './perception/ffmpeg-openvino-face-video-analyzer.ts'
+import { OpenvinoFace0204Detector } from './perception/openvino-face0204-detector.ts'
+import { FaceRuntimeInventory } from './perception/face-runtime-inventory.ts'
+import { PrismaFaceWindowEnvelopeRepository } from './prisma/face-window-envelope-repository.ts'
+import { PrismaFaceSourceWindowRepository } from './prisma/face-source-window-repository.ts'
+import { PrismaFaceSourceWindowRequestContextRepository } from './prisma/face-source-window-request-context-repository.ts'
+import { FfmpegCaptionPixelCritic } from './media/ffmpeg-caption-pixel-critic.ts'
+import { faceWorkerPlatformAccepted } from '../domain/face-producer-registry.ts'
 import { YunetCpuFaceDetector } from './perception/yunet-cpu-face-detector.ts'
 import { TelemetryPublicOperationRepository } from './telemetry-public-operation-repository.ts'
 import { CompositeOperationTelemetry, StructuredConsoleOperationTelemetry } from './structured-console-operation-telemetry.ts'
@@ -2043,6 +2053,23 @@ export function createFaceProducerRequestContextRepository() {
   return new PrismaFaceProducerRequestContextRepository(resolveV2Client())
 }
 
+export function createFaceWindowRequestContextRepository() {
+  return new PrismaFaceWindowRequestContextRepository(resolveV2Client())
+}
+
+export function createFaceWindowEnvelopeRepository() {
+  return new PrismaFaceWindowEnvelopeRepository(resolveV2Client())
+}
+
+/** W65b. The source-keyed face windows: written by the source worker, read by the proxy and final caption planners. */
+export function createFaceSourceWindowRepository() {
+  return new PrismaFaceSourceWindowRepository(resolveV2Client())
+}
+
+export function createFaceSourceWindowRequestContextRepository() {
+  return new PrismaFaceSourceWindowRequestContextRepository(resolveV2Client())
+}
+
 export function createPerceptionProducerEnvelopeRepository() {
   return new PrismaPerceptionProducerEnvelopeRepository(resolveV2Client())
 }
@@ -2089,6 +2116,66 @@ export function createFaceProducerWorker(
     }, detector),
     clock,
   })
+}
+
+/**
+ * Composition of the owner-accepted V9 window worker, for either of its profiles: `timeline` (W62, windows keyed by the timeline of one
+ * EditPlan) or `source` (W65b, windows keyed by the source artifact's own frames, reusable by every edit of it). Both run the SAME
+ * analyzer, so the analyzer is composed once, here, and a refusal is the same for both. It fails closed before it can claim anything:
+ * on a platform the producer registry has no parity receipt for, without every pinned input, or with a runtime package root whose
+ * files differ from the pinned manifest. Linux is refused until its parity run has passed (see the W62 deployment gate).
+ */
+export async function createFaceWindowWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+  platform: string = process.platform,
+  profile: 'timeline' | 'source' = 'timeline',
+) {
+  if (!faceWorkerPlatformAccepted(platform)) {
+    throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `Face V9 detector has no passed parity receipt for platform ${platform}`)
+  }
+  const required = (key: string) => {
+    const value = environment[key]?.trim()
+    if (!value) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `${key} is required for the face V9 window worker`)
+    return value
+  }
+  const runtimeRoot = required('APOLLO_V2_FACE_V9_PYTHON_MODULE_DIR')
+  const inventory = await FaceRuntimeInventory.load({
+    root: runtimeRoot,
+    manifestPath: required('APOLLO_V2_FACE_V9_RUNTIME_MANIFEST'),
+    manifestSha256: required('APOLLO_V2_FACE_V9_RUNTIME_MANIFEST_SHA256'),
+  })
+  await inventory.verifyFull()
+  const detector = new OpenvinoFace0204Detector({
+    pythonExecutable: required('APOLLO_V2_FACE_V9_PYTHON_BIN'),
+    pythonExecutableSha256: required('APOLLO_V2_FACE_V9_PYTHON_SHA256'),
+    pythonModulePath: runtimeRoot,
+    modelXmlPath: required('APOLLO_V2_FACE_V9_MODEL_XML'),
+    modelBinPath: required('APOLLO_V2_FACE_V9_MODEL_BIN'),
+    bridgePath: required('APOLLO_V2_FACE_V9_BRIDGE_SCRIPT'),
+    bridgeSha256: required('APOLLO_V2_FACE_V9_BRIDGE_SHA256'),
+    runtimeInventory: inventory,
+    timeoutMs: 60_000,
+  })
+  const analyzer = new FfmpegOpenvinoFaceVideoAnalyzer({
+    ffmpeg: { path: required('APOLLO_V2_FACE_V9_FFMPEG_BIN'), sha256: required('APOLLO_V2_FACE_V9_FFMPEG_SHA256') },
+    ffprobe: { path: required('APOLLO_V2_FACE_V9_FFPROBE_BIN'), sha256: required('APOLLO_V2_FACE_V9_FFPROBE_SHA256') },
+    modelLicense: { path: required('APOLLO_V2_FACE_V9_MODEL_LICENSE'), sha256: required('APOLLO_V2_FACE_V9_MODEL_LICENSE_SHA256') },
+  }, detector)
+  const materializer = createArtifactSourceMaterializer(environment)
+  if (profile === 'source') {
+    return runNextFaceSourceWindowOperationService({ repository: createFaceSourceWindowRepository(), materializer, analyzer, clock })
+  }
+  return runNextFaceWindowOperationService({ repository: createFaceWindowEnvelopeRepository(), materializer, analyzer, clock })
+}
+
+/** The V9 source window worker (W65b): windows keyed by the source artifact's own frames, reusable by every edit of it. */
+export function createFaceSourceWindowWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+  platform: string = process.platform,
+) {
+  return createFaceWindowWorker(environment, clock, platform, 'source')
 }
 
 export function createTemporalProducerWorker(
@@ -2743,6 +2830,12 @@ export function createProjectProxyRenderWorker(
     colorPipelines: createColorPipelineCompilationRepository(),
     colorPlans: createProjectColorPlanRepository(),
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),
+    // W65. The sealed face windows the caption planner reads (scoped to the workspace, project, Version and source).
+    faceEvidence: createFaceSourceWindowRepository(),
+    // W65. The captions the plan placed are measured on the delivered pixels. No independent face veto detector is wired
+    // (the candidate's licence is pending), so every placed cue also carries FACE_PIXEL_CHECK_UNAVAILABLE: a warning that never
+    // turns an unknown into a pass.
+    captionPixelCritic: new FfmpegCaptionPixelCritic(environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {}),
     // F4.014. The colour verdict is taken on the bytes this worker just wrote
     // and lands on the review it is about to persist. Assembled here because it
     // needs the three things a worker has no business knowing: where FFmpeg is,
@@ -2814,6 +2907,11 @@ export function createProjectFinalExportWorker(
     colorPlans: createProjectColorPlanRepository(),
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),
     sources: createArtifactSourceMaterializer(environment),
+    faceEvidence: createFaceSourceWindowRepository(),
+    // W65b. A final that burns a caption is refused without this: the caption is confirmed on the delivered pixels (C1) or it is
+    // not delivered. No independent face veto detector is wired, so each burned cue also records FACE_PIXEL_CHECK_UNAVAILABLE in
+    // the receipt - a warning that never turns an unknown into a pass.
+    captionPixelCritic: new FfmpegCaptionPixelCritic(environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {}),
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),

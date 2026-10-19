@@ -38,6 +38,12 @@ export interface RenderedSubtitleAlignmentSource {
    * admission, and the `final` one too when the evidence is a final export. `variantId` above is that entry's stable State variant.
    */
   outputConsumption?: Readonly<{ render: SidecarOutputConsumptionSeal; final?: SidecarOutputConsumptionSeal }>
+  /**
+   * Verdict of the review that judged this exact render (the proxy review of the operation, or the one a
+   * final export was approved from). `null` means no verdict exists. A blocked or unjudged render is not a
+   * deliverable, so no sidecar is published for it.
+   */
+  review: Readonly<{ status: 'blocked' | 'warning-ack-required' | 'ready-for-final'; finalAllowed: boolean; reviewHash: string }> | null
 }
 
 export interface PersistedSubtitleSidecar {

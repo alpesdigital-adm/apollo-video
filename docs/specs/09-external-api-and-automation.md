@@ -971,9 +971,19 @@ Sem percepção facial verificada, o Diretor persiste `review-required`,
 `faceSafety.status=unknown`, razão explícita e lista vazia de evidence refs.
 `subtitlesFaceSafe=false` nesse caso; posição `bottom` e flag de proteção são
 somente intenção de layout. A métrica estratégica de legibilidade cobre
-limites textuais, não ausência de colisão facial. A UI e API mostram a revisão;
-o repositório de exportação final exige aprovação e evidência facial verificada.
-Um proxy pode servir à revisão, sem promover o resultado a aprovado. Snapshots
+limites textuais, não ausência de colisão facial. A UI e API mostram a revisão.
+O repositório de exportação final admite esse relatório (`review-required`,
+`faceSafety=unknown`) somente quando a incerteza facial é a única ressalva: gate
+estratégico aprovado, todos os hard checks (exceto `subtitlesFaceSafe`) verdadeiros e
+nenhuma issue `hard`. A segurança facial **continua desconhecida**; o que o final
+garante é por legenda queimada: banda `free-certified` no canvas final (evidência
+confiável ou geometria) confirmada pelo crítico de pixels C1 sobre o MP4 entregue. A
+legenda que não puder ser certificada é omitida (não queimada) e listada como item de
+revisão no recibo e no registro da tentativa. A política é `final-caption-certification/v1`,
+fixada por digest na identidade pré-render (veja
+`docs/quality/w65b-final-caption-certification.md`). Um relatório que declare
+`faceSafety.status=verified` mantém o requisito anterior de evidência de percepção
+facial. Um proxy pode servir à revisão, sem promover o resultado a aprovado. Snapshots
 antigos sem esse campo não são prova de segurança para nova exportação.
 As capabilities `apollo.projects.perception.read` e `.put` passam a 2.0.0,
 com respostas `perception-range-response/v2` e
@@ -1013,12 +1023,54 @@ operação comprova persistência de candidatos amostrados; o envelope conserva
 `faceSafety=unknown`, `identity=not-performed`, lacunas de cobertura e avaliação
 `failed-gate`. Não aprova rosto humano, legenda, crop, Diretor ou exportação.
 
+`POST /v1/projects/{projectId}/face-window-operations` é o recurso do detector V9 aceito pelo proprietário
+(OpenVINO `face-detection-0204`, escopo: rostos em primeiro plano e orador). Recebe apenas `projectVersionId`,
+`sourceArtifactId` e `window` (`startTimelineFrame`, `endTimelineFrame`; no máximo 300 quadros), com
+`projects:write` e `Idempotency-Key`. Cadência (6 Hz), limiares, perfil e produtor são do servidor; o caller não
+informa nenhum deles nem autoridade. O servidor exige um único clip unit-rate que cobre a timeline, vídeo CFR,
+orientação neutra e fps iguais, e recusa janela fora da timeline, maior que a política ou sem quadro amostrado.
+`GET /v1/projects/{projectId}/face-window-operations/{operationId}` exige `projects:read`, isola
+workspace/projeto/perfil e só retorna o envelope `face-producer-envelope/v2` após `succeeded`, revalidando
+source, versão, direitos, integridade e as saídas brutas do detector (5600 bytes por amostra), e devolve ao lado
+dele `producerAuthentication`: o veredito do registro de produtores, recalculado na leitura. Um produtor em
+plataforma sem recibo de paridade (hoje, Linux) é válido como envelope mas não autenticado, e evidência não
+autenticada nunca libera a área de legenda. O aceite do proprietário não é qualificação: o envelope conserva
+`faceSafety=unknown`, `identity=not-performed` e avaliação `owner-accepted-scoped`. Detalhes, limites e
+bloqueios de implantação: `docs/quality/w62-v9-runtime.md`.
+
+`POST /v1/projects/{projectId}/face-source-windows` (W65b) é o mesmo detector V9, mas com a evidência ligada
+aos bytes da FONTE e não a uma edição. Recebe apenas `sourceArtifactId` e `window` (`startSourceFrame`,
+`endSourceFrame`, quadros da própria linha do tempo da fonte; no máximo 300), com `projects:write` e
+`Idempotency-Key`; não há Version, intervalo de timeline, cadência ou limiar no pedido. O projeto só diz quem
+pergunta: precisa tocar a fonte (EditPlan atual a referencia), tê-la anexada como `source-master`, e a fonte deve
+estar disponível, ser vídeo com fps inteiro e ter direitos de análise para o locale do projeto. A janela precisa
+terminar na duração da fonte e conter ao menos um quadro amostrado. O envelope `face-producer-envelope/v3`
+(sem projeto, versão, EditPlan ou mapa de tempo; `sourceFps` inteiro) é reutilizável por toda Version e todo
+projeto do workspace que tenha a fonte anexada: a cada uso a identidade da fonte (artefato e SHA-256), os
+direitos do projeto que consome e o veredito do registro do produtor são reavaliados.
+`GET /v1/projects/{projectId}/face-source-windows/{operationId}` exige `projects:read`, isola
+workspace/projeto/perfil `openvino-face0204-v9-source` e só devolve o envelope após `succeeded`, junto de
+`producerAuthentication`. O envelope conserva `faceSafety=unknown` e `identity=not-performed`; a certificação
+de legenda é por cue, depois da projeção da evidência pelos clips da edição (taxa diferente de 1 ou mapa
+inconsistente: `unknown`). Detalhes: `docs/quality/w65b-source-keyed-face-evidence.md`.
+
 `GET /v1/operations/{operationId}/final-export-attempts` passa a capability
 2.0.0 e schema `project-final-export-attempt-history/v2`: tentativas falhas
 novas podem incluir `error.stage` sanitizado, além de código e mensagem seguros.
 Estágios legados podem estar ausentes; nenhuma stack, caminho local ou segredo
 integra a resposta. A observabilidade da tentativa termina no registro
 imutável de promoção; falhas posteriores continuam na PublicOperation.
+
+`POST /v1/projects/{projectId}/subtitle-sidecars` com `projectVersionId` de uma versão
+histórica deriva o sidecar somente do render dessa versão (variante, RenderInput, snapshot de
+EditPlan e cue map próprios) e responde `projectVersion.current=false`; resolução que não seja
+o render nomeado, artefato, manifesto, RenderInput ou cue map divergentes, e render bloqueado
+ou sem revisão são recusados com `SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH` antes de qualquer
+escrita. `POST /v1/projects/{projectId}/output-variants` recusa, com `INVALID_OUTPUT_SPEC`
+e razão tipada `SUBTITLE_BURN_IN_FPS_UNSUPPORTED`, perfil de entrega com legenda queimada
+(`subtitles.mode=burn-in`) acima de 90 fps, antes de qualquer leitura ou renderização;
+saídas sem legenda queimada mantêm 1–120 fps. Detalhes e evidência em
+`docs/quality/w69-materialized-subtitle-clock-v2.md`.
 
 1. Os dez FRs 240–249 possuem endpoints/contracts e testes correspondentes.
 2. Capability registry cobre todas as ações operáveis da UI.

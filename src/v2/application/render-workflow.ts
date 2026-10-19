@@ -6,6 +6,7 @@ import type { RenderElementMap } from '../domain/review-system.ts'
 import { OUTPUT_ASPECT_RATIOS } from '../domain/output-spec.ts'
 import { OUTPUT_FORMAT_REGISTRY } from '../domain/output-format-registry.ts'
 import { critiqueOutputFormat, type FormatSubjectEvidenceV1 } from '../domain/format-quality-critic.ts'
+import type { CaptionPixelIssueV1 } from '../domain/caption-pixel-verdict.ts'
 import type { SubtitleAnchorPlan } from '../domain/subtitle-anchor-plan.ts'
 
 export interface RenderApproval {
@@ -201,7 +202,7 @@ export function evaluateRenderedProxy(input: {
   subtitleSafeRegion?: readonly [number, number, number, number]
   criticIssues?: readonly Readonly<ProxyQualityIssue>[]
   warningsAcknowledged?: boolean
-  formatCritic?: Readonly<{ outputSpecId: string; placementPlanHash?: string | null; reframePlanHash?: string | null; subjects?: readonly Readonly<FormatSubjectEvidenceV1>[]; densityLimit?: number; subtitleAnchorPlan?: Readonly<SubtitleAnchorPlan> | null }>
+  formatCritic?: Readonly<{ outputSpecId: string; placementPlanHash?: string | null; reframePlanHash?: string | null; subjects?: readonly Readonly<FormatSubjectEvidenceV1>[]; densityLimit?: number; subtitleAnchorPlan?: Readonly<SubtitleAnchorPlan> | null; captionPixelIssues?: readonly Readonly<CaptionPixelIssueV1>[] }>
 }): Readonly<ProxyReview> {
   const spec = PROXY_OUTPUT_SPECS[input.format as ProxyOutputFormat]
   assertDomain(Boolean(spec), 'INVALID_OUTPUT_SPEC', 'Proxy format is not supported')
@@ -280,6 +281,7 @@ export function evaluateRenderedProxy(input: {
     subjects: input.formatCritic.subjects,
     densityLimit: input.formatCritic.densityLimit,
     subtitleAnchorPlan: input.formatCritic.subtitleAnchorPlan ?? null,
+    ...(input.formatCritic.captionPixelIssues ? { captionPixelIssues: input.formatCritic.captionPixelIssues } : {}),
   }) : undefined
   const criticIssues = Object.freeze([
     ...(input.criticIssues ?? []),

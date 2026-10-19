@@ -212,7 +212,18 @@ export interface FaceProducerRunOperationContext {
   editPlanSnapshotHash: string
   sampleIntervalFrames: number
   requestHash: string
+  /** Server-side detector pipeline that claims the operation; absent on creation means the legacy YuNet diagnostic. */
+  detectorProfile?: FaceDetectorProfile
+  /** Timeline window [startTimelineFrame, endTimelineFrame) of at most 300 frames; required for the V9 timeline profile, absent otherwise. */
+  window?: Readonly<{ startTimelineFrame: number; endTimelineFrame: number }>
+  /**
+   * W65b. Window [startSourceFrame, endSourceFrame) of at most 300 frames of the SOURCE's own timeline; required for the V9 source profile,
+   * absent otherwise. The project/version/EditPlan fields are then only the context the window was requested from.
+   */
+  sourceWindow?: Readonly<{ startSourceFrame: number; endSourceFrame: number }>
 }
+
+export type FaceDetectorProfile = 'yunet-v5-diagnostic' | 'openvino-face0204-v9' | 'openvino-face0204-v9-source'
 
 export type PublicOperationContext =
   | ArtifactRenderOperationContext

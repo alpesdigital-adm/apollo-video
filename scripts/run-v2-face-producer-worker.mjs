@@ -12,7 +12,7 @@ const client = importedClient.disconnectV2PostgresClient ? importedClient : impo
 const lifecycle = importedLifecycle.createWorkerShutdown ? importedLifecycle : importedLifecycle.default
 const opsState = importedOpsState.createFileAdmissionGate ? importedOpsState : importedOpsState.default
 const errors = importedErrors.DomainError ? importedErrors : importedErrors.default
-const { createFaceProducerWorker } = factory
+const { createFaceProducerWorker, createFaceWindowWorker, createFaceSourceWindowWorker } = factory
 const { disconnectV2PostgresClient } = client
 const { WORKER_SHUTDOWN_DEADLINE_EXIT_CODE, awaitWithShutdownDeadline, createWorkerShutdown,
   isShutdownDeadlineError, resolveWorkerShutdownGraceMs, runWithCleanup } = lifecycle
@@ -27,7 +27,15 @@ if (!Number.isSafeInteger(pollMs) || pollMs < 100 || pollMs > 60_000) {
 const graceMs = resolveWorkerShutdownGraceMs(process.env.APOLLO_V2_WORKER_SHUTDOWN_GRACE_MS)
 const host = hostname().replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 36) || 'unknown-host'
 const owner = `face:${host}:${process.pid}:${randomUUID()}`
-const runNext = createFaceProducerWorker()
+// One process runs one detector profile: the YuNet diagnostic (default), the owner-accepted V9 timeline window profile, or the
+// V9 source window profile (W65b: windows of the source's own frames). The V9 compositions are asynchronous and fail closed
+// (platform parity, pinned inputs, runtime inventory) before they claim.
+const profile = process.env.APOLLO_V2_FACE_PROFILE ?? 'yunet-v5-diagnostic'
+if (profile !== 'yunet-v5-diagnostic' && profile !== 'openvino-face0204-v9' && profile !== 'openvino-face0204-v9-source') {
+  throw new Error('APOLLO_V2_FACE_PROFILE must be yunet-v5-diagnostic, openvino-face0204-v9 or openvino-face0204-v9-source')
+}
+const runNext = profile === 'openvino-face0204-v9-source' ? await createFaceSourceWindowWorker()
+  : profile === 'openvino-face0204-v9' ? await createFaceWindowWorker() : createFaceProducerWorker()
 const shutdown = createWorkerShutdown({ process, gate: createFileAdmissionGate(),
   log: (event) => console.info(JSON.stringify({ worker: 'face-producer', ...event })) })
 
@@ -77,6 +85,18 @@ const SAFE_CONFLICT_REASONS = new Map([
   ['Stored edit plan has no video tracks', 'plan-no-tracks'],
   ['Stored edit plan source-to-timeline range is invalid', 'plan-range'],
   ['Face producer requires exactly one source clip', 'plan-clip-count'],
+  ['Face window operation has no window', 'window-missing'],
+  ['Face producer is not an accepted producer on a parity-proven platform', 'producer-not-accepted'],
+  ['Face window raw output does not reproduce its sample', 'raw-output-mismatch'],
+  ['Face window raw outputs do not match the samples', 'raw-output-count'],
+  ['Stored face window envelope failed integrity validation', 'window-envelope-integrity'],
+  ['Producer source is not attached to the requesting project', 'source-not-attached'],
+  ['Producer source has no integer frame rate in its manifest probe', 'source-no-clock'],
+  ['Producer window does not fit the source or its cadence', 'source-window-bounds'],
+  ['Face source window operation has no window', 'source-window-missing'],
+  ['Face source window raw output does not reproduce its sample', 'source-raw-output-mismatch'],
+  ['Face source window raw outputs do not match the samples', 'source-raw-output-count'],
+  ['Stored face source window envelope failed integrity validation', 'source-window-envelope-integrity'],
 ])
 function safeIterationDiagnostic(error) {
   if (error instanceof DomainError) {

@@ -148,6 +148,21 @@ const CONFIGURED_SPAWNS = new Map([
       /pins\[1\] !== this\.runtime\.ffmpeg\.sha256/, /pins\[2\] !== this\.runtime\.ffprobe\.sha256/,
       /after\.some\(\(value, index\) => value !== pins\[index\]\)/],
   }],
+  // The owner-accepted V9 window detector (W62): same explicit-path rule, its own V9 variables, nothing resolved from PATH.
+  ['src/v2/infrastructure/perception/ffmpeg-openvino-face-video-analyzer.ts', {
+    constructor: 'FfmpegOpenvinoFaceVideoAnalyzer', factory: 'createFaceWindowWorker',
+    expressions: ['binary'], calls: [],
+    variables: ['APOLLO_V2_FACE_V9_FFMPEG_BIN', 'APOLLO_V2_FACE_V9_FFPROBE_BIN',
+      'APOLLO_V2_FACE_V9_FFMPEG_SHA256', 'APOLLO_V2_FACE_V9_FFPROBE_SHA256'],
+    bindings: [/ffmpeg: \{ path: required\('APOLLO_V2_FACE_V9_FFMPEG_BIN'\),\s*sha256: required\('APOLLO_V2_FACE_V9_FFMPEG_SHA256'\) \}/,
+      /ffprobe: \{ path: required\('APOLLO_V2_FACE_V9_FFPROBE_BIN'\),\s*sha256: required\('APOLLO_V2_FACE_V9_FFPROBE_SHA256'\) \}/],
+    guards: [/\[runtime\.ffmpeg, runtime\.ffprobe, runtime\.modelLicense\]/,
+      /!isAbsolute\(binary\.path\)/, /!SHA\.test\(binary\.sha256\)/,
+      /runner\(this\.runtime\.ff(?:probe|mpeg)\.path,/g,
+      /Promise\.all\(pinPaths\.map\(hashFile\)\)/g,
+      /before\[1\] !== this\.runtime\.ffmpeg\.sha256/, /before\[2\] !== this\.runtime\.ffprobe\.sha256/,
+      /after\.some\(\(value, index\) => value !== before\[index\]\)/],
+  }],
   ['src/v2/infrastructure/perception/tesseract-ocr-video-adapter.ts', {
     constructor: 'TesseractOcrVideoAdapter', factory: 'createPerceptionProducerWorker',
     expressions: ['this.runtime.tesseractBinary', 'this.runtime.ffprobeBinary',
@@ -161,6 +176,20 @@ const CONFIGURED_SPAWNS = new Map([
       /hashesAfter\.slice\(0, 3\)\.some\(\(hash, index\) => hash !== runtimeHashes\[index\]\)/,
       /executableSha256: runtimeHashes\[2\]/,
       /ffmpegSha256: runtimeHashes\[0\]/, /ffprobeSha256: runtimeHashes\[1\]/],
+  }],
+  ['src/v2/infrastructure/perception/openvino-face0204-detector.ts', {
+    constructor: 'OpenvinoFace0204Detector', factory: 'createFaceWindowWorker',
+    expressions: ['this.config.pythonExecutable'],
+    variables: ['APOLLO_V2_FACE_V9_PYTHON_BIN', 'APOLLO_V2_FACE_V9_PYTHON_SHA256',
+      'APOLLO_V2_FACE_V9_BRIDGE_SCRIPT', 'APOLLO_V2_FACE_V9_BRIDGE_SHA256',
+      'APOLLO_V2_FACE_V9_MODEL_XML', 'APOLLO_V2_FACE_V9_MODEL_BIN', 'APOLLO_V2_FACE_V9_PYTHON_MODULE_DIR',
+      'APOLLO_V2_FACE_V9_RUNTIME_MANIFEST', 'APOLLO_V2_FACE_V9_RUNTIME_MANIFEST_SHA256'],
+    fields: ['pythonExecutable', 'pythonExecutableSha256', 'bridgePath', 'bridgeSha256'],
+    guards: [/\[config\.pythonExecutable, config\.pythonModulePath, config\.modelXmlPath, config\.modelBinPath, config\.bridgePath\]/,
+      /!isAbsolute\(path\)/, /!SHA\.test\(config\.pythonExecutableSha256\)/,
+      /hashFile\(this\.config\.pythonExecutable\)/,
+      /python !== this\.config\.pythonExecutableSha256/,
+      /const after = await this\.verifyFiles\(\)/],
   }],
   ['src/v2/infrastructure/perception/yunet-cpu-face-detector.ts', {
     constructor: 'YunetCpuFaceDetector', factory: 'createFaceProducerWorker',
@@ -430,8 +459,10 @@ test('every ffmpeg and ffprobe spawn in src/ uses the resolver or audited explic
     'src/v2/infrastructure/media/audio-concatenation.ts::input.ffmpegPath',
   ])
   assert.deepEqual(configured, [
+    'src/v2/infrastructure/perception/ffmpeg-openvino-face-video-analyzer.ts::binary',
     'src/v2/infrastructure/perception/ffmpeg-temporal-video-analyzer.ts::binary',
     'src/v2/infrastructure/perception/ffmpeg-yunet-face-video-analyzer.ts::binary',
+    'src/v2/infrastructure/perception/openvino-face0204-detector.ts::this.config.pythonExecutable',
     'src/v2/infrastructure/perception/tesseract-ocr-video-adapter.ts::this.runtime.ffmpegBinary',
     'src/v2/infrastructure/perception/tesseract-ocr-video-adapter.ts::this.runtime.ffprobeBinary',
     'src/v2/infrastructure/perception/tesseract-ocr-video-adapter.ts::this.runtime.tesseractBinary',
