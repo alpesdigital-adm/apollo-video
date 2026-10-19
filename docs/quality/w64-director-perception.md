@@ -158,6 +158,10 @@ PostgreSQL (harness `run-local-pg-s2d.mjs`, cluster descartável por invocação
 | `w64-final-d660e7eb` (`--build`) | suíte nova 4, W63a Director 1, snapshot PG 5, snapshot HTTP 1, **servidor Next real 1**, `prisma-director-ocr` 6 (OCR real) | 18/18, 0 pulados |
 | `w64-reg-96c0bbda` (`--build`, com as variáveis que habilitam as suítes) | `director-copy-editorial-cut.pg` 1, `multi-output-project-wide.pg` 1, `prisma-manual-edit` 1 | 3/3 (as três ficaram *puladas* na `w64-final-d660e7eb` por falta da variável; só esta rodada conta) |
 
+Árvore fundida com a W66r (`1166ede3` + correções `d3c36a5d`), uma só rodada com `--build`: **`w64-merged-e1d5fa40`**: suíte nova 4/4, `prisma-director-ocr` 6/6, `prisma-director-server-perception` 1/1, `prisma-server-perception-snapshot` 5/5,
+`server-perception-snapshot-http` (tsx) 1/1, servidor Next real 1/1, **W66r GT (`reframe-trajectory-render`) 10/10, W66r PG (`reframe-trajectory.pg`) 2/2**, `director-copy-editorial-cut.pg` 1/1, `multi-output-project-wide.pg` 1/1,
+`prisma-manual-edit` 1/1: 32/32, 0 pulados, pós-voo limpo. `npm test` na árvore fundida: 3680 testes, 3667 passam, 0 falham, 13 pulados.
+
 Mutação (editar a regra, rodar as suítes de domínio, restaurar e conferir `git status` limpo; 59 testes de domínio/Diretor na base):
 
 | regra quebrada | resultado |
