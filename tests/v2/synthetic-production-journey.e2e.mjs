@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import http from 'node:http'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -15,10 +15,14 @@ const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
 const ffprobePath = require('ffprobe-static').path
 
-const workspaceId = 'production-journey-workspace'
-const foreignWorkspaceId = 'production-journey-foreign'
-const clientId = 'production-journey-client'
-const foreignClientId = 'production-journey-foreign-client'
+// The identities are this run's own. The sealed rows of a run are append-only and stay in the database, and CI runs this journey three
+// times in a row against one database, so a fixed id would collide on the second pass ("Unique constraint failed on the fields: (`id`)").
+// Every assertion is scoped to these identities; nothing is deleted.
+const run = randomUUID().slice(0, 8)
+const workspaceId = `production-journey-workspace-${run}`
+const foreignWorkspaceId = `production-journey-foreign-${run}`
+const clientId = `production-journey-client-${run}`
+const foreignClientId = `production-journey-foreign-client-${run}`
 const hash = (character) => character.repeat(64)
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const at = (second) => new Date(Date.parse('2029-07-01T00:00:00.000Z') + second * 1_000).toISOString()
@@ -304,18 +308,18 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     let event = 0
     const project = await createProjectService({
       repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(at(0)),
-      createId: (kind) => `${kind}-production-journey-${++entity}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(820_000 + ++event).padStart(12, '0')}`,
+      createId: (kind) => `${kind}-production-journey-${run}-${++entity}`,
+      createEventId: () => `${run}-0000-4000-8000-${String(820_000 + ++event).padStart(12, '0')}`,
     })({
       workspaceId, name: 'Jornada de producao', objective: 'awareness', actor,
-      idempotencyKey: 'production-journey-project',
+      idempotencyKey: `production-journey-project-${run}`,
     })
     const projectId = project.projectAtCreation.id
     const projectVersionId = project.creationVersion.id
 
     await client.v2MediaArtifact.create({
       data: {
-        id: 'production-journey-consent', workspaceId, artifactKey: 'production-journey/consent.json',
+        id: `production-journey-consent-${run}`, workspaceId, artifactKey: `production-journey-${run}/consent.json`,
         sha256: hash('a'), byteSize: 512n, mediaType: 'data', container: 'json', status: 'available', createdAt: new Date(at(0)),
       },
     })
@@ -325,21 +329,21 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
       clock: () => new Date(at(0)),
     })
     const profileInput = (version, voiceId, avatarRef, key, extra = {}) => ({
-      workspaceId, profileId: 'production-journey-presenter', version, actorIdentityId: 'production-journey-identity',
+      workspaceId, profileId: `production-journey-presenter-${run}`, version, actorIdentityId: `production-journey-identity-${run}`,
       avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: avatarRef },
       voice: { id: voiceId, version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {
-        id: `production-journey-consent-v${version}`, evidenceArtifactId: 'production-journey-consent', granted: true,
+        id: `production-journey-consent-${run}-v${version}`, evidenceArtifactId: `production-journey-consent-${run}`, granted: true,
         allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
         allowedOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
         ...extra,
       },
       actor, idempotencyKey: key,
     })
-    const profileV1 = await registerProfile(profileInput(1, 'voice_pj_a', 'avatar_pj_1', 'production-journey-profile-v1'))
-    const profileV2 = await registerProfile(profileInput(2, 'voice_pj_b', 'avatar_pj_1', 'production-journey-profile-v2'))
-    const profileV3 = await registerProfile(profileInput(3, 'voice_pj_b', 'avatar_pj_2', 'production-journey-profile-v3'))
+    const profileV1 = await registerProfile(profileInput(1, 'voice_pj_a', 'avatar_pj_1', `production-journey-profile-${run}-v1`))
+    const profileV2 = await registerProfile(profileInput(2, 'voice_pj_b', 'avatar_pj_1', `production-journey-profile-${run}-v2`))
+    const profileV3 = await registerProfile(profileInput(3, 'voice_pj_b', 'avatar_pj_2', `production-journey-profile-${run}-v3`))
 
     const port = await freePort()
     const baseUrl = `http://127.0.0.1:${port}`
@@ -451,7 +455,7 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     const setRights = setAssetRightsService({
       repository: new PrismaAssetRightsRepository(client),
       clock: () => new Date(at(50)),
-      createId: () => `production-journey-rights-${++rightsSequence}`,
+      createId: () => `production-journey-rights-${run}-${++rightsSequence}`,
     })
     const clearProducedTakes = async () => {
       const approved = await client.v2SyntheticBlockGeneration.findMany({
@@ -1021,7 +1025,7 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     // -----------------------------------------------------------------------
     const beforeRevocation = await counts()
     const hitsBeforeRevocation = await client.v2SyntheticCacheDecision.count({ where: { workspaceId, outcome: 'hit' } })
-    const profileV4 = await registerProfile(profileInput(4, 'voice_pj_b', 'avatar_pj_2', 'production-journey-profile-v4', {
+    const profileV4 = await registerProfile(profileInput(4, 'voice_pj_b', 'avatar_pj_2', `production-journey-profile-${run}-v4`, {
       revokedAt: '2026-01-01T00:00:00.000Z',
     }))
     planState = await getPlan(planId)
