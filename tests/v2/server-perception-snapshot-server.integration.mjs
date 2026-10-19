@@ -105,7 +105,9 @@ test('W63a real Next server: the snapshot route, its published schema and the Op
       const full = await call(route, reader)
       assert.equal(full.status, 200, JSON.stringify(full.body))
       assert.equal(validate(full.body), true, ajv.errorsText(validate.errors))
-      assert.ok(full.headers.get('x-request-id'), 'the response is traceable')
+      assert.ok(full.headers.get('apollo-request-id'), 'the response is traceable')
+      assert.equal(full.headers.get('cache-control'), 'no-store')
+      assert.equal(full.headers.get('apollo-api-version'), 'v1')
       assert.deepEqual(full.body.data.origin, { kind: 'server-assembled', manualTimelinesIncluded: false })
       assert.deepEqual(Object.fromEntries(full.body.data.result.coverage.map((entry) => [entry.kind, entry.state])), {
         'transcript-word': 'partial', speaker: 'absent', silence: 'absent', face: 'partial', object: 'absent',
