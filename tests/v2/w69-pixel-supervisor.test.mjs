@@ -48,19 +48,26 @@ test('lock arguments are validated', async () => {
 })
 
 test('the supervisor refuses relative paths, bad pins and unknown flags, and a dry run starts nothing', async () => {
+  // The built-in FFmpeg and font paths are the Windows ones the physical proof was authenticated with ("C:/..."), which another
+  // platform does not call absolute. Every case that must reach a LATER check therefore names its own absolute binaries, built
+  // with this platform's join, so the test says the same thing on Windows and on the Linux runner.
+  const binaries = ['--ffmpeg', join(tmpdir(), 'ffmpeg-binary'), '--font', join(tmpdir(), 'font-file.ttf')]
   assert.throws(() => parseArguments([]), /--base/)
   assert.throws(() => parseArguments(['--base', 'relative']), /--base/)
-  assert.throws(() => parseArguments(['--base', join(tmpdir(), 'b'), '--ffmpeg-sha256', 'abc']), /SHA-256/)
-  assert.throws(() => parseArguments(['--base', join(tmpdir(), 'b'), '--nope']), /Unknown argument/)
-  assert.throws(() => parseArguments(['--base', join(tmpdir(), 'b'), '--timeout-ms', '5']), /out of range/)
+  assert.throws(() => parseArguments(['--base', join(tmpdir(), 'b'), ...binaries, '--ffmpeg-sha256', 'abc']), /SHA-256/)
+  assert.throws(() => parseArguments(['--base', join(tmpdir(), 'b'), ...binaries, '--font-sha256', 'abc']), /SHA-256/)
+  assert.throws(() => parseArguments(['--base', join(tmpdir(), 'b'), '--ffmpeg', 'ffmpeg', '--font', join(tmpdir(), 'font-file.ttf')]), /absolute paths/)
+  assert.throws(() => parseArguments(['--base', join(tmpdir(), 'b'), '--ffmpeg', join(tmpdir(), 'ffmpeg-binary'), '--font', 'font.ttf']), /absolute paths/)
+  assert.throws(() => parseArguments(['--base', join(tmpdir(), 'b'), ...binaries, '--nope']), /Unknown argument/)
+  assert.throws(() => parseArguments(['--base', join(tmpdir(), 'b'), ...binaries, '--timeout-ms', '5']), /out of range/)
   assert.throws(() => parseArguments(['--base']), /requires a value/)
-  const options = parseArguments(['--base', join(tmpdir(), 'b'), '--dry-run'])
+  const options = parseArguments(['--base', join(tmpdir(), 'b'), ...binaries, '--dry-run'])
   assert.equal(options.dryRun, true); assert.equal(options.fontFamily, 'Arial')
   await withDirectory(async (directory) => {
     const lines = []
     const original = console.log
     console.log = (line) => lines.push(line)
-    try { assert.equal(await main(['--base', directory, '--dry-run']), 0) } finally { console.log = original }
+    try { assert.equal(await main(['--base', directory, ...binaries, '--dry-run']), 0) } finally { console.log = original }
     const plan = JSON.parse(lines.join('\n'))
     assert.equal(plan.dryRun, true); assert.equal(plan.lockPath, join(directory, 'workload.lock'))
     assert.deepEqual(plan.args, ['--experimental-transform-types', '--test', 'tests/v2/ass-emission-clock-pixels.integration.mjs'])
