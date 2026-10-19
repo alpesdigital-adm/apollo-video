@@ -8,6 +8,7 @@ import { parseCommandImpact } from '../../domain/command-impact.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { requireOutputVariant } from '../../domain/output-consumption.ts'
 import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
 import { renderOutputReferences } from '../../domain/output-variant-references.ts'
 import { childCommandOf } from '../../domain/project-output-state-transition.ts'
@@ -128,7 +129,16 @@ export class PrismaVariantReframeOverrideRepository implements VariantReframeOve
     })
   }
 
-  listCurrentByVariant(input: { workspaceId: string; projectId: string; variantId: string }) {
+  /**
+   * The same scope rule as every other read of this variant: the project must exist in THIS workspace (a stranger's project is not found, it
+   * is not an empty list) and the variant must be an exact member of the sealed State of its head (an aspect ratio is not one).
+   */
+  async listCurrentByVariant(input: { workspaceId: string; projectId: string; variantId: string }) {
+    const project = await this.client.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { currentVersionId: true } })
+    if (!project?.currentVersionId) throw new DomainError('PROJECT_NOT_FOUND', 'Reframe project was not found')
+    const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersionId })
+    if (!parent) throw new DomainError('PROJECT_NOT_FOUND', 'Reframe project was not found')
+    requireOutputVariant(parent.state, input.variantId)
     return readVariantReframeOverrideHeads(this.client, input)
   }
 
