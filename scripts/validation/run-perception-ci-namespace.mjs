@@ -40,6 +40,7 @@ export const PERCEPTION_SUITES = Object.freeze([
   'tests/v2/prisma-temporal-producer.integration.mjs',
   'tests/v2/prisma-server-perception-snapshot.integration.mjs',
   'tests/v2/prisma-director-server-perception.integration.mjs',
+  'tests/v2/prisma-director-perception-evidence.integration.mjs',
   'tests/v2/server-perception-snapshot-server.integration.mjs',
   'tests/v2/prisma-face-producer.integration.mjs',
 ])
