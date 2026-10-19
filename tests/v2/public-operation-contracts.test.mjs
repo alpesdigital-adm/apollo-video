@@ -33,6 +33,8 @@ import { ACCEPTED_FACE_PRODUCERS, authenticateFaceEnvelope } from '../../src/v2/
 import { acceptedProducer, sealedWindow } from './helpers/face-envelope-v2.mjs'
 import { sealedSourceWindow } from './helpers/face-source-envelope-v3.mjs'
 import { presentPublicOperationV2 } from '../../src/v2/public-api/presenters.ts'
+import { assembleServerPerceptionSnapshot, queryServerPerceptionSnapshot } from '../../src/v2/domain/server-perception-snapshot.ts'
+import { assemblyBase, ocrEnvelope, temporalEnvelope } from './helpers/perception-snapshot-fixtures.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const openApi = createOpenApiDocument()
@@ -116,7 +118,7 @@ function parameterMap(operation) {
 }
 
 test('T-FR-241 every public operation has an executable, versioned contract test', async (t) => {
-  assert.equal(FOUNDATION_CAPABILITIES.length, 391)
+  assert.equal(FOUNDATION_CAPABILITIES.length, 392)
   assert.deepEqual(FOUNDATION_CAPABILITIES
     .filter((capability) => capability.id.startsWith('apollo.projects.perception-producer-operations.'))
     .map((capability) => capability.id).sort(), [
@@ -539,4 +541,56 @@ test('T-F4.015 each renderable-plan compiler is reached by its own route and by 
     attribution.get('compileSynthesisRenderPlanService'),
     ['POST /v1/projects/{projectId}/editorial-syntheses/{synthesisId}/render-plan'],
   )
+})
+
+test('the server perception snapshot capability is a scoped query that answers with server provenance and honest coverage', () => {
+  const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.perception.snapshot.read')
+  assert.ok(capability)
+  assert.equal(capability.version, '1.0.0')
+  assert.equal(capability.operationKind, 'query')
+  assert.deepEqual(capability.requiredScopes, ['projects:read'])
+  assert.deepEqual(capability.endpoint, { method: 'GET', path: '/v1/projects/{projectId}/perception/snapshot' })
+  assert.deepEqual(capability.queryParameters.map((parameter) => parameter.name), ['versionId', 'fromMs', 'toMs', 'kinds'])
+  assert.ok(capability.queryParameters.every((parameter) => parameter.required === false))
+  assert.deepEqual(capability.successStatuses, [200])
+  // The manual timeline of PUT /perception keeps its own capability, schema and label.
+  assert.equal(FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.perception.read').outputSchemaRef, 'apollo://schemas/perception-range-response/v2')
+  const response = ajv.getSchema(capability.outputSchemaRef)
+  assert.equal(response(structuredClone(publicSchemaExamples(getPublicSchema(capability.outputSchemaRef))[0])), true, ajv.errorsText(response.errors))
+
+  // A real snapshot, queried the way the service queries it, satisfies the published schema.
+  const snapshot = assembleServerPerceptionSnapshot(assemblyBase({ extra: { ocr: [ocrEnvelope({ frames: [0, 30] })], temporal: [temporalEnvelope()] } }))
+  const base = {
+    id: `perception-snapshot-${snapshot.snapshotHash.slice(0, 40)}`, workspaceId: 'workspace-1', projectId: 'project-1', projectVersionId: 'version-1',
+    createdAt: '2026-10-19T00:00:00.000Z', origin: { kind: 'server-assembled', manualTimelinesIncluded: false },
+    snapshot: { schemaVersion: snapshot.schemaVersion, snapshotHash: snapshot.snapshotHash, timelineHash: snapshot.timeline.timelineHash,
+      faceSafety: snapshot.faceSafety, editPlan: snapshot.editPlan, timeBase: snapshot.timeBase, sources: snapshot.sources,
+      inputs: snapshot.inputs, rejected: snapshot.rejected },
+    result: queryServerPerceptionSnapshot(snapshot, { fromMs: 0, toMs: 2_000 }),
+  }
+  const envelope = (data) => ({ data, meta: { apiVersion: 'v1' } })
+  assert.equal(response(envelope(base)), true, ajv.errorsText(response.errors))
+  // Each way a response could overstate what the server examined, or pass a caller's timeline off as the server's, is refused.
+  const edit = (mutate) => { const clone = structuredClone(base); mutate(clone); return envelope(clone) }
+  for (const [label, mutate] of [
+    ['manual origin', (value) => { value.origin.kind = 'manual-controlled' }],
+    ['manual timelines included', (value) => { value.origin.manualTimelinesIncluded = true }],
+    ['invented values', (value) => { value.result.inventedValues = 1 }],
+    ['face safety granted', (value) => { value.snapshot.faceSafety = 'safe' }],
+    ['observation without server provenance', (value) => { delete value.result.observations[0].provenance.origin }],
+    ['observation provenance of a caller', (value) => { value.result.observations[0].provenance = { source: 'caller', model: 'caller', version: 'v1', confidence: 0.99 } }],
+    ['unknown confidence basis', (value) => { value.result.observations[0].provenance.confidenceBasis = 'believed' }],
+    ['coverage state invented', (value) => { value.result.coverage[0].state = 'unknown' }],
+    ['coverage without its unexamined ranges', (value) => { delete value.result.coverage[0].unexaminedRanges }],
+    ['reason code in lower case', (value) => { value.result.coverage.find((entry) => entry.state === 'absent').reasonCode = 'no_verified_detector' }],
+    ['extra field on the snapshot', (value) => { value.snapshot.manualTimeline = {} }],
+    ['unhashed snapshot', (value) => { value.snapshot.snapshotHash = 'not-a-hash' }],
+    ['unverified source bytes', (value) => { value.snapshot.sources[0].sha256 = null }],
+    ['unverified EditPlan', (value) => { value.snapshot.editPlan.snapshotHash = null }],
+  ]) {
+    assert.equal(response(edit(mutate)), false, label)
+  }
+  // The object kind is always absent for lack of a verified detector; the response carries that reason, not a state of its own.
+  const object = base.result.coverage.find((entry) => entry.kind === 'object')
+  assert.deepEqual([object.state, object.reasonCode, object.observedMs], ['absent', 'NO_VERIFIED_DETECTOR', 0])
 })

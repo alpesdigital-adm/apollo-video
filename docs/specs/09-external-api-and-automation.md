@@ -993,6 +993,34 @@ manuais/controladas; o servidor grava `origin.kind=manual-controlled`,
 `PUT` devolvem essa origem. Proveniência e confidence alegadas por observação
 permanecem dados do caller; não autorizam consumo automático como detector.
 
+`GET /v1/projects/{projectId}/perception/snapshot` (W63a, capability
+`apollo.projects.perception.snapshot.read` 1.0.0, schema
+`server-perception-snapshot-response/v1`) exige `projects:read` e devolve o
+snapshot de percepção que o SERVIDOR monta, para uma ProjectVersion (a corrente,
+ou a de `versionId`), somente com evidência selada que ele mesmo produziu:
+palavras da transcrição retemporizada no EditPlan, amostras de OCR, medidas
+quadro a quadro de plano/movimento e janelas de rosto `face-producer-envelope/v3`
+(por quadros da FONTE, projetadas pelos clips). O relógio é o do EditPlan
+(`ms = round(quadro / fps * 1000)`); diferenças de fps/PTS ficam como foram
+medidas (`inputs[].sourceClock`, `startSourcePts`). Cada observação traz
+proveniência `origin=server` com `producer`, `model`, `version`, `envelopeId`,
+`envelopeHash` e `confidence` (com a base: reportada pelo produtor, medida
+determinística ou prior de política). A cobertura é por tipo, recortada ao
+intervalo pedido (`fromMs`/`toMs`, semiaberto) e nunca inventa `complete`:
+`complete` só quando todo quadro foi examinado; `partial` lista o examinado e o
+`unexaminedRanges`; `absent` traz `reasonCode` (`NO_PRODUCER_RUN`,
+`NO_VERIFIED_DETECTOR` para `object`, `DIARIZATION_UNAVAILABLE`,
+`SILENCE_PRODUCER_UNAVAILABLE`, `INSERT_GEOMETRY_NOT_COMPILED`,
+`TIMELINE_FPS_NOT_INTEGER`, `NO_UNIT_RATE_CLIP`…). `object` é sempre `absent`:
+não há detector verificado. Envelope violado, de outra versão, plano, workspace,
+fonte (SHA) ou relógio é recusado e listado em `snapshot.rejected`; os direitos
+da fonte e o selo de cada envelope são reverificados a cada leitura. O snapshot
+é endereçado pelo conteúdo (`snapshotHash`), gravado uma só vez por versão e
+idempotente: a mesma evidência é a mesma linha. A timeline manual do `PUT
+/perception` (`manual-controlled`) nunca entra no snapshot
+(`origin.manualTimelinesIncluded=false`) e continua em `GET /perception`.
+Detalhes e limites: `docs/quality/w63a-server-perception-snapshot.md`.
+
 `POST /v1/projects/{projectId}/perception-producer-operations` exige
 `projects:write`, `Idempotency-Key` e corpo limitado a `projectVersionId`,
 `sourceArtifactId` e `sampleIntervalFrames` opcional (1–300; padrão 30).
