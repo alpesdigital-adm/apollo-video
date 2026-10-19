@@ -32,6 +32,7 @@ export interface CommandImpactV1 {
     | 'apply-review-patch'
     | 'apply-review-patch-batch'
     | 'apply-subtitle-segment-override'
+    | 'apply-variant-reframe-override'
   baseVersionId: string
   resultVersionId: string
   changeKinds: readonly string[]
@@ -614,6 +615,70 @@ export function createSubtitleSegmentOverrideCommandImpact(input: {
   return Object.freeze({ ...body, impactHash: calculateCanonicalHash(body) })
 }
 
+/**
+ * W66r — impact of one manual reframe scoped to a single range of a single clip of a single output variant.
+ *
+ * Variant-scoped like the subtitle exception, but NOT partial: it is a full-timeline impact of ONE output. `affectedVariantIds` and
+ * `affectedArtifacts` only ever mention the target variant, so a 9:16 reframe cannot invalidate the 16:9 export. A render made from a reframe
+ * plan is always a full render of its output (the bytes of an earlier proxy were drawn under another trajectory, and the renderer refuses a
+ * trajectory combined with a reused range), so the stale region and the render it asks for are both the whole timeline of that variant, and
+ * never the range the editor framed. That range (validated here against the compiled timeline) is in the Command's payload and in the override
+ * row, which is where it belongs. A manual reframe moves only what is drawn (`visual`).
+ */
+export function createVariantReframeOverrideCommandImpact(input: {
+  commandId: string
+  baseVersionId: string
+  resultVersionId: string
+  variantId: string
+  clipId: string
+  action: 'set' | 'reset'
+  range: Readonly<CommandImpactRange>
+  durationFrames: number
+  outputReferences: readonly Readonly<CommandImpactOutputReference>[]
+}): Readonly<CommandImpactV1> {
+  for (const [field, value] of Object.entries({
+    commandId: input.commandId,
+    baseVersionId: input.baseVersionId,
+    resultVersionId: input.resultVersionId,
+    variantId: input.variantId,
+    clipId: input.clipId,
+  })) assertDomain(validId(value), 'INVALID_ARGUMENT', `${field} is invalid`)
+  assertDomain(input.action === 'set' || input.action === 'reset', 'INVALID_ARGUMENT', 'Reframe override action is invalid')
+  assertDomain(
+    Number.isSafeInteger(input.durationFrames) && input.durationFrames > 0,
+    'INVALID_ARGUMENT',
+    'Reframe override impact requires a compiled timeline',
+  )
+  assertDomain(
+    Number.isSafeInteger(input.range.startFrame) && Number.isSafeInteger(input.range.endFrame) &&
+      input.range.startFrame >= 0 && input.range.endFrame > input.range.startFrame &&
+      input.range.endFrame <= input.durationFrames,
+    'INVALID_ARGUMENT',
+    'Reframe override range must sit inside the compiled timeline',
+  )
+  const affectedRanges = canonicalCommandImpactRanges([{ startFrame: 0, endFrame: input.durationFrames }])
+  const affectedArtifacts = normalizeCommandImpactOutputReferences(
+    input.outputReferences.filter((output) => output.variantId === input.variantId),
+  )
+  const body = {
+    schemaVersion: 'command-impact/v1' as const,
+    commandId: input.commandId,
+    commandType: 'apply-variant-reframe-override' as const,
+    baseVersionId: input.baseVersionId,
+    resultVersionId: input.resultVersionId,
+    changeKinds: Object.freeze([`reframe-override:${input.action}`]),
+    dependencyTypes: Object.freeze(['visual' as const]),
+    affectedRanges,
+    affectedVariantIds: Object.freeze([input.variantId]),
+    affectedArtifacts,
+    minimalRenders: Object.freeze([
+      Object.freeze({ kind: 'proxy' as const, variantId: input.variantId, ranges: affectedRanges }),
+    ]),
+    renderSemanticsChanged: true,
+  }
+  return Object.freeze({ ...body, impactHash: calculateCanonicalHash(body) })
+}
+
 export function createCommandArtifactInvalidations(input: {
   impact: Readonly<CommandImpactV1>
   createdAt: string
@@ -718,7 +783,7 @@ export function parseCommandImpact(value: unknown): Readonly<CommandImpactV1> {
   const impact = stored as unknown as CommandImpactV1
   assertDomain(
     impact.schemaVersion === 'command-impact/v1' &&
-      ['manual-edit', 'apply-review-patch', 'apply-review-patch-batch', 'apply-subtitle-segment-override']
+      ['manual-edit', 'apply-review-patch', 'apply-review-patch-batch', 'apply-subtitle-segment-override', 'apply-variant-reframe-override']
         .includes(impact.commandType) &&
       validId(impact.commandId) &&
       validId(impact.baseVersionId) &&
@@ -817,6 +882,26 @@ export function parseCommandImpact(value: unknown): Readonly<CommandImpactV1> {
         impact.dependencyTypes.every((dependency) => dependency === 'visual' || dependency === 'content'),
       'PERSISTENCE_CONFLICT',
       'Stored subtitle segment override impact is inconsistent',
+    )
+  }
+  if (impact.commandType === 'apply-variant-reframe-override') {
+    // A manual reframe is scoped to exactly one variant and moves only what is drawn. Its impact is the whole timeline of that variant, and so
+    // is its render: a render made from a plan never reuses another's bytes. Anything narrower stored under this type is a defect.
+    assertDomain(
+      impact.renderSemanticsChanged === true &&
+        impact.affectedVariantIds.length === 1 &&
+        impact.affectedRanges.length === 1 &&
+        impact.affectedRanges[0]!.startFrame === 0 &&
+        impact.minimalRenders.length === 1 &&
+        impact.minimalRenders[0]!.variantId === impact.affectedVariantIds[0] &&
+        impact.minimalRenders[0]!.ranges.length === 1 &&
+        impact.minimalRenders[0]!.ranges[0]!.startFrame === 0 &&
+        impact.minimalRenders[0]!.ranges[0]!.endFrame === impact.affectedRanges[0]!.endFrame &&
+        impact.affectedArtifacts.every((artifact) => artifact.variantId === impact.affectedVariantIds[0]) &&
+        impact.changeKinds.length === 1 && impact.changeKinds.every((kind) => kind === 'reframe-override:set' || kind === 'reframe-override:reset') &&
+        impact.dependencyTypes.length === 1 && impact.dependencyTypes[0] === 'visual',
+      'PERSISTENCE_CONFLICT',
+      'Stored variant reframe override impact is inconsistent',
     )
   }
   const { impactHash, ...body } = impact

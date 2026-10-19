@@ -161,17 +161,24 @@ test('a parent without an explicit output variant cannot receive a child Command
   assert.deepEqual(bundle.state.document.entries.map((e) => e.consumption), [{ status: 'blocked', reasons: ['empty-project'] }])
 })
 
-test('the database guard names exactly the types, plan effects, replacements, origin keys and producer the domain declares', async () => {
-  const sql = await readFile(new URL('../../prisma/v2/migrations/20261016120000_project_child_command_state_v1/migration.sql', import.meta.url), 'utf8')
+/**
+ * The guard function is redefined by every migration that adds a Command type. The first definition names the types that existed then; the
+ * definition in force (W66r added `apply-variant-reframe-override`) names the registry as it is now. Both are pinned to the domain, so the
+ * history cannot be edited and the guard in force cannot drift from the table.
+ */
+async function pinChildCommandGuard(migration, table, { dispatch }) {
+  const sql = await readFile(new URL(`../../prisma/v2/migrations/${migration}/migration.sql`, import.meta.url), 'utf8')
   const quoted = (text) => [...text.matchAll(/'([A-Za-z-]+)'/g)].map((match) => match[1])
-  const table = Object.entries(CHILD_COMMAND_TRANSITIONS)
   assert.deepEqual(quoted(sql.match(/cmd\.type NOT IN \(([^)]*)\)/)[1]), table.map(([type]) => type))
   assert.deepEqual(quoted(sql.match(/cmd\.type IN \(([^)]*)\) AND pj-ARRAY/)[1]), table.filter(([, t]) => t.planEffect === 'preserves-plan').map(([type]) => type))
   assert.deepEqual([...sql.matchAll(/WHEN '([a-z-]+)' THEN ARRAY\[([^\]]*)\]/g)].map((match) => [match[1], quoted(match[2])]),
     table.filter(([, t]) => t.replaces.length > 0).map(([type, t]) => [type, [...t.replaces]]))
   const bundle = transitionProjectOutputState(childInput(await world(), { suffix: 'sync' }).input)
   assert.deepEqual(quoted(sql.match(/w66_v3_exact_keys\(o,ARRAY\[([^\]]*)\]\)/)[1]).sort(), Object.keys(bundle.origin).sort())
-  assert.ok(sql.includes(`o->>'kind' IS DISTINCT FROM '${bundle.origin.kind}'`) && sql.includes(`origin_kind='${bundle.origin.kind}'`))
+  // The dispatch on the origin kind belongs to the first definition; a later one redefines the child guard alone and must not redefine the dispatch.
+  assert.ok(sql.includes(`o->>'kind' IS DISTINCT FROM '${bundle.origin.kind}'`))
+  assert.equal(sql.includes('w66_assert_operational_state_v3'), dispatch)
+  if (dispatch) assert.ok(sql.includes(`origin_kind='${bundle.origin.kind}'`))
   const producer = bundle.state.document.producer.document, body = sql.match(/expected_producer:=jsonb_build_object\(([^;]*)\);/)[1]
   assert.deepEqual([...new Set(quoted(body).filter((token) => Object.keys(producer).includes(token)))].sort(), Object.keys(producer).sort())
   assert.ok(body.includes(`'${producer.schemaVersion}'`) && body.includes(`'kind','${producer.kind}'`))
@@ -179,10 +186,18 @@ test('the database guard names exactly the types, plan effects, replacements, or
   // Adoption is verified by the same guard: listed, sorted, unique, exactly the observations outside the parent, persisted and rights-current.
   assert.deepEqual(producer.adoptions, [])
   for (const marker of ["jsonb_typeof(o->'adoptions')", "'adoptions',o->'adoptions'", 'W66v3 child adoption shape/order differs', 'W66v3 child normalization lineage differs',
-    'w66_assert_normalization_v3(adopted_receipt.id', 'W66v3 adopted observation rights differ from the snapshot they name', 'written_now', 'W66v3 adopted observation rights are not current', 'apollo.w66_state_verified', 'pg_stat_xact_all_tables',
-    'W66v3 adopted observation has no project media association']) {
+    'w66_assert_normalization_v3(adopted_receipt.id', 'W66v3 adopted observation rights differ from the snapshot they name', 'written_now', 'W66v3 adopted observation rights are not current',
+    'W66v3 adopted observation has no project media association',
+    // the verdict cache lives in the dispatch, which only the first definition carries
+    ...(dispatch ? ['apollo.w66_state_verified', 'pg_stat_xact_all_tables'] : [])]) {
     assert.ok(sql.includes(marker), marker)
   }
+}
+
+test('the database guard names exactly the types, plan effects, replacements, origin keys and producer the domain declares', async () => {
+  const table = Object.entries(CHILD_COMMAND_TRANSITIONS)
+  await pinChildCommandGuard('20261016120000_project_child_command_state_v1', table.filter(([type]) => type !== 'apply-variant-reframe-override'), { dispatch: true })
+  await pinChildCommandGuard('20261019100000_variant_reframe_v1', table, { dispatch: false })
 })
 
 test('a child plan is materialized only from observed sources: an unobserved source is refused, an emptied plan blocks', async () => {

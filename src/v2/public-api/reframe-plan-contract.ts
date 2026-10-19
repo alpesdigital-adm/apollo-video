@@ -1,5 +1,4 @@
 import { DomainError } from '../domain/errors.ts'
-import { OUTPUT_ASPECT_RATIOS, type OutputAspectRatio } from '../domain/output-spec.ts'
 
 function record(value: unknown, field: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new DomainError('INVALID_ARGUMENT', `${field} must be an object`)
@@ -13,14 +12,13 @@ function id(value: unknown, field: string): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(value)) throw new DomainError('INVALID_ARGUMENT', `${field} is invalid`)
   return value
 }
-export function parseReframePlanRequest(value: unknown): Readonly<{
-  baseVersionId: string
-  format: OutputAspectRatio
-}> {
+
+/**
+ * W66r. A reframe plan is requested for one STABLE output variant of one Version. The body carries neither observations nor overrides
+ * (the server derives the one from sealed evidence, and an override is a Command), and an aspect ratio is not a variant.
+ */
+export function parseReframePlanRequest(value: unknown): Readonly<{ baseVersionId: string; variantId: string }> {
   const body = record(value, 'body')
-  exact(body, ['baseVersionId', 'format'], 'body')
-  if (typeof body.format !== 'string' || !OUTPUT_ASPECT_RATIOS.includes(body.format as OutputAspectRatio)) throw new DomainError('INVALID_ARGUMENT', 'format is invalid')
-  return Object.freeze({
-    baseVersionId: id(body.baseVersionId, 'baseVersionId'), format: body.format as OutputAspectRatio,
-  })
+  exact(body, ['baseVersionId', 'variantId'], 'body')
+  return Object.freeze({ baseVersionId: id(body.baseVersionId, 'baseVersionId'), variantId: id(body.variantId, 'variantId') })
 }

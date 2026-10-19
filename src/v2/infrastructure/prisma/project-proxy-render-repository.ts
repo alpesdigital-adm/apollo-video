@@ -26,6 +26,9 @@ import { parseDirectorPerceptionSnapshotUnchecked } from './director-run-reposit
 import { readPerceptionProducerEnvelope } from './perception-producer-envelope-repository.ts'
 import { PrismaAutomaticCatalogRepository } from './automatic-catalog-repository.ts'
 import { PrismaProxyReviewRepository } from './proxy-review-repository.ts'
+import { reframeTimelineOf } from '../../application/project-reframe-facts.ts'
+import { reframeClipMapHash } from '../../domain/variant-reframe-plan.ts'
+import { readVariantReframePlanHead } from './variant-reframe-plan-repository.ts'
 import { PrismaPublicOperationRepository } from './public-operation-repository.ts'
 
 function parseArray(value: string, field: string): readonly unknown[] {
@@ -106,7 +109,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
   async readCurrentSource(input: { workspaceId: string; projectId: string; purpose?: ProjectRenderConsumptionPurpose; variantId?: string }) {
     const project = await this.queryProject(input)
     const source = hydrateProxySource(project)
-    return source ? this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source)) : null
+    return source ? this.attachReframePlan(project!, await this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source))) : null
   }
 
   /** The exact Version a worker was sealed to, consumed for `purpose` (default: the proxy render). */
@@ -117,7 +120,36 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       throw new DomainError('PERSISTENCE_CONFLICT', 'The sealed Version is no longer the current Version of the project')
     }
     const source = hydrateProxySource(project, input)
-    return source ? this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source)) : null
+    return source ? this.attachReframePlan(project!, await this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source))) : null
+  }
+
+  /**
+   * W66r. The reframe plan persisted for THIS Version and THIS output (by its stable variant id), with its localized issues and its content
+   * address. Nothing is decided here: a Version with no persisted plan renders as it always did. A plan that does not describe the Version it
+   * is bound to (another spec revision, other clips) is a defect and stops the read, it is never bent onto the render.
+   *
+   * A reframed render is always a full render of the output: the bytes of an earlier proxy were drawn under another trajectory, and the
+   * renderer refuses a trajectory combined with a reused range.
+   */
+  private async attachReframePlan(
+    project: NonNullable<Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>>,
+    source: Readonly<ProjectProxyRenderSource>,
+    client: PrismaClient | Prisma.TransactionClient = this.client,
+  ): Promise<Readonly<ProjectProxyRenderSource>> {
+    const variantId = sourceOutputVariantId(source)
+    const stored = await readVariantReframePlanHead(client, { workspaceId: project.workspaceId, projectId: project.id, projectVersionId: source.projectVersionId, variantId })
+    if (!stored) return source
+    const record = stored.record
+    const facts = reframeTimelineOf(source)
+    const seal = source.outputConsumption.seal
+    if (
+      record.binding.specHash !== seal.specHash || record.binding.outputSpecRevisionId !== seal.outputSpecRevisionId ||
+      record.binding.aspectRatio !== source.format ||
+      record.binding.clipMapHash !== reframeClipMapHash(facts.timeline, facts.clips.map(({ hasStaticCrop: _crop, ...clip }) => clip)) ||
+      record.renderPlan.variantId !== variantId
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'The persisted reframe plan does not describe the Version and output it is bound to')
+    const { rangeReuse: _range, unchangedReuse: _unchanged, unchangedReuseRequired: _required, ...rest } = source
+    return Object.freeze({ ...rest, reframePlan: record.renderPlan, reframeIssues: record.issues, reframeRecordHash: record.recordHash })
   }
 
   private async attachTrustedOcr(

@@ -245,7 +245,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       // placement plan with its unknown-face anchor plan, and the persisted reframe plan); only the
       // canvas differs, because a placement plan is addressed against the pixels it is drawn on.
       const outputPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
-      const { subtitleCues, subtitleResolution, ctaOverlays, placementPlan, reframePlan } = await deriveEditorialRenderGeometry({
+      const { subtitleCues, subtitleResolution, ctaOverlays, placementPlan, reframePlan, reframeIssues } = await deriveEditorialRenderGeometry({
         source,
         canvas: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height },
         workspaceId: operation.workspaceId, projectId: context.projectId, clips,
@@ -257,7 +257,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         uncertifiedCues: 'omit-and-list',
       })
       // The kept ranges of a reuse are base bytes without any caption; a plan that draws one over them needs the full render.
-      const rangeReuse = source.rangeReuse && !plannedCaptionsOverKeptFrames(placementPlan, source.rangeReuse.ranges) ? source.rangeReuse : undefined
+      const rangeReuse = source.rangeReuse && !reframePlan && !plannedCaptionsOverKeptFrames(placementPlan, source.rangeReuse.ranges) ? source.rangeReuse : undefined
       const ocrReceipt = source.trustedOcr ? Object.freeze({
         envelopeId: source.trustedOcr.envelopeId,
         envelopeHash: source.trustedOcr.envelopeHash,
@@ -539,6 +539,8 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           outputSpecId: outputPreset.spec.id,
           placementPlanHash: placementPlan.placementPlanHash,
           reframePlanHash: reframePlan?.reframePlanHash ?? null,
+          // The localized issues of the persisted plan: a subject the trajectory could not keep, evidence that was missing or uncertain.
+          ...(reframeIssues.length ? { reframeIssues, reframeRecordHash: source.reframeRecordHash ?? null } : {}),
           // Subject evidence persisted for this variant. Forwarded untouched: without it the
           // subject-dependent reason codes could never fire on a real render.
           ...(source.formatSubjects ? { subjects: source.formatSubjects } : {}),

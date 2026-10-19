@@ -363,6 +363,14 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one segment-scoped EditCommand and immutable ProjectVersion that moves position, style, text or visibility for a single subtitle segment of a single variant; the range comes from the compiled segment, the transcript and every other variant stay byte-identical, and no render or provider work starts.',
     },
+    'apollo.projects.reframe-plans.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Persists one content-addressed reframe plan record for one output variant of the current version from sealed server-side evidence; it creates no version or Command, accepts no caller observation, and the same inputs replay the same record.',
+    },
+    'apollo.projects.variant-reframe-overrides.apply': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one range-scoped EditCommand and immutable ProjectVersion that frames a single range of a single clip of a single output variant by hand, or resets it; the observations, the server plan and every other output stay byte-identical and no render or provider work starts.',
+    },
     'apollo.synthetic-presenters.register': {
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Registers one versioned actor identity, avatar and voice consent scope that can authorize later paid synthetic generation, while preserving the evidence artifact and immutable audit.',

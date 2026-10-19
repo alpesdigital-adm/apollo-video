@@ -11,6 +11,7 @@ import {
   validateReframePlan,
 } from '../../src/v2/domain/reframe-plan.ts'
 import { planProjectReframeService } from '../../src/v2/application/plan-project-reframe.ts'
+import { reframeTimelineOf } from '../../src/v2/application/project-reframe-facts.ts'
 import { parseReframePlanRequest } from '../../src/v2/public-api/reframe-plan-contract.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { readFile } from 'node:fs/promises'
@@ -97,52 +98,53 @@ test('T-FR-164 localizes uncertain perception and deterministic no-observation f
 })
 
 test('T-FR-164 public application boundary returns localized review without approved server-owned ROI evidence', async () => {
+  // W66r: the request names the STABLE output variant (the aspect ratio is not a variant) and the store, not the caller, supplies the facts.
   const reads = []
-  const plan = planProjectReframeService({ projects: { async readContext(input) {
-    reads.push(input)
-    return {
-      currentVersion: { id: 'project-version-reframe-1' },
-      editPlan: { videoTracks: [{ clips: [{ sourceArtifactId: 'artifact-reframe-1' }] }] },
-      transcript: { sourceArtifactId: 'artifact-reframe-1' },
-      sourceRights: { state: 'present', status: 'approved', consentStatus: 'not-required' },
-    }
-  } } })
-  const result = await plan({ workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1', baseVersionId: 'project-version-reframe-1', format: '4:5' })
-  assert.deepEqual(result, { schemaVersion: 'reframe-plan-request-result/v2', status: 'review-required', plan: null,
-    reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', baseVersionId: 'project-version-reframe-1', format: '4:5' })
-  assert.deepEqual(reads, [{ workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1' }])
-  await assert.rejects(() => planProjectReframeService({ projects: { async readContext() { return { currentVersion: { id: 'project-version-new' }, editPlan: { videoTracks: [] } } } } })({ workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1', baseVersionId: 'project-version-stale', format: '4:5' }), /stale/)
-  const denied = planProjectReframeService({ projects: { async readContext() { return {
-    currentVersion: { id: 'project-version-reframe-1' },
-    editPlan: { videoTracks: [{ clips: [{ sourceArtifactId: 'artifact-reframe-1' }] }] },
-    transcript: { sourceArtifactId: 'artifact-reframe-1' },
-    sourceRights: { state: 'present', status: 'approved', consentStatus: 'approved', expiresAt: '2026-10-07T00:00:00.000Z' },
-  } } }, clock: () => new Date('2026-10-08T00:00:00.000Z') })
-  await assert.rejects(() => denied({ workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1', baseVersionId: 'project-version-reframe-1', format: '4:5' }),
-    (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
-  const multipleSources = planProjectReframeService({ projects: { async readContext() { return {
-    currentVersion: { id: 'project-version-reframe-1' },
-    editPlan: { videoTracks: [{ clips: [
-      { sourceArtifactId: 'artifact-reframe-1' }, { sourceArtifactId: 'artifact-reframe-2' },
-    ] }] },
-    transcript: { sourceArtifactId: 'artifact-reframe-1' },
-    sourceRights: { state: 'present', status: 'approved', consentStatus: 'not-required' },
-  } } } })
-  await assert.rejects(() => multipleSources({ workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1', baseVersionId: 'project-version-reframe-1', format: '4:5' }),
-    (error) => error.code === 'PRECONDITION_REQUIRED' && /one transcript-bound source/.test(error.message))
+  const source = { artifactId: 'artifact-reframe-1', manifestId: 'manifest-reframe-1', sha256: 'a'.repeat(64), width: 1920, height: 1080 }
+  const context = (versionId = 'project-version-reframe-1') => ({
+    workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1', version: { id: versionId, baseHash: 'b'.repeat(64) }, variantId: 'variant-reframe-vertical-1',
+    spec: { outputSpecRevisionId: 'revision-reframe-1', specHash: 'c'.repeat(64), aspectRatio: '4:5', safeArea: { top: 0.07, right: 0.06, bottom: 0.06, left: 0.06 }, width: 1080, height: 1350, fps: 30 },
+    timeline: { fps: 30, durationFrames: 90 }, source, overrideHeads: [],
+    clips: [{ clipId: 'clip-reframe-1', sourceArtifactId: source.artifactId, sourceSha256: source.sha256, sourceWidth: 1920, sourceHeight: 1080,
+      sourceInFrame: 0, sourceOutFrame: 90, timelineInFrame: 0, timelineOutFrame: 90, rate: 1, fps: 30, hasStaticCrop: false }],
+  })
+  const plans = (versionId) => ({ async readContext(input) { reads.push(input); return context(versionId) }, async readHead() { return null },
+    async persistOrReplay() { throw new Error('nothing may be persisted without evidence') } })
+  const request = { workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1', baseVersionId: 'project-version-reframe-1', variantId: 'variant-reframe-vertical-1' }
+  const result = await planProjectReframeService({ plans: plans('project-version-reframe-1') })(request)
+  assert.deepEqual(result, { schemaVersion: 'reframe-plan-request-result/v3', status: 'review-required', plan: null,
+    reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', baseVersionId: 'project-version-reframe-1', variantId: 'variant-reframe-vertical-1', format: '4:5',
+    requiredFaceWindows: [{ sourceArtifactId: 'artifact-reframe-1', windows: [{ startSourceFrame: 0, endSourceFrame: 90 }] }], replayed: false })
+  assert.deepEqual(reads, [{ workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1', variantId: 'variant-reframe-vertical-1' }])
+  await assert.rejects(() => planProjectReframeService({ plans: plans('project-version-new') })({ ...request, baseVersionId: 'project-version-stale' }), /stale/)
+  // a rights refusal is the store's (it reads the source rights while reading the context) and is not swallowed
+  const denied = { async readContext() { throw Object.assign(new Error('Render source no longer has approved current rights'), { code: 'ASSET_RIGHTS_BLOCKED' }) } }
+  await assert.rejects(() => planProjectReframeService({ plans: denied })(request), (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
+  // one video source only: the observations describe one source
+  const twoSources = (extra) => reframeTimelineOf({ editPlan: { fps: 30, durationFrames: 90, videoTracks: [{ kind: 'base-video', clips: [
+    { id: 'clip-1', sourceArtifactId: 'artifact-reframe-1', sourceInFrame: 0, sourceOutFrame: 45, timelineInFrame: 0, timelineOutFrame: 45, rate: 1 },
+    { id: 'clip-2', sourceArtifactId: extra, sourceInFrame: 0, sourceOutFrame: 45, timelineInFrame: 45, timelineOutFrame: 90, rate: 1 },
+  ] }] }, renderSources: [{ artifactId: 'artifact-reframe-1', mediaType: 'video', sha256: 'a'.repeat(64), manifestId: 'manifest-reframe-1', probe: { width: 1920, height: 1080 } }] })
+  assert.throws(() => twoSources('artifact-reframe-2'), (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'reframe-single-source-required')
+  assert.doesNotThrow(() => twoSources('artifact-reframe-1'))
 })
 
 test('T-FR-164 public request cannot inject observation or manual override as detector evidence', async () => {
-  const parsed = parseReframePlanRequest({ baseVersionId: 'project-version-reframe-1', format: '9:16' })
-  assert.equal(parsed.format, '9:16')
-  assert.throws(() => parseReframePlanRequest({ baseVersionId: 'project-version-reframe-1', format: '9:16', observationSet: observationSet() }), /unsupported/)
-  assert.throws(() => parseReframePlanRequest({ baseVersionId: 'project-version-reframe-1', format: '9:16', overrides: [] }), /unsupported/)
+  const parsed = parseReframePlanRequest({ baseVersionId: 'project-version-reframe-1', variantId: 'variant-reframe-vertical-1' })
+  assert.equal(parsed.variantId, 'variant-reframe-vertical-1')
+  // W66r: the aspect ratio spelling of a variant (`format`) is no longer a request field, and neither are the observations or overrides.
+  assert.throws(() => parseReframePlanRequest({ baseVersionId: 'project-version-reframe-1', format: '9:16' }), /unsupported/)
+  assert.throws(() => parseReframePlanRequest({ baseVersionId: 'project-version-reframe-1', variantId: 'variant-reframe-vertical-1', observationSet: observationSet() }), /unsupported/)
+  assert.throws(() => parseReframePlanRequest({ baseVersionId: 'project-version-reframe-1', variantId: 'variant-reframe-vertical-1', overrides: [] }), /unsupported/)
   const capability = FOUNDATION_CAPABILITIES.find((entry) => entry.id === 'apollo.projects.reframe-plans.create')
+  assert.equal(capability.version, '3.0.0')
   assert.equal(capability.endpoint.path, '/v1/projects/{projectId}/reframe-plans')
-  assert.deepEqual(capability.requiredScopes, ['projects:read'])
+  // planning persists a record, so it takes the write scope (it was a read-scope query while it persisted nothing)
+  assert.deepEqual(capability.requiredScopes, ['projects:write'])
   const route = await readFile(new URL('../../src/app/v1/projects/[projectId]/reframe-plans/route.ts', import.meta.url), 'utf8')
   assert.match(route, /authenticateExternalRequest/)
+  assert.match(route, /requireScope\(actor, 'projects:write'\)/)
   assert.match(route, /requireScope\(actor, 'projects:read'\)/)
-  assert.match(route, /createDirectorRunRepository/)
+  assert.match(route, /createVariantReframePlanRepository/)
   assert.doesNotMatch(route, /detector|provider|legacy/i)
 })

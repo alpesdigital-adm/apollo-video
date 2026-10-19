@@ -260,6 +260,11 @@ export function buildRenderElementMap(input: {
     timelineInFrame: number
     timelineOutFrame: number
     crop?: Readonly<{ x: number; y: number; width: number; height: number }>
+    /**
+     * W66r. The clip plays under an active reframe range: its crop FILLS the canvas, so the picture is the whole canvas and nothing is drawn
+     * behind it (no blurred backdrop, no band). Absent for a clip that keeps the composition it always had.
+     */
+    reframed?: boolean
   }>[]
   subtitleCues?: readonly Readonly<{ id: string; startFrame: number; endFrame: number; text: string }>[]
   ctaOverlays?: readonly Readonly<{ id: string; startFrame: number; endFrame: number; text: string }>[]
@@ -305,25 +310,28 @@ export function buildRenderElementMap(input: {
       input.canvas.height,
       Math.round(cropHeight * clipScale * foregroundScale),
     )
-    const foregroundBounds = Object.freeze({
+    const foregroundBounds = clip.reframed ? backgroundBounds : Object.freeze({
       x: Math.floor((input.canvas.width - clipForegroundWidth) / 2),
       y: Math.max(0, Math.min(input.canvas.height - clipForegroundHeight, Math.round(input.canvas.height * verticalPosition - clipForegroundHeight / 2))),
       width: clipForegroundWidth,
       height: clipForegroundHeight,
     })
     const sceneId = `scene:${clip.id}`
-    elements.push(...elementFrames(clip.timelineInFrame, clip.timelineOutFrame, (frame) => ({
-      elementId: `background:${clip.id}`,
-      type: 'background',
-      clipId: clip.id,
-      sceneId,
-      sourceId: clip.sourceArtifactId,
-      frame,
-      bounds: backgroundBounds,
-      zIndex: 0,
-      opacity: 1,
-      priority: 100,
-    })))
+    // A reframed clip's picture is the whole canvas, so there is nothing behind it to describe.
+    if (!clip.reframed) {
+      elements.push(...elementFrames(clip.timelineInFrame, clip.timelineOutFrame, (frame) => ({
+        elementId: `background:${clip.id}`,
+        type: 'background',
+        clipId: clip.id,
+        sceneId,
+        sourceId: clip.sourceArtifactId,
+        frame,
+        bounds: backgroundBounds,
+        zIndex: 0,
+        opacity: 1,
+        priority: 100,
+      })))
+    }
     elements.push(...elementFrames(clip.timelineInFrame, clip.timelineOutFrame, (frame) => ({
       elementId: `presenter:${clip.id}`,
       type: 'presenter',

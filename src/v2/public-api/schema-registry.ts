@@ -6350,6 +6350,132 @@ const subtitleSegmentOverrideImpactSchemaV1 = {
     renderSemanticsChanged: { const: true },
   },
 }
+const reframeAspectRatioSchemaV1 = { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] }
+const reframeCropSchemaV1 = {
+  type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'],
+  properties: { x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } },
+}
+const reframeIssueSchemaV1 = {
+  type: 'object', additionalProperties: false,
+  required: ['code', 'severity', 'disposition', 'variantId', 'aspectRatio', 'clipId', 'startFrame', 'endFrame', 'observationIds', 'evidenceIds', 'reasonCode'],
+  properties: {
+    code: { enum: ['PERCEPTION_UNCERTAIN', 'SUBJECTS_DO_NOT_FIT', 'NO_SUBJECT_OBSERVATION', 'TRACKING_LIMIT_EXCEEDED'] },
+    severity: { enum: ['hard', 'warning'] },
+    disposition: { enum: ['blocked', 'review-required'] },
+    variantId: idSchema, aspectRatio: reframeAspectRatioSchemaV1, clipId: { anyOf: [{ type: 'null' }, idSchema] },
+    startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 },
+    observationIds: { type: 'array', maxItems: 16, items: idSchema }, evidenceIds: { type: 'array', maxItems: 16, items: idSchema },
+    reasonCode: { anyOf: [{ type: 'null' }, { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' }] },
+  },
+}
+const renderReframePlanSchemaV1 = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'format', 'outputSpecId', 'outputPresetHash', 'variantId', 'fps', 'durationFrames', 'source', 'ranges', 'reframePlanHash'],
+  properties: {
+    schemaVersion: { const: 'render-reframe-plan/v1' }, format: reframeAspectRatioSchemaV1, outputSpecId: idSchema, outputPresetHash: sha256Schema,
+    variantId: idSchema, fps: { type: 'number', exclusiveMinimum: 0, maximum: 240 }, durationFrames: { type: 'integer', minimum: 1 },
+    source: { type: 'object', additionalProperties: false, required: ['width', 'height'], properties: { width: { type: 'integer', minimum: 2 }, height: { type: 'integer', minimum: 2 } } },
+    ranges: {
+      type: 'array', minItems: 1, maxItems: 20000, items: {
+        type: 'object', additionalProperties: false, required: ['clipId', 'startFrame', 'endFrame', 'interpolation', 'source', 'keyframes'],
+        properties: {
+          clipId: idSchema, startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 }, interpolation: { enum: ['linear', 'hold'] },
+          source: { enum: ['plan', 'manual', 'fallback'] },
+          keyframes: { type: 'array', maxItems: 600, items: { type: 'object', additionalProperties: false, required: ['frame', 'crop'], properties: { frame: { type: 'integer', minimum: 0 }, crop: reframeCropSchemaV1 } } },
+          manualSpans: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['id', 'startFrame', 'endFrame'], properties: { id: idSchema, startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 } } } },
+        },
+      },
+    },
+    reframePlanHash: sha256Schema,
+  },
+}
+const reframeVariantPlanSchemaV1 = {
+  type: 'object', additionalProperties: false,
+  required: ['planRecordId', 'sequence', 'recordHash', 'disposition', 'dispositionCodes', 'policy', 'binding', 'roi', 'evidence', 'observationSetHash', 'observationCount',
+    'unknownRangeCount', 'serverPlanHash', 'finalPlanHash', 'overrides', 'issues', 'renderPlan'],
+  properties: {
+    planRecordId: idSchema, sequence: { type: 'integer', minimum: 1 }, recordHash: sha256Schema,
+    disposition: { enum: ['ready', 'review-required', 'blocked'] },
+    dispositionCodes: { type: 'array', maxItems: 4, uniqueItems: true, items: { enum: ['PERCEPTION_UNCERTAIN', 'SUBJECTS_DO_NOT_FIT', 'NO_SUBJECT_OBSERVATION', 'TRACKING_LIMIT_EXCEEDED'] } },
+    policy: { type: 'object', additionalProperties: false, required: ['id', 'hash'], properties: { id: { const: 'w66r-reframe-trajectory/v1' }, hash: sha256Schema } },
+    binding: {
+      type: 'object', additionalProperties: false, required: ['outputSpecRevisionId', 'specHash', 'aspectRatio', 'clipMapHash', 'timeline', 'canvas'],
+      properties: {
+        outputSpecRevisionId: idSchema, specHash: sha256Schema, aspectRatio: reframeAspectRatioSchemaV1, clipMapHash: sha256Schema,
+        timeline: { type: 'object', additionalProperties: false, required: ['fps', 'durationFrames'], properties: { fps: { type: 'integer', minimum: 1 }, durationFrames: { type: 'integer', minimum: 1 } } },
+        canvas: { type: 'object', additionalProperties: false, required: ['width', 'height', 'fps'], properties: { width: { type: 'integer', minimum: 2 }, height: { type: 'integer', minimum: 2 }, fps: { type: 'integer', minimum: 1 } } },
+      },
+    },
+    roi: {
+      type: 'object', additionalProperties: false, required: ['face', 'object', 'screen'], properties: {
+        face: { type: 'object', additionalProperties: false, required: ['status', 'reasonCode'], properties: { status: { enum: ['present', 'partial', 'absent'] }, reasonCode: { anyOf: [{ type: 'null' }, { type: 'string' }] } } },
+        object: { type: 'object', additionalProperties: false, required: ['status', 'reasonCode'], properties: { status: { const: 'absent' }, reasonCode: { const: 'NO_VERIFIED_DETECTOR' } } },
+        screen: { type: 'object', additionalProperties: false, required: ['status', 'reasonCode'], properties: { status: { const: 'absent' }, reasonCode: { const: 'NO_VERIFIED_PRODUCER' } } },
+      },
+    },
+    evidence: {
+      type: 'array', maxItems: 16, items: {
+        type: 'object', additionalProperties: false, required: ['id', 'streamHash', 'policySha256', 'trustedWindowCount', 'untrustedWindows'],
+        properties: {
+          id: idSchema, streamHash: sha256Schema, policySha256: sha256Schema, trustedWindowCount: { type: 'integer', minimum: 0 },
+          untrustedWindows: { type: 'array', maxItems: 4000, items: { type: 'object', additionalProperties: false, required: ['envelopeHash', 'reasons'], properties: { envelopeHash: sha256Schema, reasons: { type: 'array', maxItems: 16, items: { type: 'string' } } } } },
+        },
+      },
+    },
+    observationSetHash: sha256Schema, observationCount: { type: 'integer', minimum: 0 }, unknownRangeCount: { type: 'integer', minimum: 0 },
+    serverPlanHash: sha256Schema, finalPlanHash: sha256Schema,
+    overrides: {
+      type: 'object', additionalProperties: false, required: ['applied', 'inactive'], properties: {
+        applied: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['id', 'commandId', 'overrideHash', 'clipId', 'startFrame', 'endFrame', 'crop'], properties: { id: idSchema, commandId: idSchema, overrideHash: sha256Schema, clipId: idSchema, startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 }, crop: reframeCropSchemaV1 } } },
+        inactive: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['id', 'commandId', 'overrideHash', 'clipId', 'startFrame', 'endFrame', 'reasonCode'], properties: { id: idSchema, commandId: idSchema, overrideHash: sha256Schema, clipId: idSchema, startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 }, reasonCode: { enum: ['CLIP_ABSENT', 'CLIP_CHANGED', 'HIDES_CRITICAL_SUBJECT'] } } } },
+      },
+    },
+    issues: { type: 'array', maxItems: 20000, items: reframeIssueSchemaV1 },
+    renderPlan: renderReframePlanSchemaV1,
+  },
+}
+const reframePlanRequestResultSchemaV3 = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'status', 'plan', 'reasonCode', 'baseVersionId', 'variantId', 'format', 'requiredFaceWindows', 'replayed'],
+  properties: {
+    schemaVersion: { const: 'reframe-plan-request-result/v3' },
+    status: { enum: ['ready', 'review-required', 'blocked'] },
+    plan: { anyOf: [{ type: 'null' }, reframeVariantPlanSchemaV1] },
+    reasonCode: { anyOf: [{ type: 'null' }, { const: 'FACE_PERCEPTION_UNAVAILABLE' }] },
+    baseVersionId: idSchema, variantId: idSchema, format: reframeAspectRatioSchemaV1,
+    requiredFaceWindows: {
+      type: 'array', maxItems: 16, items: {
+        type: 'object', additionalProperties: false, required: ['sourceArtifactId', 'windows'],
+        properties: { sourceArtifactId: idSchema, windows: { type: 'array', maxItems: 20000, items: { type: 'object', additionalProperties: false, required: ['startSourceFrame', 'endSourceFrame'], properties: { startSourceFrame: { type: 'integer', minimum: 0 }, endSourceFrame: { type: 'integer', minimum: 1 } } } } },
+      },
+    },
+    replayed: { type: 'boolean' },
+  },
+}
+/** The impact of a manual reframe is a `command-impact/v1` document pinned to exactly one variant, one half-open range and one minimal render. */
+const variantReframeOverrideImpactSchemaV1 = {
+  ...commandImpactSchema,
+  properties: {
+    ...commandImpactSchema.properties,
+    commandType: { const: 'apply-variant-reframe-override' },
+    affectedRanges: { ...commandImpactSchema.properties.affectedRanges, minItems: 1, maxItems: 1 },
+    affectedVariantIds: { ...commandImpactSchema.properties.affectedVariantIds, minItems: 1, maxItems: 1 },
+    minimalRenders: { ...commandImpactSchema.properties.minimalRenders, minItems: 1, maxItems: 1 },
+    renderSemanticsChanged: { const: true },
+  },
+}
+const variantReframeOverrideDocumentSchemaV1 = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'id', 'workspaceId', 'projectId', 'baseVersionId', 'resultVersionId', 'commandId', 'variantId', 'aspectRatio', 'clipId', 'startFrame', 'endFrame',
+    'action', 'crop', 'clipBindingHash', 'previousOverrideId', 'provenance', 'createdAt', 'overrideHash'],
+  properties: {
+    schemaVersion: { const: 'variant-reframe-override/v2' }, id: idSchema, workspaceId: idSchema, projectId: idSchema, baseVersionId: idSchema, resultVersionId: idSchema,
+    commandId: idSchema, variantId: idSchema, aspectRatio: reframeAspectRatioSchemaV1, clipId: idSchema,
+    startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 }, action: { enum: ['set', 'reset'] },
+    crop: { anyOf: [{ type: 'null' }, reframeCropSchemaV1] }, clipBindingHash: sha256Schema, previousOverrideId: { anyOf: [{ type: 'null' }, idSchema] },
+    provenance: { const: 'manual-command' }, createdAt: { type: 'string', format: 'date-time' }, overrideHash: sha256Schema,
+  },
+}
 const reviewPatchCommandImpactSchema = {
   ...commandImpactSchema,
   properties: {
@@ -21659,6 +21785,18 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
       format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
     },
   })),
+  defineSchema('reframe-plan-request', 3, 'Request reframe planning for ONE stable output variant of an immutable version, without caller observations or overrides', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'variantId'],
+    properties: {
+      baseVersionId: idSchema,
+      variantId: { ...idSchema, description: 'Stable variant id of the output the plan is decided for. An aspect ratio is not a variant and is refused.' },
+    },
+  }),
+  defineSchema('reframe-plan-request-result', 3, 'Persisted reframe plan of one output variant (ready, review-required or blocked), or review-required without geometry while approved face evidence is unavailable', successSchema(reframePlanRequestResultSchemaV3)),
+  defineSchema('reframe-plan-read-response', 1, 'Latest persisted reframe plan record of one output variant of one version', successSchema({
+    type: 'object', additionalProperties: false, required: ['variantId', 'projectVersionId', 'plan'],
+    properties: { variantId: idSchema, projectVersionId: idSchema, plan: { anyOf: [{ type: 'null' }, reframeVariantPlanSchemaV1] } },
+  })),
   defineSchema('reframe-plan', 1, 'Content-addressed per-format reframe plan with localized fallbacks', successSchema({
     type: 'object', additionalProperties: false, required: ['plan'], properties: { plan: {
       type: 'object', additionalProperties: false,
@@ -26077,6 +26215,32 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
         }],
       },
       overrides: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: true } },
+    },
+  })),
+  defineSchema('variant-reframe-override-apply-request', 1, 'Frame ONE range of ONE clip of ONE output variant by hand, or reset that exact range to the automatic level', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash', 'variantId', 'clipId', 'startFrame', 'endFrame', 'action'], properties: {
+      baseVersionId: idSchema, baseHash: sha256Schema,
+      variantId: { ...idSchema, description: 'Stable variant id of the output the manual reframe is for. An aspect ratio is not a variant and is refused.' },
+      clipId: idSchema, startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 },
+      action: { enum: ['set', 'reset'] },
+      crop: { ...reframeCropSchemaV1, description: 'Normalized source crop with the size of the variant crop (it can be moved, not zoomed). Required for a set; forbidden for a reset.' },
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+    oneOf: [
+      { properties: { action: { const: 'reset' }, crop: false }, required: ['action'] },
+      { properties: { action: { const: 'set' } }, required: ['crop'] },
+    ],
+  }),
+  defineSchema('variant-reframe-override-impact', 1, 'Manual reframe impact limited to one variant: the whole timeline of its proxy, rendered in full', variantReframeOverrideImpactSchemaV1),
+  defineSchema('variant-reframe-override-applied', 1, 'Applied content-addressed manual reframe, its immutable result version and the reframe plan the result version carries for the variant', successSchema({
+    type: 'object', additionalProperties: false, required: ['command', 'version', 'reframeOverride', 'plan', 'impact', 'replayed'], properties: {
+      command: { type: 'object', additionalProperties: true }, version: { type: 'object', additionalProperties: true },
+      reframeOverride: variantReframeOverrideDocumentSchemaV1, plan: reframeVariantPlanSchemaV1, impact: variantReframeOverrideImpactSchemaV1, replayed: { type: 'boolean' },
+    },
+  })),
+  defineSchema('variant-reframe-override-response', 1, 'Current manual reframes of one output variant: the head list', successSchema({
+    type: 'object', additionalProperties: false, required: ['variantId', 'overrides'], properties: {
+      variantId: idSchema, overrides: { type: 'array', maxItems: 1000, items: variantReframeOverrideDocumentSchemaV1 },
     },
   })),
   defineSchema('governance-usage-audit-page', 2, 'Redacted governance admission and reservation audit page', successSchema({

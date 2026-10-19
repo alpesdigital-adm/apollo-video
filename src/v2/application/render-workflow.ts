@@ -7,6 +7,7 @@ import { OUTPUT_ASPECT_RATIOS } from '../domain/output-spec.ts'
 import { OUTPUT_FORMAT_REGISTRY } from '../domain/output-format-registry.ts'
 import { critiqueOutputFormat, type FormatSubjectEvidenceV1 } from '../domain/format-quality-critic.ts'
 import type { CaptionPixelIssueV1 } from '../domain/caption-pixel-verdict.ts'
+import type { VariantReframeIssueV1 } from '../domain/variant-reframe-plan.ts'
 import type { SubtitleAnchorPlan } from '../domain/subtitle-anchor-plan.ts'
 
 export interface RenderApproval {
@@ -202,7 +203,7 @@ export function evaluateRenderedProxy(input: {
   subtitleSafeRegion?: readonly [number, number, number, number]
   criticIssues?: readonly Readonly<ProxyQualityIssue>[]
   warningsAcknowledged?: boolean
-  formatCritic?: Readonly<{ outputSpecId: string; placementPlanHash?: string | null; reframePlanHash?: string | null; subjects?: readonly Readonly<FormatSubjectEvidenceV1>[]; densityLimit?: number; subtitleAnchorPlan?: Readonly<SubtitleAnchorPlan> | null; captionPixelIssues?: readonly Readonly<CaptionPixelIssueV1>[] }>
+  formatCritic?: Readonly<{ outputSpecId: string; placementPlanHash?: string | null; reframePlanHash?: string | null; reframeIssues?: readonly Readonly<VariantReframeIssueV1>[]; reframeRecordHash?: string | null; subjects?: readonly Readonly<FormatSubjectEvidenceV1>[]; densityLimit?: number; subtitleAnchorPlan?: Readonly<SubtitleAnchorPlan> | null; captionPixelIssues?: readonly Readonly<CaptionPixelIssueV1>[] }>
 }): Readonly<ProxyReview> {
   const spec = PROXY_OUTPUT_SPECS[input.format as ProxyOutputFormat]
   assertDomain(Boolean(spec), 'INVALID_OUTPUT_SPEC', 'Proxy format is not supported')
@@ -282,6 +283,7 @@ export function evaluateRenderedProxy(input: {
     densityLimit: input.formatCritic.densityLimit,
     subtitleAnchorPlan: input.formatCritic.subtitleAnchorPlan ?? null,
     ...(input.formatCritic.captionPixelIssues ? { captionPixelIssues: input.formatCritic.captionPixelIssues } : {}),
+    ...(input.formatCritic.reframeIssues ? { reframeIssues: input.formatCritic.reframeIssues, reframeRecordHash: input.formatCritic.reframeRecordHash ?? null } : {}),
   }) : undefined
   const criticIssues = Object.freeze([
     ...(input.criticIssues ?? []),
