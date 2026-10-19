@@ -34,6 +34,7 @@ const safeError = (error) => { const message = String(error?.message ?? ''); ret
   name: error.name, code: error.code ?? null, messageSha256: digest(message), messageBytes: Buffer.byteLength(message),
   ...(error.linuxStatDiagnostic ? { linuxStatDiagnostic: error.linuxStatDiagnostic } : {}),
   ...(error.linuxStatRecheckDiagnostic ? { linuxStatRecheckDiagnostic: error.linuxStatRecheckDiagnostic } : {}),
+  ...(error.admissionLockDiagnostic ? { admissionLockDiagnostic: error.admissionLockDiagnostic } : {}),
   ...(error.cgroupSnapshotDiagnostic ? { cgroupSnapshotDiagnostic: error.cgroupSnapshotDiagnostic } : {}) } }
 
 export function assertCgroupScope(scope) {

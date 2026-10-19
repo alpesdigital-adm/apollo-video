@@ -46,7 +46,8 @@ export function assertPerceptionSuite(suite, pattern = null) {
 }
 const key = (value) => `${value.pid}:${value.starttime}`
 const errorFact = (error) => ({ name: error.name, code: error.code ?? null,
-  message: String(error.message).slice(0, 512) })
+  message: String(error.message).slice(0, 512),
+  ...(error.admissionLockDiagnostic ? { admissionLockDiagnostic: error.admissionLockDiagnostic } : {}) })
 
 export function namespaceLaunchConfig({ suite, pattern = null, env = process.env,
   uid = process.getuid(), gid = process.getgid(), node = process.execPath, now = Date.now(), controlledFault = null }) {

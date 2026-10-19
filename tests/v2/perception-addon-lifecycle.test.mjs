@@ -3,7 +3,7 @@ import test from 'node:test'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { PassThrough } from 'node:stream'
-import { chmodSync, createReadStream, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, createReadStream, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { buildPublicationAllowed, buildEnvironmentEvidence } from '../../scripts/validation/build-perception-pidfd.mjs'
@@ -16,7 +16,7 @@ import { verifyOuterHostDeath, verifySudoCarrierBirth, verifyOuterRoleCredential
 import { loadPidfdBinding } from '../../scripts/validation/perception-pidfd.mjs'
 import { parseLinuxProcessStat } from '../../scripts/validation/run-perception-ci.mjs'
 import { awaitProductGate, bootstrapReadback } from '../../scripts/validation/perception-namespace-node-bootstrap.mjs'
-import { CI_PIDFD_SOURCE_PATHS, digest, initializeRegistry, readRegistry, registryLock, assertDashboardPlaywrightFacts,
+import { CI_PIDFD_SOURCE_PATHS, describeAdmissionLock, digest, initializeRegistry, readRegistry, registryLock, assertDashboardPlaywrightFacts,
   registerAddonConsumer, writeRegistry, sourceFingerprint } from '../../scripts/validation/perception-addon-registry.mjs'
 
 const cgroupScope = { runId: 'pidfd-cgroup-11111111-1111-1111-1111-111111111111',
@@ -1216,6 +1216,79 @@ test('CI source fingerprint explicitly includes new files without relying on tra
   assert.ok(files.every((value) => /^[a-f0-9]{64}$/.test(value.sha256)))
 })
 
+// Fix B: the admission lock is a bare `mkdir`; when acquisition hits the deadline the
+// failure receipt records the lock's read-only state (no stale-lock deletion).
+function lockFixture(setup) {
+  const root = mkdtempSync(join(tmpdir(), 'apollo-lock-state.')), lock = join(root, 'admission.lock')
+  try { return setup({ root, lock }) } finally { rmSync(root, { recursive: true }) }
+}
+const lockIo = (procStat) => ({ lstat: lstatSync, readdir: readdirSync, readFile: readFileSync, procStat })
+
+test('admission lock state records existence, stat, entries and an owner that today is NOT carried, read-only', () => {
+  lockFixture(({ lock }) => {
+    mkdirSync(lock, { mode: 0o700 })
+    const stat = lstatSync(lock), now = stat.mtimeMs + 1234
+    const facts = describeAdmissionLock(lock, { now })
+    assert.equal(facts.schemaVersion, 'registry-admission-lock-state/v1')
+    assert.equal(facts.path, lock); assert.equal(facts.observedAt, new Date(now).toISOString())
+    assert.equal(facts.exists, true); assert.equal(facts.kind, 'directory')
+    assert.deepEqual(Object.keys(facts.stat).sort(), ['ageMs', 'birthtimeMs', 'ctimeMs', 'dev', 'ino', 'mode', 'mtimeMs', 'nlink', 'size', 'uid'])
+    assert.equal(facts.stat.ino, stat.ino); assert.equal(facts.stat.mtimeMs, stat.mtimeMs)
+    assert.equal(facts.stat.size, stat.size); assert.ok(Math.abs(facts.stat.ageMs - 1234) < 0.01, String(facts.stat.ageMs))
+    assert.match(facts.stat.mode, /^[0-7]+$/)
+    assert.deepEqual(facts.entries, { count: 0, names: [] })
+    assert.deepEqual(facts.owner, { carried: false, source: null, pid: null, starttime: null, alive: null, aliveBasis: null })
+    assert.deepEqual(facts.readErrors, []); assert.equal(facts.staleLockDeletion, false)
+    assert.deepEqual(JSON.parse(JSON.stringify(facts)), facts, 'Evidence is plain JSON')
+    assert.equal(lstatSync(lock).isDirectory(), true, 'Describing a lock never removes or repairs it')
+    assert.deepEqual(readdirSync(lock), [])
+  })
+  lockFixture(({ lock }) => {
+    const facts = describeAdmissionLock(lock, { now: 5 })
+    assert.equal(facts.exists, false); assert.equal(facts.kind, null); assert.equal(facts.stat, null)
+    assert.equal(facts.entries, null); assert.equal(facts.owner.carried, false); assert.deepEqual(facts.readErrors, [])
+  })
+})
+
+test('admission lock owner fields, when a lock carries them, are checked against /proc without any signal', () => {
+  const procs = {
+    live: cgroupStat(4242, '77', 1, 'S'), recycled: cgroupStat(4242, '78', 1, 'S'), zombie: cgroupStat(4242, '77', 1, 'Z'),
+    sentinel: cgroupUnavailableStat(4242, '77'),
+    gone: Object.assign(new Error('PRIVATE_GONE'), { code: 'ENOENT' }), denied: Object.assign(new Error('PRIVATE_DENIED'), { code: 'EACCES' }) }
+  for (const [name, source, alive, basis] of [['live', 'live', true, 'proc-stat-live'], ['recycled', 'recycled', false, 'pid-recycled'],
+    ['zombie', 'zombie', false, 'proc-stat-state-Z'], ['sentinel', 'sentinel', null, 'proc-stat-unavailable-tuple'],
+    ['gone', 'gone', false, 'proc-stat-absent'], ['denied', 'denied', null, 'proc-stat-error-EACCES']]) {
+    for (const shape of ['lock-file', 'owner.json']) {
+      lockFixture(({ lock }) => {
+        const document = JSON.stringify({ pid: 4242, starttime: '77' })
+        if (shape === 'lock-file') writeFileSync(lock, document)
+        else { mkdirSync(lock); writeFileSync(join(lock, 'owner.json'), document) }
+        const reads = []
+        const facts = describeAdmissionLock(lock, { now: Date.now(), io: lockIo((pid) => {
+          reads.push(pid); if (procs[source] instanceof Error) throw procs[source]; return procs[source] }) })
+        assert.deepEqual(facts.owner, { carried: true, source: shape, pid: 4242, starttime: '77', alive, aliveBasis: basis }, `${name}/${shape}`)
+        assert.deepEqual(reads, [4242], 'One read-only /proc lookup, no signal')
+        assert.equal(facts.kind, shape === 'lock-file' ? 'file' : 'directory')
+        if (shape === 'owner.json') assert.deepEqual(facts.entries, { count: 1, names: ['owner.json'] })
+        assert.doesNotMatch(JSON.stringify(facts), /PRIVATE_|controlled \(member\)/)
+      })
+    }
+  }
+})
+
+test('admission lock owner documents that are unbounded, pid-less or malformed are reported, never trusted, and names are redacted', () => {
+  for (const [name, document] of [['not json', '{'], ['no pid', JSON.stringify({ starttime: '1' })],
+    ['bad pid', JSON.stringify({ pid: -4 })], ['oversized', JSON.stringify({ pid: 4242, pad: 'x'.repeat(5000) })]]) {
+    lockFixture(({ lock }) => {
+      mkdirSync(lock); writeFileSync(join(lock, 'owner.json'), document); writeFileSync(join(lock, 'weird name'), '')
+      const facts = describeAdmissionLock(lock, { now: Date.now(), io: lockIo(() => assert.fail('No /proc lookup without a trusted PID')) })
+      assert.equal(facts.owner.carried, false, name); assert.equal(facts.owner.pid, null, name)
+      assert.deepEqual(facts.readErrors.map((value) => value.stage), ['owner-document'], name)
+      assert.equal(facts.entries.count, 2); assert.deepEqual(facts.entries.names.sort(), ['<redacted>', 'owner.json'])
+    })
+  }
+})
+
 test('normal Linux registry authenticates real self before invalid addon load and refuses closed admission',
   { skip: process.platform !== 'linux' }, async () => {
     assert.ok(process.getuid() > 0)
@@ -1241,6 +1314,16 @@ test('normal Linux registry authenticates real self before invalid addon load an
       assert.deepEqual(readRegistry(root, env).creator, registry.creator)
       const second = await registerAddonConsumer(env); assert.equal(second.path, registered.path)
       mkdirSync(join(root, 'admission.lock'), { mode: 0o700 })
-      await assert.rejects(registryLock(root, () => assert.fail('Action must not run'), { env, deadlineAt: Date.now() + 10 }), /lock deadline/)
+      await assert.rejects(registryLock(root, () => assert.fail('Action must not run'), { env, deadlineAt: Date.now() + 10 }), (error) => {
+        assert.equal(error.name, 'AssertionError'); assert.equal(error.message, 'Registry admission lock deadline; no stale-lock deletion')
+        const facts = error.admissionLockDiagnostic
+        assert.equal(facts.schemaVersion, 'registry-admission-lock-state/v1'); assert.equal(facts.path, join(root, 'admission.lock'))
+        assert.equal(facts.exists, true); assert.equal(facts.kind, 'directory')
+        assert.equal(facts.stat.ino, lstatSync(join(root, 'admission.lock')).ino); assert.equal(facts.stat.uid, process.getuid())
+        assert.deepEqual(facts.entries, { count: 0, names: [] }); assert.equal(facts.owner.carried, false)
+        assert.equal(facts.staleLockDeletion, false)
+        return true
+      })
+      assert.equal(lstatSync(join(root, 'admission.lock')).isDirectory(), true, 'No stale-lock deletion')
     } finally { rmSync(root, { recursive: true }) } // No processes/addon were created by this test.
 })

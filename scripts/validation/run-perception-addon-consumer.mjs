@@ -266,7 +266,8 @@ export async function runAddonConsumer(mode, args = [], env = process.env) {
   const fail = (error) => report.errors.push({ name: error.name, code: error.code ?? null, message: String(error.message).slice(0, 512),
     ...(error.linuxStatDiagnostic ? { linuxStatDiagnostic: error.linuxStatDiagnostic } : {}),
     ...(error.linuxStatRecheckDiagnostic ? { linuxStatRecheckDiagnostic: error.linuxStatRecheckDiagnostic } : {}),
-    ...(error.cgroupSnapshotDiagnostic ? { cgroupSnapshotDiagnostic: error.cgroupSnapshotDiagnostic } : {}) })
+    ...(error.cgroupSnapshotDiagnostic ? { cgroupSnapshotDiagnostic: error.cgroupSnapshotDiagnostic } : {}),
+    ...(error.admissionLockDiagnostic ? { admissionLockDiagnostic: error.admissionLockDiagnostic } : {}) })
   let child, birthToken, closed = false, closePromise, interrupted
   const signals = ['SIGINT', 'SIGTERM'].map((name) => {
     const handler = () => { interrupted ??= name; child?.stdin.end() }; process.on(name, handler); return [name, handler]

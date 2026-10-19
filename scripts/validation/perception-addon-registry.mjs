@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
-import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readlinkSync, realpathSync, renameSync, rmdirSync, writeFileSync } from 'node:fs'
+import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, rmdirSync, writeFileSync } from 'node:fs'
 import { join, posix, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseLinuxProcessStat, parseLinuxProcessCredentials } from './run-perception-ci.mjs'
@@ -107,18 +107,84 @@ export function writeRegistry(root, value) {
   renameSync(pending, path)
 }
 
+const lockIo = Object.freeze({ lstat: lstatSync, readdir: readdirSync, readFile: readFileSync,
+  procStat: (pid) => readFileSync(`/proc/${pid}/stat`, 'utf8') })
+
+// Read-only evidence for a failed admission-lock acquisition (never repairs
+// anything; stale locks are deliberately NOT deleted). The lock is a bare
+// `mkdir` directory, so today it carries no owner fields: `owner.carried` is
+// false and liveness of the holder cannot be established from the lock alone.
+// If a lock file (or an `owner.json` inside a lock directory) ever carries
+// `{pid, starttime?}`, its owner is looked up in /proc without any signal.
+// `ageMs` is the time since the lock inode's mtime, i.e. since its creation.
+export function describeAdmissionLock(lockPath, { now = Date.now(), io = lockIo } = {}) {
+  const facts = { schemaVersion: 'registry-admission-lock-state/v1', path: String(lockPath).slice(0, 512),
+    observedAt: new Date(now).toISOString(), exists: false, kind: null, stat: null, entries: null,
+    owner: { carried: false, source: null, pid: null, starttime: null, alive: null, aliveBasis: null },
+    readErrors: [], staleLockDeletion: false }
+  const note = (stage, error) => { if (facts.readErrors.length < 8) facts.readErrors.push({ stage, code: error?.code ?? error?.name ?? null }) }
+  let metadata
+  try { metadata = io.lstat(lockPath) }
+  catch (error) { if (!['ENOENT', 'ENOTDIR'].includes(error?.code)) note('lstat', error); return facts }
+  facts.exists = true
+  facts.kind = metadata.isDirectory() ? 'directory' : metadata.isFile() ? 'file' : metadata.isSymbolicLink() ? 'symlink' : 'other'
+  facts.stat = { size: metadata.size, mtimeMs: metadata.mtimeMs, ctimeMs: metadata.ctimeMs, birthtimeMs: metadata.birthtimeMs,
+    ino: metadata.ino, dev: metadata.dev, nlink: metadata.nlink, uid: metadata.uid, mode: (metadata.mode & 0o7777).toString(8),
+    ageMs: Number.isFinite(metadata.mtimeMs) ? Math.max(0, now - metadata.mtimeMs) : null }
+  let ownerPath = null
+  if (facts.kind === 'directory') {
+    try {
+      const names = io.readdir(lockPath).map(String)
+      facts.entries = { count: names.length, names: names.slice(0, 8).map((name) => /^[A-Za-z0-9._-]{1,64}$/.test(name) ? name : '<redacted>') }
+      if (names.includes('owner.json')) ownerPath = join(lockPath, 'owner.json')
+    } catch (error) { note('readdir', error) }
+  } else if (facts.kind === 'file') ownerPath = lockPath
+  if (ownerPath) {
+    try {
+      const ownerMeta = ownerPath === lockPath ? metadata : io.lstat(ownerPath)
+      assert.ok(ownerMeta.isFile() && ownerMeta.size <= 4096, 'Lock owner document is not a bounded regular file')
+      const bytes = io.readFile(ownerPath)
+      assert.ok(Buffer.byteLength(bytes) <= 4096, 'Lock owner document exceeds byte bound')
+      const owner = JSON.parse(Buffer.from(bytes).toString('utf8'))
+      assert.ok(owner && typeof owner === 'object' && Number.isSafeInteger(owner.pid) && owner.pid > 0, 'Lock owner document has no PID')
+      Object.assign(facts.owner, { carried: true, source: ownerPath === lockPath ? 'lock-file' : 'owner.json', pid: owner.pid,
+        starttime: typeof owner.starttime === 'string' && /^\d{1,32}$/.test(owner.starttime) ? owner.starttime : null })
+      try {
+        const current = parseLinuxProcessStat(io.procStat(owner.pid))
+        const same = facts.owner.starttime === null || current.starttime === facts.owner.starttime
+        facts.owner.alive = same && !['Z', 'X', 'x'].includes(current.state)
+        facts.owner.aliveBasis = !same ? 'pid-recycled' : facts.owner.alive ? 'proc-stat-live' : `proc-stat-state-${current.state}`
+      } catch (error) {
+        if (['ENOENT', 'ESRCH'].includes(error?.code)) Object.assign(facts.owner, { alive: false, aliveBasis: 'proc-stat-absent' })
+        else {
+          // The sighand-unavailable tuple, a missing /proc or a denial is no liveness claim either way.
+          facts.owner.aliveBasis = error?.linuxStatDiagnostic?.unavailableObservation ? 'proc-stat-unavailable-tuple'
+            : `proc-stat-error-${error?.code ?? error?.name ?? 'unknown'}`
+        }
+      }
+    } catch (error) { note('owner-document', error) }
+  }
+  return facts
+}
+
 export async function registryLock(root, action, { env = process.env, deadlineAt = Date.now() + 750, signal } = {}) {
   admissionCheck(deadlineAt, signal)
   assertOwnedRoot(root, env)
   const lock = join(root, 'admission.lock')
   let acquired = false
-  while (Date.now() < deadlineAt) {
-    admissionCheck(deadlineAt, signal)
-    try { mkdirSync(lock, { mode: 0o700 }); acquired = true; break }
-    catch (error) { if (error.code !== 'EEXIST') throw error }
-    await new Promise((done) => setTimeout(done, Math.min(10, Math.max(0, deadlineAt - Date.now()))))
+  try {
+    while (Date.now() < deadlineAt) {
+      admissionCheck(deadlineAt, signal)
+      try { mkdirSync(lock, { mode: 0o700 }); acquired = true; break }
+      catch (error) { if (error.code !== 'EEXIST') throw error }
+      await new Promise((done) => setTimeout(done, Math.min(10, Math.max(0, deadlineAt - Date.now()))))
+    }
+    assert.ok(acquired, 'Registry admission lock deadline; no stale-lock deletion')
+  } catch (error) {
+    // Evidence only: the original failure, its class and its message are unchanged.
+    if (!acquired) { try { error.admissionLockDiagnostic = describeAdmissionLock(lock) } catch { /* Never mask the original failure. */ } }
+    throw error
   }
-  assert.ok(acquired, 'Registry admission lock deadline; no stale-lock deletion')
   try {
     admissionCheck(deadlineAt, signal)
     const result = await action()

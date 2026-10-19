@@ -15,7 +15,8 @@ const RUN_MARKER = 'APOLLO_PERCEPTION_RUN_ID'
 export const CLEANUP_BUDGET_MS = 90_000
 const TREE_CLEANUP_BUDGET_MS = 25_000
 const delay = (ms) => new Promise((done) => setTimeout(done, ms))
-const diagnostic = (error) => String(error?.stack ?? error)
+const diagnostic = (error) => String(error?.stack ?? error) +
+  (error?.admissionLockDiagnostic ? `\nadmissionLockDiagnostic=${JSON.stringify(error.admissionLockDiagnostic)}` : '')
 const identityKey = ({ pid, starttime }) => `${pid}:${starttime}`
 const live = (entry) => entry && !['Z', 'X', 'x'].includes(entry.state)
 
@@ -663,7 +664,7 @@ try {
     ...(fault === 'deadline' ? { deadlineMs: report.controlledDeadlineMs } : {}) }))
 } catch (error) {
   primaryError = error
-  report.error = String(error.stack ?? error)
+  report.error = diagnostic(error)
 } finally {
   finalCleanupDeadline = report.cleanupDeadlineAt ? Date.parse(report.cleanupDeadlineAt) : Date.now() + CLEANUP_BUDGET_MS
   report.cleanupDeadlineAt = new Date(finalCleanupDeadline).toISOString()
