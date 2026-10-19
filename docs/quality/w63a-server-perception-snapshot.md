@@ -122,4 +122,15 @@ resumo à cobertura da própria timeline, em vez de exigir `absent`); `visualCov
 
 ## Evidência
 
-(ver a seção final, preenchida com as execuções)
+Suítes (todas fora do CI hospedado, declaradas em `KNOWN_UNRUN_SUITES`; rodam no harness supervisionado de PostgreSQL descartável):
+
+- `tests/v2/server-perception-snapshot.test.mjs` — 16 testes de domínio (`node --test`, roda no `npm test`): ordenação e desempate, aritmética de
+  cobertura, duplicatas, lacunas preservadas, mesma evidência em outra ordem = mesmo hash, selo violado recusado, vínculo (versão, plano, workspace,
+  fonte, mapa de tempo, relógio), PTS/relógio preservados, projeção de rosto por clips cortados, taxa ≠ 1, `object` ausente, PUT manual não eleva.
+- `tests/v2/prisma-server-perception-snapshot.integration.mjs` — evidência real (OCR, temporal, rosto v3 gravados pelos escritores dos produtos),
+  cobertura por tipo, idempotência e concorrência, isolamento, versão antiga, direitos revogados, selo/bytes violados, tabela imutável, CHECKs, linha forjada.
+- `tests/v2/prisma-director-server-perception.integration.mjs` — a percepção da Director é o snapshot (mesmos bytes), gravada uma vez no commit, run recusada se a evidência mudou.
+- `tests/v2/server-perception-snapshot-http.integration.mjs` — a rota, em processo, com autenticação real: 200 + esquema publicado, recorte, 404/401/403/422/428, PUT manual separado.
+- `tests/v2/server-perception-snapshot-server.integration.mjs` — a mesma rota num `next start` real (build de produção), esquema servido pela própria API e OpenAPI.
+
+(Os run ids e as contagens de cada execução estão na seção seguinte.)
