@@ -993,6 +993,60 @@ manuais/controladas; o servidor grava `origin.kind=manual-controlled`,
 `PUT` devolvem essa origem. Proveniência e confidence alegadas por observação
 permanecem dados do caller; não autorizam consumo automático como detector.
 
+`GET /v1/projects/{projectId}/perception/snapshot` (W63a, capability
+`apollo.projects.perception.snapshot.read` 1.0.0, schema
+`server-perception-snapshot-response/v1`) exige `projects:read` e devolve o
+snapshot de percepção que o SERVIDOR monta, para uma ProjectVersion (a corrente,
+ou a de `versionId`), somente com evidência selada que ele mesmo produziu:
+palavras da transcrição retemporizada no EditPlan, amostras de OCR, medidas
+quadro a quadro de plano/movimento e janelas de rosto `face-producer-envelope/v3`
+(por quadros da FONTE, projetadas pelos clips). O relógio é o do EditPlan
+(`ms = round(quadro / fps * 1000)`); diferenças de fps/PTS ficam como foram
+medidas (`inputs[].sourceClock`, `startSourcePts`). Cada observação traz
+proveniência `origin=server` com `producer`, `model`, `version`, `envelopeId`,
+`envelopeHash` e `confidence` (com a base: reportada pelo produtor, medida
+determinística ou prior de política). A cobertura é por tipo, recortada ao
+intervalo pedido (`fromMs`/`toMs`, semiaberto) e nunca inventa `complete`:
+`complete` só quando todo quadro foi examinado; `partial` lista o examinado e o
+`unexaminedRanges`; `absent` traz `reasonCode` (`NO_PRODUCER_RUN`,
+`NO_VERIFIED_DETECTOR` para `object`, `DIARIZATION_UNAVAILABLE`,
+`SILENCE_PRODUCER_UNAVAILABLE`, `INSERT_GEOMETRY_NOT_COMPILED`,
+`TIMELINE_FPS_NOT_INTEGER`, `NO_UNIT_RATE_CLIP`,
+`SOURCE_TIMELINE_LENGTH_MISMATCH`, `FACE_WINDOW_LIMIT_EXCEEDED`…). `object` é
+sempre `absent`: não há detector verificado. O que nenhuma amostra poderia
+cobrir por um fato estrutural (clip de outra velocidade, spans de comprimento
+desigual, fps não inteiro, fonte cujas janelas não foram lidas) vem em
+`snapshot.unexaminedSpans` com o PRÓPRIO motivo, e na leitura por intervalo
+`coverage[].unexaminedReasons` parte o não examinado onde o motivo muda; ele não
+aparece como se o produtor apenas tivesse deixado de amostrar.
+
+Dois lugares recusam evidência, com efeitos diferentes. No caminho real de
+leitura (o `GET`), o selo de cada envelope, os bytes da fonte (SHA) e os
+direitos de análise são reverificados a cada leitura; envelope adulterado,
+envelope selado para outros bytes que os da fonte (SHA divergente) ou direito
+revogado fazem a leitura inteira falhar — 409 `PERSISTENCE_CONFLICT` ou 422
+`ASSET_RIGHTS_BLOCKED` —, sem servir parte da evidência e sem gravar nada (um SHA
+divergente NÃO é listado em `snapshot.rejected`: é 409). O montador lista em
+`snapshot.rejected` o que recusa da evidência recebida: outra versão, plano,
+workspace ou relógio, duplicata, conflito entre janelas de rosto
+(`EVIDENCE_CONFLICT`), palavra que o plano põe fora da linha do tempo
+(`WORD_OUTSIDE_TIMELINE`/`WORD_SPAN_INVALID`, com os ids das palavras em
+`subjects`: nunca grudada na borda) e fonte cujas janelas de rosto excedem o
+orçamento de 1000 por snapshot (`FACE_WINDOW_LIMIT_EXCEEDED`; todas as janelas de
+uma fonte são lidas, por keyset, ou nenhuma é usada, e a fonte sem janelas lidas
+fica sem cobertura de rosto, dita). A fonte da transcrição é a da linha de
+transcrição; sem a linha, a única fonte que a linha do tempo toca, e havendo
+várias `inputs[].sourceArtifactId` é `null`: nunca a primeira da lista.
+
+O snapshot é endereçado pelo conteúdo (`snapshotHash`), gravado uma só vez por
+versão e idempotente: a mesma evidência é a mesma linha. **O próprio `GET` grava
+essa linha** quando ela ainda não existe (com `projects:read`: o conteúdo é função
+determinística de evidência já selada e o chamador não escolhe nenhum byte dele);
+a Director grava a mesma linha no seu commit. A timeline manual do `PUT
+/perception` (`manual-controlled`) nunca entra no snapshot
+(`origin.manualTimelinesIncluded=false`) e continua em `GET /perception`.
+Detalhes, limites e o custo medido: `docs/quality/w63a-server-perception-snapshot.md`.
+
 `POST /v1/projects/{projectId}/perception-producer-operations` exige
 `projects:write`, `Idempotency-Key` e corpo limitado a `projectVersionId`,
 `sourceArtifactId` e `sampleIntervalFrames` opcional (1–300; padrão 30).

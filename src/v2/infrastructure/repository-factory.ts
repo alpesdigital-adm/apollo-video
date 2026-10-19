@@ -47,6 +47,7 @@ import {
 import { SpecializedSyntheticProviderResultCritic } from '../application/synthetic-provider-critic.ts'
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
 import { runNextPerceptionProducerOperationService } from '../application/run-perception-producer-worker.ts'
+import { readServerPerceptionSnapshotService } from '../application/server-perception-snapshots.ts'
 import { runNextTemporalProducerOperationService } from '../application/run-temporal-producer-worker.ts'
 import { runNextFaceProducerOperationService } from '../application/run-face-producer-worker.ts'
 import { runNextFaceWindowOperationService } from '../application/run-face-window-worker.ts'
@@ -465,6 +466,8 @@ import { runNextMediaSegmentDerivativeJobService } from '../application/run-medi
 import { materializeMediaSegmentDerivativeService } from '../application/materialize-media-segment.ts'
 import { PrismaImageAnalysisRepository } from './prisma/image-analysis-repository.ts'
 import { PrismaPerceptionTimelineRepository } from './prisma/perception-timeline-repository.ts'
+import { PrismaServerPerceptionEvidenceReader } from './prisma/server-perception-evidence-reader.ts'
+import { PrismaServerPerceptionSnapshotRepository } from './prisma/server-perception-snapshot-repository.ts'
 import { PrismaMediaArtifactLifecycleRepository } from './prisma/media-artifact-lifecycle-repository.ts'
 import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input-store.ts'
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
@@ -1678,6 +1681,14 @@ export function createImageAnalysisRepository(): ImageAnalysisRepository {
 
 export function createPerceptionTimelineRepository(): PerceptionTimelineRepository {
   return new PrismaPerceptionTimelineRepository(resolveV2Client())
+}
+
+export function createServerPerceptionSnapshotService(clock: () => Date = () => new Date()) {
+  return readServerPerceptionSnapshotService({
+    evidence: new PrismaServerPerceptionEvidenceReader(resolveV2Client()),
+    snapshots: new PrismaServerPerceptionSnapshotRepository(resolveV2Client()),
+    clock,
+  })
 }
 
 export function createMediaArtifactLifecycleRepository(): MediaArtifactLifecycleRepository {
