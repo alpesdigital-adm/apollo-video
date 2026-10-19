@@ -260,7 +260,14 @@ export async function runAddonConsumer(mode, args = [], env = process.env) {
   const report = { schemaVersion: 'perception-pidfd-consumer-close/v1', runId, mode, args,
     sourceCommit: env.GITHUB_SHA, buildRunId: registration.entry.buildRunId,
     owner: registration.entry.identity, scope, childCloseObserved: false, success: false, errors: [], observed: [], terminality: [] }
-  const fail = (error) => report.errors.push({ name: error.name, code: error.code ?? null, message: String(error.message).slice(0, 512) })
+  // The message alone cannot tell WHICH /proc read failed (CI job 118192911424
+  // recorded only "Incomplete Linux process identity"); keep the already
+  // sanitized hash-only stat/snapshot facts when the failing read attached them.
+  const fail = (error) => report.errors.push({ name: error.name, code: error.code ?? null, message: String(error.message).slice(0, 512),
+    ...(error.linuxStatDiagnostic ? { linuxStatDiagnostic: error.linuxStatDiagnostic } : {}),
+    ...(error.linuxStatRecheckDiagnostic ? { linuxStatRecheckDiagnostic: error.linuxStatRecheckDiagnostic } : {}),
+    ...(error.cgroupSnapshotDiagnostic ? { cgroupSnapshotDiagnostic: error.cgroupSnapshotDiagnostic } : {}),
+    ...(error.admissionLockDiagnostic ? { admissionLockDiagnostic: error.admissionLockDiagnostic } : {}) })
   let child, birthToken, closed = false, closePromise, interrupted
   const signals = ['SIGINT', 'SIGTERM'].map((name) => {
     const handler = () => { interrupted ??= name; child?.stdin.end() }; process.on(name, handler); return [name, handler]

@@ -102,7 +102,8 @@ export async function runOuterHostDeath(env = process.env) {
   const report = { schemaVersion: 'perception-outer-host-death/v1', kind: 'outer-host-death',
     sourceCommit: env.GITHUB_SHA, parent: readAuthorityIdentitySync(process.pid), errors: [],
     identities: [], observedRunSuccess: false, containmentTerminal: false, productGateReleased: false }
-  const fail = (error) => report.errors.push({ name: error.name, code: error.code ?? null, message: String(error.message).slice(0, 512) })
+  const fail = (error) => report.errors.push({ name: error.name, code: error.code ?? null, message: String(error.message).slice(0, 512),
+    ...(error.admissionLockDiagnostic ? { admissionLockDiagnostic: error.admissionLockDiagnostic } : {}) })
   let child, birthToken, closed = false, closePromise, readyPromise, prepared, birth, protocolError
   const held = new Map()
   try {
