@@ -22,7 +22,10 @@ import {
   type DesiredActionInput,
 } from '../domain/desired-action.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
-import { createPerceptionTimeline, PERCEPTION_KINDS, type PerceptionObservation } from '../domain/perception-timeline.ts'
+import type { PerceptionKind } from '../domain/perception-timeline.ts'
+import {
+  assembleServerPerceptionSnapshot, type ServerPerceptionAssemblyInput, type ServerPerceptionSnapshot,
+} from '../domain/server-perception-snapshot.ts'
 import type { PerceptionProducerEnvelope } from '../domain/perception-producer-envelope.ts'
 import { createProjectSnapshot, type ProjectSnapshot, type ProjectSnapshotKind } from '../domain/project-snapshot.ts'
 import { offeredObservationsFor } from './adoptable-observations.ts'
@@ -44,7 +47,7 @@ import { createDirectorDecisionLog } from '../domain/director-decision.ts'
 import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import { createTreatmentPlan } from '../domain/treatment-plan.ts'
 import { createDirectorRunImpact } from '../domain/director-run-impact.ts'
-import type { DirectorRunRepository } from './ports/director-run-repository.ts'
+import type { DirectorRunContext, DirectorRunRepository } from './ports/director-run-repository.ts'
 import { bindDirectorSnapshotIdentities } from './director-snapshot-identity.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
@@ -145,74 +148,31 @@ function mergeCoverage(ranges: readonly (readonly [number, number])[]): number {
   return total + end - start
 }
 
+/**
+ * The Director's perception IS the server perception snapshot of its input Version (W63a): one assembler fuses the sealed evidence
+ * - the EditPlan's retimed transcript, the OCR samples, the adjacent-frame measurements and the source-keyed face windows - on the
+ * EditPlan's clock, and says per kind what was examined. The Director adds nothing to it and decides nothing from the kinds it
+ * did not have before: face safety stays `unknown`, and the snapshot is evidence input only.
+ */
 function buildPerception(input: {
   id: string
   inputVersionId: string
-  durationFrames: number
-  fps: number
-  transcript: {
-    id: string
-    provider: string
-    model: string
-    transcriptHash: string
-  }
-  words: readonly Readonly<{
-    text: string
-    sourceStartSeconds: number
-    sourceEndSeconds: number
-    timelineStartFrame: number
-    timelineEndFrame: number
-  }>[]
+  assembly: Readonly<ServerPerceptionAssemblyInput>
+  transcriptId: string
   ocrEnvelope?: Readonly<PerceptionProducerEnvelope>
-}): Readonly<DirectorPerceptionSnapshot> {
-  const durationMs = Math.max(1, Math.ceil(input.durationFrames / input.fps * 1000))
-  const observations: PerceptionObservation[] = input.words.map((word, index) => ({
-    id: `transcript-word-${index + 1}`,
-    kind: 'transcript-word' as const,
-    startMs: Math.max(0, Math.min(durationMs - 1, Math.round(word.timelineStartFrame / input.fps * 1000))),
-    endMs: Math.max(0, Math.min(durationMs, Math.round(word.timelineEndFrame / input.fps * 1000))),
-    value: Object.freeze({
-      text: word.text,
-      sourceStartSeconds: word.sourceStartSeconds,
-      sourceEndSeconds: word.sourceEndSeconds,
-    }),
-    provenance: Object.freeze({
-      source: input.transcript.id,
-      model: `${input.transcript.provider}/${input.transcript.model}`,
-      version: input.transcript.transcriptHash,
-      confidence: 0.82,
-    }),
-  })).map((observation) => observation.endMs <= observation.startMs
-    ? { ...observation, endMs: Math.min(durationMs, observation.startMs + 1) }
-    : observation)
-  const sampleRanges = (input.ocrEnvelope?.samples ?? []).map((sample) => {
-    const startMs = Math.min(durationMs - 1, Math.round(sample.timelineFrame / input.fps * 1_000))
-    return [startMs, Math.min(durationMs, Math.max(startMs + 1,
-      Math.round((sample.timelineFrame + 1) / input.fps * 1_000)))] as const
-  })
-  for (const [sampleIndex, sample] of (input.ocrEnvelope?.samples ?? []).entries()) {
-    const [startMs, endMs] = sampleRanges[sampleIndex]!
-    for (const [regionIndex, region] of sample.ocr.entries()) observations.push({
-      id: `ocr-${sample.timelineFrame}-${regionIndex}-${input.ocrEnvelope!.envelopeHash.slice(0, 12)}`,
-      kind: 'ocr', startMs, endMs,
-      value: Object.freeze({ text: region.text, language: region.language, box: region.box,
-        confidence: region.confidence, sourceFrame: sample.sourceFrame,
-        sourcePts: sample.sourcePts, timelineFrame: sample.timelineFrame,
-        sampleImageSha256: sample.imageSha256 }),
-      provenance: Object.freeze({ source: input.ocrEnvelope!.id, model: 'tesseract',
-        version: input.ocrEnvelope!.envelopeHash, confidence: region.confidence }),
-    })
-  }
-  const coverage = PERCEPTION_KINDS.map((kind) => ({ kind,
-    ranges: kind === 'ocr' ? sampleRanges : kind === 'transcript-word'
-      ? observations.filter((item) => item.kind === 'transcript-word')
-        .map((item) => [item.startMs, item.endMs] as const) : [],
-  }))
-  const timeline = createPerceptionTimeline({ durationMs, observations, coverage })
+}): Readonly<{ perception: Readonly<DirectorPerceptionSnapshot>; serverPerception: Readonly<ServerPerceptionSnapshot> }> {
+  const serverPerception = assembleServerPerceptionSnapshot(input.assembly)
+  const timeline = serverPerception.timeline
+  const durationMs = timeline.durationMs
+  // The Director has already bound its OCR envelope to this Version; the snapshot must have taken exactly that evidence.
+  assertDomain(!input.ocrEnvelope || serverPerception.inputs.some((item) => item.kind === 'ocr' &&
+    item.envelopeHash === input.ocrEnvelope!.envelopeHash),
+  'PERSISTENCE_CONFLICT', 'The server perception snapshot did not take the Director OCR evidence')
+  const stateOf = (kind: PerceptionKind) => timeline.coverage.find((entry) => entry.kind === kind)!.state
   const speechMs = mergeCoverage(timeline.observations
     .filter((item) => item.kind === 'transcript-word')
     .map((item) => [item.startMs, item.endMs] as const))
-  return Object.freeze({
+  const perception: Readonly<DirectorPerceptionSnapshot> = Object.freeze({
     schemaVersion: 2 as const,
     id: input.id,
     inputVersionId: input.inputVersionId,
@@ -226,18 +186,47 @@ function buildPerception(input: {
       emptyTextTimelineFrames: Object.freeze(input.ocrEnvelope.samples.filter((sample) =>
         sample.ocr.length === 0).map((sample) => sample.timelineFrame)),
     }) } : {}),
+    serverSnapshot: Object.freeze({ schemaVersion: serverPerception.schemaVersion, snapshotHash: serverPerception.snapshotHash }),
     timeline,
     summary: Object.freeze({
       id: `${input.id}-summary`,
       speechCoverage: Number(Math.min(1, speechMs / durationMs).toFixed(4)),
-      visualCoverage: (sampleRanges.length ? 'partial' : 'absent') as 'partial' | 'absent',
-      faceCoverage: 'absent' as const,
+      visualCoverage: (['ocr', 'shot', 'motion', 'face'] as const).some((kind) => stateOf(kind) !== 'absent')
+        ? 'partial' as const : 'absent' as const,
+      faceCoverage: stateOf('face'),
       confidence: 0.82,
-      sourceTranscriptId: input.transcript.id,
+      sourceTranscriptId: input.transcriptId,
     }),
   })
+  return Object.freeze({ perception, serverPerception })
 }
 
+/** What the Director itself carries of its input Version, for a context that has no store to read the rest of the evidence from. */
+function directorAssemblyInput(input: {
+  workspaceId: string
+  projectId: string
+  baseVersionId: string
+  context: Readonly<DirectorRunContext>
+  ocrEnvelope?: Readonly<PerceptionProducerEnvelope>
+}): Readonly<ServerPerceptionAssemblyInput> {
+  const { context } = input
+  return Object.freeze({
+    workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.baseVersionId,
+    editPlan: Object.freeze({
+      snapshotId: context.currentVersion.snapshotRefs.editPlan, snapshotHash: null,
+      fps: context.editPlan.fps, durationFrames: context.editPlan.durationFrames,
+      clips: Object.freeze(context.editPlan.videoTracks.flatMap((track) => track.clips).map((clip) => Object.freeze({
+        id: clip.id, sourceArtifactId: clip.sourceArtifactId, sourceInFrame: clip.sourceInFrame, sourceOutFrame: clip.sourceOutFrame,
+        timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame, rate: clip.rate }))),
+    }),
+    transcript: Object.freeze({
+      transcript: Object.freeze({ id: context.transcript.id, provider: context.transcript.provider, model: context.transcript.model,
+        transcriptHash: context.transcript.transcriptHash, sourceArtifactId: context.transcript.sourceArtifactId }),
+      words: context.editPlan.retimedTranscript.words,
+    }),
+    ...(input.ocrEnvelope ? { ocr: Object.freeze([input.ocrEnvelope]) } : {}),
+  })
+}
 function observedTranscriptStatements(words: readonly Readonly<{ text: string }>[]): readonly string[] {
   const statements: string[] = []
   let current: string[] = []
@@ -891,13 +880,13 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const proposedBriefSnapshotId = briefChanged
       ? dependencies.createId('project-snapshot')
       : currentBriefSnapshotId
-    const perception = buildPerception({
+    const { perception, serverPerception } = buildPerception({
       id: perceptionId,
       inputVersionId: baseVersionId,
-      durationFrames: context.editPlan.durationFrames,
-      fps: context.editPlan.fps,
-      transcript: context.transcript,
-      words: context.editPlan.retimedTranscript.words,
+      assembly: context.perceptionEvidence ?? directorAssemblyInput({
+        workspaceId, projectId, baseVersionId, context, ...(ocrEnvelope ? { ocrEnvelope } : {}),
+      }),
+      transcriptId: context.transcript.id,
       ...(ocrEnvelope ? { ocrEnvelope } : {}),
     })
     const lowerOcrRisks = ocrLowerSourceRisks(ocrEnvelope,
@@ -1288,6 +1277,8 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       })
       return {
         bundle, snapshots, run, decisionLog, event,
+        ...(serverPerception.editPlan.snapshotHash !== null && serverPerception.sources.every((source) => source.sha256 !== null)
+          ? { serverPerception } : {}),
         sourceEvidence: {
           transcriptId: context.transcript.id,
           transcriptHash: context.transcript.transcriptHash,

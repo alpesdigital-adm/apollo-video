@@ -9,6 +9,7 @@ import { FACE_EVIDENCE_POLICY, FACE_EVIDENCE_POLICY_SHA256, faceSampleIntervalFr
 import { faceSampleMatchesRawOutput } from '../../domain/face-producer-envelope-v2.ts'
 import { createFaceProducerEnvelopeV3, type FaceProducerEnvelopeV3, type FaceProducerEnvelopeV3Input } from '../../domain/face-producer-envelope-v3.ts'
 import { authenticateFaceEnvelope } from '../../domain/face-producer-registry.ts'
+import type { FaceWindowCursor } from '../../domain/face-window-paging.ts'
 import { evaluatePerceptionSourceAnalysisRights } from '../../domain/perception-source-rights.ts'
 import { startPublicOperationAttempt } from '../../domain/public-operation.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
@@ -371,6 +372,62 @@ export class PrismaFaceSourceWindowRepository implements FaceSourceWindowWorkerR
       if (stored) result.push(stored)
     }
     return Object.freeze(result)
+  }
+
+  private overlapWhere(input: { workspaceId: string; sourceArtifactId: string; fromSourceFrame: number; toSourceFrame: number }) {
+    if (!Number.isSafeInteger(input.fromSourceFrame) || !Number.isSafeInteger(input.toSourceFrame) || input.fromSourceFrame < 0 ||
+        input.toSourceFrame <= input.fromSourceFrame) throw new DomainError('INVALID_ARGUMENT', 'Face source window listing range is invalid')
+    return { workspaceId: input.workspaceId, sourceArtifactId: input.sourceArtifactId, schemaVersion: SCHEMA_VERSION,
+      windowStartSourceFrame: { lt: input.toSourceFrame }, windowEndSourceFrame: { gt: input.fromSourceFrame } }
+  }
+
+  private async attached(input: { workspaceId: string; projectId: string; sourceArtifactId: string }) {
+    return (await this.client.v2ProjectMediaAsset.findFirst({
+      where: { workspaceId: input.workspaceId, projectId: input.projectId, artifactId: input.sourceArtifactId, role: 'source-master' },
+      select: { id: true },
+    })) !== null
+  }
+
+  /** How many window envelopes of this source overlap [from, to) of its own frames (zero for a project that does not have it attached). */
+  async countSourceWindows(input: { workspaceId: string; projectId: string; sourceArtifactId: string
+    fromSourceFrame: number; toSourceFrame: number }): Promise<number> {
+    const where = this.overlapWhere(input)
+    if (!await this.attached(input)) return 0
+    return this.client.v2FaceSourceWindowEnvelope.count({ where })
+  }
+
+  /**
+   * One page of the same listing, in its stable order (window start, creation time, id), starting after `after` (keyset: the position
+   * of the last window of the previous page, so a window written meanwhile can neither shift a page nor be skipped twice). `next` is
+   * the position to continue from, or null when this page was the last. Every window of the page is verified exactly as
+   * `listSourceWindows` verifies it.
+   */
+  async pageSourceWindows(input: { workspaceId: string; projectId: string; sourceArtifactId: string
+    fromSourceFrame: number; toSourceFrame: number; now: Date; after: FaceWindowCursor | null; limit: number }) {
+    if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > MAX_LIST) {
+      throw new DomainError('INVALID_ARGUMENT', 'Face source window page size is invalid')
+    }
+    const overlap = this.overlapWhere(input)
+    if (!await this.attached(input)) return Object.freeze({ items: Object.freeze([]) as readonly StoredFaceSourceWindowEnvelope[], next: null as FaceWindowCursor | null })
+    const after = input.after
+    const rows = await this.client.v2FaceSourceWindowEnvelope.findMany({
+      where: after === null ? overlap : { AND: [overlap, { OR: [
+        { windowStartSourceFrame: { gt: after.windowStartSourceFrame } },
+        { windowStartSourceFrame: after.windowStartSourceFrame, createdAt: { gt: new Date(after.createdAt) } },
+        { windowStartSourceFrame: after.windowStartSourceFrame, createdAt: new Date(after.createdAt), id: { gt: after.id } },
+      ] }] },
+      orderBy: [{ windowStartSourceFrame: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, windowStartSourceFrame: true, createdAt: true }, take: input.limit,
+    })
+    const items: StoredFaceSourceWindowEnvelope[] = []
+    for (const row of rows) {
+      const stored = await readFaceSourceWindowEnvelope(this.client, { id: row.id, workspaceId: input.workspaceId, projectId: input.projectId, now: input.now })
+      if (stored) items.push(stored)
+    }
+    const last = rows.at(-1)
+    return Object.freeze({ items: Object.freeze(items),
+      next: rows.length === input.limit && last
+        ? Object.freeze({ windowStartSourceFrame: last.windowStartSourceFrame, createdAt: last.createdAt.toISOString(), id: last.id }) : null })
   }
 }
 

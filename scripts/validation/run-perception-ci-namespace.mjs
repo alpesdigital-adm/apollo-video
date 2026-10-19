@@ -38,6 +38,9 @@ export const PERCEPTION_SUITES = Object.freeze([
   'tests/v2/prisma-perception-producer-http.integration.mjs',
   'tests/v2/prisma-director-ocr.integration.mjs',
   'tests/v2/prisma-temporal-producer.integration.mjs',
+  'tests/v2/prisma-server-perception-snapshot.integration.mjs',
+  'tests/v2/prisma-director-server-perception.integration.mjs',
+  'tests/v2/server-perception-snapshot-server.integration.mjs',
   'tests/v2/prisma-face-producer.integration.mjs',
 ])
 export function assertPerceptionSuite(suite, pattern = null) {
@@ -46,7 +49,8 @@ export function assertPerceptionSuite(suite, pattern = null) {
 }
 const key = (value) => `${value.pid}:${value.starttime}`
 const errorFact = (error) => ({ name: error.name, code: error.code ?? null,
-  message: String(error.message).slice(0, 512) })
+  message: String(error.message).slice(0, 512),
+  ...(error.admissionLockDiagnostic ? { admissionLockDiagnostic: error.admissionLockDiagnostic } : {}) })
 
 export function namespaceLaunchConfig({ suite, pattern = null, env = process.env,
   uid = process.getuid(), gid = process.getgid(), node = process.execPath, now = Date.now(), controlledFault = null }) {

@@ -37,6 +37,8 @@ model V2Workspace {
   imageAnalyses                          V2ImageAnalysis[]
   imageReuseReferences                   V2ImageReuseReference[]
   perceptionTimelines                    V2PerceptionTimeline[]
+  serverPerceptionSnapshots              V2ServerPerceptionSnapshot[]
+  serverPerceptionSnapshotCoverage       V2ServerPerceptionSnapshotCoverage[]
   perceptionProducerEnvelopes            V2PerceptionProducerEnvelope[]
   perceptionProducerOperations           V2PerceptionProducerOperation[]
   temporalProducerEnvelopes              V2TemporalProducerEnvelope[]
@@ -807,6 +809,7 @@ model V2Project {
   creationCommand                        V2ProjectCreationCommand?
   administrationCommands                 V2ProjectAdministrationCommand[]
   perceptionTimelines                    V2PerceptionTimeline[]
+  serverPerceptionSnapshots              V2ServerPerceptionSnapshot[]
   perceptionProducerEnvelopes            V2PerceptionProducerEnvelope[]
   perceptionProducerOperations           V2PerceptionProducerOperation[]
   temporalProducerEnvelopes              V2TemporalProducerEnvelope[]
@@ -936,6 +939,7 @@ model V2ProjectSnapshot {
   syntheticEditPlanRuns   V2SyntheticProductionRun[]      @relation("SyntheticEditPlanSnapshot")
   syntheticRenderOperations V2SyntheticProductionRenderOperation[] @relation("SyntheticProductionRenderEditPlanSnapshot")
   perceptionProducerEnvelopes V2PerceptionProducerEnvelope[] @relation("PerceptionProducerEditPlanSnapshot")
+  serverPerceptionSnapshots V2ServerPerceptionSnapshot[] @relation("ServerPerceptionSnapshotEditPlan")
   perceptionProducerOperations V2PerceptionProducerOperation[] @relation("PerceptionProducerOperationEditPlanSnapshot")
   outputStateEditPlans V2ProjectOutputState[] @relation("OutputStateEditPlan")
   temporalProducerEnvelopes V2TemporalProducerEnvelope[] @relation("TemporalProducerEditPlanSnapshot")
@@ -1055,6 +1059,7 @@ model V2ProjectVersion {
   assetSelections                  V2AssetSelection[]
   qualityIterations                V2QualityIteration[]
   perceptionTimelines              V2PerceptionTimeline[]
+  serverPerceptionSnapshots        V2ServerPerceptionSnapshot[]
   perceptionProducerEnvelopes      V2PerceptionProducerEnvelope[]
   perceptionProducerOperations     V2PerceptionProducerOperation[]
   temporalProducerEnvelopes        V2TemporalProducerEnvelope[]
@@ -2516,6 +2521,56 @@ model V2FaceSourceWindowRawOutput {
   @@unique([envelopeId, sampleIndex])
   @@index([workspaceId, envelopeId])
   @@map("face_source_window_raw_outputs")
+}
+
+/// W63a. The server-owned perception snapshot of one ProjectVersion: content-addressed (the hash is over the canonical JSON), written
+/// once, never updated. Several snapshots may exist for a Version (the evidence it can see grows), each exactly once.
+model V2ServerPerceptionSnapshot {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  editPlanSnapshotId   String   @db.VarChar(128)
+  editPlanSnapshotHash String   @db.Char(64)
+  durationFrames       Int
+  durationMs           Int
+  schemaVersion        String   @db.VarChar(64)
+  snapshotJson         String   @db.Text
+  snapshotHash         String   @db.Char(64)
+  timelineHash         String   @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+  coverage             V2ServerPerceptionSnapshotCoverage[]
+
+  workspace        V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  projectVersion   V2ProjectVersion  @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  editPlanSnapshot V2ProjectSnapshot @relation("ServerPerceptionSnapshotEditPlan", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([id, workspaceId, durationMs])
+  @@unique([workspaceId, projectVersionId, snapshotHash])
+  @@index([workspaceId, projectId, projectVersionId, createdAt(sort: Desc)])
+  @@map("server_perception_snapshots")
+}
+
+/// The nine kinds of one snapshot, as the database enforces them: absent states a reason and examined nothing, complete examined the
+/// whole duration, object is always absent. The snapshot JSON is re-derived and compared with these rows on every read.
+model V2ServerPerceptionSnapshotCoverage {
+  snapshotId       String  @db.VarChar(128)
+  workspaceId      String  @db.VarChar(128)
+  kind             String  @db.VarChar(16)
+  state            String  @db.VarChar(8)
+  observedMs       Int
+  durationMs       Int
+  observationCount Int
+  reasonCode       String? @db.VarChar(64)
+
+  workspace V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  snapshot  V2ServerPerceptionSnapshot @relation(fields: [snapshotId, workspaceId, durationMs], references: [id, workspaceId, durationMs], onDelete: Restrict)
+
+  @@id([snapshotId, kind])
+  @@index([workspaceId, snapshotId])
+  @@map("server_perception_snapshot_coverage")
 }
 
 model V2FaceProducerOperation {

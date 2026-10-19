@@ -14,6 +14,7 @@ import type {
 } from '../../domain/strategic-objective.ts'
 import type { DirectorDecisionLog } from '../../domain/director-decision.ts'
 import type { PerceptionProducerEnvelope } from '../../domain/perception-producer-envelope.ts'
+import type { ServerPerceptionAssemblyInput, ServerPerceptionSnapshot } from '../../domain/server-perception-snapshot.ts'
 
 export interface DirectorRunContext {
   workspaceId: string
@@ -61,6 +62,13 @@ export interface DirectorRunContext {
   }>
   /** Absent means no server-produced OCR envelope exists for this input version. */
   ocrEnvelope?: Readonly<PerceptionProducerEnvelope>
+  /**
+   * W63a. Every sealed piece of server evidence of the input Version (OCR, temporal, source-keyed face windows, the EditPlan's own
+   * retimed transcript), read through the same reader the public snapshot uses. The Director assembles its perception from it, so the
+   * Director and the API see the same bytes. Absent only where there is no store to read (a controlled context): the Director then
+   * assembles from what the context itself carries.
+   */
+  perceptionEvidence?: Readonly<ServerPerceptionAssemblyInput>
 }
 
 export interface DirectorRunCommit {
@@ -71,6 +79,12 @@ export interface DirectorRunCommit {
   run: Readonly<DirectorRun>
   decisionLog: Readonly<DirectorDecisionLog>
   event: Readonly<PublicEvent>
+  /**
+   * W63a. The server perception snapshot the run's perception IS, present only when the evidence it was assembled from was fully bound
+   * (EditPlan hash and every source's bytes hash verified). The commit re-reads the evidence, refuses a run whose evidence moved, and
+   * writes the snapshot (once, by content) in the same transaction, so the Director and the public snapshot hold the same bytes.
+   */
+  serverPerception?: Readonly<ServerPerceptionSnapshot>
   sourceEvidence: Readonly<{
     transcriptId: string
     transcriptHash: string

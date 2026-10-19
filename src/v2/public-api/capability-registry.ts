@@ -1341,6 +1341,19 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     toolName: 'apollo.projects.perception.put', supportsDryRun: false, costClass: 'low', confirmation: 'none', successStatuses: [201, 200], idempotency: 'required', requestBodyRequired: true,
   },
   {
+    id: 'apollo.projects.perception.snapshot.read', version: '1.0.0', title: 'Query the server perception snapshot of a project version',
+    description: 'Returns the content-addressed perception snapshot the server assembled from its own sealed evidence for one ProjectVersion (the current one unless versionId names another): observations of a half-open millisecond range with kind, per-kind coverage clipped to the range (absent with a reason, partial with the examined and the unexamined ranges, complete only when every frame was examined) and server provenance naming the sealed envelope. Rights and envelope hashes are re-verified at read; `object` is always absent for lack of a verified detector; a caller\'s manual PUT timeline is never part of it.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/server-perception-snapshot-response/v1', endpoint: { method: 'GET', path: '/v1/projects/{projectId}/perception/snapshot' },
+    toolName: 'apollo.projects.perception.snapshot.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'versionId', required: false, description: 'ProjectVersion to read; the project\'s current version when omitted.', schema: { type: 'string', minLength: 1, maxLength: 128 } },
+      { name: 'fromMs', required: false, description: 'Inclusive range start in milliseconds.', schema: { type: 'integer', minimum: 0 } },
+      { name: 'toMs', required: false, description: 'Exclusive range end in milliseconds.', schema: { type: 'integer', minimum: 1 } },
+      { name: 'kinds', required: false, description: 'Comma-separated canonical perception kinds.', schema: { type: 'string', minLength: 1, maxLength: 256 } },
+    ],
+  },
+  {
     id: 'apollo.media.segments.list', version: '1.0.0', title: 'List virtual media segments',
     description: 'Lists immutable semantic ranges for one workspace media artifact without creating derivative bytes.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['artifacts:read'],

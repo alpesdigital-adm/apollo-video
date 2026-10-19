@@ -4,9 +4,9 @@
     "uiActions": 176,
     "capabilities": 156,
     "endpoints": 156,
-    "registeredCapabilities": 394,
-    "operableCapabilities": 394,
-    "publicContractCapabilities": 394,
+    "registeredCapabilities": 395,
+    "operableCapabilities": 395,
+    "publicContractCapabilities": 395,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -3879,6 +3879,17 @@
       "endpoint": "PUT /v1/projects/{projectId}/perception",
       "inputSchemaRef": "apollo://schemas/perception-timeline-put-request/v1",
       "outputSchemaRef": "apollo://schemas/perception-timeline-put-response/v2",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.perception.snapshot.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/perception/snapshot",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/server-perception-snapshot-response/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

@@ -2190,6 +2190,11 @@ jobs:
           node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/prisma-director-ocr.integration.mjs
       - name: Temporal worker, SQL publication fences and HTTP
         run: node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/prisma-temporal-producer.integration.mjs
+      - name: Server perception snapshot, Director commit and real-server HTTP
+        run: |
+          node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/prisma-server-perception-snapshot.integration.mjs
+          node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/prisma-director-server-perception.integration.mjs
+          node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/server-perception-snapshot-server.integration.mjs
       # Only these three offline assertions run here. Face PG/HTTP and the real
       # failed-gate YuNet runner remain local, with licensed development inputs.
       # No holdout/model acquisition or faceSafety authority is implied.

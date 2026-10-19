@@ -58,6 +58,9 @@ import { readPerceptionProducerEnvelope } from './perception-producer-envelope-r
 import type { PerceptionProducerEnvelope } from '../../domain/perception-producer-envelope.ts'
 import { expectedOcrTimeline } from '../../domain/projected-ocr-timeline.ts'
 import { createPerceptionTimeline, type PerceptionTimeline } from '../../domain/perception-timeline.ts'
+import { assembleServerPerceptionSnapshot, verifyServerPerceptionSnapshot } from '../../domain/server-perception-snapshot.ts'
+import { PrismaServerPerceptionEvidenceReader } from './server-perception-evidence-reader.ts'
+import { insertServerPerceptionSnapshot } from './server-perception-snapshot-repository.ts'
 
 const directorRunInclude = Prisma.validator<Prisma.V2DirectorRunInclude>()({
   command: { include: { artifactInvalidations: true } },
@@ -112,7 +115,8 @@ export function parseDirectorPerceptionSnapshotUnchecked(input: {
   }
   const expectedKeys = input.schemaVersion === 2
     ? ['schemaVersion', 'id', 'inputVersionId', 'timeline', 'summary',
-        ...('ocrEvidence' in record ? ['ocrEvidence'] : [])]
+        ...('ocrEvidence' in record ? ['ocrEvidence'] : []),
+        ...('serverSnapshot' in record ? ['serverSnapshot'] : [])]
     : ['schemaVersion', 'id', 'timeline', 'summary']
   if (Object.keys(record).sort().join('|') !== expectedKeys.sort().join('|') ||
       typeof record.id !== 'string' || !record.id ||
@@ -122,13 +126,20 @@ export function parseDirectorPerceptionSnapshotUnchecked(input: {
   const stored = record as unknown as DirectorPerceptionSnapshot
   let rebuilt: Readonly<PerceptionTimeline>
   try {
+    // The Director's timeline is the server's own assembly (W63a): it may carry server provenance and a reason for what was not examined.
     rebuilt = createPerceptionTimeline({ durationMs: stored.timeline.durationMs,
-      observations: stored.timeline.observations,
-      coverage: stored.timeline.coverage.map((item) => ({ kind: item.kind, ranges: item.ranges })),
+      observations: stored.timeline.observations, origin: 'server',
+      coverage: stored.timeline.coverage.map((item) => ({ kind: item.kind, ranges: item.ranges,
+        ...(item.reasonCode === undefined ? {} : { reasonCode: item.reasonCode }) })),
     })
   } catch { throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception timeline is invalid') }
+  // The summary states nothing the timeline does not: face and visual coverage are what the timeline's own coverage says.
+  const coverageState = (kind: string) => stored.timeline.coverage.find((entry) => entry.kind === kind)?.state
+  const visualCoverage = (['ocr', 'shot', 'motion', 'face'] as const).some((kind) => coverageState(kind) !== 'absent')
+    ? 'partial' : 'absent'
   if (stableSerialize(rebuilt) !== stableSerialize(stored.timeline) ||
-      !stored.summary || stored.summary.faceCoverage !== 'absent' ||
+      !stored.summary || stored.summary.faceCoverage !== coverageState('face') ||
+      (input.schemaVersion === 2 && stored.summary.visualCoverage !== visualCoverage) ||
       stored.summary.id !== `${stored.id}-summary` ||
       !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(stored.summary.sourceTranscriptId) ||
       !Number.isFinite(stored.summary.speechCoverage) ||
@@ -159,8 +170,6 @@ export function parseDirectorPerceptionSnapshotUnchecked(input: {
             !evidence.sampledTimelineFrames.includes(frame)) ||
           evidence.emptyTextTimelineFrames.some((frame, index) =>
             index > 0 && frame <= evidence.emptyTextTimelineFrames[index - 1]!) ||
-          stored.summary.visualCoverage !==
-            (evidence.sampledTimelineFrames.length > 0 ? 'partial' : 'absent') ||
           !ocrCoverage || (evidence.sampledTimelineFrames.length > 0 && ocrCoverage.observedMs === 0) ||
           (evidence.sampledTimelineFrames.length === 0 && ocrCoverage.observedMs !== 0) ||
           ocrObservations.some((item) => item.provenance.source !== evidence.envelopeId ||
@@ -172,9 +181,15 @@ export function parseDirectorPerceptionSnapshotUnchecked(input: {
             !ocrObservations.some((item) => (item.value as Record<string, unknown>).timelineFrame === frame))) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Director OCR snapshot evidence is invalid')
       }
-    } else if (ocrObservations.length > 0 || ocrCoverage?.observedMs !== 0 ||
-        stored.summary.visualCoverage !== 'absent') {
+    } else if (ocrObservations.length > 0 || ocrCoverage?.observedMs !== 0) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Director OCR observations lack an envelope')
+    }
+    const snapshotRef = (record as { serverSnapshot?: unknown }).serverSnapshot
+    if (snapshotRef !== undefined && (typeof snapshotRef !== 'object' || snapshotRef === null ||
+        Object.keys(snapshotRef).sort().join('|') !== 'schemaVersion|snapshotHash' ||
+        (snapshotRef as Record<string, unknown>).schemaVersion !== 'server-perception-snapshot/v1' ||
+        !/^[a-f0-9]{64}$/.test(String((snapshotRef as Record<string, unknown>).snapshotHash)))) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception names an invalid server snapshot')
     }
   }
   return Object.freeze(stored)
@@ -653,6 +668,10 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           inputVersionId: versionRow.id, now: this.clock() })
       : null
     if (latestOcr && !ocrEnvelope) throw new DomainError('PERSISTENCE_CONFLICT', 'Selected OCR envelope disappeared')
+    // The rest of the sealed evidence of this Version (temporal, source-keyed face windows, the plan's own transcript), read by the
+    // same reader the public snapshot uses, so the Director's perception and the API's are the same bytes (W63a).
+    const evidence = await new PrismaServerPerceptionEvidenceReader(this.client).readForVersion({
+      workspaceId: project.workspaceId, projectId: project.id, projectVersionId: versionRow.id, now: this.clock() })
     return Object.freeze({
       workspaceId: project.workspaceId,
       project: Object.freeze({ id: project.id, objective: projectObjective.id, locale: project.locale }),
@@ -690,6 +709,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
         words: Object.freeze(transcriptWords.map((word) => Object.freeze({ word: word.word, start: word.start, end: word.end }))),
       }),
       ...(ocrEnvelope ? { ocrEnvelope } : {}),
+      ...(evidence !== null && evidence !== 'no-timeline' ? { perceptionEvidence: evidence } : {}),
     })
   }
 
@@ -1065,6 +1085,28 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
         bundle.run.perception.ocrEvidence !== undefined ||
         bundle.run.perception.timeline.coverage.find((item) => item.kind === 'ocr')?.observedMs !== 0) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception claims OCR without a sealed envelope')
+    }
+    // W63a. The run's perception IS a server perception snapshot. What the stores hold now must still assemble into exactly it (stale
+    // evidence of any kind - OCR, temporal, face windows, the plan - refuses the run), and the very same bytes are then written, once,
+    // in this transaction, where the public snapshot finds them.
+    const attachedSnapshot = bundle.run.perception.schemaVersion === 2 ? bundle.run.perception.serverSnapshot : undefined
+    if (bundle.serverPerception) {
+      const snapshot = verifyServerPerceptionSnapshot(bundle.serverPerception)
+      if (!attachedSnapshot || attachedSnapshot.snapshotHash !== snapshot.snapshotHash ||
+          snapshot.workspaceId !== bundle.command.workspaceId || snapshot.projectId !== bundle.command.projectId ||
+          snapshot.projectVersionId !== bundle.command.baseVersionId ||
+          stableSerialize(bundle.run.perception.timeline) !== stableSerialize(snapshot.timeline)) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception is not the server perception snapshot it names')
+      }
+      const fresh = await new PrismaServerPerceptionEvidenceReader(transaction as unknown as PrismaClient).readForVersion({
+        workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
+        projectVersionId: bundle.command.baseVersionId, now: this.clock() })
+      if (fresh === null || fresh === 'no-timeline' || assembleServerPerceptionSnapshot(fresh).snapshotHash !== snapshot.snapshotHash) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception evidence changed before commit')
+      }
+      await insertServerPerceptionSnapshot(transaction, snapshot, this.clock())
+    } else if (attachedSnapshot !== undefined) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception names a server snapshot the commit does not carry')
     }
     const targetObjective = resolveStrategicObjective(bundle.command.payload.objective)
     const latestRun = project.directorRuns[0]
