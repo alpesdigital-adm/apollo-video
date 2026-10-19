@@ -4,6 +4,10 @@ Escopo: primeiro seguimento do W65b. Ramo `claude/w65b-final-gate-source-evidenc
 Segue o fecho do W65 (`docs/quality/w65-caption-placement-v3.md`), que deixou a exportação final exigindo um `faceSafety`
 do Diretor `verified` que nada concede: **nenhum final podia ser produzido**.
 
+Segundo seguimento (`docs/quality/w65b-source-keyed-face-evidence.md`): a evidência facial que certifica cada banda passou a ser lida
+por **fonte** (`face-producer-envelope/v3`, frames da própria fonte, projetados pelos clipes do EditPlan), e não mais pela linha do
+tempo de uma Version. A regra desta nota não muda; muda de onde vêm as janelas, e por isso um corte do Diretor passa a ter janelas.
+
 ## 1. A regra (política fixada e versionada)
 
 A segurança facial global **continua `unknown`** (no relatório do Diretor e em todo plano de posicionamento). O que o final garante
