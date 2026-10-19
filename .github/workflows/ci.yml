@@ -38,7 +38,15 @@ jobs:
     # The last green job took 34m04s; a later main run reached API 12/12 and
     # cleanup but hit the 35m job limit. Allow five more minutes for postflight
     # without changing any test or step deadline.
-    timeout-minutes: 40
+    #
+    # Raised from 40 to 60 for the W61-70 integration head, which carries the W62-W69 suites on top of the W66 model. Measured on this
+    # job (GitHub-hosted runner): the last green job before it, 62ce2db3, took 1821 s; the first full run of the integration head
+    # (45d6a2d4) was cancelled by the 2400 s limit at 2553 s, 220 s into "Run public API integration tests" (366 s at 62ce2db3), so it
+    # projects to about 2760 s. Where the time went, step by step (62ce2db3 -> 45d6a2d4): unit and contract tests 81 -> 263 s (1,674
+    # tests under the pidfd consumer), Wave 23 worker journeys on the local driver 91 -> 198 s, production build 117 -> 142 s, editorial
+    # renderer goldens 59 -> 79 s, proof mode goldens 65 -> 83 s, two-hour master synthesis 208 -> 256 s. The new limit leaves about 30%
+    # over the projection; no test or step deadline changes.
+    timeout-minutes: 60
 
     env:
       CI: true
