@@ -73,6 +73,7 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     })
 
     const counters = new Map()
+    let eventSequence = 0
     const createEntityId = (kind) => {
       const next = (counters.get(kind) ?? 0) + 1
       counters.set(kind, next)
@@ -83,7 +84,9 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
       repository,
       clock: () => testNow,
       createId: createEntityId,
-      createEventId: randomUUID,
+      // The outbox is read by (occurredAt, id) and both creation events carry the creation instant, so ids that grow with the order the
+      // service allocates them (project.created, then project.version.created) keep that order; random ids made it a coin flip.
+      createEventId: () => `${run.slice(0, 8)}-0000-4000-8000-${String(++eventSequence).padStart(12, '0')}`,
     })
     const request = {
       workspaceId,
