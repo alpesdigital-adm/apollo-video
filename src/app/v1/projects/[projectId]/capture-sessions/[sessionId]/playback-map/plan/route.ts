@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { requireScope } from '@/v2/application/authenticate-api-client'
+import { materializeActorAuditContext, requireScope } from '@/v2/application/authenticate-api-client'
 import { DomainError } from '@/v2/domain/errors'
 import { createReactPlaybackPlanCompileService } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
@@ -52,6 +52,7 @@ export async function POST(
       projectVersionId: body.projectVersionId,
       objective: body.objective,
       planFps: body.planFps,
+      audit: materializeActorAuditContext(actor),
     })
     return NextResponse.json(
       presentSuccess(presentCompiledRenderablePlan(result)),

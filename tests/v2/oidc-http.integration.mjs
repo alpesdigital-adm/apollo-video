@@ -106,20 +106,8 @@ test('OIDC HTTP journey verifies provider evidence and creates only authorized o
     response.end(JSON.stringify({ error: 'not_found' }))
   })
 
-  const cleanup = async () => {
-    await client.v2UiSession.deleteMany({ where: { workspaceId } })
-    await client.v2OidcAuthorization.deleteMany({ where: { issuer } })
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } })
-    await client.v2WorkspaceMember.deleteMany({ where: { workspaceId } })
-    await client.v2ApiAdministrationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2ApiCredential.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2HumanIdentity.deleteMany({ where: { id: identityId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     await client.v2Workspace.create({ data: { id: workspaceId, slug: 'oidc-http', name: 'OIDC HTTP' } })
     await client.v2ApiClient.create({ data: {
       id: apiClientId, workspaceId, name: 'OIDC HTTP UI', type: 'service-account',
@@ -243,7 +231,6 @@ test('OIDC HTTP journey verifies provider evidence and creates only authorized o
   } finally {
     await stopChild(app)
     if (idp.listening) await new Promise((resolve) => idp.close(resolve))
-    await cleanup()
     await client.$disconnect()
   }
 })

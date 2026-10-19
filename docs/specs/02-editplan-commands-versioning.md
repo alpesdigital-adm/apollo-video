@@ -715,6 +715,21 @@ imutáveis apenas como contexto histórico, sem executar resolução ou renderer
 Ausência ou drift do proxy-base falha fechado. Replays convergem para a mesma
 operação e nenhum worker pode reivindicá-la porque ela já nasce terminal.
 
+Checkpoint de 12/10/2026: o reuso também precisa copiar o RenderElementMap para
+a versão filha na mesma transação, com identidade nova e sem transferir revisão
+ou aceite. O hash histórico do mapa usa `JSON.stringify`; reordenar as chaves
+dos elementos invalida esse selo, mesmo que o JSON tenha significado equivalente.
+O teste focal passou com mapa não vazio, cópia e reidratação pelo repository Prisma
+com dados controlados em memória;
+a jornada PostgreSQL/API permanece pendente após as falhas de preparação e
+serialização registradas. O reuso deve revalidar os direitos vigentes de todas as
+fontes sob os mesmos fences de publicação, inclusive após espera por locks e
+antes do retorno. Essa correção está em implementação e ainda não foi validada
+por latches PostgreSQL. A transação de enqueue não reverte o Command e a versão
+já comitados pelo serviço anterior: uma recusa preserva esses fatos e não cria
+novos efeitos de reuso. O enqueue da edição manual deve exigir exatamente a
+versão retornada pelo serviço, recusando head concorrente.
+
 O caso integrado de crop usa o mesmo executor: o Command tipado materializa o
 retângulo no EditPlan, o impacto restringe a variante e o range do clip, e o
 renderer preserva crop ao fatiar o input parcial. O golden audiovisual cria
@@ -946,3 +961,29 @@ carregamento, evitando fallback silencioso no primeiro frame.
 - Semântica de rebase automático.
 - Persistência/consulta eficiente do dependency graph.
 - Granularidade de versions em batch edits.
+
+## 33. Limite de comprovação — Diretor e objetivo (12/10/2026)
+
+A jornada manual atual exige que uma mudança de `discovery` para `sale` sem
+aprovação do objetivo anterior retorne `428 PRECONDITION_REQUIRED`, sem novos
+Commands, versões, snapshots, operações ou outbox. O positivo de mudança de
+objetivo **após aprovação** continua pendente; repetir `discovery` não comprova
+`supersedesRunId` nem uma segunda versão do objetivo.
+
+O diagnóstico local `manual-50d11-v8-49a3a88e` observou `P2002` na unicidade
+`ProjectSnapshot(projectId, kind, contentHash)` durante o commit do Diretor.
+Essa unicidade permanece obrigatória. Uma identidade canônica já existente
+precisa ser resolvida e validada antes de selar Command, DirectorRun e Version;
+não se pode trocar referências depois dos hashes nem alterar conteúdo para
+evitar a colisão. O commit deve revalidar os fatos imutáveis dentro da transação.
+O commit `693233668b06da7ec2f0af6e080ffd4fdb78f1a6` resolve essas identidades
+na transação antes dos selos, preserva o `createdAt` da row reaproveitada e
+recompõe somente o bundle puro em retry serializável; não reexecuta o Diretor.
+Os testes PostgreSQL locais passaram 2/2, incluindo colisão concorrente,
+rollback e expiração de lease após espera SQL. A jornada manual passou 1/1
+no build desse commit e o worker real concluiu na primeira tentativa.
+As preparações de outputs/mapas dessa jornada são metadados controlados,
+sem render físico. Os recibos e seus hashes constam no registro canônico.
+O supersede após aprovação e o final positivo W35 continuam pendentes; o
+dashboard desse commit falhou no GET inicial do workspace com `ECONNRESET`,
+antes do browser, com causa ainda não determinada e cleanup concluído.

@@ -1110,7 +1110,9 @@ test(
           where: { workspaceId: world.workspaceId, projectId: conflict.projectId },
         }),
         exportOperations: await prisma.v2PublicOperation.count({
-          where: { workspaceId: world.workspaceId, projectId: conflict.projectId, type: { not: 'project-proxy-render' } },
+          // The 'media-ingest' operation is the source recording's own ingest, which the seeded world persists with its sealed
+          // normalization receipt; it is not something the refused read could have created.
+          where: { workspaceId: world.workspaceId, projectId: conflict.projectId, type: { notIn: ['project-proxy-render', 'media-ingest'] } },
         }),
         ui: await refusalBlock(page),
         readLedger: await readLedger(page),

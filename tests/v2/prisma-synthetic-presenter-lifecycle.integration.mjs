@@ -14,16 +14,8 @@ test('T-FR-103 presenter profiles version, activate, deactivate and expire under
 }, async () => {
   const client = new PrismaClient({ datasources: { db: { url: process.env.V2_DATABASE_URL } } })
 
-  const cleanup = async () => {
-    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
     const { registerSyntheticPresenterProfileService } = await import('../../src/v2/application/synthetic-production.ts')
@@ -180,7 +172,6 @@ test('T-FR-103 presenter profiles version, activate, deactivate and expire under
     )
     assert.equal(await repository.readProfileHead({ workspaceId: 'other-workspace', profileId: 'lifecycle-presenter' }), null)
   } finally {
-    await cleanup()
     await client.$disconnect()
   }
 })

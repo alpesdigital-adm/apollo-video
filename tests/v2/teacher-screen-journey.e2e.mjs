@@ -188,6 +188,9 @@ test(
     const { DEFAULT_DIRECTION_POLICY } = await import('../../src/v2/domain/multicam-direction.ts')
     const { COLOR_TRANSFORM_ORDER } = await import('../../src/v2/domain/color-and-export.ts')
     const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
+    const { assetRightsRevision, evaluateAssetUse } = await import('../../src/v2/domain/asset-rights.ts')
+    const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
+    const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
     const sessionsRoute = await import('../../src/app/v1/projects/[projectId]/capture-sessions/route.ts')
     const tracksRoute = await import('../../src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/tracks/route.ts')
     const protocolRoute = await import('../../src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/protocol/route.ts')
@@ -250,68 +253,22 @@ test(
     // refused.
     process.env.APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM = '400'
 
-    const clean = async () => {
-      await prisma.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-      await prisma.v2ProjectVersion.updateMany({ where: { workspaceId }, data: { commandId: null } })
-      for (const table of [
-        prisma.v2MulticamAngleScoreComponent, prisma.v2MulticamAngleCandidate,
-        prisma.v2MulticamShotAlternative, prisma.v2MulticamShotDecision,
-        prisma.v2MulticamDirectionHead, prisma.v2MulticamDirection,
-        prisma.v2MulticamObservation, prisma.v2MulticamEvidenceSet,
-        prisma.v2SpeakerDiarizationSegment, prisma.v2SpeakerDiarizationRun,
-        prisma.v2LongFormIndexWorkflow, prisma.v2MediaTranscript,
-        prisma.v2SyncDiagnosticHead, prisma.v2SyncDiagnostic,
-        prisma.v2CaptureSessionProtocol, prisma.v2CaptureProtocolEvaluation,
-        prisma.v2CaptureTrackCoverage, prisma.v2CaptureClockMapPiece, prisma.v2CaptureClockMap,
-        prisma.v2CaptureSyncEvidence, prisma.v2CaptureSyncRun, prisma.v2CaptureSessionClock,
-        prisma.v2CaptureSessionHead, prisma.v2CaptureSessionVersion,
-        prisma.v2ColorCriticProposedDelta, prisma.v2ColorCriticIssue,
-        prisma.v2ColorCriticDimensionResult, prisma.v2ColorCriticReportMeasurement,
-        prisma.v2ColorCriticReport,
-        // The critic measures the cameras it judged, and those rows outlive the
-        // report: `camera_color_measurements_workspaceId_fkey` otherwise blocks
-        // the workspace delete at the very end of the teardown.
-        prisma.v2ColorMeasurementComponent, prisma.v2ColorMeasurementDimension,
-        prisma.v2CameraColorMeasurement,
-        prisma.v2ProxyReviewDecision, prisma.v2ProxyReview, prisma.v2RenderElementMap,
-        prisma.v2ProjectProxyRenderOperation,
-        prisma.v2ProjectLutSelectionHead, prisma.v2ProjectLutSelection,
-        prisma.v2CommandArtifactInvalidation, prisma.v2PublicEventOutbox,
-        prisma.v2EditCommand, prisma.v2ProjectVersion, prisma.v2ProjectSnapshot,
-        prisma.v2ColorPipelineCompilation, prisma.v2MediaColorProbe,
-        // After the review and the render operation that point at it: an
-        // operation deleted first violates
-        // `proxy_reviews_operationId_projectId_workspaceId_fkey`.
-        prisma.v2ProjectMediaAsset, prisma.v2PublicOperation,
-        // The render's manifest records what it was derived from, and the
-        // lineage row outlives the operation that wrote it: deleting manifests
-        // first violates `media_artifact_lineage_manifestId_workspaceId_fkey`.
-        prisma.v2MediaArtifactLineage,
-        prisma.v2MediaArtifactManifest, prisma.v2MediaArtifact,
-        prisma.v2Project, prisma.v2ApiCredential, prisma.v2ApiClient,
-      ]) {
-        await table.deleteMany({ where: { workspaceId } })
-      }
-      await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } })
-    }
-
     t.after(async () => {
-      // Reported, never rethrown: a failing cleanup that masks the assertion
-      // turns one clear defect into two confusing ones.
-      try {
-        await clean()
-      } catch (error) {
-        console.log(`teacher-screen cleanup reported: ${error?.message ?? error}`)
+      // node:test keeps a body failure separate from the failing after hook.
+      // Attempt every owned close, and retain the artifact root on incomplete cleanup.
+      const failures = []
+      for (const action of [() => closeJourneyObjectStore(objectStore), () => prisma.$disconnect()]) {
+        try { await action() } catch (error) { failures.push(error) }
       }
-      await closeJourneyObjectStore(objectStore).catch((error) => {
-        console.log(`teacher-screen object storage cleanup reported: ${error?.message ?? error}`)
-      })
-      await rm(root, { recursive: true, force: true }).catch((error) => {
-        console.log(`teacher-screen artifact root cleanup reported: ${error?.message ?? error}`)
-      })
-      await prisma.$disconnect()
+      if (!failures.length) {
+        try { await rm(root, { recursive: true, force: true }) } catch (error) { failures.push(error) }
+      }
+      if (failures.length) throw new AggregateError(failures, 'Teacher-screen fixture cleanup did not complete')
     })
-    await clean()
+    // Sealed rows are append-only, so this journey cannot clear a previous run: its identities are fixed, and it is single-use per
+    // database (a workflow gives it a fresh one). Say so here instead of failing later on a unique constraint.
+    assert.equal(await prisma.v2Workspace.count({ where: { id: workspaceId } }), 0,
+      'this journey needs a fresh database: its workspace already exists and sealed rows are never deleted')
 
     // ---- the two recordings, generated here and never committed -----------
     const mediaDirectory = join(sourceRoot, 'capture')
@@ -330,6 +287,10 @@ test(
     const screenKey = 'capture/screen-capture.mp4'
     const cameraFile = helpers.artifactPath(sourceRoot, cameraKey)
     const screenFile = helpers.artifactPath(sourceRoot, screenKey)
+    // Interpret the generated RGB patterns explicitly, convert actual pixels,
+    // and publish the same BT.709 limited facts in H.264 VUI, not only MP4 tags.
+    const rgbToBt709Limited = 'format=gbrp,zscale=matrixin=gbr:primariesin=709:transferin=linear:matrix=709:primaries=709:transfer=709:range=limited,format=yuv420p'
+    const bt709Vui = 'colorprim=bt709:transfer=bt709:colormatrix=bt709:fullrange=off'
     const cameraBytes = await helpers.encodeRecording({
       ffmpegPath,
       outputPath: cameraFile,
@@ -337,8 +298,9 @@ test(
       fps: FPS,
       width: WIDTH,
       height: HEIGHT,
-      videoInput: `color=c=0x204060:s=${WIDTH}x${HEIGHT}:r=${FPS}:d=${SECONDS}`,
-      videoFilter: 'drawbox=x=150:y=50:w=44:h=44:color=0xe0b090:t=fill',
+      videoInput: `color=c=0x204060:s=${WIDTH}x${HEIGHT}:r=${FPS}:d=${SECONDS},format=gbrp`,
+      videoFilter: `drawbox=x=150:y=50:w=44:h=44:color=0xe0b090:t=fill,${rgbToBt709Limited}`,
+      x264Params: bt709Vui,
       pcmPath: cameraPcm,
     })
     // A slide, a demonstration, and the slide again. `life` is the generated
@@ -354,9 +316,9 @@ test(
       width: WIDTH,
       height: HEIGHT,
       videoInputs: [
-        `color=c=0xf0f0f0:s=${WIDTH}x${HEIGHT}:r=${FPS}`,
-        `life=s=${WIDTH}x${HEIGHT}:r=${FPS}:mold=10:random_seed=${LIFE_SEED}`,
-        `color=c=0xf0f0f0:s=${WIDTH}x${HEIGHT}:r=${FPS}`,
+        `color=c=0xf0f0f0:s=${WIDTH}x${HEIGHT}:r=${FPS},format=gbrp`,
+        `life=s=${WIDTH}x${HEIGHT}:r=${FPS}:mold=10:random_seed=${LIFE_SEED},format=gbrp`,
+        `color=c=0xf0f0f0:s=${WIDTH}x${HEIGHT}:r=${FPS},format=gbrp`,
       ],
       // `life` has no duration option and never ends, so each leg is trimmed in
       // the graph and the timestamps restarted before the three are joined.
@@ -364,7 +326,8 @@ test(
         `[0:v]trim=duration=${DEMONSTRATION_START_SECOND},setpts=PTS-STARTPTS[slide];`
         + `[1:v]trim=duration=${DEMONSTRATION_END_SECOND - DEMONSTRATION_START_SECOND},setpts=PTS-STARTPTS[demo];`
         + `[2:v]trim=duration=${screenSeconds - DEMONSTRATION_END_SECOND},setpts=PTS-STARTPTS[after];`
-        + '[slide][demo][after]concat=n=3:v=1:a=0[picture]',
+        + `[slide][demo][after]concat=n=3:v=1:a=0[pictureRgb];[pictureRgb]${rgbToBt709Limited}[picture]`,
+      x264Params: bt709Vui,
       pcmPath: screenPcm,
     })
 
@@ -416,6 +379,8 @@ test(
     })
 
     const registered = {}
+    const rightsRepository = new PrismaAssetRightsRepository(prisma)
+    const recordingRights = []
     for (const entry of [
       {
         artifactId: cameraArtifactId, artifactKey: cameraKey, stream: cameraVideo, bytes: cameraBytes,
@@ -449,7 +414,49 @@ test(
         createdAt: at(0),
         recipeId: entry.recipeId,
       })
+      // Both video/PCM recordings were generated here. Registration is not a
+      // rights grant: authorize only each real project role via the production service.
+      assert.ok(['source-master', 'selected-insert'].includes(entry.role))
+      const use = entry.role === 'source-master' ? 'rendering' : 'editorial-reuse'
+      const oppositeUse = use === 'rendering' ? 'editorial-reuse' : 'rendering'
+      const snapshotId = `teacher-screen-rights-${entry.artifactId}`
+      const granted = await setAssetRightsService({ repository: rightsRepository,
+        clock: () => at(0), createId: () => snapshotId })({ workspaceId, artifactId: entry.artifactId,
+        baseRevision: assetRightsRevision(entry.artifactId, 0),
+        draft: { status: 'approved', allowedUses: [use], prohibitedUses: [], allowedLocales: ['pt-BR'],
+          consent: { status: 'not-required', allowedUses: [] },
+          sourceNote: 'Owner-generated synthetic teacher-screen video and PCM; no external recording or music' },
+        actor: { type: 'api-client', id: clientId } })
+      const readback = (await rightsRepository.findCurrentForArtifacts(workspaceId, [entry.artifactId])).get(entry.artifactId)
+      assert.equal(readback?.id, snapshotId)
+      assert.equal(readback?.workspaceId, workspaceId); assert.equal(readback?.artifactId, entry.artifactId)
+      assert.equal(readback?.snapshotHash, granted.snapshot.snapshotHash)
+      assert.deepEqual(readback?.createdBy, { type: 'api-client', id: clientId })
+      assert.deepEqual(readback?.allowedUses, [use])
+      assert.deepEqual(readback?.allowedWorkspaceIds, [workspaceId])
+      assert.equal(granted.revision, assetRightsRevision(entry.artifactId, 1))
+      const audit = await prisma.v2AssetRightsChange.findUniqueOrThrow({
+        where: { artifactId_sequence: { artifactId: entry.artifactId, sequence: 1 } },
+      })
+      assert.equal(audit.workspaceId, workspaceId); assert.equal(audit.snapshotId, snapshotId)
+      assert.equal(audit.snapshotHash, readback.snapshotHash)
+      assert.equal(audit.actorKind, 'internal'); assert.equal(audit.actorType, 'api-client'); assert.equal(audit.actorId, clientId)
+      assert.equal(audit.baseRevision, assetRightsRevision(entry.artifactId, 0)); assert.equal(audit.resultRevision, granted.revision)
+      const context = { workspaceId, use, locale: 'pt-BR' }
+      assert.equal(evaluateAssetUse(readback, context, at(0)).outcome, 'allow')
+      for (const [deniedContext, reason] of [
+        [{ ...context, use: oppositeUse }, 'RIGHTS_USE_NOT_ALLOWED'],
+        [{ ...context, workspaceId: 'teacher-screen-other-workspace' }, 'RIGHTS_WORKSPACE_NOT_ALLOWED'],
+        [{ ...context, locale: 'en-US' }, 'RIGHTS_LOCALE_NOT_ALLOWED'],
+      ]) {
+        const denied = evaluateAssetUse(readback, deniedContext, at(0))
+        assert.equal(denied.outcome, 'deny'); assert.ok(denied.reasonCodes.includes(reason))
+      }
+      recordingRights.push({ artifactId: entry.artifactId, role: entry.role, use, snapshotId, snapshotHash: readback.snapshotHash,
+        revision: granted.revision, auditId: audit.id, authority: 'production-service+PostgreSQL-reader' })
     }
+    console.log(JSON.stringify({ scope: 'controlled-synthetic-teacher-screen-rights', recordings: recordingRights,
+      permissionInferredFromRegistration: false, thirdPartyOrCorpusRightsClaimed: false }))
     await helpers.seedBaseProjectVersion({
       prisma, workspaceId, projectId, versionId, clientId,
       objective: 'awareness',

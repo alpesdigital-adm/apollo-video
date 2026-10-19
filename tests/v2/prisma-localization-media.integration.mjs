@@ -173,18 +173,7 @@ test(
       testFailure = error;
       throw error;
     } finally {
-      try {
-      for (const id of createdIds) {
-        await prisma.v2LocalizationMediaRunRevision.deleteMany({
-          where: { runId: id },
-        });
-        await prisma.v2LocalizationMediaRun.deleteMany({ where: { id } });
-      }
-      if (fixture) await fixture.cleanup();
-      } catch (cleanupError) {
-        if (testFailure) throw new AggregateError([testFailure, cleanupError], 'Localization media proof and cleanup both failed');
-        throw cleanupError;
-      } finally { await prisma.$disconnect(); }
+      await prisma.$disconnect();
     }
   },
 );

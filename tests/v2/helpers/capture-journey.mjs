@@ -53,6 +53,8 @@ const { createWorkspace } = await import('../../../src/v2/domain/workspace.ts')
 const { PrismaApiClientRepository } = await import('../../../src/v2/infrastructure/prisma/api-client-repository.ts')
 const { PrismaWorkspaceRepository } = await import('../../../src/v2/infrastructure/prisma/workspace-repository.ts')
 const { nodeApiCredentialCrypto } = await import('../../../src/v2/infrastructure/security/api-credential.ts')
+const { commitSealedChild, persistReceiptForExistingAudio, persistReceiptForExistingVideo, seedSealedProject, testActor } = await import('./pg-output-world.mjs')
+const { variantBodyFor } = await import('./explicit-project-http.mjs')
 
 const execFileAsync = promisify(execFile)
 
@@ -196,6 +198,7 @@ export async function encodeRecording({
   videoInput = null,
   videoInputs = null,
   videoFilter = null,
+  x264Params = null,
   filterComplex = null,
   pcmPath = null,
   sampleRate = SAMPLE_RATE,
@@ -212,6 +215,7 @@ export async function encodeRecording({
     ...(filterComplex && pcmPath ? ['-map', `${pictures.length}:a:0`] : []),
     ...(videoFilter ? ['-vf', videoFilter] : []),
     '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    ...(x264Params ? ['-x264-params', x264Params] : []),
     // Tagged, not left to a reader's guess: an untagged h264 stream probes as
     // `unknown` colorimetry, and a colour pipeline compiled over `unknown`
     // would hand zscale a token it refuses. These four are what ffprobe is then
@@ -337,24 +341,21 @@ export async function createWorkspaceRow({ prisma, workspaceId, name, createdAt 
   }))
 }
 
+/**
+ * The project, the way the product creates it: the creation Command (the root Version, no output) and one explicit output
+ * variant in `format` (16:9, 9:16...), through the production services and repositories. A Version cannot be inserted by hand
+ * (the database admits only Versions born with their sealed output State), so the head here is that variant's Version; the
+ * recordings registered next and `seedBaseProjectVersion` build on it. `status` is the journey's own, set on the mutable row.
+ */
 export async function createProjectRow({
   prisma, workspaceId, projectId, name, objective, format, clientId, createdAt,
 }) {
-  await prisma.v2Project.create({
-    data: {
-      id: projectId,
-      workspaceId,
-      name,
-      status: 'reviewing-proxy',
-      objective,
-      format,
-      locale: 'pt-BR',
-      createdByType: 'api-client',
-      createdById: clientId,
-      createdAt,
-      updatedAt: createdAt,
-    },
-  })
+  const actor = testActor({ workspaceId, clientId, credentialId: `${clientId}-seed`, environment: 'production',
+    scopes: ['projects:read', 'projects:write', 'artifacts:read', 'operations:read'] })
+  const world = await seedSealedProject(prisma, { workspaceId, actor, prefix: projectId, ids: { project: projectId }, name, objective,
+    variant: variantBodyFor({ aspectRatio: format }), at: () => createdAt })
+  await prisma.v2Project.update({ where: { id: projectId }, data: { status: 'reviewing-proxy' } })
+  return world
 }
 
 /**
@@ -368,7 +369,7 @@ export async function createProjectRow({
 export async function registerRecording({
   prisma, workspaceId, projectId, artifactId, artifactKey, mediaType, container,
   sha256, byteSize, probe, colorMetadata, pixelFormat, producerVersion, producerBinaryDigest,
-  role, originalFileName, createdAt, recipeId,
+  role, originalFileName, createdAt, recipeId, receipt = true,
 }) {
   const manifest = createMediaArtifactManifestV2({
     artifactKey,
@@ -457,6 +458,19 @@ export async function registerRecording({
     })
     probeId = colorProbe.id
   }
+  // The ingest also leaves the sealed normalization receipt of a recording (a video also its editing proxy): a child Command (the multicam cut,
+  // a selected insert, music...) can only play a source whose receipt was persisted, by adopting it. The source's rights stay
+  // with the journey, which grants them through the production service.
+  if (receipt && (mediaType === 'video' || mediaType === 'audio')) {
+    const project = await prisma.v2Project.findUniqueOrThrow({ where: { id: projectId } })
+    const actor = testActor({ workspaceId, clientId: project.createdById, credentialId: `${project.createdById}-seed`, environment: 'production' })
+    if (mediaType === 'video') {
+      await persistReceiptForExistingVideo(prisma, { workspaceId, projectId, actor, artifactId, createdAt: createdAt.toISOString(),
+        nativeFps: probe.fps, durationFrames: Math.max(2, Math.round(probe.duration * probe.fps)), width: probe.width, height: probe.height })
+    } else {
+      await persistReceiptForExistingAudio(prisma, { workspaceId, projectId, actor, artifactId, createdAt: createdAt.toISOString(), durationSeconds: probe.duration })
+    }
+  }
   return { manifestId, manifestHash: manifest.manifestHash, probeId }
 }
 
@@ -521,53 +535,16 @@ export async function seedBaseProjectVersion({
     audioTimelineHash: createEditorialAudioTimelineHash({ fps, clips: baseClips }),
     createdAt: createdAt.toISOString(),
   }
-  for (const [kind, content] of [['brief', { kind: 'brief' }], ['policies', { kind: 'policies' }]]) {
-    await prisma.v2ProjectSnapshot.create({
-      data: {
-        id: `${projectId}-snapshot-${kind}`,
-        workspaceId,
-        projectId,
-        kind,
-        schemaVersion: 1,
-        contentJson: stableSerialize(content),
-        contentHash: calculateVersionHash(content),
-        createdAt,
-      },
-    })
-  }
-  await prisma.v2ProjectSnapshot.create({
-    data: {
-      id: `${projectId}-snapshot-edit-plan`,
-      workspaceId,
-      projectId,
-      kind: 'edit-plan',
-      schemaVersion: 2,
-      contentJson: stableSerialize(basePlan),
-      contentHash: calculateVersionHash(basePlan),
-      createdAt,
-    },
+  // A Version is born with its sealed output State: this is the real child Command of the project's head, adopting the receipt
+  // the recording's ingest persisted (so the recording must already carry current rights). Its id is the one the journey named.
+  const clip = baseClips[0]
+  const bundle = await commitSealedChild(prisma, {
+    workspaceId, projectId, actor: testActor({ workspaceId, clientId, credentialId: `${clientId}-seed`, environment: 'production' }),
+    suffix: `${projectId}-base`, versionId, snapshotId: `${projectId}-snapshot-edit-plan`, adopt: [sourceArtifactId],
+    createdAt: createdAt.toISOString(), mutatePlan: () => ({ ...basePlan, createdAt: createdAt.toISOString() }),
   })
-  const baseHash = calculateVersionHash({
-    projectId,
-    sequence: 1,
-    editPlanHash: calculateVersionHash(basePlan),
-  })
-  await prisma.v2ProjectVersion.create({
-    data: {
-      id: versionId,
-      workspaceId,
-      projectId,
-      sequence: 1,
-      briefSnapshotId: `${projectId}-snapshot-brief`,
-      editPlanSnapshotId: `${projectId}-snapshot-edit-plan`,
-      policiesSnapshotId: `${projectId}-snapshot-policies`,
-      baseHash,
-      createdBy: clientId,
-      createdAt,
-    },
-  })
-  await prisma.v2Project.update({ where: { id: projectId }, data: { currentVersionId: versionId } })
-  return { baseHash, basePlan }
+  assert.equal(clip.sourceArtifactId, sourceArtifactId)
+  return { baseHash: bundle.version.baseHash, basePlan: JSON.parse(bundle.editPlanSnapshot.contentJson) }
 }
 
 /**

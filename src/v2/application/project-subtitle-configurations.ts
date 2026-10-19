@@ -1,13 +1,15 @@
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { createEditCommand, type CommandActor } from '../domain/edit-command.ts'
 import { DomainError } from '../domain/errors.ts'
+import { requireOutputVariant } from '../domain/output-consumption.ts'
+import { referencesOfVariant } from '../domain/output-variant-references.ts'
 import {
   createProjectSubtitleConfiguration,
   createProjectSubtitleConfigurationImpact,
   resolveProjectSubtitleRevertTarget,
   type ProjectSubtitleConfigurationAction,
 } from '../domain/project-subtitle-configuration.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
+import { reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { resolveSubtitleConfig, validateSubtitleConfig, type SubtitleModeRequest } from '../domain/subtitle-system.ts'
 import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
 import type { ProjectSubtitleConfigurationRepository } from './ports/project-subtitle-configuration-repository.ts'
@@ -17,7 +19,7 @@ const id = (value: unknown, field: string) => { const parsed = typeof value === 
 
 export function setProjectSubtitleConfigurationService(dependencies: {
   repository: ProjectSubtitleConfigurationRepository
-  createId: (kind: 'command' | 'version' | 'configuration') => string
+  createId: (kind: 'command' | 'version' | 'configuration' | 'edit-plan-snapshot' | 'state' | 'materialization') => string
   clock?: () => Date
 }) {
   return async (request: {
@@ -41,7 +43,12 @@ export function setProjectSubtitleConfigurationService(dependencies: {
     if (replay) { if (replay.requestFingerprint !== requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with another subtitle configuration'); return replay.result }
     const context = await dependencies.repository.readContext({ workspaceId, projectId, variantId, ...(request.requested ? { requested: request.requested } : {}) })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Subtitle configuration context was not found')
-    if (context.currentVersion.id !== baseVersionId || context.currentVersion.baseHash !== request.baseHash) throw new DomainError('VERSION_CONFLICT', 'Subtitle configuration base version is stale')
+    const parent = context.parent; const currentVersion = parent.version
+    if (currentVersion.id !== baseVersionId || currentVersion.baseHash !== request.baseHash) throw new DomainError('VERSION_CONFLICT', 'Subtitle configuration base version is stale')
+    // `variantId` is the stable variant of the State the base Version seals: an exact member with an aspect ratio of its own
+    // (`output-variant-unknown` / `output-variant-ambiguous` otherwise). Only that output's renders go stale; the other entries are
+    // re-bound to the new Version byte-identical in revision, spec and geometry.
+    requireOutputVariant(parent.state, variantId)
     if (action === 'revert' && !context.currentConfiguration) throw new DomainError('INVALID_ARGUMENT', 'There is no subtitle configuration to revert on this variant')
     const requested = action === 'revert'
       ? resolveProjectSubtitleRevertTarget({ current: context.currentConfiguration, previous: context.previousConfiguration })
@@ -50,12 +57,19 @@ export function setProjectSubtitleConfigurationService(dependencies: {
     const resolved = resolveSubtitleConfig({ requested, variantId, transcript: context.transcript, directorPreset: context.directorPresetId, workspacePreset: context.workspaceDefault?.presetId, workspaceDefaultRevision: context.workspaceDefault?.revision })
     validateSubtitleConfig(resolved, context.transcript)
     const createdAt = (dependencies.clock ?? (() => new Date()))().toISOString(); const commandId = id(dependencies.createId('command'), 'commandId'); const versionId = id(dependencies.createId('version'), 'versionId')
+    const editPlanSnapshotId = id(dependencies.createId('edit-plan-snapshot'), 'editPlanSnapshotId'); const stateId = id(dependencies.createId('state'), 'stateId')
     const configuration = createProjectSubtitleConfiguration({ id: id(dependencies.createId('configuration'), 'configurationId'), workspaceId, projectId, baseVersionId, resultVersionId: versionId, commandId, variantId, action, previousConfigurationId: context.currentConfiguration?.id ?? null, requested: resolved.requested, resolved: resolved.resolved, origin: resolved.origin, transcriptHash: resolved.transcriptHash, ...(resolved.workspaceDefaultRevision !== undefined ? { workspaceDefaultRevision: resolved.workspaceDefaultRevision } : {}), createdAt })
-    const impact = createProjectSubtitleConfigurationImpact({ commandId, baseVersionId, resultVersionId: versionId, variantId, configurationId: configuration.id, configurationHash: configuration.configurationHash, action, requestedMode: configuration.requested.mode, origin: configuration.origin, resolvedPresetId: configuration.resolved.enabled ? configuration.resolved.presetId : null, resolvedPresetHash: configuration.resolved.enabled ? configuration.resolved.presetHash : null, transcriptHash: configuration.transcriptHash, durationFrames: context.durationFrames, affectedArtifacts: context.outputReferences })
+    const impact = createProjectSubtitleConfigurationImpact({ commandId, baseVersionId, resultVersionId: versionId, variantId, configurationId: configuration.id, configurationHash: configuration.configurationHash, action, requestedMode: configuration.requested.mode, origin: configuration.origin, resolvedPresetId: configuration.resolved.enabled ? configuration.resolved.presetId : null, resolvedPresetHash: configuration.resolved.enabled ? configuration.resolved.presetHash : null, transcriptHash: configuration.transcriptHash, durationFrames: context.durationFrames, affectedArtifacts: referencesOfVariant(context.outputReferences, variantId) })
     const author: Readonly<CommandActor> = Object.freeze({ type: 'api-client', id: audit.clientId, ...(audit.delegatedUserId ? { delegatedUserId: audit.delegatedUserId } : {}) })
-    const command = createEditCommand({ id: commandId, workspaceId, projectId, baseVersionId, baseHash: request.baseHash, author, type: 'set-project-subtitle-mode', scope: { outputSpecIds: [variantId] }, payload: Object.freeze({ schemaVersion: 1 as const, variantId, action, requested: resolved.requested, impact }), ...(request.reason?.trim() ? { reason: request.reason.trim() } : {}), idempotencyKey, createdAt })
-    const version = createProjectVersion({ id: versionId, workspaceId, projectId, sequence: context.currentVersion.sequence + 1, parentVersionId: baseVersionId, snapshotRefs: context.currentVersion.snapshotRefs, baseHash: calculateCanonicalHash({ schemaVersion: 'project-version-subtitle-configuration/v1', previousBaseHash: request.baseHash, commandId, configurationHash: configuration.configurationHash, impactHash: impact.impactHash }), createdBy: audit.clientId, commandId, createdAt })
-    return dependencies.repository.commitOrReplay({ requestFingerprint, authenticationAudit: audit, command, version, configuration, impact })
+    const command = createEditCommand({ id: commandId, workspaceId, projectId, baseVersionId, baseHash: request.baseHash, author, type: 'set-project-subtitle-mode', scope: { outputVariantIds: [variantId] }, payload: Object.freeze({ schemaVersion: 1 as const, variantId, action, requested: resolved.requested, impact }), ...(request.reason?.trim() ? { reason: request.reason.trim() } : {}), idempotencyKey, createdAt })
+    // The configuration lives in its own domain row; the EditPlan is the parent's under the new Version's identity.
+    const bundle = transitionProjectOutputState({
+      parent, command, audit, requestFingerprint,
+      allocation: { workspaceId, projectId, resultVersionId: versionId, stateId, parentVersionId: currentVersion.id, sequence: currentVersion.sequence + 1, createdBy: audit.clientId, createdAt },
+      editPlanSnapshot: reidentifiedEditPlanSnapshot(parent, { snapshotId: editPlanSnapshotId, versionId, createdAt }),
+      createMaterializationId: () => id(dependencies.createId('materialization'), 'materializationId'),
+    })
+    return dependencies.repository.commitOrReplay({ bundle, configuration, impact })
   }
 }
 

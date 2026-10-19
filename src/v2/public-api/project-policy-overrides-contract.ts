@@ -42,7 +42,7 @@ export function presentCurrentProjectPolicyOverrides(value: Readonly<CurrentProj
       {
         id: value.version.id,
         sequence: value.version.sequence,
-        parentVersionId: value.version.parentVersionId,
+        ...('parentVersionId' in value.version ? { parentVersionId: value.version.parentVersionId } : {}),
         baseHash: value.version.baseHash,
         createdAt: value.version.createdAt,
       },

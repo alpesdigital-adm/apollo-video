@@ -65,6 +65,30 @@ test('long-form index operation exposes its six durable phases', () => {
   })
 })
 
+test('temporal producer operation requires a project version and has four distinct durable phases', () => {
+  const input = {
+    id: 'operation-temporal-test', workspaceId: 'workspace-temporal-test',
+    projectId: 'project-temporal-test', clientId: 'client-temporal-test',
+    type: 'perception-temporal-run',
+    target: { type: 'project-version', id: 'version-temporal-test' },
+    createdAt: '2026-10-08T20:00:00.000Z',
+  }
+  assert.throws(() => createQueuedPublicOperation({ ...input,
+    target: { type: 'media-artifact', id: 'artifact-temporal-test',
+      manifestId: 'manifest-temporal-test' },
+  }), /target/i)
+  let operation = startPublicOperationAttempt(createQueuedPublicOperation(input),
+    '2026-10-08T20:00:01.000Z')
+  assert.equal(operation.phase, 'probing')
+  for (const [index, phase] of ['analyzing', 'verifying', 'persisting'].entries()) {
+    operation = advancePublicOperationPhase(operation, phase,
+      `2026-10-08T20:00:0${index + 2}.000Z`)
+  }
+  operation = succeedPublicOperation(operation, '2026-10-08T20:00:05.000Z')
+  assert.deepEqual(operation.progress, { completed: 4, total: 4, unit: 'stage' })
+  assert.equal(operation.status, 'succeeded')
+})
+
 function createClock() {
   let current = Date.parse('2026-07-14T12:00:00.000Z')
   return () => new Date((current += 100))

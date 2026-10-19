@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import test from 'node:test'
 
+import { planCaptionPlacement } from '../../src/v2/application/plan-caption-placement.ts'
 import { createRenderInputSpec } from '../../src/v2/domain/render-input.ts'
 import { createEditorialAudioTimelineHash } from '../../src/v2/domain/production-modes.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
@@ -144,4 +145,61 @@ test('approved FFmpeg final reconstructs exact MP4 bytes from materialized input
   await assert.rejects(adapter.stage({ ...wrongPlanFps, assets: input.assets }, { outputKey: 'workspaces/test/renders/wrong-fps.mp4' }),
     (error) => error.code === 'INVALID_RENDER_INPUT')
   assert.equal(await stat(join(outputRoot, 'workspaces', 'test', 'renders', 'wrong-output.mp4')).catch(() => null), null)
+})
+
+test('W65 a final with burned captions reconstructs the same MP4 from the placement it was decided with, and refuses it altered or missing', { timeout: 120_000 }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-editorial-reconstruct-captions-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const source = join(root, 'source.mp4')
+  execFileSync(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0x303030:s=320x180:r=30:d=2',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=2', '-shortest', '-c:v', 'libx264', '-preset', 'ultrafast',
+    '-pix_fmt', 'yuv420p', '-c:a', 'aac', source], { windowsHide: true, timeout: 30_000 })
+  const compilation = colorCompilation()
+  const clips = [{ id: 'clip-editorial-reconstruct', sourceArtifactId: artifactId, sourceInFrame: 0, sourceOutFrame: 30,
+    timelineInFrame: 0, timelineOutFrame: 30, rate: 1 }]
+  const audioTimelineHash = createEditorialAudioTimelineHash({ fps: 30, clips })
+  const cue = { id: 'cue-final-1', startFrame: 5, endFrame: 25, text: 'LEGENDA FINAL', anchor: 'bottom' }
+  const editPlan = { schemaVersion: 2, state: 'compiled', id: 'edit-plan-editorial-reconstruct', projectVersionId, fps: 30, durationFrames: 30,
+    videoTracks: [{ kind: 'base-video', clips }], subtitleTracks: [{ presetId: 'kinetic', cues: [cue] }], transitions: [], audioTracks: [],
+    movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 } }
+  // a 16:9 picture on the 9:16 final canvas: the bottom band is over the blurred copy, certified by geometry
+  const { placementPlan } = await planCaptionPlacement({ clock: () => new Date('2026-10-18T12:00:00.000Z') }, {
+    workspaceId: 'workspace-editorial-reconstruct', projectId: 'project-editorial-reconstruct', projectVersionId, format: '9:16',
+    canvas: { width: 180, height: 320 }, editPlan, clips,
+    renderSources: [{ artifactId, sha256: 'a'.repeat(64), mediaType: 'video', probe: { width: 320, height: 180 } }],
+    subtitleCues: [{ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame }], subtitlePresetId: 'kinetic', placementElements: [],
+    primarySourceArtifactId: artifactId, faceEvidenceAllowed: true })
+  assert.equal(placementPlan.subtitleAnchorPlan.decisions[0].disposition, 'placed')
+  const expected = await new FfmpegEditorialProxyRenderer({ workRoot: join(root, 'original-work'), ffmpegPath }).render({
+    operationId: 'original-final-captions', renderKind: 'final', sources: [{ artifactId, path: source, mediaType: 'video', colorPipelineCompilation: compilation }],
+    lutPaths: {}, clips, audioTimelineHash, fps: 30, format: '9:16', outputSpec: { width: 180, height: 320, fps: 30 }, subtitleCues: [cue], placementPlan, transitions: [],
+  })
+  assert.equal(expected.renderElementMap.elements.some((element) => element.type === 'subtitle'), true, 'the caption was burned')
+  const props = { renderSchemaVersion: 'apollo-editorial-final/v2', editPlan, placementPlan,
+    outputSpec: { aspectRatio: '9:16', width: 180, height: 320, fps: 30, codec: 'h264', audioCodec: 'aac', container: 'mp4', quality: 'final' },
+    sourceArtifactIds: [artifactId], audioTimelineHash,
+    colorPipelineBindings: [{ sourceArtifactId: artifactId, sourceManifestId: manifestId, compilationId: compilation.id,
+      compilationHash: compilation.compilationHash, pipelineHash: compilation.pipeline.pipelineHash }],
+    colorPipelineCompilations: [compilation], colorPlan: null, lutBindings: [], colorPlanHash: null,
+    compiledColorPlanManifestHash: null, projectLutSelectionHash: '1'.repeat(64), materializedCubeHash: null, materializedCubeHashes: [],
+    expectedOutputSha256: expected.sha256, expectedOutputByteSize: expected.byteSize, ffmpegBinarySha256: expected.ffmpegBinarySha256 }
+  const specFor = async (withProps) => createRenderInputSpec({ schemaVersion: 'render-input/v1', renderer: { id: 'ffmpeg', version: 'static',
+    digest: createHash('sha256').update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`).digest('hex') },
+  composition: { id: 'apollo-editorial', version: 'v2', propsSchemaRef: 'apollo://render-props/apollo-editorial/v2' },
+  plan: { id: editPlan.id, versionId: projectVersionId, hash: '2'.repeat(64) },
+  output: { id: 'final-9-16', locale: 'pt-BR', aspectRatio: '9:16', width: 180, height: 320, fps: 30,
+    safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 }, durationInFrames: 30 },
+  assets: [{ id: 'asset-1', artifactId, artifactKey: 'masters/reconstruction-source.mp4', kind: 'video', role: 'source-master', ordinal: 0,
+    sha256: await calculateFileSha256(source), byteSize: (await stat(source)).size }], props: withProps })
+  const inputFor = (spec) => ({ ...spec, assets: spec.assets.map((asset) => ({ ...asset, uri: pathToFileURL(source).href })) })
+  const adapter = new FfmpegEditorialRenderInputRenderer({ outputRoot: join(root, 'outputs'), workRoot: join(root, 'reconstruction-work') })
+  const staged = await adapter.stage(inputFor(await specFor(props)), { outputKey: 'workspaces/test/renders/final-captions.mp4' })
+  assert.equal(staged.receipt.outputSha256, expected.sha256, 'the same cues in the same bands: the same bytes')
+  // without the placement it was decided with there is no right to draw a caption
+  const { placementPlan: _dropped, ...withoutPlan } = props
+  await assert.rejects(adapter.stage(inputFor(await specFor(withoutPlan)), { outputKey: 'workspaces/test/renders/no-plan.mp4' }), /face review plan|placement/i)
+  // an altered plan (a band state rewritten) is refused before any frame
+  const altered = structuredClone(props)
+  altered.placementPlan.subtitleAnchorPlan.decisions[0].bandAssessments.bottom.face.state = 'occupied'
+  await assert.rejects(adapter.stage(inputFor(await specFor(altered)), { outputKey: 'workspaces/test/renders/altered.mp4' }), /hash|follow|invalid/i)
 })

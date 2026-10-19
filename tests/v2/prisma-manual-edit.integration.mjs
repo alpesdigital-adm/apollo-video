@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { existsSync } from 'node:fs'
 import net from 'node:net'
@@ -33,10 +33,20 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
 }, async () => {
   const { applyManualEditService, readManualTimelineService } = await import('../../src/v2/application/manual-edit.ts')
   const { createColorPipelineCompilationService } = await import('../../src/v2/application/color-pipeline-compilations.ts')
+  const { setExternalAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
+  const { assetRightsRevision, evaluateAssetUse } = await import('../../src/v2/domain/asset-rights.ts')
+  const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
-  const { createProductionBrief } = await import('../../src/v2/domain/production-brief.ts')
+  const { buildRenderElementMap, renderElementMapHash } = await import('../../src/v2/domain/review-system.ts')
+  const { projectProxyRenderInputHash } = await import('../../src/v2/application/project-render-sources.ts')
+  const { EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } = await import('../../src/v2/application/ports/editorial-proxy-renderer.ts')
+  const { PrismaRenderElementMapRepository } = await import('../../src/v2/infrastructure/prisma/render-element-map-repository.ts')
+  const { PrismaProjectProxyRenderRepository } = await import('../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts')
+  const { assertMediaArtifactManifest, createMediaArtifactManifestV2 } = await import('../../src/v2/domain/media-artifact.ts')
+  const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
+  const { createDesiredAction, parseDesiredAction } = await import('../../src/v2/domain/desired-action.ts')
   const { parseCompareActionImpact } = await import('../../src/v2/domain/compare-action-impact.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
@@ -45,24 +55,28 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const { PrismaManualEditRepository } = await import('../../src/v2/infrastructure/prisma/manual-edit-repository.ts')
   const { PrismaColorPipelineCompilationRepository } = await import('../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
-  const {
-    createUiPasswordHash,
-    uiLoginThrottleKey,
-    uiSessionSubjectHash,
-  } = await import('../../src/v2/infrastructure/security/ui-session.ts')
+  const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
+  const { commitSealedChild, persistRecording } = await import('./helpers/pg-output-world.mjs')
+  const { recordingNames } = await import('./helpers/operational-editorial-fixture.mjs')
+  const { seedReviewProject } = await import('./helpers/review-edit-world.mjs')
+  const { resetDisposableDatabase } = await import('./helpers/disposable-database.mjs')
 
   const client = new PrismaClient()
   const repository = new PrismaManualEditRepository(client)
   const suffix = randomUUID().slice(0, 8)
   const workspaceId = `manual-workspace-${suffix}`
   const projectId = `manual-project-${suffix}`
-  const sourceA = `manual-artifact-a-${suffix}`
-  const sourceB = `manual-artifact-b-${suffix}`
+  // Two ingested recordings: the product only plays sources whose sealed ingest receipt a Version adopts.
+  const slugA = `manual-a-${suffix}`, slugB = `manual-b-${suffix}`
+  const namesA = recordingNames(slugA), namesB = recordingNames(slugB)
+  const sourceA = namesA.sourceArtifactId, sourceB = namesB.sourceArtifactId
+  const manifestA = namesA.sourceManifestId
   const currentTranscriptId = `manual-transcript-current-${suffix}`
   const replacementTranscriptId = `manual-transcript-replacement-${suffix}`
   const completedProxyArtifactId = `manual-proxy-initial-${suffix}`
   const initialVersionId = `manual-version-${suffix}`
-  const createdAt = new Date('2026-07-26T17:30:00.000Z')
+  // Observe this run's clock; service TTLs must follow current PostgreSQL time.
+  const createdAt = new Date()
   const uiUsername = `manual-user-${suffix}`
   const uiPassword = `Manual-E2E-${suffix}-secure`
   const uiSessionSecret = `manual-session-secret-${suffix}-at-least-32-characters`
@@ -71,56 +85,6 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   let browser
   let authenticatedActor
   const colorCompilations = new Map()
-
-  const cleanup = async () => {
-    const identityIds = (await client.v2WorkspaceMember.findMany({
-      where: { workspaceId }, select: { identityId: true },
-    })).map((member) => member.identityId)
-    const sessionEnvironment = { APOLLO_UI_SESSION_SECRET: uiSessionSecret }
-    const loginKeyHash = uiLoginThrottleKey('direct', uiUsername, sessionEnvironment)
-    const loginSubjectHash = uiSessionSubjectHash(uiUsername, sessionEnvironment)
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectProxyRenderOperation.deleteMany({
-      where: { workspaceId, reusedFromOperationId: { not: null } },
-    })
-    await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
-    await client.v2DirectorRun.updateMany({
-      where: { workspaceId },
-      data: { operationId: null, supersedesRunId: null },
-    })
-    await client.v2ProjectDirectorOperation.updateMany({
-      where: { workspaceId },
-      data: { supersedesRunId: null },
-    })
-    await client.v2ProjectDirectorOperation.deleteMany({ where: { workspaceId } })
-    const directorRunIds = (await client.v2DirectorRun.findMany({
-      where: { workspaceId },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      select: { id: true },
-    })).map((run) => run.id)
-    for (const id of directorRunIds) {
-      await client.v2DirectorRun.delete({ where: { id } })
-    }
-    await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
-    await client.v2CommandArtifactInvalidation.deleteMany({ where: { workspaceId } })
-    await client.v2MediaTranscript.deleteMany({ where: { workspaceId } })
-    await client.v2ColorPipelineCompilation.deleteMany({ where: { workspaceId } })
-    await client.v2MediaColorProbe.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2UiSession.deleteMany({ where: { workspaceId } })
-    await client.v2UiLoginAttempt.deleteMany({ where: { subjectHash: loginSubjectHash } })
-    await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: loginKeyHash } })
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-    if (identityIds.length > 0) {
-      await client.v2HumanIdentity.deleteMany({ where: { id: { in: identityIds } } })
-    }
-  }
 
   const execute = (request) => applyManualEditService({
     repository,
@@ -135,27 +99,18 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   })
 
   try {
-    await cleanup()
+    // The manual-edit API names the output by the id of its State entry and checks it against the project's aspect ratio, so the
+    // project's one variant is created with the id '9:16'. An output variant id is unique across the database: this suite owns a
+    // clean slate (the reset refuses anything that is not a disposable e2e database).
+    await resetDisposableDatabase(client)
+    // The project's brief is born with its creation Command: this is the briefing and desired action it was created with.
+    const briefing = 'Público: equipes criativas. Oferta: demonstração. Tom: direto.'
     const brief = {
-      schemaVersion: 1,
-      objective: 'discovery',
-      desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
-      outputSpec: {
-        schemaVersion: 1,
-        id: `manual-output-spec-${suffix}`,
-        locale: 'pt-BR',
-        aspectRatio: '9:16',
-        width: 1080,
-        height: 1920,
-        fps: 30,
-        safeArea: { top: 0.05, right: 0.05, bottom: 0.08, left: 0.05 },
-      },
-      productionBrief: createProductionBrief({
-        ownerText: 'Público: equipes criativas. Oferta: demonstração. Tom: direto.',
+      desiredAction: createDesiredAction({
+        objective: 'discovery',
+        desiredAction: { visualCta: 'Continue assistindo', disclosures: [] },
       }),
-      createdAt: createdAt.toISOString(),
     }
-    const policies = { schemaVersion: 1, state: 'configured', guardrails: [], createdAt: createdAt.toISOString() }
     const editPlan = {
       schemaVersion: 2,
       state: 'compiled',
@@ -214,8 +169,6 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       },
       createdAt: createdAt.toISOString(),
     }
-    const briefId = `manual-brief-${suffix}`
-    const policyId = `manual-policy-${suffix}`
     const editPlanId = `manual-edit-plan-${suffix}`
     await client.v2Workspace.create({ data: { id: workspaceId, slug: workspaceId, name: 'Manual E2E', status: 'active', createdAt, updatedAt: createdAt } })
     const issued = await createApiClientService({
@@ -227,7 +180,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       workspaceId,
       name: 'Manual editing E2E',
       environment: 'production',
-      scopes: ['projects:read', 'projects:write'],
+      scopes: ['projects:read', 'projects:write', 'artifacts:rights'],
     })
     const auditContext = createExternalAuditContext({
       clientId: issued.client.id,
@@ -237,7 +190,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     authenticatedActor = Object.freeze({
       ...auditContext,
-      scopes: new Set(['projects:read', 'projects:write']),
+      scopes: new Set(['projects:read', 'projects:write', 'artifacts:rights']),
       authenticationKind: 'bearer',
       clientKillSwitchEngaged: false,
       workspaceKillSwitchEngaged: false,
@@ -252,52 +205,17 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       actorAuthenticationKind: operationAuditContext.authenticationKind,
       actorContextHash: operationAuditContext.contextHash,
     })
-    await client.v2Project.create({ data: {
-      id: projectId, workspaceId, name: 'Manual Project', status: 'reviewing-proxy',
-      objective: 'discovery', format: '9:16', locale: 'pt-BR',
-      createdByType: 'api-client', createdById: issued.client.id, createdAt, updatedAt: createdAt,
-    } })
-    for (const [id, kind, content] of [
-      [briefId, 'brief', brief],
-      [policyId, 'policies', policies],
-      [editPlanId, 'edit-plan', editPlan],
-    ]) {
-      await client.v2ProjectSnapshot.create({ data: {
-        id, workspaceId, projectId, kind, schemaVersion: kind === 'edit-plan' ? 2 : 1,
-        contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt,
-      } })
-    }
-    const initialBaseHash = calculateVersionHash({ projectId, editPlan })
-    await client.v2ProjectVersion.create({ data: {
-      id: initialVersionId, workspaceId, projectId, sequence: 1,
-      briefSnapshotId: briefId, editPlanSnapshotId: editPlanId, policiesSnapshotId: policyId,
-      baseHash: initialBaseHash, createdBy: issued.client.id, createdAt,
-    } })
-    await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: initialVersionId } })
-    for (const artifactId of [sourceA, sourceB]) {
-      const artifactKey = `manual/${artifactId}.mp4`
-      await client.v2MediaArtifact.create({ data: {
-        id: artifactId, workspaceId, artifactKey,
-        sha256: calculateVersionHash({ artifactId }), byteSize: 1n,
-        mediaType: 'video', container: 'mp4', status: 'available', createdAt,
-      } })
-      await client.v2MediaArtifactManifest.create({ data: {
-        id: `manifest-${artifactId}`, workspaceId, artifactId,
-        schemaVersion: 'media-artifact-manifest/v2',
-        manifestHash: calculateVersionHash({ artifactId, manifest: true }),
-        recipeId: 'manual-source', recipeVersion: '1.0.0',
-        parametersHash: calculateVersionHash({ artifactId, parameters: true }),
-        manifestJson: stableSerialize({
-          artifact: { artifactKey },
-          probe: { width: 640, height: 360, duration: 6, fps: 30 },
-        }),
-        createdAt,
-      } })
-      await client.v2ProjectMediaAsset.create({ data: {
-        id: randomUUID(), workspaceId, projectId, artifactId,
-        role: artifactId === sourceA ? 'source-master' : 'selected-insert',
-        originalFileName: `${artifactId}.mp4`, createdAt,
-      } })
+    // The project is the sealed world the product builds: the creation Command (with its briefing and desired action), one
+    // explicit 9:16 output variant, the two recordings' persisted ingests, and a child Command that adopts the first one and plays it.
+    await seedReviewProject(client, { workspaceId, actor: authenticatedActor, prefix: 'manual', ids: { project: projectId, 'output-variant': '9:16' },
+      name: 'Manual Project', objective: 'discovery', aspectRatio: '9:16', status: 'reviewing-proxy', briefing,
+      desiredAction: { visualCta: 'Continue assistindo', disclosures: [] } })
+    for (const [slug, artifactId] of [[slugA, sourceA], [slugB, sourceB]]) {
+      // Both recordings are 6 s at 30 fps; their source grants are the ones this test writes below, through the production service.
+      await persistRecording(client, { workspaceId, projectId, actor: authenticatedActor, slug, durationFrames: 180, rights: { source: false } })
+      // The second recording is a library insert of the project: its ingest receipt is what a Version adopts to play it, and its link
+      // is the insert one (a project has one source master).
+      if (artifactId === sourceB) await client.v2ProjectMediaAsset.updateMany({ where: { workspaceId, projectId, artifactId, role: 'source-master' }, data: { role: 'selected-insert' } })
       const sourceMetadata = Object.freeze({
         colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709',
         matrix: 'bt709', range: 'limited', bitDepth: 8,
@@ -306,7 +224,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         id: `manual-color-probe-${artifactId}`,
         workspaceId,
         artifactId,
-        manifestId: `manifest-${artifactId}`,
+        manifestId: recordingNames(slug).sourceManifestId,
         detection: {
           state: 'ready', metadata: sourceMetadata,
           pixelFormat: 'yuv420p', hdrMode: 'sdr',
@@ -358,35 +276,65 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         idempotencyKey: `manual-color-${artifactId}`,
       })
       colorCompilations.set(artifactId, colorCompilation.value.compilation)
-      if (artifactId === sourceA) {
-        const rightsSnapshotId = `rights-${sourceA}`
-        await client.v2AssetRightsSnapshot.create({ data: {
-          id: rightsSnapshotId, workspaceId, artifactId, sequence: 1,
-          schemaVersion: 'asset-rights/v1',
-          snapshotHash: calculateVersionHash({ artifactId, rights: 'approved' }),
-          owner: 'Apollo E2E', license: 'test-owned', status: 'approved',
-          allowedUsesJson: stableSerialize(['rendering']), prohibitedUsesJson: '[]',
-          allowedWorkspaceIdsJson: stableSerialize([workspaceId]),
-          consentStatus: 'not-required', consentAllowedUsesJson: '[]',
-          createdByType: 'api-client', createdById: issued.client.id, createdAt,
-        } })
-        await client.v2MediaArtifact.update({
-          where: { id: artifactId },
-          data: { currentRightsSnapshotId: rightsSnapshotId, rightsRevision: 1 },
-        })
-      }
+      // These are synthetic fixture sources, with grants for their exact roles.
+      // Persist the real snapshot and external actor audit; a row alone is no grant.
+      // The first recording is the project's source master (rendering); the second is a selected insert (editorial reuse). Each use is
+      // allowed for its own role only.
+      const rightsRepository = new PrismaAssetRightsRepository(client)
+      const allowedUse = artifactId === sourceA ? 'rendering' : 'editorial-reuse'
+      const rightsSnapshotId = `rights-${artifactId}`
+      const baseRevision = assetRightsRevision(artifactId, 0)
+      const granted = await setExternalAssetRightsService({
+        repository: rightsRepository,
+        clock: () => createdAt,
+        createId: () => rightsSnapshotId,
+      })({
+        workspaceId, artifactId, baseRevision, actor: authenticatedActor,
+        draft: {
+          owner: 'Apollo synthetic manual-edit fixture', license: 'test-owned',
+          status: 'approved', allowedUses: [allowedUse], prohibitedUses: [],
+          allowedLocales: ['pt-BR'],
+          consent: { status: 'not-required', allowedUses: [] },
+          sourceNote: 'Controlled metadata-only source for manual-edit invariants; no media acceptance claim',
+        },
+      })
+      const rightsReadback = await rightsRepository.findCurrent(workspaceId, artifactId)
+      assert.deepEqual(rightsReadback, {
+        artifactId, revision: assetRightsRevision(artifactId, 1), snapshot: granted.snapshot,
+      })
+      assert.equal(granted.replayed, false)
+      assert.equal(rightsReadback.snapshot.id, rightsSnapshotId)
+      assert.deepEqual(rightsReadback.snapshot.allowedUses, [allowedUse])
+      assert.deepEqual(rightsReadback.snapshot.allowedWorkspaceIds, [workspaceId])
+      assert.deepEqual(rightsReadback.snapshot.allowedLocales, ['pt-BR'])
+      const rightsArtifact = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId } })
+      assert.equal(rightsArtifact.currentRightsSnapshotId, rightsSnapshotId)
+      assert.equal(rightsArtifact.rightsRevision, 1)
+      const rightsAudit = await client.v2AssetRightsChange.findUniqueOrThrow({
+        where: { artifactId_sequence: { artifactId, sequence: 1 } },
+      })
+      assert.equal(rightsAudit.workspaceId, workspaceId)
+      assert.equal(rightsAudit.snapshotId, rightsSnapshotId)
+      assert.equal(rightsAudit.snapshotHash, granted.snapshot.snapshotHash)
+      assert.equal(rightsAudit.baseRevision, baseRevision)
+      assert.equal(rightsAudit.resultRevision, granted.revision)
+      assert.equal(rightsAudit.actorKind, 'external')
+      assert.equal(rightsAudit.actorType, 'api-client')
+      assert.equal(rightsAudit.actorId, issued.client.id)
+      assert.equal(rightsAudit.actorClientId, issued.client.id)
+      assert.equal(rightsAudit.actorCredentialId, issued.credential.id)
+      assert.equal(rightsAudit.actorContextHash, operationAuditContext.contextHash)
+      assert.equal(rightsAudit.actorAuthenticationKind, 'bearer')
+      assert.equal(rightsAudit.actorEnvironment, 'production')
+      assert.equal(rightsAudit.changedAt.toISOString(), createdAt.toISOString())
+      assert.equal(evaluateAssetUse(rightsReadback.snapshot, {
+        workspaceId, locale: 'pt-BR', use: allowedUse,
+      }, createdAt).outcome, 'allow')
+      assert.equal(evaluateAssetUse(rightsReadback.snapshot, {
+        workspaceId, locale: 'pt-BR',
+        use: allowedUse === 'rendering' ? 'editorial-reuse' : 'rendering',
+      }, createdAt).outcome, 'deny')
     }
-    const renderColorBindings = (...artifactIds) => stableSerialize(artifactIds.map((artifactId) => {
-      const compilation = colorCompilations.get(artifactId)
-      assert.ok(compilation)
-      return {
-        sourceArtifactId: artifactId,
-        sourceManifestId: `manifest-${artifactId}`,
-        compilationId: compilation.id,
-        compilationHash: compilation.compilationHash,
-        pipelineHash: compilation.pipeline.pipelineHash,
-      }
-    }))
     const { createMediaTranscript } = await import('../../src/v2/domain/media-transcript.ts')
     const currentTranscript = createMediaTranscript({
       language: 'pt-BR', text: 'Primeira frase Segunda', provider: 'groq', model: 'whisper-large-v3',
@@ -409,13 +357,29 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       [replacementTranscriptId, replacementTranscript, 1],
     ]) {
       await client.v2MediaTranscript.create({ data: {
-        id, workspaceId, projectId, sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
+        id, workspaceId, projectId, sourceArtifactId: sourceA, sourceManifestId: manifestA,
         schemaVersion: transcript.schemaVersion, language: transcript.language,
         provider: transcript.provider, model: transcript.model, providerVersion: 'test-v1',
         transcriptHash: transcript.transcriptHash, transcriptJson: stableSerialize(transcript),
         createdAt: new Date(createdAt.getTime() + offset * 1000),
       } })
     }
+    // The plan's retimed transcript names the exact transcript it was derived from (an editorial cut later seals it).
+    editPlan.retimedTranscript.sourceTranscriptHash = currentTranscript.transcriptHash
+    // Its captions are the cue track aligned to that transcript (the words each cue shows), which an editorial cut needs to cut a cue.
+    Object.assign(editPlan.subtitleTracks[0], { schemaVersion: 'source-transcript-cue-track/v1', sourceTranscriptId: currentTranscriptId,
+      sourceTranscriptHash: currentTranscript.transcriptHash })
+    editPlan.subtitleTracks[0].cues[0].sourceWordIndices = [0, 1]
+    editPlan.subtitleTracks[0].cues[1].sourceWordIndices = [2]
+    // The initial Version is a real child Command: it adopts the first recording's persisted ingest receipt (the only source
+    // its clips play; the second is offered but not consumed) and carries the timeline above. Its sequence follows the creation
+    // Command (1) and the output variant (2): every revision below is counted from it.
+    const initialBundle = await commitSealedChild(client, { workspaceId, projectId, actor: authenticatedActor,
+      suffix: `manual-${suffix}-initial`, versionId: initialVersionId, snapshotId: editPlanId,
+      mutatePlan: () => editPlan, adopt: [sourceA, sourceB] })
+    const initialBaseHash = initialBundle.version.baseHash
+    const sequenceOffset = initialBundle.version.sequence - 1
+    const rev = (sequence) => sequence + sequenceOffset
     const completedProxyManifestId = `manifest-${completedProxyArtifactId}`
     const completedProxyOperationId = `manual-proxy-operation-${suffix}`
     const completedProxyHash = calculateVersionHash({ completedProxyArtifactId })
@@ -425,40 +389,175 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       sha256: completedProxyHash, byteSize: 1n,
       mediaType: 'video', container: 'mp4', status: 'available', createdAt,
     } })
-    await client.v2MediaArtifactManifest.create({ data: {
-      id: completedProxyManifestId, workspaceId, artifactId: completedProxyArtifactId,
-      schemaVersion: 'media-artifact-manifest/v2',
-      manifestHash: calculateVersionHash({ completedProxyArtifactId, manifest: true }),
-      recipeId: 'manual-proxy', recipeVersion: '1.0.0',
-      parametersHash: calculateVersionHash({ completedProxyArtifactId, parameters: true }),
-      manifestJson: stableSerialize({ artifact: { artifactKey: `manual/${completedProxyArtifactId}.mp4` } }),
-      createdAt,
-    } })
-    await client.v2PublicOperation.create({ data: {
-      id: completedProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
-      ...operationActorAudit,
-      type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
-      targetType: 'media-artifact', targetId: completedProxyArtifactId,
-      progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
-      cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
-      resultJson: stableSerialize({ resource: {
-        type: 'media-artifact', id: completedProxyArtifactId,
-        manifestId: completedProxyManifestId,
-      } }),
-      idempotencyKey: `manual-proxy-initial-${suffix}`,
-      requestFingerprint: completedProxyHash,
-      createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
-    } })
-    await client.v2ProjectProxyRenderOperation.create({ data: {
-      operationId: completedProxyOperationId, workspaceId, projectId,
-      projectVersionId: initialVersionId, editPlanSnapshotId: editPlanId,
-      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: renderColorBindings(sourceA), inputHash: calculateVersionHash({ completedProxyOperationId }),
-      outputArtifactId: completedProxyArtifactId,
-      outputManifestId: completedProxyManifestId,
-      originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
-    } })
 
+
+    // These explicit completions are metadata-only fixture preparation, not
+    // worker execution, FFmpeg provenance, critic approval or rendered pixels.
+    const proxyMaps = new PrismaRenderElementMapRepository(client)
+    const prepareControlledProxyMetadata = async ({
+      mode, operationId, projectVersionId, editPlanSnapshotId,
+      outputArtifactId: newArtifactId, manifestId: newManifestId, expectedOperation,
+    }) => {
+      assert.ok(['new-controlled-base', 'complete-api-operation'].includes(mode))
+      const existing = await client.v2PublicOperation.findUnique({ where: { id: operationId }, include: { projectProxyRender: true } })
+      // The primary source of a proxy is the product's choice (the render sources of the Version decide it): an operation the API
+      // allocated names it, and the fixture follows it instead of assuming the first recording.
+      const primary = mode === 'complete-api-operation' && existing?.projectProxyRender
+        ? { sourceArtifactId: existing.projectProxyRender.sourceArtifactId, sourceManifestId: existing.projectProxyRender.sourceManifestId }
+        : { sourceArtifactId: sourceA, sourceManifestId: manifestA }
+      const source = await new PrismaProjectProxyRenderRepository(client).readImmutableSource({
+        workspaceId, projectId, projectVersionId, editPlanSnapshotId, ...primary,
+      })
+      const colorPipelineBindings = source.renderSources.filter((asset) => asset.mediaType === 'video').map((asset) => {
+        const compilation = colorCompilations.get(asset.artifactId)
+        assert.ok(compilation)
+        return { sourceArtifactId: asset.artifactId, sourceManifestId: asset.manifestId,
+          compilationId: compilation.id, compilationHash: compilation.compilationHash, pipelineHash: compilation.pipeline.pipelineHash }
+      })
+      const inputHash = projectProxyRenderInputHash({ source, colorPipelineBindings })
+      const colorBindingsJson = stableSerialize(colorPipelineBindings)
+      let outputArtifactId = newArtifactId, manifestId = newManifestId
+      if (mode === 'complete-api-operation') {
+        assert.ok(existing?.projectProxyRender, 'the API must have allocated this exact proxy operation')
+        const detail = existing.projectProxyRender
+        assert.deepEqual({ workspaceId: detail.workspaceId, projectId: detail.projectId,
+          projectVersionId: detail.projectVersionId, editPlanSnapshotId: detail.editPlanSnapshotId,
+          sourceArtifactId: detail.sourceArtifactId, sourceManifestId: detail.sourceManifestId,
+          inputHash: detail.inputHash, colorBindingsJson: detail.colorPipelineBindingsJson },
+        { workspaceId, projectId, projectVersionId, editPlanSnapshotId,
+          ...primary, inputHash, colorBindingsJson })
+        assert.equal(existing.workspaceId, workspaceId); assert.equal(existing.projectId, projectId)
+        assert.equal(existing.type, 'project-proxy-render'); assert.equal(existing.clientId, issued.client.id)
+        const auditInput = { workspaceId, clientId: existing.clientId, credentialId: existing.actorCredentialId,
+          environment: existing.actorEnvironment, authenticationKind: existing.actorAuthenticationKind,
+          ...(existing.delegatedUserId ? { delegatedUserId: existing.delegatedUserId } : {}),
+          ...(existing.delegatedIdentityId ? { delegatedIdentityId: existing.delegatedIdentityId } : {}),
+          ...(existing.workspaceRole ? { workspaceRole: existing.workspaceRole } : {}) }
+        const persistedAudit = createApiAccessAuditContext(auditInput)
+        assert.equal(persistedAudit.contextHash, existing.actorContextHash)
+        assert.equal(persistedAudit.environment, 'production')
+        if (persistedAudit.authenticationKind === 'bearer') {
+          assert.equal(persistedAudit.credentialId, issued.credential.id)
+          assert.equal(persistedAudit.contextHash, operationAuditContext.contextHash)
+        } else {
+          assert.match(persistedAudit.credentialId, /^ui-session:[a-f0-9]{64}$/)
+          const member = await client.v2WorkspaceMember.findUniqueOrThrow({ where: { id: persistedAudit.delegatedUserId } })
+          assert.equal(member.workspaceId, workspaceId); assert.equal(member.identityId, persistedAudit.delegatedIdentityId)
+          assert.equal(member.role, persistedAudit.workspaceRole); assert.equal(member.status, 'active')
+        }
+        assert.equal(existing.targetType, 'media-artifact'); assert.equal(existing.targetId, detail.outputArtifactId)
+        assert.equal(existing.leaseOwner, null)
+        assert.equal(existing.leaseExpiresAt, null)
+        assert.ok(['queued', 'succeeded'].includes(existing.status), 'fixture must never adopt a live, failed or canceled attempt')
+        assert.equal(expectedOperation.id, existing.id)
+        assert.equal(expectedOperation.target.id, detail.outputArtifactId)
+        assert.equal(expectedOperation.target.manifestId, detail.outputManifestId)
+        outputArtifactId = detail.outputArtifactId; manifestId = detail.outputManifestId
+      } else {
+        assert.equal(existing, null, 'a new controlled base cannot duplicate any allocated operation')
+        assert.equal(await client.v2ProjectProxyRenderOperation.count({ where: { workspaceId, projectVersionId, inputHash } }), 0)
+        assert.ok(outputArtifactId && manifestId)
+      }
+      const proxyHash = outputArtifactId === completedProxyArtifactId ? completedProxyHash
+        : calculateVersionHash({ fixtureScope: 'metadata-only-manual-edit-mechanics', operationId, outputArtifactId })
+      const artifactKey = `manual/${outputArtifactId}.mp4`
+      const dimensions = {}
+      for (const asset of source.renderSources.filter((asset) => asset.mediaType === 'video')) {
+        const row = await client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: asset.manifestId } })
+        const body = JSON.parse(row.manifestJson); assertMediaArtifactManifest(body)
+        assert.equal(body.manifestHash, row.manifestHash); assert.ok(body.probe)
+        dimensions[asset.artifactId] = { width: body.probe.width, height: body.probe.height }
+      }
+      const map = buildRenderElementMap({ proxyHash, fps: source.editPlan.fps, durationFrames: source.editPlan.durationFrames,
+        canvas: { width: 540, height: 960 }, source: dimensions[sourceA], sourceDimensions: dimensions,
+        clips: source.editPlan.videoTracks.filter((track) => track.kind === 'base-video').flatMap((track) => track.clips),
+        composition: source.editPlan.composition, subtitleCues: [], ctaOverlays: [] })
+      const mapHash = renderElementMapHash(map)
+      const digest = createHash('sha256').update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`).digest('hex')
+      const manifest = createMediaArtifactManifestV2({ artifactKey, artifactSha256: proxyHash, byteSize: 1, mediaType: 'video', container: 'mp4',
+        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: {
+          fixtureScope: 'metadata-only-manual-edit-mechanics', operationId, projectVersionId, editPlanSnapshotId,
+          editPlanHash: source.editPlanHash, inputHash, renderElementMapHash: mapHash,
+          captionPolicy: 'unknown-face-suppressed', colorPipelineBindings } },
+        sources: source.renderSources.map((asset) => ({ artifactKey: asset.artifactKey, sha256: asset.sha256, role: asset.role,
+          execution: { tool: { id: 'ffmpeg', version: 'static', digest } } })),
+        probe: { width: 540, height: 960, duration: map.durationFrames / map.fps, fps: map.fps } })
+      const now = new Date()
+      const resultJson = stableSerialize({ resource: { type: 'media-artifact', id: outputArtifactId, manifestId } })
+      await client.$transaction(async (transaction) => {
+        const artifact = await transaction.v2MediaArtifact.findUnique({ where: { id: outputArtifactId } })
+        if (artifact) assert.deepEqual({ workspaceId: artifact.workspaceId, artifactKey: artifact.artifactKey, sha256: artifact.sha256,
+          byteSize: artifact.byteSize, mediaType: artifact.mediaType, container: artifact.container, status: artifact.status },
+        { workspaceId, artifactKey, sha256: proxyHash, byteSize: 1n, mediaType: 'video', container: 'mp4', status: 'available' })
+        else await transaction.v2MediaArtifact.create({ data: { id: outputArtifactId, workspaceId, artifactKey, sha256: proxyHash,
+          byteSize: 1n, mediaType: 'video', container: 'mp4', status: 'available', createdAt: now } })
+        const storedManifest = await transaction.v2MediaArtifactManifest.findUnique({ where: { id: manifestId } })
+        const manifestData = { id: manifestId, workspaceId, artifactId: outputArtifactId, schemaVersion: manifest.schemaVersion,
+          manifestHash: manifest.manifestHash, recipeId: manifest.recipe.id, recipeVersion: manifest.recipe.version,
+          parametersHash: manifest.recipe.parametersHash, manifestJson: stableSerialize(manifest) }
+        if (storedManifest) for (const [key, value] of Object.entries(manifestData)) assert.equal(storedManifest[key], value)
+        else await transaction.v2MediaArtifactManifest.create({ data: { ...manifestData, createdAt: now } })
+        const storedMap = await transaction.v2RenderElementMap.findFirst({ where: { workspaceId, projectVersionId, proxyArtifactId: outputArtifactId } })
+        const mapData = { workspaceId, projectId, projectVersionId, proxyArtifactId: outputArtifactId, proxyHash, mapHash,
+          schemaVersion: map.schemaVersion, fps: map.fps, durationFrames: map.durationFrames,
+          canvasWidth: map.canvas.width, canvasHeight: map.canvas.height, elementsJson: JSON.stringify(map.elements) }
+        if (storedMap) for (const [key, value] of Object.entries(mapData)) assert.equal(storedMap[key], value)
+        else await transaction.v2RenderElementMap.create({ data: { id: randomUUID(), ...mapData, createdAt: now } })
+        if (existing) {
+          const current = await transaction.v2PublicOperation.findUniqueOrThrow({ where: { id: operationId }, include: { projectProxyRender: true } })
+          assert.deepEqual(current.projectProxyRender, existing.projectProxyRender, 'reserved output/source/detail identity cannot change during fixture preparation')
+          assert.equal(current.status, existing.status); assert.equal(current.leaseOwner, null)
+          for (const key of ['clientId', 'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind', 'actorContextHash', 'delegatedUserId', 'delegatedIdentityId', 'workspaceRole']) assert.equal(current[key], existing[key])
+          if (current.status === 'succeeded') {
+            assert.equal(current.phase, 'completed'); assert.equal(current.resultJson, resultJson)
+          } else {
+            const changed = await transaction.v2PublicOperation.updateMany({ where: { id: operationId, workspaceId, projectId,
+              status: 'queued', attempt: existing.attempt, leaseOwner: null, targetId: outputArtifactId },
+            data: { status: 'succeeded', phase: 'completed', progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
+              cancelable: false, retryable: false, attempt: 1, resultJson, startedAt: now, completedAt: now, updatedAt: now } })
+            assert.equal(changed.count, 1, 'metadata-only completion must own the unchanged queued identity')
+          }
+          // A completed proxy is bound to the stable output variant it was rendered for: an editorial cut or a restore refuses a
+          // proxy without that authority, and the route's enqueue does not write it.
+          await transaction.v2ProjectProxyRenderOperation.update({ where: { operationId }, data: { renderableVariantId: '9:16' } })
+        } else {
+          await transaction.v2PublicOperation.create({ data: { id: operationId, workspaceId, projectId, clientId: issued.client.id,
+            ...operationActorAudit, type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
+            targetType: 'media-artifact', targetId: outputArtifactId, progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
+            cancelable: false, retryable: false, attempt: 1, maxAttempts: 3, resultJson, idempotencyKey: `controlled-${operationId}`,
+            requestFingerprint: calculateVersionHash({ fixtureScope: 'metadata-only', operationId, inputHash }),
+            createdAt: now, updatedAt: now, startedAt: now, completedAt: now } })
+          await transaction.v2ProjectProxyRenderOperation.create({ data: { operationId, workspaceId, projectId, projectVersionId,
+            editPlanSnapshotId, sourceArtifactId: sourceA, sourceManifestId: manifestA,
+            colorPipelineBindingsJson: colorBindingsJson, inputHash, outputArtifactId, outputManifestId: manifestId,
+            renderableVariantId: '9:16', originalFileName: `${outputArtifactId}.mp4`, createdAt: now } })
+        }
+      }, { isolationLevel: 'Serializable' })
+      const record = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: operationId }, include: { projectProxyRender: true } })
+      assert.equal(record.status, 'succeeded'); assert.equal(record.phase, 'completed'); assert.equal(record.resultJson, resultJson)
+      assert.equal(record.projectProxyRender.inputHash, inputHash)
+      assert.equal(record.projectProxyRender.outputArtifactId, outputArtifactId)
+      assert.equal(record.projectProxyRender.outputManifestId, manifestId)
+      const artifactReadback = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: outputArtifactId } })
+      assert.equal(artifactReadback.workspaceId, workspaceId); assert.equal(artifactReadback.artifactKey, artifactKey)
+      assert.equal(artifactReadback.sha256, proxyHash); assert.equal(artifactReadback.byteSize, 1n)
+      const manifestReadback = await client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: manifestId } })
+      assert.equal(manifestReadback.workspaceId, workspaceId); assert.equal(manifestReadback.artifactId, outputArtifactId)
+      assert.equal(manifestReadback.manifestHash, manifest.manifestHash)
+      assert.deepEqual(JSON.parse(manifestReadback.manifestJson), manifest)
+      assertMediaArtifactManifest(JSON.parse(manifestReadback.manifestJson))
+      const readback = await proxyMaps.findExact({ workspaceId, projectId, projectVersionId, proxyArtifactId: outputArtifactId })
+      assert.equal(readback.mapHash, mapHash); assert.deepEqual(readback.map, map)
+      assert.equal(readback.map.elements.some((element) => element.type === 'subtitle'), false)
+      console.log(JSON.stringify({ fixtureScope: 'metadata-only-manual-edit-mechanics', mode, operationId, projectVersionId,
+        originalStatus: existing?.status ?? null, outputArtifactId, manifestId, inputHash, mapHash,
+        physicalRenderObserved: false, approvalTransferred: false }))
+      return { operationId, outputArtifactId, manifestId, inputHash, map: readback }
+    }
+    const initialProxyMetadata = await prepareControlledProxyMetadata({ mode: 'new-controlled-base', operationId: completedProxyOperationId,
+      projectVersionId: initialVersionId, editPlanSnapshotId: editPlanId, outputArtifactId: completedProxyArtifactId, manifestId: completedProxyManifestId })
+
+    assert.equal(initialProxyMetadata.outputArtifactId, completedProxyArtifactId)
     const initial = await readManualTimelineService({ repository })({ workspaceId, projectId })
     assert.equal(initial.timeline.clips.length, 2)
     assert.deepEqual(initial.timeline.snapPointsMs, [0, 3000, 6000])
@@ -466,14 +565,14 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const split = await execute({
       baseVersionId: initialVersionId,
       baseHash: initialBaseHash,
-      expectedRevision: 1,
+      expectedRevision: rev(1),
       action: 'apply',
       variantId: '9:16',
       targetId: 'clip-1',
       operation: { kind: 'split', clipId: 'clip-1', atMs: 1505 },
       idempotencyKey: `manual-split-${suffix}`,
     })
-    assert.equal(split.version.sequence, 2)
+    assert.equal(split.version.sequence, rev(2))
     assert.deepEqual(split.timeline.clips.map((clip) => clip.id), ['clip-1:a', 'clip-1:b', 'clip-2'])
     assert.equal(split.timeline.clips[0].endMs, 1500)
     const splitStoredCommand = await client.v2EditCommand.findUnique({ where: { id: split.command.id } })
@@ -507,7 +606,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     await assert.rejects(() => execute({
       baseVersionId: initialVersionId,
       baseHash: initialBaseHash,
-      expectedRevision: 1,
+      expectedRevision: rev(1),
       action: 'apply',
       variantId: '9:16',
       targetId: 'clip-2',
@@ -518,7 +617,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const inspect = await execute({
       baseVersionId: split.version.id,
       baseHash: split.version.baseHash,
-      expectedRevision: 2,
+      expectedRevision: rev(2),
       action: 'apply',
       variantId: '9:16',
       targetId: 'clip-1:a',
@@ -528,40 +627,40 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       } },
       idempotencyKey: `manual-inspect-${suffix}`,
     })
-    assert.equal(inspect.version.sequence, 3)
+    assert.equal(inspect.version.sequence, rev(3))
     assert.match(JSON.stringify(inspect.editPlan), /Texto ajustado/)
     assert.match(JSON.stringify(inspect.editPlan), /warm-lut/)
 
     const undo = await execute({
       baseVersionId: inspect.version.id,
       baseHash: inspect.version.baseHash,
-      expectedRevision: 3,
+      expectedRevision: rev(3),
       action: 'undo',
       variantId: '9:16',
       targetId: 'clip-1:a',
       targetVersionId: split.version.id,
       idempotencyKey: `manual-undo-${suffix}`,
     })
-    assert.equal(undo.version.sequence, 4)
+    assert.equal(undo.version.sequence, rev(4))
     assert.doesNotMatch(JSON.stringify(undo.editPlan), /Texto ajustado/)
     assert.equal(undo.command.payload.restoresVersionId, split.version.id)
 
     const redo = await execute({
       baseVersionId: undo.version.id,
       baseHash: undo.version.baseHash,
-      expectedRevision: 4,
+      expectedRevision: rev(4),
       action: 'redo',
       variantId: '9:16',
       targetId: 'clip-1:a',
       targetVersionId: inspect.version.id,
       idempotencyKey: `manual-redo-${suffix}`,
     })
-    assert.equal(redo.version.sequence, 5)
+    assert.equal(redo.version.sequence, rev(5))
     assert.match(JSON.stringify(redo.editPlan), /Texto ajustado/)
     const replay = await execute({
       baseVersionId: undo.version.id,
       baseHash: undo.version.baseHash,
-      expectedRevision: 4,
+      expectedRevision: rev(4),
       action: 'redo',
       variantId: '9:16',
       targetId: 'clip-1:a',
@@ -581,6 +680,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         NODE_ENV: 'production',
         __NEXT_PROCESSED_ENV: 'true',
         APOLLO_API_ENVIRONMENT: 'production',
+        // This journey sends bursts of writes from one client within a minute: the request-spike anomaly is not what it proves.
+        APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: '1000000',
         APOLLO_AUTH_MODE: 'bootstrap',
         APOLLO_ALLOW_BOOTSTRAP_AUTH: 'true',
         APOLLO_UI_BOOTSTRAP_ROLE: 'operator',
@@ -600,7 +701,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     const timeline = await timelineResponse.json()
     assert.equal(timelineResponse.status, 200, JSON.stringify(timeline))
-    assert.equal(timeline.data.timeline.revision, 5)
+    assert.equal(timeline.data.timeline.revision, rev(5))
     assert.equal(timeline.data.history[0].action, 'redo')
     const invalidationsResponse = await fetch(
       `${baseUrl}/v1/projects/${projectId}/artifact-invalidations?resultVersionId=${split.version.id}`,
@@ -633,17 +734,15 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     const publicApplied = await apiResponse.json()
     assert.equal(apiResponse.status, 201, `${JSON.stringify(publicApplied)}\n${serverLogs.slice(-4_000)}`)
-    assert.equal(publicApplied.data.version.sequence, 6)
+    assert.equal(publicApplied.data.version.sequence, rev(6))
     assert.equal(publicApplied.data.operation.status, 'queued')
     assert.equal(publicApplied.data.command.payload.schemaVersion, 2)
     assert.equal(publicApplied.data.command.payload.impact.schemaVersion, 'command-impact/v1')
     assert.equal(publicApplied.data.timeline.clips.find((clip) => clip.id === 'clip-2').sourceId, sourceB)
     const { readProjectWorkspaceService } = await import('../../src/v2/application/read-project-workspace.ts')
     const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
-    const { PrismaPublicOperationRepository: PrismaWorkspacePublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
     const workspaceProjection = await readProjectWorkspaceService({
       projects: new PrismaProjectWorkspaceQueryRepository(client),
-      operations: new PrismaWorkspacePublicOperationRepository(client),
     })({ workspaceId, projectId })
     assert.equal(workspaceProjection.version.id, publicApplied.data.version.id)
 
@@ -707,7 +806,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     await new Promise((resolve) => setTimeout(resolve, 100))
     await page.mouse.up()
     assert.equal((await moved).status(), 201)
-    await page.getByText(/Edição registrada na versão 7/).waitFor({ state: 'visible' })
+    await page.getByText(new RegExp(`Edição registrada na versão ${rev(7)}`)).waitFor({ state: 'visible' })
 
     const undoButton = page.getByTestId('manual-undo')
     let undoReady = false
@@ -726,16 +825,19 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     await manualEditor.focus()
     await page.keyboard.press('Control+z')
     assert.equal((await undone).status(), 201)
-    await page.getByText(/Undo registrado como versão 8/).waitFor({ state: 'visible' })
-    assert.match(await manualEditor.textContent(), /V8/)
+    await page.getByText(new RegExp(`Undo registrado como versão ${rev(8)}`)).waitFor({ state: 'visible' })
+    assert.match(await manualEditor.textContent(), new RegExp(`V${rev(8)}`))
 
     const beforeTrimResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/timeline`, {
       headers: { authorization },
     })
     const beforeTrim = await beforeTrimResponse.json()
     assert.equal(beforeTrimResponse.status, 200, JSON.stringify(beforeTrim))
-    assert.equal(beforeTrim.data.timeline.revision, 8)
+    assert.equal(beforeTrim.data.timeline.revision, rev(8))
     const beforeCompareVersionId = beforeTrim.data.timeline.versionId
+    // KNOWN PRODUCT DEFECT (manual-editing.ts, `trim`/`split` of a clip that `replace` gave audioSource* ranges): the trim moves the video
+    // range and the timeline but not audioSourceOutFrame, so the sealed materialization refuses the clip with INVALID_RENDER_INPUT
+    // 'Primary/secondary audio rate map invalid' (output-materialization.ts). Replacing a different clip than the one trimmed passes.
     const trimResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/manual-edits`, {
       method: 'POST',
       headers: {
@@ -754,8 +856,17 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       }),
     })
     const trimmed = await trimResponse.json()
-    assert.equal(trimResponse.status, 201, JSON.stringify(trimmed))
-    assert.equal(trimmed.data.version.sequence, 9)
+    let trimDiagnostic = '' // Failure diagnostics: the route hides the domain error, so the same apply runs in-process.
+    if (trimResponse.status !== 201) {
+      try {
+        await execute({ baseVersionId: beforeTrim.data.timeline.versionId, baseHash: beforeTrim.data.baseHash,
+          expectedRevision: beforeTrim.data.timeline.revision, action: 'apply', variantId: '9:16', targetId: 'clip-2',
+          operation: { kind: 'trim', clipId: 'clip-2', edge: 'end', atMs: 4000 }, idempotencyKey: `diag-trim-${suffix}` })
+        trimDiagnostic = 'apply ok in-process'
+      } catch (error) { trimDiagnostic = `${error?.code} ${error?.message} ${JSON.stringify(error?.details ?? null)}` }
+    }
+    assert.equal(trimResponse.status, 201, `${JSON.stringify(trimmed)}\n${trimDiagnostic}`)
+    assert.equal(trimmed.data.version.sequence, rev(9))
     const afterCompareVersionId = trimmed.data.version.id
     const comparisonUrl = (mode) => {
       const query = new URLSearchParams({
@@ -784,7 +895,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       mode: 'split',
       baseVersionId: afterCompareVersionId,
       baseHash: trimmed.data.version.baseHash,
-      expectedRevision: 9,
+      expectedRevision: rev(9),
       variantId: '9:16',
     })
     // A compare action is the only no-render Command: it moves the review state
@@ -874,7 +985,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         'content-type': 'application/json',
         'idempotency-key': `manual-compare-stale-${suffix}`,
       },
-      body: JSON.stringify({ ...compareActionBody('accept'), expectedRevision: 8 }),
+      body: JSON.stringify({ ...compareActionBody('accept'), expectedRevision: rev(8) }),
     })
     const stale = await staleResponse.json()
     assert.equal(staleResponse.status, 409, JSON.stringify(stale))
@@ -942,13 +1053,16 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       && response.request().method() === 'POST',
     )
     await page.getByTestId('compare-restore').click()
-    assert.equal((await restoredResponse).status(), 201)
-    await page.getByText(/restaurada como V10/).waitFor({ state: 'visible' })
+    const restoredHttp = await restoredResponse
+    const restoredPayload = await restoredHttp.json()
+    assert.equal(restoredHttp.status(), 201, JSON.stringify(restoredPayload))
+    assert.ok(restoredPayload.data.operation?.id)
+    await page.getByText(new RegExp(`restaurada como V${rev(10)}`)).waitFor({ state: 'visible' })
     const persistedVersions = await client.v2ProjectVersion.findMany({
       where: { projectId },
       orderBy: { sequence: 'asc' },
     })
-    assert.equal(persistedVersions.at(-1).sequence, 10)
+    assert.equal(persistedVersions.at(-1).sequence, rev(10))
     assert.equal(persistedVersions.at(-1).parentVersionId, afterCompareVersionId)
     assert.equal(persistedVersions.some((version) => version.id === beforeCompareVersionId), true)
     assert.equal(persistedVersions.some((version) => version.id === afterCompareVersionId), true)
@@ -964,35 +1078,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const selectionBasePlan = JSON.parse(selectionBaseSnapshot.contentJson)
     const selectionClipId = selectionBasePlan.videoTracks[0].clips[0].id
     assert.equal(selectionClipId, 'clip-1:a')
-    const selectionBaseOperationId = `manual-selection-base-proxy-${suffix}`
-    const selectionBaseFingerprint = calculateVersionHash({ selectionBaseOperationId })
-    const selectionColorBindings = renderColorBindings(sourceA, sourceB)
-    await client.v2PublicOperation.create({ data: {
-      id: selectionBaseOperationId, workspaceId, projectId, clientId: issued.client.id,
-      ...operationActorAudit,
-      type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
-      targetType: 'media-artifact', targetId: completedProxyArtifactId,
-      progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
-      cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
-      resultJson: stableSerialize({ resource: {
-        type: 'media-artifact', id: completedProxyArtifactId,
-        manifestId: completedProxyManifestId,
-      } }),
-      idempotencyKey: `manual-selection-base-proxy-${suffix}`,
-      requestFingerprint: selectionBaseFingerprint,
-      createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
-    } })
-    await client.v2ProjectProxyRenderOperation.create({ data: {
-      operationId: selectionBaseOperationId, workspaceId, projectId,
-      projectVersionId: selectionBaseVersion.id,
-      editPlanSnapshotId: selectionBaseVersion.editPlanSnapshotId,
-      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: selectionColorBindings,
-      inputHash: selectionBaseFingerprint,
-      outputArtifactId: completedProxyArtifactId,
-      outputManifestId: completedProxyManifestId,
-      originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
-    } })
+    const selectionBaseOperationId = restoredPayload.data.operation.id
+    const selectionProxyMetadata = await prepareControlledProxyMetadata({ mode: 'complete-api-operation',
+      operationId: selectionBaseOperationId, projectVersionId: selectionBaseVersion.id,
+      editPlanSnapshotId: selectionBaseVersion.editPlanSnapshotId, expectedOperation: restoredPayload.data.operation })
     const artifactCountBeforeSelection = await client.v2MediaArtifact.count({ where: { workspaceId } })
     const selectionKey = `manual-selection-reuse-${suffix}`
     const select = () => fetch(`${baseUrl}/v1/projects/${projectId}/manual-edits`, {
@@ -1006,7 +1095,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         action: 'apply',
         baseVersionId: selectionBaseVersion.id,
         baseHash: selectionBaseVersion.baseHash,
-        expectedRevision: 10,
+        expectedRevision: rev(10),
         variantId: '9:16',
         targetId: selectionClipId,
         operation: { kind: 'select', clipId: selectionClipId },
@@ -1015,10 +1104,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const selectedResponse = await select()
     const selected = await selectedResponse.json()
     assert.equal(selectedResponse.status, 201, JSON.stringify(selected))
-    assert.equal(selected.data.version.sequence, 11)
+    assert.equal(selected.data.version.sequence, rev(11))
     assert.equal(selected.data.operation.status, 'succeeded')
     assert.equal(selected.data.operation.phase, 'completed')
-    assert.equal(selected.data.operation.target.id, completedProxyArtifactId)
+    assert.equal(selected.data.operation.target.id, selectionProxyMetadata.outputArtifactId)
     const selectionOperation = await client.v2ProjectProxyRenderOperation.findUnique({
       where: { operationId: selected.data.operation.id },
     })
@@ -1027,7 +1116,13 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(selectionOperation.reuseCommandId, selected.data.command.id)
     assert.equal(selectionOperation.reuseImpactHash, selected.data.command.payload.impact.impactHash)
     assert.equal(selectionOperation.reuseBaseVersionId, selectionBaseVersion.id)
-    assert.equal(selectionOperation.outputArtifactId, completedProxyArtifactId)
+    assert.equal(selectionOperation.outputArtifactId, selectionProxyMetadata.outputArtifactId)
+    const selectedMap = await proxyMaps.findExact({ workspaceId, projectId,
+      projectVersionId: selected.data.version.id, proxyArtifactId: selectionProxyMetadata.outputArtifactId })
+    assert.ok(selectedMap, 'runtime must atomically preserve the map for the reused child')
+    assert.notEqual(selectedMap.id, selectionProxyMetadata.map.id)
+    assert.equal(selectedMap.mapHash, selectionProxyMetadata.map.mapHash)
+    assert.deepEqual(selectedMap.map, selectionProxyMetadata.map.map)
     assert.equal(await client.v2MediaArtifact.count({ where: { workspaceId } }), artifactCountBeforeSelection)
     assert.equal(await client.v2CommandArtifactInvalidation.count({
       where: { commandId: selected.data.command.id },
@@ -1037,6 +1132,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(selectedReplayResponse.status, 200)
     assert.equal(selectedReplay.data.replayed, true)
     assert.equal(selectedReplay.data.operation.id, selected.data.operation.id)
+
+    assert.equal(await client.v2RenderElementMap.count({ where: { workspaceId, projectVersionId: selected.data.version.id, proxyArtifactId: selectionProxyMetadata.outputArtifactId } }), 1, 'replay must not duplicate the runtime child map')
 
     const cropKey = `manual-crop-range-${suffix}`
     const cropResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/manual-edits`, {
@@ -1050,7 +1147,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         action: 'apply',
         baseVersionId: selected.data.version.id,
         baseHash: selected.data.version.baseHash,
-        expectedRevision: 11,
+        expectedRevision: rev(11),
         variantId: '9:16',
         targetId: selectionClipId,
         operation: {
@@ -1062,7 +1159,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     const cropped = await cropResponse.json()
     assert.equal(cropResponse.status, 201, JSON.stringify(cropped))
-    assert.equal(cropped.data.version.sequence, 12)
+    assert.equal(cropped.data.version.sequence, rev(12))
     assert.equal(cropped.data.command.payload.impact.changeKinds[0], 'crop')
     assert.deepEqual(cropped.data.command.payload.impact.dependencyTypes, ['visual'])
     assert.deepEqual(cropped.data.command.payload.impact.affectedVariantIds, ['9:16'])
@@ -1084,9 +1181,6 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const cropOperation = await client.v2ProjectProxyRenderOperation.findUnique({
       where: { operationId: cropped.data.operation.id },
     })
-    const { PrismaProjectProxyRenderRepository } = await import(
-      '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
-    )
     const cropSource = await new PrismaProjectProxyRenderRepository(client).readImmutableSource({
       workspaceId,
       projectId,
@@ -1098,32 +1192,14 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(cropSource.rangeReuse.commandId, cropped.data.command.id)
     assert.equal(cropSource.rangeReuse.impactHash, cropped.data.command.payload.impact.impactHash)
     assert.equal(cropSource.rangeReuse.baseVersionId, selected.data.version.id)
-    assert.equal(cropSource.rangeReuse.artifactId, completedProxyArtifactId)
+    assert.equal(cropSource.rangeReuse.artifactId, selectionProxyMetadata.outputArtifactId)
     assert.deepEqual(
       cropSource.rangeReuse.ranges,
       cropped.data.command.payload.impact.minimalRenders[0].ranges,
     )
-    const transcriptBaseProxyOperationId = `manual-transcript-base-proxy-${suffix}`
-    await client.v2PublicOperation.create({ data: {
-      id: transcriptBaseProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
-      ...operationActorAudit,
-      type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
-      targetType: 'media-artifact', targetId: completedProxyArtifactId,
-      progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
-      cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
-      resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
-      idempotencyKey: `manual-transcript-base-proxy-${suffix}`,
-      requestFingerprint: calculateVersionHash({ transcriptBaseProxyOperationId }),
-      createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
-    } })
-    await client.v2ProjectProxyRenderOperation.create({ data: {
-      operationId: transcriptBaseProxyOperationId, workspaceId, projectId,
-      projectVersionId: cropped.data.version.id, editPlanSnapshotId: cropVersion.editPlanSnapshotId,
-      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: renderColorBindings(sourceA, sourceB), inputHash: calculateVersionHash({ transcriptBaseProxyOperationId, input: true }),
-      outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId,
-      originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
-    } })
+    const transcriptProxyMetadata = await prepareControlledProxyMetadata({ mode: 'complete-api-operation',
+      operationId: cropped.data.operation.id, projectVersionId: cropped.data.version.id,
+      editPlanSnapshotId: cropVersion.editPlanSnapshotId, expectedOperation: cropped.data.operation })
     const editorialKey = `remove-spoken-content-${suffix}`
     const applyEditorialCut = () => fetch(`${baseUrl}/v1/projects/${projectId}/commands`, {
       method: 'POST',
@@ -1133,6 +1209,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         baseVersionId: cropped.data.version.id,
         baseHash: cropped.data.version.baseHash,
         sourceTranscriptId: currentTranscriptId,
+        variantId: '9:16',
         rules: [{ id: 'remove-phrase', label: 'frase', alternatives: ['frase'] }],
         exclusionOverrides: [{
           sourceStartSeconds: 1.1, sourceEndSeconds: 1.7,
@@ -1143,9 +1220,24 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     const editorialResponse = await applyEditorialCut()
     const editorialApplied = await editorialResponse.json()
-    assert.equal(editorialResponse.status, 201, JSON.stringify(editorialApplied))
-    assert.equal(editorialApplied.data.version.sequence, 13)
-    assert.equal(editorialApplied.data.editorial.impact.schemaVersion, 'editorial-cut-impact/v1')
+    let editorialDiagnostic = '' // Failure diagnostics: the route hides the domain error, so the same Command is applied in-process.
+    if (editorialResponse.status !== 201) {
+      try {
+        const { applyEditorialCutCommandService } = await import('../../src/v2/application/apply-editorial-cut-command.ts')
+        const factory = await import('../../src/v2/infrastructure/repository-factory.ts')
+        await applyEditorialCutCommandService({ repository: factory.createEditorialCommandRepository(), clock: () => new Date(),
+          createId: (kind) => `${kind}-diag-${randomUUID()}`, createEventId: randomUUID })({
+          workspaceId, projectId, baseVersionId: cropped.data.version.id, baseHash: cropped.data.version.baseHash,
+          sourceTranscriptId: currentTranscriptId, variantId: '9:16', rules: [{ id: 'remove-phrase', label: 'frase', alternatives: ['frase'] }],
+          exclusionOverrides: [{ sourceStartSeconds: 1.1, sourceEndSeconds: 1.7, ruleIds: ['remove-phrase'], reason: 'Reviewed boundary removes only the selected source word.' }],
+          actor: authenticatedActor, idempotency: { clientId: authenticatedActor.clientId, key: `diag-editorial-${suffix}` } })
+        editorialDiagnostic = 'applied in-process'
+      } catch (error) { editorialDiagnostic = `${error?.code} ${error?.message} ${JSON.stringify(error?.details ?? null)}` }
+    }
+    assert.equal(editorialResponse.status, 201, `${JSON.stringify(editorialApplied)}
+${editorialDiagnostic}`)
+    assert.equal(editorialApplied.data.version.sequence, rev(13))
+    assert.equal(editorialApplied.data.editorial.impact.schemaVersion, 'editorial-cut-impact/v2')
     assert.deepEqual(editorialApplied.data.editorial.impact.affectedRanges, [{ startFrame: 0, endFrame: cropPlan.durationFrames }])
     assert.equal(editorialApplied.data.editorial.impact.minimalRenders.length, 1)
     assert.equal(editorialApplied.data.editorial.impact.minimalRenders[0].ranges[0].endFrame, editorialApplied.data.editorial.outputDurationFrames)
@@ -1155,30 +1247,15 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       where: { commandId: editorialApplied.data.command.id },
     })
     assert.equal(editorialInvalidations.length, 1)
-    assert.equal(editorialInvalidations[0].artifactId, completedProxyArtifactId)
+    assert.equal(editorialInvalidations[0].artifactId, transcriptProxyMetadata.outputArtifactId)
     assert.deepEqual(JSON.parse(editorialInvalidations[0].dependencyTypesJson), ['audio', 'content', 'timing', 'visual'])
     const editorialReplayResponse = await applyEditorialCut()
     assert.equal(editorialReplayResponse.status, 200)
     assert.equal((await editorialReplayResponse.json()).data.replayed, true)
-    const editorialOperationCreatedAt = (await client.v2PublicOperation.findUniqueOrThrow({
-      where: { id: editorialApplied.data.operation.id }, select: { createdAt: true },
-    })).createdAt
-    await client.v2PublicOperation.update({
-      where: { id: editorialApplied.data.operation.id },
-      data: {
-        status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: completedProxyArtifactId,
-        progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
-        cancelable: false, retryable: false, attempt: 1,
-        resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
-        startedAt: editorialOperationCreatedAt,
-        completedAt: editorialOperationCreatedAt,
-        updatedAt: editorialOperationCreatedAt,
-      },
-    })
-    await client.v2ProjectProxyRenderOperation.update({
-      where: { operationId: editorialApplied.data.operation.id },
-      data: { outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId },
-    })
+    const editorialProxyMetadata = await prepareControlledProxyMetadata({ mode: 'complete-api-operation',
+      operationId: editorialApplied.data.operation.id, projectVersionId: editorialApplied.data.version.id,
+      editPlanSnapshotId: (await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: editorialApplied.data.version.id } })).editPlanSnapshotId,
+      expectedOperation: editorialApplied.data.operation })
     const transcriptKey = `replace-source-transcript-${suffix}`
     const replaceTranscript = () => fetch(`${baseUrl}/v1/projects/${projectId}/commands`, {
       method: 'POST',
@@ -1195,7 +1272,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const transcriptResponse = await replaceTranscript()
     const transcriptApplied = await transcriptResponse.json()
     assert.equal(transcriptResponse.status, 201, JSON.stringify(transcriptApplied))
-    assert.equal(transcriptApplied.data.version.sequence, 14)
+    assert.equal(transcriptApplied.data.version.sequence, rev(14))
     assert.equal(transcriptApplied.data.command.type, 'replace-source-transcript')
     assert.equal(transcriptApplied.data.sourceTranscript.replacementTranscriptId, replacementTranscriptId)
     assert.equal(transcriptApplied.data.sourceTranscript.impact.renderBlockedUntilDirectorRun, true)
@@ -1225,7 +1302,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     await client.v2MediaTranscript.create({ data: {
       id: `manual-transcript-unselected-${suffix}`, workspaceId, projectId,
-      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
+      sourceArtifactId: sourceA, sourceManifestId: manifestA,
       schemaVersion: newestUnselectedTranscript.schemaVersion, language: newestUnselectedTranscript.language,
       provider: newestUnselectedTranscript.provider, model: newestUnselectedTranscript.model, providerVersion: 'test-v1',
       transcriptHash: newestUnselectedTranscript.transcriptHash,
@@ -1237,30 +1314,14 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(directorContext.transcript.id, replacementTranscriptId)
     assert.equal(directorContext.transcript.transcriptHash, replacementTranscript.transcriptHash)
     assert.equal(directorContext.currentDurationFrames, replacementPlan.durationFrames)
-    assert.equal(directorContext.proxyVariantId, '9:16')
+    assert.deepEqual(directorContext.variantIds, ['9:16'])
+    assert.equal('proxyVariantId' in directorContext, false)
     assert.deepEqual(directorContext.outputReferences, [])
     const directorBaseProxyOperationId = `manual-director-base-proxy-${suffix}`
-    await client.v2PublicOperation.create({ data: {
-      id: directorBaseProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
-      ...operationActorAudit,
-      type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
-      targetType: 'media-artifact', targetId: completedProxyArtifactId,
-      progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
-      cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
-      resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
-      idempotencyKey: `manual-director-base-proxy-${suffix}`,
-      requestFingerprint: calculateVersionHash({ directorBaseProxyOperationId }),
-      createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
-    } })
-    await client.v2ProjectProxyRenderOperation.create({ data: {
-      operationId: directorBaseProxyOperationId, workspaceId, projectId,
-      projectVersionId: transcriptApplied.data.version.id,
-      editPlanSnapshotId: replacementVersion.editPlanSnapshotId,
-      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: renderColorBindings(sourceA, sourceB), inputHash: calculateVersionHash({ directorBaseProxyOperationId, input: true }),
-      outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId,
-      originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
-    } })
+    const directorProxyMetadata = await prepareControlledProxyMetadata({ mode: 'new-controlled-base',
+      operationId: directorBaseProxyOperationId, projectVersionId: transcriptApplied.data.version.id,
+      editPlanSnapshotId: replacementVersion.editPlanSnapshotId, outputArtifactId: `manual-proxy-director-base-${suffix}`,
+      manifestId: `manifest-${directorBaseProxyOperationId}` })
     const directorKey = `run-director-impact-${suffix}`
     const runDirector = () => fetch(`${baseUrl}/v1/projects/${projectId}/commands`, {
       method: 'POST',
@@ -1276,11 +1337,11 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const directorResponse = await runDirector()
     const directorApplied = await directorResponse.json()
     assert.equal(directorResponse.status, 201, JSON.stringify(directorApplied))
-    assert.equal(directorApplied.data.version.sequence, 15)
+    assert.equal(directorApplied.data.version.sequence, rev(15))
     assert.equal(directorApplied.data.directorRun.impact.schemaVersion, 'director-run-impact/v1')
     assert.equal(directorApplied.data.directorRun.impact.sourceTranscriptId, replacementTranscriptId)
     assert.deepEqual(directorApplied.data.directorRun.impact.affectedArtifacts, [{
-      artifactId: completedProxyArtifactId, kind: 'proxy',
+      artifactId: directorProxyMetadata.outputArtifactId, kind: 'proxy',
       sourceVersionId: transcriptApplied.data.version.id, variantId: '9:16',
     }])
     assert.equal(directorApplied.data.directorRun.invalidations.length, 1)
@@ -1288,7 +1349,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(directorApplied.data.directorRun.objectiveVersion, 1)
     assert.equal(directorApplied.data.directorRun.rubricRef, 'awareness-discovery/v1')
     assert.equal(directorApplied.data.directorRun.supersedesRunId, undefined)
-    assert.equal(directorApplied.data.directorRun.invalidations[0].artifactId, completedProxyArtifactId)
+    assert.equal(directorApplied.data.directorRun.invalidations[0].artifactId, directorProxyMetadata.outputArtifactId)
     assert.equal(directorApplied.data.operation.status, 'queued')
     const storedDirectorCommand = await client.v2EditCommand.findUniqueOrThrow({
       where: { id: directorApplied.data.command.id }, include: { artifactInvalidations: true },
@@ -1301,25 +1362,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(directorReplayResponse.status, 200, JSON.stringify(directorReplay))
     assert.equal(directorReplay.data.replayed, true)
     assert.equal(directorReplay.data.operation.id, directorApplied.data.operation.id)
-    const directorOperationCreatedAt = (await client.v2PublicOperation.findUniqueOrThrow({
-      where: { id: directorApplied.data.operation.id }, select: { createdAt: true },
-    })).createdAt
-    await client.v2PublicOperation.update({
-      where: { id: directorApplied.data.operation.id },
-      data: {
-        status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: completedProxyArtifactId,
-        progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
-        cancelable: false, retryable: false, attempt: 1,
-        resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
-        startedAt: directorOperationCreatedAt,
-        completedAt: directorOperationCreatedAt,
-        updatedAt: directorOperationCreatedAt,
-      },
-    })
-    await client.v2ProjectProxyRenderOperation.update({
-      where: { operationId: directorApplied.data.operation.id },
-      data: { outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId },
-    })
+    const completedDirectorProxyMetadata = await prepareControlledProxyMetadata({ mode: 'complete-api-operation',
+      operationId: directorApplied.data.operation.id, projectVersionId: directorApplied.data.version.id,
+      editPlanSnapshotId: (await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: directorApplied.data.version.id } })).editPlanSnapshotId,
+      expectedOperation: directorApplied.data.operation })
     const lutSelectionKey = `set-project-lut-impact-${suffix}`
     const setProjectLut = () => fetch(`${baseUrl}/v1/projects/${projectId}/lut-selection`, {
       method: 'POST',
@@ -1334,18 +1380,18 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const lutSelectionResponse = await setProjectLut()
     const lutSelectionApplied = await lutSelectionResponse.json()
     assert.equal(lutSelectionResponse.status, 201, JSON.stringify(lutSelectionApplied))
-    assert.equal(lutSelectionApplied.data.version.sequence, 16)
+    assert.equal(lutSelectionApplied.data.version.sequence, rev(16))
     assert.equal(lutSelectionApplied.data.impact.schemaVersion, 'project-lut-selection-impact/v1')
     assert.equal(lutSelectionApplied.data.impact.renderDeferredUntilTimeline, false)
     assert.deepEqual(lutSelectionApplied.data.impact.dependencyTypes, ['visual'])
     assert.deepEqual(lutSelectionApplied.data.impact.affectedRanges, directorApplied.data.directorRun.impact.affectedRanges)
     assert.deepEqual(lutSelectionApplied.data.impact.affectedArtifacts, [{
-      artifactId: completedProxyArtifactId, kind: 'proxy',
+      artifactId: completedDirectorProxyMetadata.outputArtifactId, kind: 'proxy',
       sourceVersionId: directorApplied.data.version.id, variantId: '9:16',
     }])
     assert.equal(lutSelectionApplied.data.impact.minimalRenders.length, 1)
     assert.equal(lutSelectionApplied.data.invalidations.length, 1)
-    assert.equal(lutSelectionApplied.data.invalidations[0].artifactId, completedProxyArtifactId)
+    assert.equal(lutSelectionApplied.data.invalidations[0].artifactId, completedDirectorProxyMetadata.outputArtifactId)
     assert.equal(lutSelectionApplied.data.operation.status, 'queued')
     const storedLutSelectionCommand = await client.v2EditCommand.findUniqueOrThrow({
       where: { id: lutSelectionApplied.data.command.id }, include: { artifactInvalidations: true },
@@ -1360,10 +1406,47 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(lutSelectionReplay.data.replayed, true)
     assert.equal(lutSelectionReplay.data.operation.id, lutSelectionApplied.data.operation.id)
 
-    const asyncDirectorKey = `async-director-${suffix}`
-    const enqueueAsyncDirector = () => fetch(`${baseUrl}/v1/projects/${projectId}/director-runs`, {
+    // An unapproved direction cannot be superseded. This negative must not
+    // create an operation, Command, Version, snapshot or outbox event.
+    const asyncDirectorContext = await new PrismaDirectorRunRepository(client).readContext({ workspaceId, projectId })
+    assert.equal(asyncDirectorContext.currentVersion.id, lutSelectionApplied.data.version.id)
+    assert.equal(asyncDirectorContext.currentVersion.baseHash, lutSelectionApplied.data.version.baseHash)
+    assert.equal(asyncDirectorContext.project.objective, 'discovery')
+    assert.equal(asyncDirectorContext.latestDirectorObjective.runId, directorApplied.data.directorRun.id)
+    assert.equal(asyncDirectorContext.latestDirectorObjective.approved, false)
+    const currentDesiredAction = parseDesiredAction(asyncDirectorContext.brief.desiredAction, 'discovery')
+    assert.deepEqual(currentDesiredAction, brief.desiredAction)
+    const currentDesiredActionInput = {
+      ...(currentDesiredAction.destination ? { destination: currentDesiredAction.destination } : {}),
+      ...(currentDesiredAction.verbalCta ? { verbalCta: currentDesiredAction.verbalCta } : {}),
+      ...(currentDesiredAction.visualCta ? { visualCta: currentDesiredAction.visualCta } : {}),
+      disclosures: [...currentDesiredAction.disclosures],
+    }
+    assert.deepEqual(createDesiredAction({
+      objective: 'discovery', desiredAction: currentDesiredActionInput,
+    }), currentDesiredAction)
+    const readDirectionBoundary = async () => ({
+      project: await client.v2Project.findUniqueOrThrow({ where: { id: projectId } }),
+      previousRun: await client.v2DirectorRun.findUniqueOrThrow({
+        where: { id: directorApplied.data.directorRun.id }, include: { qualitySnapshot: true },
+      }),
+      versions: await client.v2ProjectVersion.count({ where: { projectId } }),
+      commands: await client.v2EditCommand.count({ where: { projectId } }),
+      snapshots: await client.v2ProjectSnapshot.count({ where: { projectId } }),
+      directorRuns: await client.v2DirectorRun.count({ where: { projectId } }),
+      operations: await client.v2PublicOperation.count({ where: { workspaceId } }),
+      directorOperations: await client.v2ProjectDirectorOperation.count({ where: { workspaceId } }),
+      proxyOperations: await client.v2ProjectProxyRenderOperation.count({ where: { workspaceId } }),
+      invalidations: await client.v2CommandArtifactInvalidation.count({ where: { workspaceId } }),
+      maps: await client.v2RenderElementMap.findMany({ where: { workspaceId, projectId }, orderBy: { id: 'asc' } }),
+      reviews: await client.v2ProxyReview.findMany({ where: { workspaceId, projectId }, orderBy: { id: 'asc' } }),
+      outbox: await client.v2PublicEventOutbox.count({ where: { workspaceId } }),
+    })
+    const directionBoundaryBefore = await readDirectionBoundary()
+    assert.equal(JSON.parse(directionBoundaryBefore.previousRun.qualitySnapshot.contentJson).status, 'review-required')
+    const rejectedSaleResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/director-runs`, {
       method: 'POST',
-      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': asyncDirectorKey },
+      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': `unapproved-sale-${suffix}` },
       body: JSON.stringify({
         baseVersionId: lutSelectionApplied.data.version.id,
         baseHash: lutSelectionApplied.data.version.baseHash,
@@ -1373,7 +1456,26 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
           visualCta: 'Garanta sua vaga',
           disclosures: ['Oferta sujeita a disponibilidade.'],
         },
-        reason: 'Comprovar enqueue, lease e commit transacional do Diretor assíncrono.',
+        reason: 'Tentar alterar uma direção discovery ainda não aprovada.',
+      }),
+    })
+    const rejectedSale = await rejectedSaleResponse.json()
+    assert.equal(rejectedSaleResponse.status, 428, JSON.stringify(rejectedSale))
+    assert.equal(rejectedSale.error.code, 'PRECONDITION_REQUIRED')
+    assert.deepEqual(await readDirectionBoundary(), directionBoundaryBefore, 'unapproved objective change must preserve prior records, head, status and quality with zero new effects')
+
+    // Exercise the real async worker in the existing direction. Approval and
+    // an objective change remain outside this positive.
+    const asyncDirectorKey = `async-director-${suffix}`
+    const enqueueAsyncDirector = () => fetch(`${baseUrl}/v1/projects/${projectId}/director-runs`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': asyncDirectorKey },
+      body: JSON.stringify({
+        baseVersionId: lutSelectionApplied.data.version.id,
+        baseHash: lutSelectionApplied.data.version.baseHash,
+        objective: 'discovery',
+        desiredAction: currentDesiredActionInput,
+        reason: 'Comprovar enqueue, lease e commit transacional assíncrono na mesma direção discovery.',
       }),
     })
     const asyncDirectorResponse = await enqueueAsyncDirector()
@@ -1387,25 +1489,135 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const { runNextProjectDirectorOperationService } = await import('../../src/v2/application/run-project-director-operation-worker.ts')
     const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
     const { createEvidenceBoundBriefCompiler } = await import('../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts')
+    // Retrying operations clear error columns. Observe the real port call
+    // before that transition, without changing its input, return or exception.
+    const asyncDirectorDiagnostics = []
+    const diagnosticCode = (value) => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,64}$/.test(value)
+      ? value : null
+    const diagnosticMessage = (value) => typeof value === 'string'
+      ? { sha256: createHash('sha256').update(value, 'utf8').digest('hex'), bytes: Buffer.byteLength(value, 'utf8') }
+      : null
+    const diagnosticTargetFields = new Set([
+      'id', 'workspaceId', 'projectId', 'kind', 'contentHash', 'sequence',
+      'idempotencyKey', 'commandId', 'resultVersionId', 'operationId',
+    ])
+    const diagnosticTarget = (value) => {
+      if (value === undefined || value === null) return null
+      if (Array.isArray(value) && value.length <= 16 &&
+        value.every((field) => typeof field === 'string' && diagnosticTargetFields.has(field))) {
+        return { fields: [...value] }
+      }
+      if (typeof value === 'string') return { hash: diagnosticMessage(value) }
+      if (Array.isArray(value) && value.every((field) => typeof field === 'string')) {
+        return { hash: diagnosticMessage(JSON.stringify(value)) }
+      }
+      return { type: typeof value }
+    }
+    const diagnosticError = (error, depth = 0) => {
+      if (depth >= 3) return { truncated: true }
+      if (!error || typeof error !== 'object') return { type: typeof error, message: diagnosticMessage(error) }
+      return {
+        name: diagnosticCode(error.name),
+        code: diagnosticCode(error.code),
+        sqlState: diagnosticCode(error.meta?.code),
+        modelName: diagnosticCode(error.meta?.modelName),
+        target: diagnosticTarget(error.meta?.target),
+        errno: Number.isSafeInteger(error.errno) ? error.errno : null,
+        syscall: diagnosticCode(error.syscall),
+        message: diagnosticMessage(error.message),
+        ...(error.cause === undefined ? {} : { cause: diagnosticError(error.cause, depth + 1) }),
+      }
+    }
+    const observeDirectorCall = async (phase, action, args) => {
+      try {
+        return await action(...args)
+      } catch (error) {
+        asyncDirectorDiagnostics.push({ phase, error: diagnosticError(error) })
+        throw error
+      }
+    }
+    const observeDirectorPort = (port, label) => new Proxy(port, {
+      get(target, property) {
+        const value = Reflect.get(target, property)
+        if (typeof value !== 'function') return value
+        return async (...args) => {
+          if (label === 'operations' && property === 'failOrRetry') {
+            const failure = args[0]
+            asyncDirectorDiagnostics.push({
+              phase: 'operations.failOrRetry',
+              operationId: failure.operationId,
+              attempt: failure.attempt,
+              now: failure.now,
+              nextAttemptAt: failure.nextAttemptAt ?? null,
+              error: {
+                code: diagnosticCode(failure.error.code),
+                retryable: failure.error.retryable,
+                message: diagnosticMessage(failure.error.message),
+              },
+            })
+          }
+          return observeDirectorCall(`${label}.${String(property)}`, value.bind(target), args)
+        }
+      },
+    })
+    // Keep the real transaction callback/options and transaction client
+    // untouched. Observe a rejected Prisma transaction before the repository
+    // converts P2002 to its domain conflict.
+    const diagnosticDirectorClient = new Proxy(client, {
+      get(target, property) {
+        const value = Reflect.get(target, property, target)
+        if (property !== '$transaction') return typeof value === 'function' ? value.bind(target) : value
+        return async (...args) => observeDirectorCall(
+          'directorClient.$transaction', value.bind(target), args,
+        )
+      },
+    })
+    const realBriefCompiler = createEvidenceBoundBriefCompiler()
     const runNextDirector = runNextProjectDirectorOperationService({
-      operations: new PrismaPublicOperationRepository(client),
-      directorRuns: new PrismaDirectorRunRepository(client),
+      operations: observeDirectorPort(new PrismaPublicOperationRepository(client), 'operations'),
+      directorRuns: observeDirectorPort(new PrismaDirectorRunRepository(diagnosticDirectorClient), 'directorRuns'),
       createId: (kind) => `${kind}-async-${suffix}-${randomUUID()}`,
       createEventId: randomUUID,
-      compileBrief: createEvidenceBoundBriefCompiler(),
+      compileBrief: (...args) => observeDirectorCall('compileBrief', realBriefCompiler, args),
     })
     const asyncDirectorOutcome = await runNextDirector(`director-worker-${suffix}`)
     const asyncDirectorSettlement = await client.v2PublicOperation.findUniqueOrThrow({
       where: { id: asyncDirectorEnqueued.data.operation.id },
       select: {
-        status: true, phase: true, errorCode: true,
-        errorMessage: true, errorRetryable: true,
+        id: true, status: true, phase: true, attempt: true, maxAttempts: true,
+        retryable: true, nextAttemptAt: true, startedAt: true, completedAt: true,
+        leaseOwner: true, leaseExpiresAt: true, heartbeatAt: true,
+        errorCode: true, errorMessage: true, errorRetryable: true,
       },
     })
+    const asyncDirectorDiagnosticReceipt = {
+      fixtureScope: 'real-director-worker-diagnostic',
+      operation: {
+        id: asyncDirectorSettlement.id,
+        status: asyncDirectorSettlement.status,
+        phase: asyncDirectorSettlement.phase,
+        attempt: asyncDirectorSettlement.attempt,
+        maxAttempts: asyncDirectorSettlement.maxAttempts,
+        retryable: asyncDirectorSettlement.retryable,
+        nextAttemptAt: asyncDirectorSettlement.nextAttemptAt,
+        startedAt: asyncDirectorSettlement.startedAt,
+        completedAt: asyncDirectorSettlement.completedAt,
+        leaseOwner: asyncDirectorSettlement.leaseOwner,
+        leaseExpiresAt: asyncDirectorSettlement.leaseExpiresAt,
+        heartbeatAt: asyncDirectorSettlement.heartbeatAt,
+        error: {
+          code: diagnosticCode(asyncDirectorSettlement.errorCode),
+          retryable: asyncDirectorSettlement.errorRetryable,
+          message: diagnosticMessage(asyncDirectorSettlement.errorMessage),
+        },
+      },
+      observedCalls: asyncDirectorDiagnostics,
+    }
+    console.log(JSON.stringify(asyncDirectorDiagnosticReceipt))
     assert.deepEqual(asyncDirectorOutcome, {
       operationId: asyncDirectorEnqueued.data.operation.id,
       status: 'succeeded',
-    }, JSON.stringify(asyncDirectorSettlement))
+    }, JSON.stringify(asyncDirectorDiagnosticReceipt))
     const storedAsyncOperation = await client.v2PublicOperation.findUniqueOrThrow({
       where: { id: asyncDirectorEnqueued.data.operation.id },
       include: { projectDirectorRun: { include: { directorRun: true } } },
@@ -1416,18 +1628,11 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(storedAsyncOperation.projectDirectorRun.resultVersionId, allocatedResultVersionId)
     assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.operationId, storedAsyncOperation.id)
     assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.resultVersionId, allocatedResultVersionId)
-    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.objective, 'sale')
-    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.objectiveVersion, 2)
-    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.rubricRef, 'conversion-sale/v1')
-    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.supersedesRunId, directorApplied.data.directorRun.id)
-    const persistedDesiredAction = JSON.parse(storedAsyncOperation.projectDirectorRun.desiredActionJson)
-    assert.deepEqual(persistedDesiredAction, {
-      schemaVersion: 1,
-      kind: 'buy',
-      destination: { type: 'url', value: 'https://example.com/checkout' },
-      visualCta: 'Garanta sua vaga',
-      disclosures: ['Oferta sujeita a disponibilidade.'],
-    })
+    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.objective, 'discovery')
+    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.objectiveVersion, 1)
+    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.rubricRef, 'awareness-discovery/v1')
+    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.supersedesRunId, null)
+    assert.equal(storedAsyncOperation.projectDirectorRun.desiredActionJson, null, 'same-direction operation inherits its existing action instead of recording a replacement')
     const [storedStorySnapshot, storedEditPlanSnapshot] = await Promise.all([
       client.v2ProjectSnapshot.findUniqueOrThrow({
         where: { id: storedAsyncOperation.projectDirectorRun.directorRun.storySnapshotId },
@@ -1438,17 +1643,22 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     ])
     const storedStoryPlan = JSON.parse(storedStorySnapshot.contentJson)
     const storedEditPlan = JSON.parse(storedEditPlanSnapshot.contentJson)
+    const persistedDesiredAction = parseDesiredAction(storedStoryPlan.desiredActionRef.action, 'discovery')
+    assert.deepEqual(persistedDesiredAction, currentDesiredAction)
     assert.deepEqual(storedStoryPlan.desiredActionRef.action, persistedDesiredAction)
     assert.equal(storedStoryPlan.desiredActionRef.actionHash.length, 64)
     assert.equal(storedEditPlan.desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
     assert.equal(storedEditPlan.subtitleTracks[0].desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
+    assert.equal(storedEditPlan.overlayTracks.length, 1)
     assert.equal(storedEditPlan.overlayTracks[0].desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
-    assert.equal(storedEditPlan.overlayTracks[0].text, 'Garanta sua vaga')
+    assert.equal(storedEditPlan.overlayTracks[0].text, currentDesiredAction.visualCta)
+    assert.equal(currentDesiredAction.visualCta, 'Continue assistindo')
     const storedAsyncVersion = await client.v2ProjectVersion.findUniqueOrThrow({
       where: { id: allocatedResultVersionId },
       include: { briefSnapshot: true },
     })
     const compiledBriefSnapshot = JSON.parse(storedAsyncVersion.briefSnapshot.contentJson)
+    assert.deepEqual(parseDesiredAction(compiledBriefSnapshot.desiredAction, 'discovery'), persistedDesiredAction)
     assert.equal(storedAsyncVersion.briefSnapshot.schemaVersion, 3)
     assert.equal(compiledBriefSnapshot.briefCompilation.audit.promptVersion, 'brief-compiler/v1')
     assert.equal(compiledBriefSnapshot.briefCompilation.audit.modelId, 'apollo-evidence-bound-brief-compiler')
@@ -1464,6 +1674,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     const compiledWorkspace = await compiledWorkspaceResponse.json()
     assert.equal(compiledWorkspaceResponse.status, 200, JSON.stringify(compiledWorkspace))
+    assert.equal(compiledWorkspace.data.directorRuns.at(-1).qualityStatus, 'review-required')
     assert.equal(
       compiledWorkspace.data.brief.briefCompilation.audit.outputHash,
       compiledBriefSnapshot.briefCompilation.audit.outputHash,
@@ -1476,27 +1687,47 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(qualityResponse.status, 200, JSON.stringify(qualityRead))
     assert.equal(qualityRead.data.qualityReport.directorRunId, storedAsyncOperation.projectDirectorRun.directorRun.id)
     assert.equal(qualityRead.data.qualityReport.projectId, projectId)
-    assert.equal(qualityRead.data.qualityReport.objective, 'sale')
-    assert.equal(qualityRead.data.qualityReport.objectiveVersion, 2)
-    assert.equal(qualityRead.data.qualityReport.rubricRef, 'conversion-sale/v1')
-    assert.equal(qualityRead.data.qualityReport.qualitySnapshot.contentSchemaVersion, 2)
+    assert.equal(qualityRead.data.qualityReport.objective, 'discovery')
+    assert.equal(qualityRead.data.qualityReport.objectiveVersion, 1)
+    assert.equal(qualityRead.data.qualityReport.rubricRef, 'awareness-discovery/v1')
+    assert.equal(qualityRead.data.qualityReport.qualitySnapshot.contentSchemaVersion, 3)
     assert.match(qualityRead.data.qualityReport.qualitySnapshot.contentHash, /^[a-f0-9]{64}$/)
-    assert.equal(qualityRead.data.qualityReport.report.schemaVersion, 'director-quality-report/v2')
+    assert.equal(qualityRead.data.qualityReport.report.schemaVersion, 'director-quality-report/v3')
+    assert.equal(qualityRead.data.qualityReport.report.status, 'review-required')
+    assert.equal(qualityRead.data.qualityReport.report.hardChecks.subtitlesFaceSafe, false)
+    assert.deepEqual(qualityRead.data.qualityReport.report.faceSafety, {
+      status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [],
+    })
+    const persistedQualitySnapshot = await client.v2ProjectSnapshot.findUniqueOrThrow({
+      where: { id: storedAsyncOperation.projectDirectorRun.directorRun.qualitySnapshotId },
+    })
+    assert.equal(persistedQualitySnapshot.schemaVersion, 3)
+    assert.equal(JSON.parse(persistedQualitySnapshot.contentJson).status, 'review-required')
     assert.equal(
       qualityRead.data.qualityReport.report.desiredActionRef.id,
       storedStoryPlan.desiredActionRef.id,
     )
     assert.equal(qualityRead.data.qualityReport.report.strategic.schemaVersion, 'strategic-quality-report/v1')
-    assert.equal(qualityRead.data.qualityReport.report.strategic.rubric.objective, 'sale')
+    assert.equal(qualityRead.data.qualityReport.report.strategic.rubric.objective, 'discovery')
     assert.equal(qualityRead.data.qualityReport.report.strategic.rubric.purpose, 'editorial-quality-proxy')
     assert.equal(qualityRead.data.qualityReport.report.strategic.passed, true)
     assert.deepEqual(qualityRead.data.qualityReport.report.strategic.gateFailures, [])
-    assert.equal(qualityRead.data.qualityReport.report.strategic.evidence.length, 8)
-    assert.equal(qualityRead.data.qualityReport.report.strategic.evidence.some((item) => item.criterionId === 'cta-clarity'), true)
-    assert.equal(qualityRead.data.qualityReport.report.strategic.evidence.some((item) => item.criterionId === 'rights-compliance'), true)
-    const projectAfterObjectiveChange = await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })
-    assert.equal(projectAfterObjectiveChange.currentVersionId, allocatedResultVersionId)
-    assert.equal(projectAfterObjectiveChange.objective, 'sale')
+    assert.deepEqual(
+      qualityRead.data.qualityReport.report.strategic.evidence.map((item) => ({
+        criterionId: item.criterionId, weight: item.weight,
+      })),
+      [
+        { criterionId: 'hook-clarity', weight: .35 },
+        { criterionId: 'problem-recognition', weight: .25 },
+        { criterionId: 'trust-building', weight: .10 },
+        { criterionId: 'narrative-integrity', weight: .15 },
+        { criterionId: 'legibility', weight: .10 },
+        { criterionId: 'rights-compliance', weight: .05 },
+      ],
+    )
+    const projectAfterSameDirection = await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })
+    assert.equal(projectAfterSameDirection.currentVersionId, allocatedResultVersionId)
+    assert.equal(projectAfterSameDirection.objective, 'discovery')
     const asyncDirectorReplayResponse = await enqueueAsyncDirector()
     const asyncDirectorReplay = await asyncDirectorReplayResponse.json()
     assert.equal(asyncDirectorReplayResponse.status, 202, JSON.stringify(asyncDirectorReplay))
@@ -1584,14 +1815,13 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         body: JSON.stringify({
           name: `F1.007 ${label}`,
           objective: 'discovery',
-          format: '9:16',
           locale: 'pt-BR',
           ...(briefing === undefined ? {} : { briefing }),
         }),
       })
       const payload = await response.json()
       assert.equal(response.status, 201, `${JSON.stringify(payload)}\n${serverLogs.slice(-4_000)}`)
-      return payload.data.project.id
+      return payload.data.projectAtCreation.id
     }
 
     const briefingCases = [
@@ -1667,7 +1897,6 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       body: JSON.stringify({
         name: 'F1.007 trust boundary forgery',
         objective: 'discovery',
-        format: '9:16',
         productionBrief: { ownerInput: { trust: 'owner-authorized' } },
       }),
     })
@@ -1683,7 +1912,6 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       server.kill()
       await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
     }
-    await cleanup()
     await client.$disconnect()
   }
 })

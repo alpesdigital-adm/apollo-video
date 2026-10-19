@@ -1,14 +1,18 @@
 import { Prisma, type PrismaClient, type V2ProjectVersion } from '../../../../generated/prisma-v2/index.js'
 import type { ProjectSubtitleConfigurationRepository, ProjectSubtitleConfigurationResult } from '../../application/ports/project-subtitle-configuration-repository.ts'
-import { type ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createProjectSubtitleConfiguration, parseProjectSubtitleConfigurationImpact, type ProjectSubtitleConfiguration } from '../../domain/project-subtitle-configuration.ts'
-import { createProjectVersion } from '../../domain/project-version.ts'
+import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { renderOutputReferences } from '../../domain/output-variant-references.ts'
+import { childCommandOf } from '../../domain/project-output-state-transition.ts'
+import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { SUBTITLE_PRESETS, validateSubtitlePreset, type SubtitleModeRequest, type SubtitlePresetId } from '../../domain/subtitle-system.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 const include = Prisma.validator<Prisma.V2ProjectSubtitleConfigurationInclude>()({ command: true, resultVersion: true })
 type Stored = Prisma.V2ProjectSubtitleConfigurationGetPayload<{ include: typeof include }>
@@ -18,9 +22,8 @@ function parse(value: string, field: string): Record<string, unknown> {
   catch { throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`) }
 }
 function version(row: V2ProjectVersion) {
-  return createProjectVersion({ id: row.id, workspaceId: row.workspaceId, projectId: row.projectId, sequence: row.sequence, ...(row.parentVersionId ? { parentVersionId: row.parentVersionId } : {}), snapshotRefs: { brief: row.briefSnapshotId, ...(row.treatmentSnapshotId ? { treatment: row.treatmentSnapshotId } : {}), ...(row.storySnapshotId ? { story: row.storySnapshotId } : {}), editPlan: row.editPlanSnapshotId, policies: row.policiesSnapshotId }, baseHash: row.baseHash, createdBy: row.createdBy, ...(row.commandId ? { commandId: row.commandId } : {}), createdAt: row.createdAt.toISOString() })
+  return hydrateProjectVersionRowV3(row)
 }
-function commandAuditData(audit: Readonly<ApiAccessAuditContext> | undefined) { return audit ? { actorCredentialId: audit.credentialId, actorEnvironment: audit.environment, actorAuthenticationKind: audit.authenticationKind, actorContextHash: audit.contextHash, actorDelegatedIdentityId: audit.delegatedIdentityId, actorWorkspaceRole: audit.workspaceRole } : {} }
 
 /** Rebuilds the stored configuration through its own constructor: a hand-edited row cannot survive. */
 function configurationOf(row: Pick<Stored, 'configurationJson' | 'configurationHash' | 'workspaceId' | 'projectId' | 'variantId' | 'requestedMode' | 'resolvedPresetId' | 'resolvedPresetHash' | 'origin' | 'transcriptHash' | 'workspaceDefaultRevision' | 'action' | 'previousConfigurationId'>): Readonly<ProjectSubtitleConfiguration> {
@@ -51,6 +54,7 @@ function hydrate(row: Stored, replayed: boolean): Readonly<ProjectSubtitleConfig
   const payload = parse(commandRow.payloadJson, 'subtitle command payload') as unknown as ProjectSubtitleConfigurationResult['command']['payload']
   const command = createEditCommand({ id: commandRow.id, workspaceId: commandRow.workspaceId, projectId: commandRow.projectId, baseVersionId: commandRow.baseVersionId, baseHash: commandRow.baseHash, author: { type: commandRow.actorType as 'api-client', id: commandRow.actorId, ...(commandRow.delegatedUserId ? { delegatedUserId: commandRow.delegatedUserId } : {}) }, type: requireEditCommandType(commandRow.type), scope: parse(commandRow.scopeJson, 'subtitle command scope') as EditScope, payload, ...(commandRow.reason ? { reason: commandRow.reason } : {}), idempotencyKey: commandRow.idempotencyKey, createdAt: commandRow.createdAt.toISOString() })
   const resultVersion = version(row.resultVersion)
+  if (commandRow.commandHash !== command.commandHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored subtitle command seal is invalid')
   if (
     impact.impactHash !== row.impactHash
     || stableSerialize(impact) !== row.impactJson
@@ -97,9 +101,12 @@ export class PrismaProjectSubtitleConfigurationRepository implements ProjectSubt
     return { currentConfiguration, previousConfiguration: configurationOf(previousRow), currentRow }
   }
   async readContext(input: { workspaceId: string; projectId: string; variantId: string; requested?: SubtitleModeRequest }) {
-    const project = await this.client.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, include: { currentVersion: { include: { editPlanSnapshot: true, policiesSnapshot: true } } } })
+    const project = await this.client.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, include: { currentVersion: { include: { policiesSnapshot: true } } } })
     if (!project?.currentVersion) return null
-    const editPlan = parse(project.currentVersion.editPlanSnapshot.contentJson, 'subtitle EditPlan')
+    const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersion.id })
+    if (!parent) return null
+    const currentVersionId = parent.version.id
+    const editPlan = parse(operationalBundlePlanV3(parent).contentJson, 'subtitle EditPlan')
     const policies = parse(project.currentVersion.policiesSnapshot.contentJson, 'subtitle policies')
     const transcript = editPlan.retimedTranscript ?? editPlan.transcript
     const tracks = editPlan.subtitleTracks
@@ -108,34 +115,42 @@ export class PrismaProjectSubtitleConfigurationRepository implements ProjectSubt
     const durationFrames = Number(editPlan.durationFrames)
     if (transcript === undefined || !Number.isSafeInteger(durationFrames) || durationFrames < 0) throw new DomainError('PERSISTENCE_CONFLICT', 'Subtitle render context is incomplete')
     const [proxy, final, chain] = await Promise.all([
-      this.client.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true } }),
-      this.client.v2ProjectFinalExportOperation.findMany({ where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true, outputAspectRatio: true } }),
+      this.client.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true, outputVariantId: true } }),
+      this.client.v2ProjectFinalExportOperation.findMany({ where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true } }),
       this.readHeadChain({ workspaceId: input.workspaceId, projectId: input.projectId, variantId: input.variantId }),
     ])
     const workspaceDefault = readWorkspaceDefault(policies)
     if (input.requested?.mode === 'workspace-default' && !workspaceDefault) throw new DomainError('PERSISTENCE_CONFLICT', 'Workspace subtitle default is not configured with an immutable version')
-    return Object.freeze({ currentVersion: version(project.currentVersion), transcript, directorPresetId: directorPresetId as SubtitlePresetId, ...(workspaceDefault ? { workspaceDefault } : {}), durationFrames, outputReferences: Object.freeze([...proxy.map(x => Object.freeze({ artifactId: x.outputArtifactId, kind: 'proxy' as const, sourceVersionId: project.currentVersion!.id, variantId: project.format ?? input.variantId })), ...final.map(x => Object.freeze({ artifactId: x.outputArtifactId, kind: 'final' as const, sourceVersionId: project.currentVersion!.id, variantId: x.outputAspectRatio }))]), currentConfiguration: chain.currentConfiguration, previousConfiguration: chain.previousConfiguration })
+    return Object.freeze({ parent, transcript, directorPresetId: directorPresetId as SubtitlePresetId, ...(workspaceDefault ? { workspaceDefault } : {}), durationFrames, outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: currentVersionId, proxies: proxy, finals: final }), currentConfiguration: chain.currentConfiguration, previousConfiguration: chain.previousConfiguration })
   }
   async readCurrent(input: { workspaceId: string; projectId: string; variantId: string }) {
     const chain = await this.readHeadChain(input)
     return chain.currentRow ? hydrate(chain.currentRow, false) : null
   }
   async commitOrReplay(input: Parameters<ProjectSubtitleConfigurationRepository['commitOrReplay']>[0], attempt = 1): Promise<Readonly<ProjectSubtitleConfigurationResult>> {
+    const sealed = childCommandOf<ProjectSubtitleConfigurationResult['command']['payload']>(input.bundle)
+    const command = sealed.command, requestFingerprint = sealed.requestFingerprint, version = input.bundle.version
+    if (
+      command.type !== 'set-project-subtitle-mode' || version.commandId !== command.id || input.configuration.commandId !== command.id ||
+      input.configuration.resultVersionId !== version.id || input.configuration.baseVersionId !== command.baseVersionId ||
+      input.configuration.workspaceId !== command.workspaceId || input.configuration.projectId !== command.projectId ||
+      version.parentVersionId !== command.baseVersionId
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Subtitle configuration does not belong to the Command that produced its Version')
     try {
       return await this.client.$transaction(async tx => {
-        const project = await tx.v2Project.findFirst({ where: { id: input.command.projectId, workspaceId: input.command.workspaceId }, include: { currentVersion: true } })
-        if (!project?.currentVersion || project.currentVersion.id !== input.command.baseVersionId || project.currentVersion.baseHash !== input.command.baseHash || input.version.sequence !== project.currentVersion.sequence + 1) throw new DomainError('VERSION_CONFLICT', 'Project changed before subtitle configuration commit')
+        const project = await tx.v2Project.findFirst({ where: { id: command.projectId, workspaceId: command.workspaceId }, include: { currentVersion: true } })
+        if (!project?.currentVersion || project.currentVersion.id !== command.baseVersionId || project.currentVersion.baseHash !== command.baseHash || version.sequence !== project.currentVersion.sequence + 1 || input.bundle.state.document.parentStateHash !== project.currentVersion.outputStateHash) throw new DomainError('VERSION_CONFLICT', 'Project changed before subtitle configuration commit')
         const head = await tx.v2ProjectSubtitleConfigurationHead.findUnique({ where: { projectId_workspaceId_variantId: { projectId: input.configuration.projectId, workspaceId: input.configuration.workspaceId, variantId: input.configuration.variantId } } })
         if ((head?.configurationId ?? null) !== input.configuration.previousConfigurationId) throw new DomainError('VERSION_CONFLICT', 'Subtitle configuration head changed before commit')
-        await tx.v2EditCommand.create({ data: { id: input.command.id, workspaceId: input.command.workspaceId, projectId: input.command.projectId, baseVersionId: input.command.baseVersionId, baseHash: input.command.baseHash, type: input.command.type, scopeJson: stableSerialize(input.command.scope), payloadJson: stableSerialize(input.command.payload), reason: input.command.reason, actorType: input.command.author.type, actorId: input.command.author.id, delegatedUserId: input.command.author.delegatedUserId, ...commandAuditData(input.authenticationAudit), idempotencyKey: input.command.idempotencyKey, requestFingerprint: input.requestFingerprint, createdAt: new Date(input.command.createdAt) } })
-        await tx.v2ProjectVersion.create({ data: { id: input.version.id, workspaceId: input.version.workspaceId, projectId: input.version.projectId, sequence: input.version.sequence, parentVersionId: input.version.parentVersionId, briefSnapshotId: input.version.snapshotRefs.brief!, treatmentSnapshotId: input.version.snapshotRefs.treatment, storySnapshotId: input.version.snapshotRefs.story, editPlanSnapshotId: input.version.snapshotRefs.editPlan, policiesSnapshotId: input.version.snapshotRefs.policies, baseHash: input.version.baseHash, createdBy: input.version.createdBy, commandId: input.command.id, createdAt: new Date(input.version.createdAt) } })
+        await commitProjectVersionWithOutputState(tx, input.bundle)
         await tx.v2ProjectSubtitleConfiguration.create({ data: { id: input.configuration.id, workspaceId: input.configuration.workspaceId, projectId: input.configuration.projectId, commandId: input.configuration.commandId, baseVersionId: input.configuration.baseVersionId, resultVersionId: input.configuration.resultVersionId, variantId: input.configuration.variantId, action: input.configuration.action, previousConfigurationId: input.configuration.previousConfigurationId, requestedMode: input.configuration.requested.mode, resolvedPresetId: input.configuration.resolved.enabled ? input.configuration.resolved.presetId : null, resolvedPresetHash: input.configuration.resolved.enabled ? input.configuration.resolved.presetHash : null, origin: input.configuration.origin, transcriptHash: input.configuration.transcriptHash, workspaceDefaultRevision: input.configuration.workspaceDefaultRevision, configurationJson: stableSerialize(input.configuration), configurationHash: input.configuration.configurationHash, impactJson: stableSerialize(input.impact), impactHash: input.impact.impactHash, createdAt: new Date(input.configuration.createdAt) } })
         await tx.v2ProjectSubtitleConfigurationHead.upsert({ where: { projectId_workspaceId_variantId: { projectId: input.configuration.projectId, workspaceId: input.configuration.workspaceId, variantId: input.configuration.variantId } }, create: { projectId: input.configuration.projectId, workspaceId: input.configuration.workspaceId, variantId: input.configuration.variantId, configurationId: input.configuration.id, updatedAt: new Date(input.configuration.createdAt) }, update: { configurationId: input.configuration.id, updatedAt: new Date(input.configuration.createdAt) } })
-        const updated = await tx.v2Project.updateMany({ where: { id: input.command.projectId, workspaceId: input.command.workspaceId, currentVersionId: input.command.baseVersionId }, data: { currentVersionId: input.version.id } }); if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project changed during subtitle configuration commit')
+        const updated = await tx.v2Project.updateMany({ where: { id: command.projectId, workspaceId: command.workspaceId, currentVersionId: command.baseVersionId }, data: { currentVersionId: version.id } }); if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project changed during subtitle configuration commit')
+        await settleDeferredOutputGuards(tx)
         return hydrate(await tx.v2ProjectSubtitleConfiguration.findUniqueOrThrow({ where: { id_workspaceId: { id: input.configuration.id, workspaceId: input.configuration.workspaceId } }, include }), false)
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') { const replay = await this.findIdempotent({ workspaceId: input.command.workspaceId, projectId: input.command.projectId, idempotencyKey: input.command.idempotencyKey }); if (replay?.requestFingerprint === input.requestFingerprint) return replay.result; if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was reused with another subtitle configuration') }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') { const replay = await this.findIdempotent({ workspaceId: command.workspaceId, projectId: command.projectId, idempotencyKey: command.idempotencyKey }); if (replay?.requestFingerprint === requestFingerprint) return replay.result; if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was reused with another subtitle configuration') }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 3) return this.commitOrReplay(input, attempt + 1)
       throw error
     }

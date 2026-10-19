@@ -5,6 +5,7 @@ import type {
   CommandImpactRange,
 } from './command-impact.ts'
 import { assertDomain } from './errors.ts'
+import { assertRendersBelongToVariants, isProxyRenderFromStart, projectWideProxyRenders, projectWideVariantIds } from './project-wide-render-impact.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const SHA = /^[a-f0-9]{64}$/
@@ -51,7 +52,8 @@ export function createProjectColorPlanImpact(input: {
   colorPlanHash: string
   compiledManifestHash: string
   durationFrames: number
-  proxyVariantId: string
+  /** Every output of the project (the stable variant ids of its State): a ColorPlan changes the plan they all re-materialize from. */
+  variantIds: readonly string[]
   outputReferences: readonly Readonly<CommandImpactOutputReference>[]
 }): Readonly<ProjectColorPlanImpactV1> {
   assertDomain(
@@ -60,6 +62,7 @@ export function createProjectColorPlanImpact(input: {
     'durationFrames is invalid',
   )
   const baseVersionId = id(input.baseVersionId, 'baseVersionId')
+  const variantIds = projectWideVariantIds(input.variantIds, input.durationFrames > 0)
   assertDomain(
     input.durationFrames > 0 || input.outputReferences.length === 0,
     'INVALID_ARGUMENT',
@@ -79,6 +82,7 @@ export function createProjectColorPlanImpact(input: {
       variantId: id(output.variantId, `outputReferences[${index}].variantId`),
     })
   }).sort((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
+  assertRendersBelongToVariants(outputs, variantIds)
   const range = input.durationFrames > 0
     ? Object.freeze({ startFrame: 0, endFrame: input.durationFrames })
     : undefined
@@ -96,11 +100,7 @@ export function createProjectColorPlanImpact(input: {
     affectedRanges: Object.freeze(range ? [range] : []),
     affectedVariantIds: Object.freeze([...new Set(outputs.map((output) => output.variantId))].sort()),
     affectedArtifacts: Object.freeze(outputs),
-    minimalRenders: Object.freeze(range ? [Object.freeze({
-      kind: 'proxy' as const,
-      variantId: id(input.proxyVariantId, 'proxyVariantId'),
-      ranges: Object.freeze([range]),
-    })] : []),
+    minimalRenders: projectWideProxyRenders(variantIds, range),
     renderSemanticsChanged: true as const,
     renderDeferredUntilTimeline: input.durationFrames === 0,
   })
@@ -111,7 +111,12 @@ export function parseProjectColorPlanImpact(value: unknown): Readonly<ProjectCol
   assertDomain(value !== null && typeof value === 'object' && !Array.isArray(value), 'PERSISTENCE_CONFLICT', 'Stored project ColorPlan impact is invalid')
   const impact = value as ProjectColorPlanImpactV1
   const range = impact.affectedRanges?.[0]
-  const minimal = impact.minimalRenders?.[0]
+  const minimalRenders: readonly unknown[] = Array.isArray(impact.minimalRenders) ? impact.minimalRenders : []
+  assertDomain(
+    minimalRenders.every((render) => isProxyRenderFromStart(render)),
+    'PERSISTENCE_CONFLICT',
+    'Stored project ColorPlan impact minimal renders are invalid',
+  )
   const recreated = createProjectColorPlanImpact({
     commandId: impact.commandId,
     baseVersionId: impact.baseVersionId,
@@ -120,7 +125,7 @@ export function parseProjectColorPlanImpact(value: unknown): Readonly<ProjectCol
     colorPlanHash: impact.colorPlanHash,
     compiledManifestHash: impact.compiledManifestHash,
     durationFrames: impact.renderDeferredUntilTimeline ? 0 : range?.endFrame ?? -1,
-    proxyVariantId: impact.renderDeferredUntilTimeline ? 'deferred' : minimal?.variantId ?? '',
+    variantIds: impact.renderDeferredUntilTimeline ? [] : minimalRenders.map((render) => (render as { variantId: string }).variantId),
     outputReferences: impact.affectedArtifacts ?? [],
   })
   assertDomain(stableSerialize(recreated) === stableSerialize(impact), 'PERSISTENCE_CONFLICT', 'Stored project ColorPlan impact is inconsistent')

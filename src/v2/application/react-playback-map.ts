@@ -50,6 +50,8 @@ import {
   type RenderablePlanSeam,
 } from './renderable-edit-plan.ts'
 import type { SyncActor } from './sync-diagnostic.ts'
+import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
+import { renderableCompileAuthor, renderableCompileVersionId } from './compile-renderable-plan-version.ts'
 
 /**
  * The react playback map at runtime (F4.015 / FR-153).
@@ -1126,11 +1128,18 @@ export function compileReactPlaybackPlanService(dependencies: {
     /** The map version the caller read, as `<sessionId>:playback:<trackId>:v<n>`. */
     baseVersionId: string
     baseHash: string
+    /**
+     * The project head the plan is compiled on. The plan is born with that head's child (a `compile-renderable-plan` Version), so
+     * the plan it answers names the child, and a retry on the same head replays the stored plan even after the head moved.
+     */
     projectVersionId: string
     objective: StrategicObjectiveId
     desiredAction?: Readonly<DesiredActionInput>
     planFps: Rational
+    /** The credential audit of an external (api-client) actor; the Command that creates the Version carries it. */
+    audit?: Readonly<ApiAccessAuditContext>
   }): Promise<Readonly<ReactPlaybackPlanResult>> => {
+    const compiler = renderableCompileAuthor({ workspaceId: input.actor.workspaceId, actor: input.actor, audit: input.audit ?? null })
     const map = await dependencies.repository.readHead({
       workspaceId: input.actor.workspaceId,
       sessionId: input.sessionId,
@@ -1281,7 +1290,8 @@ export function compileReactPlaybackPlanService(dependencies: {
       session,
       measured,
       artifactByAssetId,
-      projectVersionId: input.projectVersionId,
+      projectVersionId: renderableCompileVersionId({ workspaceId: map.workspaceId, projectId: session.projectId, origin: 'react-playback',
+        sourceId: map.mapId, sourceHash: map.mapHash, baseVersionId: input.projectVersionId }),
       objective: input.objective,
       ...(input.desiredAction ? { desiredAction: input.desiredAction } : {}),
       planFps: input.planFps,
@@ -1299,6 +1309,9 @@ export function compileReactPlaybackPlanService(dependencies: {
         plan,
       }),
       createdAt,
+      baseVersionId: input.projectVersionId,
+      author: compiler.author,
+      audit: compiler.audit,
     })
     return Object.freeze({
       plan: persisted.snapshot.plan,

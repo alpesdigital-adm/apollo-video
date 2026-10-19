@@ -1,0 +1,132 @@
+import { DomainError } from '../domain/errors.ts'
+import type { OutputAspectRatio } from '../domain/output-spec.ts'
+import {
+  validateRenderPlacementPlan,
+  type RenderPlacementRequestV1,
+} from '../domain/render-placement-plan.ts'
+import { validateRenderReframePlan } from '../domain/render-reframe-plan.ts'
+import { emittedSubtitleTracks } from '../domain/subtitle-emission-tracks.ts'
+import {
+  requireSubtitlePresetSnapshot,
+  SUBTITLE_STYLE_REGISTRY,
+  subtitlePresetHash,
+} from '../domain/subtitle-system.ts'
+import { planCaptionPlacement, type CaptionPlacementInput } from './plan-caption-placement.ts'
+import type { FaceSourceWindowEvidenceReader } from './ports/face-source-window-evidence-reader.ts'
+import type { ProjectProxyRenderSource } from './ports/project-proxy-render-repository.ts'
+
+/**
+ * The single authority for the geometry an editorial render draws: which caption cues are burned
+ * in, which CTA overlays are drawn, the content-addressed placement plan (with the subtitle anchor
+ * plan decided from the sealed face windows of the sources the cues play) and the persisted reframe plan.
+ *
+ * The proxy render worker and the final export worker both derive it here, from the same sealed
+ * source (the persisted EditPlan, its subtitle resolution, its trusted OCR envelope and its reframe
+ * plan) and from the same planner, so an approved proxy and the final cut made from it cannot
+ * disagree about what is on screen. Nothing is invented: when a plan cannot be derived the call
+ * throws `INVALID_RENDER_INPUT` and the caller must not render, and the renderer keeps refusing
+ * cues that arrive without the plan.
+ *
+ * Only the canvas differs between callers (the proxy canvas of the format, the OutputSpec canvas of
+ * a final), because the placement plan is content-addressed against the pixels it will be drawn on.
+ *
+ * The placement is decided by `planCaptionPlacement` (W65/W65b): the caption bands are judged against the
+ * source-to-canvas projection of THIS render's clips and the face evidence of each source, keyed by the
+ * source's own frames. `uncertifiedCues` is what a cue that cannot be certified costs: `block` (the default)
+ * or, under the final's rule, `omit-and-list`.
+ */
+export async function deriveEditorialRenderGeometry(input: Readonly<{
+  source: Pick<
+    ProjectProxyRenderSource,
+    'editPlan' | 'format' | 'trustedOcr' | 'subtitleResolution' | 'reframePlan' | 'renderSources' | 'sourceArtifactId'
+  >
+  canvas: Readonly<{ width: number; height: number }>
+  workspaceId: string
+  /** The project being rendered: it reads the face evidence (the source must be attached to it) under its own locale. */
+  projectId: string
+  clips: CaptionPlacementInput['clips']
+  composition?: CaptionPlacementInput['composition']
+  faceEvidence?: FaceSourceWindowEvidenceReader
+  clock: () => Date
+  uncertifiedCues?: CaptionPlacementInput['uncertifiedCues']
+}>) {
+  const { source } = input
+  const cueTracks = emittedSubtitleTracks(source.editPlan.subtitleTracks).filter(
+    (track) => track.cues.length > 0,
+  )
+  const subtitleResolution = source.subtitleResolution
+  // An explicitly disabled style must never leak the EditPlan's cues into FFmpeg.
+  // A renderable snapshot can have cues without a style resolution; its persisted
+  // track preset only reserves geometry for the review plan.
+  const subtitleCues = subtitleResolution?.enabled === false
+    ? [] : cueTracks.flatMap((track) => track.cues)
+  const subtitlePresetId = subtitleResolution?.enabled
+    ? subtitleResolution.presetId : subtitleCues.length ? cueTracks[0]?.presetId : null
+  if (subtitleCues.length && (!subtitlePresetId || cueTracks.some(
+    (track) => track.presetId !== subtitlePresetId,
+  ))) throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle cues require one consistent persisted preset')
+  const ctaOverlays = (source.editPlan.overlayTracks ?? []).filter(
+    (track) => 'kind' in track && track.kind === 'cta',
+  )
+  const durationFrames = source.editPlan.durationFrames
+  if (subtitleResolution?.enabled) {
+    // Fail closed on coherence between the identity the resolution carries and the tokens it
+    // carries. When the resolution names the *current* registry, the tokens must still be the
+    // ones the registry holds; when it names an older one, the content-addressed snapshot is
+    // the authority and the render reproduces what it was compiled to draw (FR-172).
+    if (!subtitleResolution.presetSnapshot) {
+      throw new DomainError('INVALID_RENDER_INPUT', 'Enabled subtitle resolution carries no materialized preset snapshot')
+    }
+    const snapshot = requireSubtitlePresetSnapshot(subtitleResolution.presetSnapshot)
+    if (snapshot.presetId !== subtitleResolution.presetId || snapshot.presetHash !== subtitleResolution.presetHash ||
+        snapshot.registryHash !== subtitleResolution.registryHash) {
+      throw new DomainError('INVALID_RENDER_INPUT', 'Persisted subtitle preset snapshot does not match its resolution')
+    }
+    if (subtitleResolution.registryHash === SUBTITLE_STYLE_REGISTRY.registryHash &&
+        subtitleResolution.presetHash !== subtitlePresetHash(subtitleResolution.presetId)) {
+      throw new DomainError('INVALID_RENDER_INPUT', 'Persisted subtitle resolution drifted from the subtitle style registry')
+    }
+  }
+  const reframePlan = source.reframePlan
+  if (reframePlan) {
+    validateRenderReframePlan(reframePlan)
+    if (
+      reframePlan.variantId !== source.format ||
+      reframePlan.format !== source.format ||
+      reframePlan.durationFrames !== durationFrames ||
+      Math.abs(reframePlan.fps - source.editPlan.fps) > 0.01
+    ) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted reframe plan does not describe this render')
+  }
+  const placementElements: RenderPlacementRequestV1[] = ctaOverlays.map((overlay, index) => ({
+    id: `cta-${index}-${overlay.id ?? index}`.slice(0, 96),
+    kind: 'cta' as const, anchor: 'auto' as const, priority: 80, readingOrder: index,
+    minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.5,
+    timeRange: { startFrame: overlay.startFrame, endFrame: overlay.endFrame },
+  }))
+  const { placementPlan, requiredFaceWindows } = await planCaptionPlacement(
+    { clock: input.clock, ...(input.faceEvidence ? { faceEvidence: input.faceEvidence } : {}) },
+    {
+      workspaceId: input.workspaceId, projectId: input.projectId,
+      format: source.format as OutputAspectRatio,
+      canvas: { width: input.canvas.width, height: input.canvas.height },
+      editPlan: source.editPlan, clips: input.clips, ...(input.composition ? { composition: input.composition } : {}),
+      renderSources: source.renderSources.map((asset) => ({
+        artifactId: asset.artifactId, sha256: asset.sha256, mediaType: asset.mediaType, ...(asset.probe ? { probe: asset.probe } : {}),
+      })),
+      ...(reframePlan ? { reframePlan } : {}),
+      subtitleCues: subtitleCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame })),
+      // The subtitle band is reserved from the *resolved* preset, so a CTA is never solved into the rows the subtitles
+      // already own - and never from a rectangle authored here.
+      subtitlePresetId, placementElements,
+      // Only the repository-resolved, scoped OCR envelope can supply text obstacles. It does not establish facial
+      // coverage: that comes from the sealed face windows of the sources, or the cue is not drawn.
+      ...(source.trustedOcr ? { trustedOcr: source.trustedOcr } : {}),
+      primarySourceArtifactId: source.sourceArtifactId,
+      ...(input.uncertifiedCues ? { uncertifiedCues: input.uncertifiedCues } : {}),
+    },
+  )
+  validateRenderPlacementPlan(placementPlan)
+  return Object.freeze({
+    subtitleCues, subtitlePresetId, subtitleResolution, ctaOverlays, placementPlan, reframePlan, requiredFaceWindows,
+  })
+}

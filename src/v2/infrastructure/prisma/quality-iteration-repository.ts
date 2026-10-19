@@ -37,6 +37,7 @@ import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { hydrateAssetSelection } from './asset-selection-repository.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
+import { requireCriticOutputConsumption } from './critic-output-consumption.ts'
 import { hydrateProxyReview } from './proxy-review-repository.ts'
 
 type StoredQualityIteration = Prisma.V2QualityIterationGetPayload<{
@@ -518,7 +519,11 @@ function isPrismaCode(error: unknown, code: string): boolean {
 }
 
 export class PrismaQualityIterationRepository implements QualityIterationRepository {
-  constructor(private readonly client: PrismaClient = getV2PostgresClient()) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
+  }
 
   async findIdempotent(input: {
     workspaceId: string
@@ -548,6 +553,7 @@ export class PrismaQualityIterationRepository implements QualityIterationReposit
     projectVersionId: string
     proxyReviewId: string
     assetSelectionIds: readonly string[]
+    variantId?: string
   }) {
     const [project, proxyRow, selectionRows, previousRow] = await Promise.all([
       this.client.v2Project.findFirst({
@@ -584,15 +590,22 @@ export class PrismaQualityIterationRepository implements QualityIterationReposit
     if (
       !project.currentVersion ||
       !project.objective ||
-      !project.format ||
       !project.locale ||
       selectionRows.length !== input.assetSelectionIds.length
     ) {
       throw new DomainError(
         'PRECONDITION_REQUIRED',
-        'Quality iteration requires current version, objective, format and exact evidence',
+        'Quality iteration requires current version, objective, locale and exact evidence',
       )
     }
+    // The iteration scores the output of the Version the review was about. The persisted consumption reader admits that exact
+    // Version's State for the `critic` purpose (its only output, the format that output carries) or refuses with the published
+    // reason; the project's format and the head are never consulted. The context still names the head, so a stale request is
+    // told so by the application, never answered about the head.
+    const consumption = await requireCriticOutputConsumption(this.client, {
+      workspaceId: input.workspaceId, projectId: input.projectId, versionId: input.projectVersionId,
+      ...(input.variantId ? { variantId: input.variantId } : {}),
+    })
     const selectedArtifactIds = selectionRows
       .map((selection) => selection.selectedArtifactId)
       .filter((artifactId): artifactId is string => artifactId !== null)
@@ -619,7 +632,8 @@ export class PrismaQualityIterationRepository implements QualityIterationReposit
       projectVersionId: project.currentVersion.id,
       projectVersionHash: project.currentVersion.baseHash,
       objective: project.objective,
-      format: project.format,
+      format: consumption.formatId,
+      outputConsumption: Object.freeze({ sealHash: consumption.sealHash, seal: consumption.seal }),
       locale: project.locale,
       proxyReview: hydrateProxyReview(proxyRow),
       assetSelections: Object.freeze(selectionRows.map(hydrateAssetSelection)),

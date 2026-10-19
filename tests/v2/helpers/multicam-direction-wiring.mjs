@@ -2,12 +2,14 @@ import { randomUUID } from 'node:crypto'
 
 import { createExternalAuditContext } from '../../../src/v2/application/authenticate-api-client.ts'
 import { createDesiredAction, createDesiredActionReference } from '../../../src/v2/domain/desired-action.ts'
+import { childCommandOf } from '../../../src/v2/domain/project-output-state-transition.ts'
 import { createEditorialAudioTimelineHash } from '../../../src/v2/domain/production-modes.ts'
 import {
   deriveMulticamEvidenceService,
   directMulticamSessionService,
 } from '../../../src/v2/application/multicam-direction.ts'
 import { buildDirectableMulticamWorld, fixtureSeconds as sec } from '../wave20-fixtures.mjs'
+import { ingestedRecordings, worldActor } from './output-world.mjs'
 
 /**
  * The direction COMMAND, wired to in-memory doubles.
@@ -27,6 +29,19 @@ export const WORKSPACE = 'workspace-multicam'
 export const PROJECT = 'project-multicam'
 export const SESSION = 'session-multicam'
 export const CLIENT = 'client-director'
+
+// The session records five files; the project ingested the four a cut can use (three cameras and the master audio), one
+// after another. The head is the real sealed Version3/State3 of the LAST ingest, so its State observes the master audio
+// alone; the receipts the earlier ingests persisted are what a direction adopts for the cameras it cuts to.
+export const RECORDINGS = Object.freeze(['asset-cam-a', 'asset-cam-b', 'asset-screen', 'asset-master'])
+const outputWorld = await ingestedRecordings(RECORDINGS, {
+  actor: worldActor({ workspaceId: WORKSPACE, clientId: CLIENT, credentialId: 'credential-director', environment: 'sandbox' }),
+  ids: { project: PROJECT },
+  durations: Object.fromEntries(RECORDINGS.map((slug) => [slug, 300])),
+})
+export const HEAD = outputWorld.parent
+/** The receipts the earlier ingests persisted, with the rights evidence of their sources. */
+export const PERSISTED_RECEIPTS = outputWorld.adoptable
 
 export function actor(overrides = {}) {
   const identity = {
@@ -172,21 +187,12 @@ export function memoryDirections() {
   }
 }
 
-export function memoryCommands({ world, versionId = 'project-version-1', baseHash = 'a'.repeat(64), mediaLinks }) {
+export function memoryCommands({ world, mediaLinks, offered = PERSISTED_RECEIPTS }) {
   const commands = new Map()
-  const calls = { readContext: 0, commitOrReplay: 0 }
-  const currentVersion = Object.freeze({
-    schemaVersion: 1,
-    id: versionId,
-    workspaceId: WORKSPACE,
-    projectId: PROJECT,
-    sequence: 4,
-    parentVersionId: 'project-version-0',
-    snapshotRefs: Object.freeze({ brief: 'snapshot-brief', editPlan: 'snapshot-plan', policies: 'snapshot-policies' }),
-    baseHash,
-    createdBy: CLIENT,
-    createdAt: '2029-04-01T09:00:00.000Z',
-  })
+  const calls = { readContext: 0, commitOrReplay: 0, readAdoptableObservations: 0 }
+  const requested = []
+  const committed = []
+  const currentVersion = HEAD.version
   const links = mediaLinks ?? world.session.tracks.map((track) => ({
     artifactId: track.sourceAssetId,
     role: track.trackId === 'track-camera-a' ? 'source-master' : 'selected-insert',
@@ -196,7 +202,16 @@ export function memoryCommands({ world, versionId = 'project-version-1', baseHas
   }))
   return {
     calls,
+    committed,
+    requested,
     currentVersion,
+    // The persisted receipts of the recordings the cut consumes and the head State does not observe.
+    async readAdoptableObservations({ workspaceId, projectId, sourceArtifactIds }) {
+      calls.readAdoptableObservations += 1
+      requested.push([...sourceArtifactIds])
+      if (workspaceId !== WORKSPACE || projectId !== PROJECT) return []
+      return offered.filter((offer) => sourceArtifactIds.includes(offer.normalization.document.source.artifactId))
+    },
     async findIdempotentResult({ workspaceId, projectId, idempotencyKey, actorContextHash }) {
       return commands.get([workspaceId, projectId, idempotencyKey, actorContextHash].join('|')) ?? null
     },
@@ -207,27 +222,32 @@ export function memoryCommands({ world, versionId = 'project-version-1', baseHas
         workspaceId,
         projectId,
         objective: 'warming',
+        parent: HEAD,
         currentVersion,
-        currentPlan: baseDirectedPlan({ versionId }),
+        // The plan the direction re-cuts is the Director plan below, not the head's ingest plan: the world's head only
+        // lends its sealed Version and State, and the cut is sealed on top of them by `sealOnObservedSource`.
+        currentPlan: baseDirectedPlan({ versionId: currentVersion.id }),
         currentDurationFrames: 900,
-        proxyVariantId: '9:16',
+        variantIds: HEAD.state.document.entries.map((entry) => entry.variantId),
         outputReferences: Object.freeze([]),
         mediaLinks: Object.freeze(links),
       }
     },
-    async commitOrReplay(bundle) {
+    async commitOrReplay(input) {
       calls.commitOrReplay += 1
+      committed.push(input)
+      const sealed = childCommandOf(input.bundle)
       const result = Object.freeze({
-        command: bundle.command,
-        version: bundle.version,
-        editPlan: bundle.editPlan,
-        impact: bundle.command.payload.impact,
+        command: sealed.command,
+        version: input.bundle.version,
+        editPlan: input.editPlan,
+        impact: sealed.command.payload.impact,
         invalidations: Object.freeze([]),
         replayed: false,
       })
       commands.set(
-        [bundle.command.workspaceId, bundle.command.projectId, bundle.command.idempotencyKey, bundle.authenticationAudit.contextHash].join('|'),
-        { requestFingerprint: bundle.requestFingerprint, result },
+        [sealed.command.workspaceId, sealed.command.projectId, sealed.command.idempotencyKey, sealed.audit.contextHash].join('|'),
+        { requestFingerprint: sealed.requestFingerprint, result },
       )
       return result
     },
@@ -412,8 +432,8 @@ export function request(overrides = {}) {
     workspaceId: WORKSPACE,
     projectId: PROJECT,
     sessionId: SESSION,
-    baseVersionId: 'project-version-1',
-    baseHash: 'a'.repeat(64),
+    baseVersionId: HEAD.version.id,
+    baseHash: HEAD.version.baseHash,
     format: { aspectRatio: '16:9' },
     range: { sessionStartTicks: sec(1).toString(), sessionEndTicks: sec(280).toString() },
     actor: actor(),

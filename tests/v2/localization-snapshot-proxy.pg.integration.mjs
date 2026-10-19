@@ -13,9 +13,19 @@ import { createLocalizationPgFixture } from './helpers/localization-pg.mjs'
 const { resolveFfmpegBinary, resolveFfprobeBinaryPath } = await import('../../src/v2/infrastructure/media/ffmpeg-binary.ts')
 const { createLocalizationMediaRun } = await import('../../src/v2/domain/localization-media-run.ts')
 const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
+const { stableSerialize } = await import('../../src/v2/domain/canonical-hash.ts')
+const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
 const { createColorPipelineCompilationService } = await import('../../src/v2/application/color-pipeline-compilations.ts')
 const { PrismaColorPipelineCompilationRepository } = await import('../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts')
 const { PrismaLocalizationMediaRunRepository } = await import('../../src/v2/infrastructure/prisma/localization-media-run-repository.ts')
+const { PrismaProjectProxyRenderRepository } = await import('../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts')
+const { projectProxyRenderInputHash } = await import('../../src/v2/application/project-render-sources.ts')
+const { calculateVersionHash } = await import('../../src/v2/application/version-hash.ts')
+const { requirePersistedOutputConsumptionV3 } = await import('../../src/v2/infrastructure/prisma/output-state-consumption.ts')
+const { LocalArtifactSourceMaterializer } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
+const { hydratePublicOperationRecord, PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
+const { createQueuedPublicOperation } = await import('../../src/v2/domain/public-operation.ts')
+const { externalActorAuditData } = await import('../../src/v2/infrastructure/prisma/external-actor-audit.ts')
 const { createLocalizationMediaRuntime } = await import('../../src/v2/infrastructure/repository-factory.ts')
 const { authenticateApiClientService } = await import('../../src/v2/application/authenticate-api-client.ts')
 const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
@@ -56,6 +66,67 @@ const identityStages = (metadata) => [
   { id: 'output-source', kind: 'output', version: 'v1', enabled: true, output: metadata, implementation: implementation('ffmpeg-zscale', { mode: 'identity' }) },
 ]
 
+// Match Prisma's nullable relation/column defaults before any database run.
+// This validates the exact controlled operation shape through the production
+// hydrator; it does not grant authority to its synthetic source/plan values.
+function assertControlledSnapshotRowHydrates(operationData, detailData, auditHash) {
+  const record = hydratePublicOperationRecord({
+    ...operationData,
+    projectProxyRender: { ...detailData,
+      reusedFromOperationId: null, reuseCommandId: null,
+      reuseImpactHash: null, reuseBaseVersionId: null },
+    artifactRender: null, mediaIngest: null, syntheticProductionRender: null,
+    projectFinalExport: null, sourceCleanupPlan: null, longFormIndexWorkflow: null,
+    projectDirectorRun: null, perceptionProducerOperation: null,
+    temporalProducerOperation: null, faceProducerOperation: null,
+    resultJson: null, errorCode: null, errorMessage: null, errorRetryable: null,
+    completedAt: null, nextAttemptAt: null, deadLetteredAt: null, traceId: null,
+    leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, startedAt: null,
+    delegatedUserId: null, delegatedIdentityId: null, workspaceRole: null,
+  })
+  assert.equal(record.context.kind, 'project-proxy-render')
+  assert.equal(record.context.renderableSnapshot?.planHash, detailData.renderablePlanHash)
+  assert.equal(record.authenticationAudit.contextHash, auditHash)
+}
+
+test('controlled historical snapshot transition fixture hydrates before PostgreSQL', () => {
+  const workspaceId = 'snapshot-offline-workspace', projectId = 'snapshot-offline-project'
+  const clientId = 'snapshot-offline-client', id = 'snapshot-offline-operation'
+  const artifactId = 'snapshot-offline-artifact', manifestId = 'snapshot-offline-manifest'
+  const audit = createApiAccessAuditContext({ workspaceId, clientId,
+    credentialId: 'snapshot-offline-credential', environment: 'production',
+    authenticationKind: 'bearer' })
+  const queued = createQueuedPublicOperation({ id, workspaceId, projectId, clientId,
+    type: 'project-proxy-render', target: { type: 'media-artifact', id: artifactId,
+      manifestId }, createdAt: new Date().toISOString() })
+  const operationData = { id, workspaceId, projectId, clientId,
+    ...externalActorAuditData(audit, workspaceId, clientId),
+    type: queued.type, status: queued.status, phase: queued.phase,
+    targetType: queued.target.type, targetId: queued.target.id,
+    progressCompleted: queued.progress.completed, progressTotal: queued.progress.total,
+    progressUnit: queued.progress.unit, cancelable: queued.cancelable,
+    retryable: queued.retryable, attempt: queued.attempt, maxAttempts: queued.maxAttempts,
+    idempotencyKey: id, requestFingerprint: '1'.repeat(64),
+    createdAt: new Date(queued.createdAt), updatedAt: new Date(queued.updatedAt) }
+  const detailData = { operationId: id, workspaceId, projectId,
+    projectVersionId: 'snapshot-offline-version',
+    editPlanSnapshotId: 'snapshot-offline-edit',
+    sourceArtifactId: 'snapshot-offline-source',
+    sourceManifestId: 'snapshot-offline-source-manifest',
+    colorPipelineBindingsJson: stableSerialize([{
+      sourceArtifactId: 'snapshot-offline-source',
+      sourceManifestId: 'snapshot-offline-source-manifest',
+      compilationId: 'snapshot-offline-color', compilationHash: '2'.repeat(64),
+      pipelineHash: '3'.repeat(64),
+    }]), inputHash: '1'.repeat(64), outputArtifactId: artifactId,
+    outputManifestId: manifestId, originalFileName: 'controlled.mp4',
+    renderablePlanHash: '4'.repeat(64), renderablePlanId: 'snapshot-offline-plan',
+    renderableOrigin: 'localization', renderableSourceId: 'snapshot-offline-run',
+    renderableSourceHash: '5'.repeat(64),
+    renderableVariantId: 'snapshot-offline-variant', renderableFormat: '16:9' }
+  assertControlledSnapshotRowHydrates(operationData, detailData, audit.contextHash)
+})
+
 test('localization subtitles-only persists a snapshot-bound proxy through PostgreSQL and real FFmpeg', { skip: !enabled, timeout: 120_000 }, async () => {
   assertIsolatedDatabase()
   const prisma = new PrismaClient({ datasources: { db: { url: process.env.V2_DATABASE_URL } } })
@@ -64,10 +135,21 @@ test('localization subtitles-only persists a snapshot-bound proxy through Postgr
   const sourcePath = join(artifactRoot, artifactKey)
   let fixture, runtime, failure
   try {
-    const ffmpegPath = resolveFfmpegBinary(), ffprobePath = resolveFfprobeBinaryPath()
+    const configuredProbe = process.env.FFPROBE_BIN?.trim() ||
+      process.env.APOLLO_V2_FFPROBE_PATH?.trim() || process.env.FFPROBE_PATH?.trim()
+    assert.ok(configuredProbe, 'the media E2E needs an explicit FFprobe binary')
+    const ffmpegPath = resolveFfmpegBinary()
+    const ffprobePath = resolveFfprobeBinaryPath(undefined, configuredProbe)
     const pcmPath = join(work, 'source-audio.pcm')
     await writePcm(pcmPath, sweepSamples({ seconds: 4 }))
-    const encoded = await encodeRecording({ ffmpegPath, outputPath: sourcePath, seconds: 4, fps: 25, videoInput: 'testsrc2=duration=4:size=320x180:rate=25', pcmPath })
+    // testsrc emits controlled RGB pixels. Convert from that declared linear RGB
+    // interpretation to limited-range BT.709, and place the same colorimetry in
+    // the H.264 VUI; container tags alone did not survive the pinned encoder.
+    const encoded = await encodeRecording({ ffmpegPath, outputPath: sourcePath,
+      seconds: 4, fps: 25, videoInput: 'testsrc=duration=4:size=320x180:rate=25',
+      videoFilter: 'format=gbrp,zscale=matrixin=gbr:primariesin=709:transferin=linear:matrix=709:primaries=709:transfer=709:range=limited,format=yuv420p',
+      x264Params: 'colorprim=bt709:transfer=bt709:colormatrix=bt709:fullrange=off',
+      pcmPath })
     const streams = await probeStreams(ffprobePath, sourcePath), stream = streams.find((item) => item.codec_type === 'video')
     assert.ok(stream)
     assert.ok(streams.some((item) => item.codec_type === 'audio'), 'original-audio localization source must have a measured audio stream')
@@ -93,9 +175,16 @@ test('localization subtitles-only persists a snapshot-bound proxy through Postgr
       source: { kind: 'original-audio', artifactId: fixture.artifactId, artifactSha256: encoded.sha256, rightsSnapshotId: fixture.rights.snapshot.id },
       requestedByClientId: fixture.clientId, at: fixture.now.toISOString() })
     await new PrismaLocalizationMediaRunRepository(prisma).create({ run, requestFingerprint: 'b'.repeat(64), idempotencyKey: `media-${fixture.suffix}`, authenticationAudit: fixture.audit })
+    // The plan is born with the child of the head the canonical script was approved on, so that Version must still be the head
+    // (a head that moved since is a VERSION_CONFLICT for the worker, never a plan compiled on a stale base).
+    const headBefore = await prisma.v2Project.findUniqueOrThrow({
+      where: { id: fixture.projectId }, select: { currentVersionId: true, status: true } })
+    assert.equal(headBefore.currentVersionId, fixture.versionId,
+      'the fixture publishes against the head the canonical script was approved on')
     runtime = createLocalizationMediaRuntime({
       ...process.env,
       APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
+      APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
       APOLLO_PROTECTED_PAYLOAD_KEY_ID: 'localization-e2e',
       APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 7).toString('base64url'),
     })
@@ -103,6 +192,8 @@ test('localization subtitles-only persists a snapshot-bound proxy through Postgr
     assert.equal(outcome.status, 'awaiting-human-approval')
     assert.equal(outcome.evidence.renderablePlans.length, 1)
     const proof = outcome.evidence.renderablePlans[0]
+    assert.notEqual(fixture.variant.id, proof.format,
+      'localized variant identity is distinct from the output aspect ratio')
     const operation = await prisma.v2ProjectProxyRenderOperation.findUniqueOrThrow({ where: { operationId: proof.proxyOperationId }, include: { operation: true } })
     assert.equal(operation.operation.status, 'succeeded')
     assert.equal(operation.renderablePlanHash, proof.planHash)
@@ -113,14 +204,19 @@ test('localization subtitles-only persists a snapshot-bound proxy through Postgr
     const outputManifest = output.manifests.find((item) => item.id === operation.outputManifestId)
     assert.ok(outputManifest)
     const outputKey = JSON.parse(outputManifest.manifestJson).artifact.artifactKey
-    const outputPath = join(artifactRoot, ...outputKey.split('/'))
-    const outputBytes = await readFile(outputPath)
+    const materialized = await new LocalArtifactSourceMaterializer(artifactRoot).materialize({
+      operationId: proof.proxyOperationId, artifactKey: outputKey,
+      sha256: output.sha256, byteSize: Number(output.byteSize),
+    })
+    const reviewPath = join(work, 'verified-proxy.mp4')
+    await copyFile(materialized.path, reviewPath)
+    const outputBytes = await readFile(reviewPath)
     assert.equal(sha256Of(outputBytes), output.sha256)
     assert.equal(output.sha256, JSON.parse(outputManifest.manifestJson).artifact.sha256)
-    const outputStreams = await probeStreams(ffprobePath, outputPath)
+    const outputStreams = await probeStreams(ffprobePath, reviewPath)
     const outputVideo = outputStreams.find((item) => item.codec_type === 'video')
     const outputAudio = outputStreams.find((item) => item.codec_type === 'audio')
-    const exactOutputVideo = await probeOutputVideo(ffprobePath, outputPath)
+    const exactOutputVideo = await probeOutputVideo(ffprobePath, reviewPath)
     assert.ok(outputVideo && outputAudio, 'localized proxy must decode both video and audio')
     assert.equal(outputAudio.codec_name, 'aac')
     assert.ok(Math.abs(Number(outputAudio.duration) - 4) <= .1, 'localized AAC duration must remain within 100ms of the 4s source')
@@ -129,32 +225,98 @@ test('localization subtitles-only persists a snapshot-bound proxy through Postgr
     assert.equal(Number(exactOutputVideo.nb_read_frames), 100)
     assert.equal(exactOutputVideo.avg_frame_rate, '25/1')
     const [sourceFrame, localizedFrame, sourcePcm, localizedPcm] = await Promise.all([
-      decodedRgb(ffmpegPath, sourcePath, 1), decodedRgb(ffmpegPath, outputPath, 1), decodedPcm(ffmpegPath, sourcePath), decodedPcm(ffmpegPath, outputPath),
+      decodedRgb(ffmpegPath, sourcePath, 1), decodedRgb(ffmpegPath, reviewPath, 1), decodedPcm(ffmpegPath, sourcePath), decodedPcm(ffmpegPath, reviewPath),
     ])
-    assert.ok(whiteInkInSubtitleBand(localizedFrame) > whiteInkInSubtitleBand(sourceFrame) + 50, 'localized cue must add visible white subtitle ink inside the lower subtitle band')
+    const sourceWhitePixels = whiteInkInSubtitleBand(sourceFrame)
+    const outputWhitePixels = whiteInkInSubtitleBand(localizedFrame)
+    const evidenceRoot = process.env.APOLLO_WAVE21_EVIDENCE_DIR?.trim()
+    if (evidenceRoot) {
+      const evidenceDir = resolve(evidenceRoot, `localization-proxy-${fixture.suffix}`)
+      await mkdir(evidenceDir, { recursive: true })
+      const evidenceMp4 = join(evidenceDir, basename(reviewPath))
+      await copyFile(reviewPath, evidenceMp4)
+      await Promise.all([
+        execFileAsync(ffmpegPath, ['-v', 'error', '-y', '-ss', '1', '-i', sourcePath, '-frames:v', '1', join(evidenceDir, 'source-1s.png')]),
+        execFileAsync(ffmpegPath, ['-v', 'error', '-y', '-ss', '1', '-i', reviewPath, '-frames:v', '1', join(evidenceDir, 'output-1s.png')]),
+      ])
+      await writeFile(join(evidenceDir, 'manifest.json'), JSON.stringify({ fixtureEvidence: true,
+        operationId: proof.proxyOperationId, snapshotId: proof.snapshotId,
+        planHash: proof.planHash, artifactId: proof.proxyArtifactId,
+        sourceSha256: encoded.sha256, outputSha256: output.sha256,
+        sourceWhitePixels, outputWhitePixels, mp4: basename(evidenceMp4),
+        sourceFrame: 'source-1s.png', outputFrame: 'output-1s.png' }, null, 2))
+    }
+    assert.ok(outputWhitePixels <= sourceWhitePixels + 50,
+      `unknown facial clearance must suppress the cue instead of drawing it over a possible face (source=${sourceWhitePixels}, output=${outputWhitePixels})`)
     assert.ok(correlation(sourcePcm, localizedPcm) > .97, 'subtitles-only proxy must preserve the decoded original-audio waveform')
     const snapshotRow = await prisma.v2RenderablePlanSnapshot.findFirstOrThrow({ where: {
       workspaceId: fixture.workspaceId, projectId: fixture.projectId,
       planId: proof.snapshotId, planHash: proof.planHash,
     } })
+    // The snapshot is born with a Version of its own: the child of the base, made by the run's requester, whose sealed State binds it.
+    const bornWith = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: snapshotRow.projectVersionId } })
+    assert.notEqual(bornWith.id, fixture.versionId)
+    assert.equal(bornWith.parentVersionId, fixture.versionId)
+    assert.equal(bornWith.createdBy, fixture.clientId)
+    assert.equal(JSON.parse(snapshotRow.planJson).projectVersionId, bornWith.id)
+    const bornState = await prisma.v2ProjectOutputState.findUniqueOrThrow({ where: { id: bornWith.outputStateId } })
+    assert.deepEqual([bornState.renderablePlanSnapshotId, bornState.renderablePlanId, bornState.renderablePlanHash], [snapshotRow.id, snapshotRow.planId, snapshotRow.planHash])
+    const snapshotReader = new PrismaProjectProxyRenderRepository(prisma)
+    const snapshotLookup = { workspaceId: fixture.workspaceId, projectId: fixture.projectId,
+      planId: proof.snapshotId, planHash: proof.planHash, format: proof.format }
+    assert.equal(await snapshotReader.readRenderableSnapshotSource({ ...snapshotLookup,
+      planId: `missing-${proof.snapshotId}` }), null)
+    assert.equal(await snapshotReader.readRenderableSnapshotSource({ ...snapshotLookup,
+      workspaceId: `other-${fixture.workspaceId}` }), null)
+    // The snapshot proxy consumes the persisted `render` verdict of the plan's OWN Version (never the head), seals it, and the operation's
+    // input hash is built over that seal; the requested format must be the sealed entry's.
+    const snapshotSource = await snapshotReader.readRenderableSnapshotSource(snapshotLookup)
+    assert.ok(snapshotSource)
+    const sealed = await requirePersistedOutputConsumptionV3(prisma, { workspaceId: fixture.workspaceId, projectId: fixture.projectId,
+      versionId: bornWith.id, purpose: 'render', reconstruct: true })
+    assert.equal(snapshotSource.outputConsumption.seal.projectVersionId, bornWith.id)
+    assert.equal(snapshotSource.outputConsumption.seal.outputStateId, bornWith.outputStateId)
+    assert.equal(snapshotSource.outputConsumption.seal.purpose, 'render')
+    assert.equal(snapshotSource.outputConsumption.sealHash, sealed.sealHash, 'the cheap read is the very seal the full factual rebuild yields')
+    assert.equal(snapshotSource.format, proof.format)
+    assert.equal(snapshotSource.format, sealed.aspectRatio, 'the sealed entry names the format')
+    const wrongFormat = proof.format === '1:1' ? '4:5' : '1:1'
+    await assert.rejects(snapshotReader.readRenderableSnapshotSource({ ...snapshotLookup, format: wrongFormat }),
+      (error) => error.code === 'PERSISTENCE_CONFLICT' && /not bound to the requested format/.test(error.message))
+    assert.equal(operation.inputHash, calculateVersionHash({ type: 'renderable-snapshot-proxy/v1',
+      snapshot: { planId: operation.renderablePlanId, planHash: operation.renderablePlanHash, origin: operation.renderableOrigin,
+        sourceId: operation.renderableSourceId, sourceHash: operation.renderableSourceHash, variantId: operation.renderableVariantId,
+        format: operation.renderableFormat },
+      renderInputHash: projectProxyRenderInputHash({ source: snapshotSource, colorPipelineBindings: JSON.parse(operation.colorPipelineBindingsJson) }) }),
+    'the operation input hash the worker verified is built over the sealed consumption')
+    assert.notEqual(operation.inputHash, calculateVersionHash({ type: 'renderable-snapshot-proxy/v1',
+      snapshot: { planId: operation.renderablePlanId, planHash: operation.renderablePlanHash, origin: operation.renderableOrigin,
+        sourceId: operation.renderableSourceId, sourceHash: operation.renderableSourceHash, variantId: operation.renderableVariantId,
+        format: operation.renderableFormat },
+      renderInputHash: projectProxyRenderInputHash({ source: { ...snapshotSource, outputConsumption: { ...snapshotSource.outputConsumption,
+        sealHash: calculateVersionHash({ otherState: true }) } }, colorPipelineBindings: JSON.parse(operation.colorPipelineBindingsJson) }) }),
+    'another State is another operation input')
+    assert.deepEqual(await prisma.v2Project.findUniqueOrThrow({ where: { id: fixture.projectId },
+      select: { currentVersionId: true, status: true } }), { currentVersionId: bornWith.id, status: headBefore.status },
+    'snapshot publication moves the head to the Version that holds the plan and leaves the project status alone')
     const baseVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: fixture.versionId }, include: { editPlanSnapshot: true } })
     const snapshotPlan = JSON.parse(snapshotRow.planJson), basePlan = JSON.parse(baseVersion.editPlanSnapshot.contentJson)
     assert.deepEqual(snapshotPlan.videoTracks, basePlan.videoTracks, 'localization snapshot must leave the base video clips unchanged')
-    const evidenceRoot = process.env.APOLLO_WAVE21_EVIDENCE_DIR?.trim()
-    if (evidenceRoot) {
-      const evidenceDir = resolve(evidenceRoot, `localization-proxy-${fixture.suffix}`)
-      await mkdir(evidenceDir, { recursive: true })
-      const evidenceMp4 = join(evidenceDir, basename(outputPath)), cuePng = join(evidenceDir, 'cue-1s.png')
-      await copyFile(outputPath, evidenceMp4)
-      await execFileAsync(ffmpegPath, ['-v', 'error', '-y', '-ss', '1', '-i', outputPath, '-frames:v', '1', cuePng])
-      await writeFile(join(evidenceDir, 'manifest.json'), JSON.stringify({ fixtureEvidence: true, operationId: proof.proxyOperationId, snapshotId: proof.snapshotId, planHash: proof.planHash, artifactId: proof.proxyArtifactId, sha256: output.sha256, mp4: basename(evidenceMp4), cueFrame: basename(cuePng) }, null, 2))
-    }
     const { approveLocalizationMediaService } = await import('../../src/v2/application/localization-media.ts')
     const approvalRepository = new PrismaLocalizationMediaRunRepository(prisma), approvalAt = new Date(fixture.now.getTime() + 30_000)
     const approve = approveLocalizationMediaService({ runs: approvalRepository, clock: () => approvalAt })
     const approvalInput = { workspaceId: fixture.workspaceId, projectId: fixture.projectId, variantId: fixture.variant.id, runId: outcome.id, expectedRevision: outcome.revision, expectedRunHash: outcome.runHash, actorClientId: fixture.clientId, authenticationAudit: fixture.audit, idempotencyKey: `approve-${fixture.suffix}`, note: 'Measured proxy reviewed' }
     const review = await prisma.v2ProxyReview.findUniqueOrThrow({ where: { operationId: proof.proxyOperationId } })
-    assert.equal(review.status, 'ready-for-final'); assert.equal(review.finalAllowed, true)
+    // W65b (final-caption-certification/v1): a caption nobody can certify is omitted and LISTED, so the real render of this snapshot is a
+    // review that asks for an acknowledgement, not a hard stop. Nothing grants facial clearance from absent evidence, and the human
+    // approval below is still refused: a review that is not ready-for-final (finalAllowed false) never approves a localization run.
+    const reviewIssues = [...JSON.parse(review.technicalIssuesJson), ...JSON.parse(review.criticIssuesJson)]
+    const reviewIssueCodes = JSON.stringify(reviewIssues.map((issue) => [issue.code, issue.severity]))
+    assert.equal(review.status, 'warning-ack-required', reviewIssueCodes); assert.equal(review.finalAllowed, false)
+    assert.equal(review.warningsAcknowledged, false)
+    assert.deepEqual(reviewIssues.filter((issue) => issue.severity === 'hard'), [], reviewIssueCodes)
+    assert.ok(reviewIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'),
+      `the omitted caption is listed as a face-perception warning, from absent evidence: ${reviewIssueCodes}`)
     const { calculateProxyReviewHash } = await import('../../src/v2/application/render-workflow.ts')
     const { PrismaProxyReviewRepository } = await import('../../src/v2/infrastructure/prisma/proxy-review-repository.ts')
     const reviewBody = { schemaVersion: 'proxy-review/v1', projectVersionId: review.projectVersionId, proxyArtifactId: review.proxyArtifactId, proxyManifestId: review.proxyManifestId, inputHash: review.inputHash, outputSpecId: review.outputSpecId, rangeCacheKey: review.rangeCacheKey, spec: JSON.parse(review.specJson), status: review.status, technicalIssues: JSON.parse(review.technicalIssuesJson), criticIssues: JSON.parse(review.criticIssuesJson), ...(review.formatQualityJson === null ? {} : { formatQuality: JSON.parse(review.formatQualityJson) }), warningsAcknowledged: review.warningsAcknowledged, finalAllowed: review.finalAllowed, uploadReceivedAt: review.uploadReceivedAt.toISOString(), renderCompletedAt: review.renderCompletedAt.toISOString(), timeToFirstProxyMs: Number(review.timeToFirstProxyMs) }
@@ -166,9 +328,6 @@ test('localization subtitles-only persists a snapshot-bound proxy through Postgr
     assert.equal(retryPersisted.reviewHash, review.reviewHash, 'retry keeps the first equivalent operation-bound review observation')
     const conflictBody = { ...retryBody, inputHash: 'e'.repeat(64) }
     await assert.rejects(() => proxyReviews.persistGenerated({ id: `conflict-${review.id}`, workspaceId: fixture.workspaceId, projectId: fixture.projectId, operationId: proof.proxyOperationId, review: Object.freeze({ ...conflictBody, reviewHash: calculateProxyReviewHash(conflictBody) }), createdAt: laterCompletedAt }), /identity did not converge/)
-    const hardIssues = [{ code: 'VALID_HARD_BLOCK', severity: 'hard', category: 'integrity', message: 'Persisted blocker', correctable: false }]
-    const blockedReviewBody = { schemaVersion: 'proxy-review/v1', projectVersionId: review.projectVersionId, proxyArtifactId: review.proxyArtifactId, proxyManifestId: review.proxyManifestId, inputHash: review.inputHash, outputSpecId: review.outputSpecId, rangeCacheKey: review.rangeCacheKey, spec: JSON.parse(review.specJson), status: 'blocked', technicalIssues: JSON.parse(review.technicalIssuesJson), criticIssues: hardIssues, ...(review.formatQualityJson === null ? {} : { formatQuality: JSON.parse(review.formatQualityJson) }), warningsAcknowledged: review.warningsAcknowledged, finalAllowed: false, uploadReceivedAt: review.uploadReceivedAt.toISOString(), renderCompletedAt: review.renderCompletedAt.toISOString(), timeToFirstProxyMs: Number(review.timeToFirstProxyMs) }
-    await prisma.v2ProxyReview.update({ where: { id: review.id }, data: { status: 'blocked', finalAllowed: false, criticIssuesJson: JSON.stringify(hardIssues), reviewHash: calculateProxyReviewHash(blockedReviewBody) } })
     await assert.rejects(approve({ ...approvalInput, idempotencyKey: `blocked-${fixture.suffix}` }), (error) => error?.code === 'PRECONDITION_REQUIRED')
     assert.equal((await approvalRepository.read({ workspaceId: fixture.workspaceId, projectId: fixture.projectId, runId: outcome.id })).status, 'awaiting-human-approval')
     await prisma.v2ProxyReview.update({ where: { id: review.id }, data: { status: review.status, finalAllowed: review.finalAllowed, criticIssuesJson: review.criticIssuesJson, reviewHash: '0'.repeat(64) } })
@@ -179,41 +338,101 @@ test('localization subtitles-only persists a snapshot-bound proxy through Postgr
     await assert.rejects(approve({ ...approvalInput, idempotencyKey: `stale-${fixture.suffix}` }), (error) => error?.code === 'VERSION_CONFLICT')
     await prisma.v2LocalizationVariantHead.update({ where: { id: fixture.variant.id }, data: { currentVariantHash: fixture.variant.variantHash } })
 
-    const approved = await approve(approvalInput), replayed = await approve({ ...approvalInput, note: '  Measured proxy reviewed  ' })
-    assert.equal(approved.status, 'approved'); assert.equal(replayed.runHash, approved.runHash)
-    const approvedHead = await prisma.v2LocalizationVariantHead.findUniqueOrThrow({ where: { id: fixture.variant.id } })
-    const approvedVariant = JSON.parse((await prisma.v2LocalizationVariantRevision.findFirstOrThrow({ where: { variantId: fixture.variant.id, revision: approvedHead.currentRevision } })).variantJson)
-    const expectedCaptionIds = snapshotPlan.subtitleTracks.flatMap((track) => track.cues.map((cue) => cue.id)).sort()
-    const expectedClipIds = snapshotPlan.videoTracks.filter((track) => track.kind === 'base-video').flatMap((track) => track.clips.map((clip) => clip.id)).sort()
-    assert.deepEqual(approvedVariant.dependentPlan.captionIds, expectedCaptionIds); assert.deepEqual(approvedVariant.dependentPlan.clipIds, expectedClipIds)
-    assert.ok(!approvedVariant.dependentPlan.captionIds.includes(proof.snapshotId)); assert.ok(!approvedVariant.dependentPlan.clipIds.includes(proof.planHash))
-    await assert.rejects(approve({ ...approvalInput, variantId: `wrong-${fixture.variant.id}` }), (error) => error?.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH')
-    await assert.rejects(approve({ ...approvalInput, authenticationAudit: { ...fixture.audit, contextHash: '0'.repeat(64) } }), (error) => error?.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH')
+    assert.equal((await prisma.v2LocalizationVariantHead.findUniqueOrThrow({
+      where: { id: fixture.variant.id } })).currentRevision, fixture.variant.revision,
+    'blocked proxy must leave the localization variant unchanged')
+
+    // Controlled transition proof: a snapshot does not own the project workflow,
+    // even when its version temporarily coincides with the current head. No
+    // second render or facial approval is claimed by this operation.
+    await prisma.v2Project.update({ where: { id: fixture.projectId }, data: {
+      currentVersionId: fixture.versionId, status: 'rendering-proxy',
+    } })
+    const coincidentHead = await prisma.v2Project.findUniqueOrThrow({
+      where: { id: fixture.projectId }, select: { currentVersionId: true, status: true },
+    })
+    const assertHeadUnchanged = async (transition) => assert.deepEqual(
+      await prisma.v2Project.findUniqueOrThrow({ where: { id: fixture.projectId },
+        select: { currentVersionId: true, status: true } }), coincidentHead,
+      `explicit snapshot ${transition} must not change the project head or workflow status`,
+    )
+    const controlledId = `snapshot-transition-${fixture.suffix}`
+    const controlledHash = createHash('sha256').update(controlledId).digest('hex')
+    const transitionBase = Date.now() - 4_000
+    const at = (offset) => new Date(transitionBase + offset).toISOString()
+    const controlled = createQueuedPublicOperation({ id: controlledId,
+      workspaceId: fixture.workspaceId, projectId: fixture.projectId,
+      clientId: fixture.clientId, type: 'project-proxy-render',
+      target: { type: 'media-artifact', id: operation.outputArtifactId,
+        manifestId: operation.outputManifestId }, createdAt: at(0),
+    })
+    const controlledOperationData = {
+      id: controlled.id, workspaceId: fixture.workspaceId, projectId: fixture.projectId,
+      clientId: fixture.clientId,
+      ...externalActorAuditData(fixture.audit, fixture.workspaceId, fixture.clientId),
+      type: controlled.type, status: controlled.status, phase: controlled.phase,
+      targetType: controlled.target.type, targetId: controlled.target.id,
+      progressCompleted: controlled.progress.completed,
+      progressTotal: controlled.progress.total, progressUnit: controlled.progress.unit,
+      cancelable: controlled.cancelable, retryable: controlled.retryable,
+      attempt: controlled.attempt, maxAttempts: controlled.maxAttempts,
+      idempotencyKey: `snapshot-transition-${fixture.suffix}`,
+      requestFingerprint: controlledHash,
+      createdAt: new Date(controlled.createdAt), updatedAt: new Date(controlled.updatedAt),
+    }
+    const controlledDetailData = {
+      operationId: controlledId, workspaceId: fixture.workspaceId,
+      projectId: fixture.projectId, projectVersionId: operation.projectVersionId,
+      editPlanSnapshotId: operation.editPlanSnapshotId,
+      sourceArtifactId: operation.sourceArtifactId,
+      sourceManifestId: operation.sourceManifestId,
+      colorPipelineBindingsJson: operation.colorPipelineBindingsJson,
+      inputHash: controlledHash,
+      outputArtifactId: operation.outputArtifactId,
+      outputManifestId: operation.outputManifestId,
+      originalFileName: operation.originalFileName,
+      renderablePlanHash: operation.renderablePlanHash,
+      renderablePlanId: operation.renderablePlanId,
+      renderableOrigin: operation.renderableOrigin,
+      renderableSourceId: operation.renderableSourceId,
+      renderableSourceHash: operation.renderableSourceHash,
+      renderableVariantId: operation.renderableVariantId,
+      renderableFormat: operation.renderableFormat,
+    }
+    assertControlledSnapshotRowHydrates(controlledOperationData,
+      controlledDetailData, fixture.audit.contextHash)
+    await prisma.v2PublicOperation.create({ data: controlledOperationData })
+    await prisma.v2ProjectProxyRenderOperation.create({ data: controlledDetailData })
+    const operations = new PrismaPublicOperationRepository(prisma)
+    const controlledStored = await operations.findById(fixture.workspaceId, controlledId)
+    assert.equal(controlledStored?.operation.status, 'queued')
+    assert.equal(controlledStored?.context.renderableSnapshot?.planHash, proof.planHash)
+    const canceled = await operations.cancel({ workspaceId: fixture.workspaceId,
+      operationId: controlledId, commandId: `snapshot-cancel-${fixture.suffix}`,
+      authenticationAudit: fixture.audit, canceledAt: at(1_000) })
+    assert.equal(canceled?.operation.status, 'canceled')
+    await assertHeadUnchanged('cancel')
+    const retried = await operations.retry({ workspaceId: fixture.workspaceId,
+      operationId: controlledId, commandId: `snapshot-retry-${fixture.suffix}`,
+      authenticationAudit: fixture.audit, requestedAt: at(2_000),
+      nextAttemptAt: at(2_500) })
+    assert.equal(retried?.operation.status, 'queued')
+    await assertHeadUnchanged('retry')
+    const leaseOwner = `snapshot-worker-${fixture.suffix}`
+    const claimed = await operations.claimNext({ workspaceId: fixture.workspaceId,
+      operationId: controlledId, type: 'project-proxy-render', leaseOwner,
+      now: at(3_000), leaseUntil: at(63_000) })
+    assert.equal(claimed?.operation.status, 'running')
+    await assertHeadUnchanged('claim')
+    const failed = await operations.failOrRetry({ operationId: controlledId,
+      leaseOwner, attempt: claimed.operation.attempt, now: at(3_100),
+      error: { code: 'controlled_snapshot_failure',
+        message: 'Controlled snapshot operation failure', retryable: false } })
+    assert.equal(failed?.operation.status, 'failed')
+    await assertHeadUnchanged('failure')
   } catch (error) { failure = error; throw error } finally {
     try {
       if (runtime) await runtime.close()
-      if (fixture) {
-        await prisma.v2LocalizationMediaRunRevision.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2LocalizationMediaRun.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2ProxyReview.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2RenderElementMap.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2OperationTelemetryAlert.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2OperationTelemetryEvent.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2PublicEventOutbox.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2PublicOperation.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2RenderablePlanSnapshot.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2AutomaticCatalogRecord.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2MediaArtifactLineage.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2ColorPipelineCompilation.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2MediaColorProbe.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2ProjectMediaAsset.deleteMany({ where: { workspaceId: fixture.workspaceId, artifactId: { not: fixture.artifactId } } })
-        await prisma.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: fixture.workspaceId, artifactId: { not: fixture.artifactId } } })
-        await prisma.v2MediaArtifact.deleteMany({ where: { workspaceId: fixture.workspaceId, id: { not: fixture.artifactId } } })
-        await prisma.v2RecipeParameterPayload.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2RenderInputPayload.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await fixture.cleanup()
-      }
     } catch (cleanupError) { if (failure) throw new AggregateError([failure, cleanupError]); throw cleanupError }
     finally { await prisma.$disconnect(); await rm(work, { recursive: true, force: true }) }
   }

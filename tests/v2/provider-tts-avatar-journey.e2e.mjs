@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -13,9 +13,12 @@ const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
 const ffprobePath = require('ffprobe-static').path
 
-const workspaceId = 'provider-journey-e2e-workspace'
-const clientId = 'provider-journey-e2e-client'
-const credentialId = 'provider-journey-e2e-credential'
+// Sealed rows are append-only and this journey runs more than once in one database (the integration and the e2e step),
+// so every identity it creates carries this invocation's RUN and nothing is deleted.
+const RUN = randomUUID().replaceAll('-', '').slice(0, 10)
+const workspaceId = `provider-journey-e2e-workspace-${RUN}`
+const clientId = `provider-journey-e2e-client-${RUN}`
+const credentialId = `provider-journey-e2e-credential-${RUN}`
 const hash = (character) => character.repeat(64)
 const at = (second) => new Date(Date.parse('2029-01-01T00:00:00.000Z') + second * 1_000).toISOString()
 
@@ -46,42 +49,8 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
 
   let objectStore = null
 
-  const cleanup = async () => {
-    await client.v2SyntheticCriticIssue.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticCriticMeasurement.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticCriticEvaluator.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticCriticReport.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-    await client.v2SyntheticCacheSubmissionClaim.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticBlockGeneration.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.updateMany({ where: { workspaceId }, data: { currentRightsSnapshotId: null, rightsRevision: 0 } })
-    await client.v2AssetRightsChange.deleteMany({ where: { workspaceId } })
-    await client.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactLineage.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     const { createProjectService } = await import('../../src/v2/application/create-project.ts')
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
@@ -100,7 +69,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
     const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
     const { PrismaMediaArtifactRepository } = await import('../../src/v2/infrastructure/prisma/media-artifact-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
     const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
     const { PrismaProviderJobRepository } = await import('../../src/v2/infrastructure/prisma/provider-job-repository.ts')
     const { PrismaProviderResultArtifactRepository } = await import('../../src/v2/infrastructure/prisma/provider-result-artifact-repository.ts')
@@ -154,16 +123,15 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
     })
     let entity = 0
-    let event = 0
     const project = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client), clock: () => new Date(at(0)),
-      createId: (kind) => `${kind}-provider-journey-${++entity}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(900_000 + ++event).padStart(12, '0')}`,
-    })({ workspaceId, name: 'Jornada TTS para avatar', objective: 'awareness', format: '9:16', actor, idempotency: { clientId, key: 'provider-journey-project' } })
+      repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(at(0)),
+      createId: (kind) => `${kind}-provider-journey-${RUN}-${++entity}`,
+      createEventId: randomUUID,
+    })({ workspaceId, name: 'Jornada TTS para avatar', objective: 'awareness', actor, idempotencyKey: 'provider-journey-project' })
 
     await client.v2MediaArtifact.create({
       data: {
-        id: 'journey-consent-evidence', workspaceId, artifactKey: 'provider-journey/consent.json',
+        id: `journey-consent-evidence-${RUN}`, workspaceId, artifactKey: 'provider-journey/consent.json',
         sha256: hash('a'), byteSize: 512n, mediaType: 'data', container: 'json', status: 'available', createdAt: new Date(at(0)),
       },
     })
@@ -173,12 +141,12 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       repository: syntheticRepository, artifacts: artifactRepository, clock: () => new Date(at(0)),
     })
     const registered = await registerProfile({
-      workspaceId, profileId: 'journey-presenter', version: 1, actorIdentityId: 'journey-identity',
+      workspaceId, profileId: `journey-presenter-${RUN}`, version: 1, actorIdentityId: 'journey-identity',
       avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_journey_123' },
       voice: { id: 'voice_journey_123', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {
-        id: 'journey-consent', evidenceArtifactId: 'journey-consent-evidence', granted: true,
+        id: `journey-consent-${RUN}`, evidenceArtifactId: `journey-consent-evidence-${RUN}`, granted: true,
         allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
         allowedOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
       },
@@ -269,12 +237,12 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       jobs: providerRepository, adapters: registry, profiles: syntheticRepository,
       audioMasters: audioMasterRepository, projects: projectsQuery, artifacts: artifactRepository,
       rights: rightsRepository, clock: () => new Date(at(1)),
-      createJobId: () => `journey-job-${entity += 1}`,
-      createTransitionId: () => `journey-transition-${++providerTransition}`,
+      createJobId: () => `journey-job-${RUN}-${entity += 1}`,
+      createTransitionId: () => `journey-transition-${RUN}-${++providerTransition}`,
       resolveAvatarCriticBinding: async ({ audioMaster, audioRange, profileSnapshotId, use, market, locale }) => {
         assert.equal(audioMaster.source.kind, 'tts')
         const generation = await generations.findByProviderJob({
-          workspaceId, projectId: project.project.id, providerJobId: audioMaster.source.providerJobId,
+          workspaceId, projectId: project.projectAtCreation.id, providerJobId: audioMaster.source.providerJobId,
         })
         assert.ok(generation)
         const block = await client.v2SyntheticScriptBlock.findUniqueOrThrow({ where: { id: generation.blockId } })
@@ -288,9 +256,9 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
 
     const createdPlan = await createSyntheticScriptPlanService({
       plans, projects: projectsQuery, profiles: syntheticRepository,
-      clock: () => new Date(at(1)), createId: (kind) => `${kind}-provider-journey-${++entity}`,
+      clock: () => new Date(at(1)), createId: (kind) => `${kind}-provider-journey-${RUN}-${++entity}`,
     })({
-      workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+      workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
       profileSnapshotId: registered.profile.snapshot.id, locale: 'pt-BR', scriptText: SCRIPT,
       actor, idempotencyKey: 'provider-journey-script-plan',
     })
@@ -303,14 +271,14 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       enqueueProviderJob: enqueue, clock: () => new Date(at(1)),
     })
     const [ttsGenerationOutcome] = await ensureTts({
-      workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+      workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
       planId, use: 'ads', market: 'BRA', actor,
     })
     assert.equal(ttsGenerationOutcome.action, 'enqueued')
     const [pendingGeneration] = await generations.listByPlan({ workspaceId, planId, statuses: ['pending'] })
     assert.ok(pendingGeneration?.providerJobId)
     const ttsJobId = pendingGeneration.providerJobId
-    const ttsEnqueued = await providerRepository.read({ workspaceId, projectId: project.project.id, jobId: ttsJobId })
+    const ttsEnqueued = await providerRepository.read({ workspaceId, projectId: project.projectAtCreation.id, jobId: ttsJobId })
     assert.equal(ttsEnqueued.job.status, 'planned')
 
     // A real PostgreSQL CAS keeps long media work fenced: renewal extends the
@@ -378,7 +346,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       pronunciation: new AlignmentSyntheticCriticPronunciationEvaluator({ alignment }),
       controlled: new DeterministicSyntheticCriticControlledEvaluator(),
       clock: () => new Date(at(7)),
-      createId: ({ evaluationContextHash }) => `journey-critic-${evaluationContextHash.slice(0, 48)}`,
+      createId: ({ evaluationContextHash }) => `journey-critic-${RUN}-${evaluationContextHash.slice(0, 48)}`,
     })
     const criticContext = new PrismaSyntheticCriticRuntimeContextResolver({
       client, artifacts: artifactRepository, resultArtifacts: resultArtifactRepository,
@@ -408,11 +376,11 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
         ingestor: ttsIngestor, critic: ttsCritic,
         clock: () => new Date(at(tick + 2)),
         createLeaseToken: () => `journey-tts-lease-${tick}`,
-        createTransitionId: () => `journey-transition-${++providerTransition}`,
+        createTransitionId: () => `journey-transition-${RUN}-${++providerTransition}`,
       })(`journey-tts-worker-${tick}`)
     }
     for (let stage = 0; stage < 6; stage += 1) await runFreshTtsWorkerOnce()
-    const ttsDone = await providerRepository.read({ workspaceId, projectId: project.project.id, jobId: ttsJobId })
+    const ttsDone = await providerRepository.read({ workspaceId, projectId: project.projectAtCreation.id, jobId: ttsJobId })
     const ttsReport = ttsDone.job.criticResultHash
       ? await criticReports.readByHash({ workspaceId, reportHash: ttsDone.job.criticResultHash })
       : null
@@ -427,13 +395,13 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     await settleSyntheticBlockGenerationsService({
       generations, providerJobs: providerRepository, resultArtifacts: resultArtifactRepository,
       criticReports, clock: () => new Date(at(8)),
-    })({ workspaceId, projectId: project.project.id, planId, actor })
+    })({ workspaceId, projectId: project.projectAtCreation.id, planId, actor })
     const [settledGeneration] = await generations.listByPlan({ workspaceId, planId, statuses: ['approved'] })
     assert.equal(settledGeneration.providerJobId, ttsJobId)
     // A restarted worker after approval finds nothing to do.
     assert.equal(await runFreshTtsWorkerOnce(), null)
 
-    const ledger = await resultArtifactRepository.listByJob({ workspaceId, projectId: project.project.id, jobId: ttsJobId })
+    const ledger = await resultArtifactRepository.listByJob({ workspaceId, projectId: project.projectAtCreation.id, jobId: ttsJobId })
     assert.deepEqual(ledger.map(({ role }) => role), ['alignment-evidence', 'primary-audio'])
     const audioEntry = ledger.find((entry) => entry.role === 'primary-audio')
     const alignmentEntry = ledger.find((entry) => entry.role === 'alignment-evidence')
@@ -454,7 +422,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
 
     // Replay is byte-identical and charges nothing new.
     const ttsReplayed = await ensureTts({
-      workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+      workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
       planId, use: 'ads', market: 'BRA', actor,
     })
     assert.deepEqual(ttsReplayed.map(({ action }) => action), ['up-to-date'])
@@ -465,7 +433,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     // Rights for the produced artifacts before they may feed the audio master.
     for (const [index, artifactId] of [audioEntry.artifactId, alignmentEntry.artifactId].entries()) {
       const snapshot = createAssetRightsSnapshot({
-        id: `journey-rights-${index + 1}`, workspaceId, artifactId, sequence: 1,
+        id: `journey-rights-${RUN}-${index + 1}`, workspaceId, artifactId, sequence: 1,
         draft: {
           status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
           allowedSyntheticOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
@@ -485,10 +453,10 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       criticReports,
       alignment,
       audioDurations: new FfmpegDecodedSyntheticAudioDurationReader(sourceMaterializer, process.env),
-      clock: () => new Date(at(10)), createId: () => 'journey-audio-master',
+      clock: () => new Date(at(10)), createId: () => `journey-audio-master-${RUN}`,
     })
     const audioMasterRequest = {
-      workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+      workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
       profileSnapshotId: registered.profile.snapshot.id,
       source: { kind: 'tts', text: SCRIPT, providerJobId: ttsJobId },
       audioArtifactId: audioEntry.artifactId, alignmentEvidenceArtifactId: alignmentEntry.artifactId,
@@ -513,7 +481,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
 
     // Avatar leg: the approved master's exact audio is the only allowed input.
     const avatarEnqueued = await enqueue({
-      workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+      workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
       profileSnapshotId: registered.profile.snapshot.id, operation: 'audio-avatar',
       adapterId: 'heygen-v3', adapterVersion: '3.1.0',
       providerInput: { aspectRatio: '9:16' },
@@ -561,19 +529,19 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
         ingestor: avatarIngestor, critic: avatarCritic,
         clock: () => new Date(at(tick + 2)),
         createLeaseToken: () => `journey-avatar-lease-${tick}`,
-        createTransitionId: () => `journey-transition-${++providerTransition}`,
+        createTransitionId: () => `journey-transition-${RUN}-${++providerTransition}`,
       })(`journey-avatar-worker-${tick}`)
     }
     for (let stage = 0; stage < 8; stage += 1) await runFreshAvatarWorkerOnce()
-    const avatarDone = await providerRepository.read({ workspaceId, projectId: project.project.id, jobId: avatarJobId })
+    const avatarDone = await providerRepository.read({ workspaceId, projectId: project.projectAtCreation.id, jobId: avatarJobId })
     assert.equal(avatarDone.job.status, 'failed', 'HeyGen without output speech evidence must fail closed before criticism')
     assert.equal(avatarDone.job.normalizedError?.code, 'PRECONDITION_REQUIRED')
     assert.equal(avatarDone.job.providerJobId, 'journey_video_1')
     assert.ok(avatarDone.job.resultArtifact, 'provider result must remain ingested for diagnosis')
-    const avatarEvidence = await provenanceRepository.listEvidenceByJob({ workspaceId, projectId: project.project.id, jobId: avatarJobId })
+    const avatarEvidence = await provenanceRepository.listEvidenceByJob({ workspaceId, projectId: project.projectAtCreation.id, jobId: avatarJobId })
     const avatarSubmitEvidence = avatarEvidence.filter((evidence) => evidence.phase === 'submit')
     const avatarRetrieveEvidence = avatarEvidence.filter((evidence) => evidence.phase === 'retrieve')
-    const avatarReceipt = await provenanceRepository.readReceiptByJob({ workspaceId, projectId: project.project.id, jobId: avatarJobId })
+    const avatarReceipt = await provenanceRepository.readReceiptByJob({ workspaceId, projectId: project.projectAtCreation.id, jobId: avatarJobId })
     assert.equal(avatarSubmitEvidence.length, 1)
     assert.equal(avatarRetrieveEvidence.length, 1)
     assert.ok(avatarReceipt, 'avatar execution receipt must exist before critic terminal state')
@@ -582,7 +550,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     assert.equal(new Set([avatarSubmitEvidence[0].leaseToken, avatarRetrieveEvidence[0].leaseToken, avatarReceipt.leaseToken]).size, 3, 'submit, retrieve and receipt must retain their distinct legitimate worker leases')
     assert.equal(avatarDone.job.criticResultHash, undefined, 'missing output speech evidence cannot produce a critic result')
     assert.deepEqual(
-      (await resultArtifactRepository.listByJob({ workspaceId, projectId: project.project.id, jobId: avatarJobId }))
+      (await resultArtifactRepository.listByJob({ workspaceId, projectId: project.projectAtCreation.id, jobId: avatarJobId }))
         .map(({ role }) => role),
       ['primary-video'],
       'transport evidence cannot be promoted into output speech evidence',
@@ -623,7 +591,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     // before the terminal transition commits. The repository must re-read the
     // current head inside the same transaction as approval and refuse it.
     const raced = await enqueue({
-      workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+      workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
       profileSnapshotId: registered.profile.snapshot.id, operation: 'tts',
       adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0',
       providerInput: { text: SCRIPT, scriptHash: SCRIPT_HASH, locale: 'pt-BR', outputFormat: 'mp3' },
@@ -663,12 +631,12 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
         adapters: registry, materializer, ingestor: diagnosticIngestor, critic,
         clock: () => new Date(at(tick + 2)),
         createLeaseToken: () => `journey-race-lease-${tick}`,
-        createTransitionId: () => `journey-transition-${++providerTransition}`,
+        createTransitionId: () => `journey-transition-${RUN}-${++providerTransition}`,
       })(`journey-race-worker-${tick}`)
     }
     let reachedEvaluating = false
     for (let attempt = 0; attempt < 10; attempt += 1) {
-      const current = await providerRepository.read({ workspaceId, projectId: project.project.id, jobId: racedJobId })
+      const current = await providerRepository.read({ workspaceId, projectId: project.projectAtCreation.id, jobId: racedJobId })
       if (current.job.status === 'evaluating') {
         reachedEvaluating = true
         break
@@ -692,7 +660,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
           result = await ttsCritic.evaluate(input)
         } catch (error) {
           const [ledger, reports] = await Promise.all([
-            resultArtifactRepository.listByJob({ workspaceId, projectId: project.project.id, jobId: racedJobId }),
+            resultArtifactRepository.listByJob({ workspaceId, projectId: project.projectAtCreation.id, jobId: racedJobId }),
             criticReports.readByArtifact({ workspaceId, artifactId: input.artifact.artifactId, limit: 10 }),
           ])
           rawRaceFailures.push({
@@ -727,7 +695,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
         break
       }
       const stillEvaluating = await providerRepository.read({
-        workspaceId, projectId: project.project.id, jobId: racedJobId,
+        workspaceId, projectId: project.projectAtCreation.id, jobId: racedJobId,
       })
       assert.equal(
         stillEvaluating.job.status,
@@ -750,7 +718,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     assert.notEqual(firstContextReport.evaluationContextHash, secondContextReport.evaluationContextHash)
     assert.notEqual(firstContextReport.reportHash, secondContextReport.reportHash)
     const racedLedger = await resultArtifactRepository.listByJob({
-      workspaceId, projectId: project.project.id, jobId: racedJobId,
+      workspaceId, projectId: project.projectAtCreation.id, jobId: racedJobId,
     })
     const racedAlignment = racedLedger.find(({ role }) => role === 'alignment-evidence')
     assert.ok(racedAlignment)
@@ -767,7 +735,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       defaultLocale: registered.profile.snapshot.defaultLocale, status: 'active',
       disclosure: registered.profile.snapshot.disclosure,
       consent: {
-        id: 'journey-consent-v2-revoked', evidenceArtifactId: 'journey-consent-evidence', granted: true,
+        id: `journey-consent-v2-revoked-${RUN}`, evidenceArtifactId: `journey-consent-evidence-${RUN}`, granted: true,
         allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
         allowedOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
         revokedAt: at(40),
@@ -776,7 +744,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     })
     const racedRights = await rightsRepository.findCurrent(workspaceId, audioEntry.artifactId)
     const restricted = createAssetRightsSnapshot({
-      id: 'journey-rights-audio-restricted', workspaceId, artifactId: audioEntry.artifactId, sequence: 2,
+      id: `journey-rights-audio-restricted-${RUN}`, workspaceId, artifactId: audioEntry.artifactId, sequence: 2,
       draft: {
         status: 'restricted', allowedUses: [], prohibitedUses: ['ads'],
         allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'], allowedSyntheticOperations: [],
@@ -799,7 +767,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       throw mutationFailure
     }
     await assert.rejects(racedApproval, (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
-    const afterRevocationRace = await providerRepository.read({ workspaceId, projectId: project.project.id, jobId: racedJobId })
+    const afterRevocationRace = await providerRepository.read({ workspaceId, projectId: project.projectAtCreation.id, jobId: racedJobId })
     assert.equal(afterRevocationRace.job.status, 'evaluating')
     assert.equal(await client.v2ProviderJobTransition.count({
       where: { workspaceId, jobId: racedJobId, toStatus: 'approved' },
@@ -809,23 +777,23 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     const originalMasterHash = (await client.v2SyntheticAudioMaster.findUniqueOrThrow({ where: { id: masterCreated.value.master.id }, select: { masterHash: true } })).masterHash
     await client.v2SyntheticAudioMaster.update({ where: { id: masterCreated.value.master.id }, data: { masterHash: hash('9') } })
     await assert.rejects(
-      audioMasterRepository.read({ workspaceId, projectId: project.project.id, audioMasterId: masterCreated.value.master.id }),
+      audioMasterRepository.read({ workspaceId, projectId: project.projectAtCreation.id, audioMasterId: masterCreated.value.master.id }),
       (error) => /hash|integrity/i.test(String(error.message)),
     )
     await client.v2SyntheticAudioMaster.update({ where: { id: masterCreated.value.master.id }, data: { masterHash: originalMasterHash } })
 
     // Workspace isolation: another workspace sees nothing.
-    assert.equal(await providerRepository.read({ workspaceId: 'other-workspace', projectId: project.project.id, jobId: ttsJobId }), null)
-    assert.equal(await audioMasterRepository.read({ workspaceId: 'other-workspace', projectId: project.project.id, audioMasterId: masterCreated.value.master.id }), null)
+    assert.equal(await providerRepository.read({ workspaceId: 'other-workspace', projectId: project.projectAtCreation.id, jobId: ttsJobId }), null)
+    assert.equal(await audioMasterRepository.read({ workspaceId: 'other-workspace', projectId: project.projectAtCreation.id, audioMasterId: masterCreated.value.master.id }), null)
 
     // Revoked consent blocks any new provider effect for that profile.
     const revoked = await registerProfile({
-      workspaceId, profileId: 'journey-presenter-revoked', version: 1, actorIdentityId: 'journey-identity-revoked',
+      workspaceId, profileId: `journey-presenter-revoked-${RUN}`, version: 1, actorIdentityId: 'journey-identity-revoked',
       avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_revoked_123' },
       voice: { id: 'voice_revoked_123', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {
-        id: 'journey-consent-revoked', evidenceArtifactId: 'journey-consent-evidence', granted: true,
+        id: `journey-consent-revoked-${RUN}`, evidenceArtifactId: `journey-consent-evidence-${RUN}`, granted: true,
         allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
         allowedOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
         revokedAt: '2029-06-01T00:00:00.000Z',
@@ -834,7 +802,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     })
     await assert.rejects(
       enqueue({
-        workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+        workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
         profileSnapshotId: revoked.profile.profileSnapshotId, operation: 'tts',
         adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0',
         providerInput: { text: SCRIPT, scriptHash: SCRIPT_HASH, locale: 'pt-BR', outputFormat: 'mp3' },
@@ -847,8 +815,13 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       }),
       (error) => error.code === 'ASSET_RIGHTS_BLOCKED',
     )
+
+    // The consent-race job is left evaluating (its approval was refused on purpose). Provider workers claim the oldest
+    // non-terminal job of ANY workspace, and sealed rows are never deleted, so a suite that runs a worker later in this
+    // database would claim it; it ends canceled through the real repository instead.
+    const { cancelOutstandingProviderJobs } = await import('./helpers/synth-pg-job-quiesce.mjs')
+    assert.ok((await cancelOutstandingProviderJobs(client, { workspaceId, repository: providerRepository })).includes(racedJobId))
   } finally {
-    await cleanup()
     await client.$disconnect()
     if (objectStore) {
       // Zero orphan objects: delete every version, prove the empty listing,

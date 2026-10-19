@@ -100,9 +100,6 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
   let serverLogs = ''
 
   try {
-    await client.$executeRawUnsafe(
-      'TRUNCATE TABLE "workspaces" CASCADE',
-    )
     await client.v2Workspace.create({
       data: {
         id: workspaceId,
@@ -326,8 +323,10 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
       ],
       budget: {
         currency: 'USD',
-        maxCostMinorUnits: 10,
-        reservedCostMinorUnits: 3,
+        // Minor units are scaled so one batch proves both the budget threshold event (spent 9_000 of 10_000 crosses 80%) and
+        // the signed edits (125 + 75 + 225 minor units of edit cost fit in what is left after the 3_000 reserve).
+        maxCostMinorUnits: 10_000,
+        reservedCostMinorUnits: 3_000,
       },
       items: [
         {
@@ -487,17 +486,17 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
         step: 'planning',
         expectedBatchRevision: batch.revision,
         expectedItemRevision: running.revision,
-        costMinorUnits: 1,
+        costMinorUnits: 1_000,
         cacheHit: false,
       }, `batch-first-planning-complete-${suffix}`)
       batch = completed.payload.data.batch
     }
-    await completeStep(firstItemId, 'materializing', 1)
-    await completeStep(firstItemId, 'rendering', 1)
-    await completeStep(firstItemId, 'reviewing', 1, [finalOneId])
+    await completeStep(firstItemId, 'materializing', 1_000)
+    await completeStep(firstItemId, 'rendering', 1_000)
+    await completeStep(firstItemId, 'reviewing', 1_000, [finalOneId])
 
     const secondItemId = batch.items[1].id
-    await completeStep(secondItemId, 'planning', 2, [planTwoId])
+    await completeStep(secondItemId, 'planning', 2_000, [planTwoId])
     {
       const item = batch.items.find((candidate) =>
         candidate.id === secondItemId)
@@ -516,7 +515,7 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
         step: 'materializing',
         expectedBatchRevision: batch.revision,
         expectedItemRevision: running.revision,
-        costMinorUnits: 3,
+        costMinorUnits: 3_000,
         cacheHit: false,
         error: {
           code: 'PROVIDER_TIMEOUT',
@@ -542,11 +541,11 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
         batchId: batch.id,
         budgetScope: 'production-batch',
         currency: 'USD',
-        maximumMinorUnits: 10,
+        maximumMinorUnits: 10_000,
         policyVersion: 'production-batch-budget-thresholds/v1',
-        previousSpentMinorUnits: 6,
+        previousSpentMinorUnits: 6_000,
         projectId,
-        spentMinorUnits: 9,
+        spentMinorUnits: 9_000,
         thresholdBasisPoints: 8_000,
         thresholdLevel: 'warning',
       })
@@ -584,7 +583,7 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
     assert.equal(batch.progress.failedSteps, 1)
     assert.equal(batch.progress.cancelledSteps, 4)
     assert.equal(batch.progress.percent, 41)
-    assert.equal(batch.progress.spentMinorUnits, 9)
+    assert.equal(batch.progress.spentMinorUnits, 9_000)
     assert.deepEqual(batch.items[0].artifactIds, [finalOneId])
     assert.deepEqual(batch.items[1].artifactIds, [planTwoId])
 
@@ -612,7 +611,7 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
         batch.items.find((item) => item.id === secondItemId).artifactIds,
         [planTwoId],
       )
-      assert.equal(batch.progress.spentMinorUnits, 9)
+      assert.equal(batch.progress.spentMinorUnits, 9_000)
     }
     {
       const queued = batch.items.find((candidate) =>
@@ -635,7 +634,7 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
         cacheHit: true,
       }, `batch-second-materializing-cache-${suffix}`)
       batch = completed.payload.data.batch
-      assert.equal(batch.progress.spentMinorUnits, 9)
+      assert.equal(batch.progress.spentMinorUnits, 9_000)
       assert.equal(
         batch.items.find((item) => item.id === secondItemId)
           .steps[1].attempt,
@@ -691,7 +690,7 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
     assert.equal(batch.items[1].state, 'queued')
     assert.equal(batch.items[2].state, 'queued')
     assert.deepEqual(batch.items[1].artifactIds, [planTwoId])
-    assert.equal(batch.progress.spentMinorUnits, 9)
+    assert.equal(batch.progress.spentMinorUnits, 9_000)
 
     const readResponse = await fetch(`${endpoint}/${batch.id}`, {
       headers: { authorization },
@@ -699,7 +698,7 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
     const readPayload = await readResponse.json()
     assert.equal(readResponse.status, 200)
     assert.equal(readPayload.data.batch.revision, batch.revision)
-    assert.equal(readPayload.data.batch.progress.spentMinorUnits, 9)
+    assert.equal(readPayload.data.batch.progress.spentMinorUnits, 9_000)
     assert.deepEqual(
       readPayload.data.batch.items[0].artifactIds,
       [finalOneId],

@@ -30,6 +30,7 @@ test('T-FR-165 persists one independent format verdict per output and blocks onl
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaProxyReviewRepository } = await import('../../src/v2/infrastructure/prisma/proxy-review-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
+  const { seedSealedProject, testActor } = await import('./helpers/pg-output-world.mjs')
 
   const client = new PrismaClient()
   const repository = new PrismaProxyReviewRepository(client)
@@ -37,47 +38,12 @@ test('T-FR-165 persists one independent format verdict per output and blocks onl
   const workspaceId = `format-quality-workspace-${suffix}`
   const foreignWorkspaceId = `format-quality-foreign-${suffix}`
   const projectId = `format-quality-project-${suffix}`
-  const projectVersionId = `format-quality-version-${suffix}`
   const createdAt = new Date('2026-08-13T17:00:00.000Z')
   const renderCompletedAt = new Date(createdAt.getTime() + 61_000)
 
-  const variants = [
-    // The approved landscape is persisted first so the project can then move to `revising`.
-    { key: 'landscape', format: '16:9', width: 960, height: 540, presenter: { x: 90, y: 30, width: 780, height: 450 }, subtitle: { x: 100, y: 410, width: 760, height: 80 }, subject: { x: .35, y: .15, width: .3, height: .35 } },
-    { key: 'vertical', format: '9:16', width: 540, height: 960, presenter: { x: 80, y: 100, width: 380, height: 760 }, subtitle: { x: 45, y: 700, width: 450, height: 170 }, subject: { x: .25, y: .55, width: .5, height: .3 } },
-  ].map((variant) => ({
-    ...variant,
-    outputSpecId: readOutputFormatPreset(variant.format).spec.id,
-    outputPresetHash: readOutputFormatPreset(variant.format).presetHash,
-    artifactId: `format-quality-artifact-${variant.key}-${suffix}`,
-    manifestId: `format-quality-manifest-${variant.key}-${suffix}`,
-    operationId: `format-quality-operation-${variant.key}-${suffix}`,
-    reviewId: `format-quality-review-${variant.key}-${suffix}`,
-    inputHash: calculateVersionHash({ projectVersionId, variant: variant.key }),
-    proxySha256: calculateVersionHash({ artifact: variant.key, suffix }),
-  }))
-
-  const cleanup = async () => {
-    for (const scope of [workspaceId, foreignWorkspaceId]) {
-      await client.v2ProxyReviewDecision.deleteMany({ where: { workspaceId: scope } })
-      await client.v2ProxyReview.deleteMany({ where: { workspaceId: scope } })
-      await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId: scope } })
-      await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId: scope } })
-      await client.v2PublicOperation.deleteMany({ where: { workspaceId: scope } })
-      await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: scope } })
-      await client.v2MediaArtifact.deleteMany({ where: { workspaceId: scope } })
-      await client.v2Project.updateMany({ where: { workspaceId: scope }, data: { currentVersionId: null } })
-      await client.v2ProjectVersion.deleteMany({ where: { workspaceId: scope } })
-      await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId: scope } })
-      await client.v2Project.deleteMany({ where: { workspaceId: scope } })
-      await client.v2ApiClient.deleteMany({ where: { workspaceId: scope } })
-      await client.v2Workspace.deleteMany({ where: { id: scope } })
-    }
-  }
-
-  let primaryError
+  // The project, its sealed Versions and the reviews are append-only: every identity is unique to this run and nothing is
+  // cleaned up (the owner of the disposable schema resets it).
   try {
-    await cleanup()
     for (const scope of [workspaceId, foreignWorkspaceId]) {
       await client.v2Workspace.create({ data: { id: scope, slug: scope, name: 'Format quality E2E', status: 'active', createdAt, updatedAt: createdAt } })
     }
@@ -92,38 +58,31 @@ test('T-FR-165 persists one independent format verdict per output and blocks onl
       environment: 'production',
       scopes: ['projects:read', 'projects:write', 'projects:approve'],
     })
-    await client.v2Project.create({
-      data: {
-        id: projectId, workspaceId, name: 'Format quality E2E', status: 'reviewing-proxy', objective: 'discovery',
-        format: '9:16', locale: 'pt-BR', createdByType: 'api-client', createdById: issued.client.id, createdAt, updatedAt: createdAt,
-      },
-    })
-    const editPlan = {
-      schemaVersion: 2, id: `edit-plan-${suffix}`, projectVersionId, state: 'compiled', fps: 30, durationFrames: 60,
-      videoTracks: [], markers: [], movementPolicy: { automaticZoom: false }, subtitlePolicy: { faceProtection: true },
-    }
-    const snapshots = [
-      { id: `format-quality-brief-${suffix}`, kind: 'brief', schemaVersion: 1, content: { schemaVersion: 1, productionBrief: { ownerInput: { text: 'Uma variante reprovada não derruba as demais.' } } } },
-      { id: `format-quality-policies-${suffix}`, kind: 'policies', schemaVersion: 1, content: { schemaVersion: 1, state: 'configured' } },
-      { id: `format-quality-edit-plan-${suffix}`, kind: 'edit-plan', schemaVersion: 2, content: editPlan },
-    ]
-    for (const snapshot of snapshots) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id: snapshot.id, workspaceId, projectId, kind: snapshot.kind, schemaVersion: snapshot.schemaVersion,
-          contentJson: stableSerialize(snapshot.content), contentHash: calculateVersionHash(snapshot.content), createdAt,
-        },
-      })
-    }
-    const projectVersionHash = calculateVersionHash({ projectId, projectVersionId })
-    await client.v2ProjectVersion.create({
-      data: {
-        id: projectVersionId, workspaceId, projectId, sequence: 1, briefSnapshotId: snapshots[0].id,
-        editPlanSnapshotId: snapshots[2].id, policiesSnapshotId: snapshots[1].id, baseHash: projectVersionHash,
-        createdBy: issued.client.id, createdAt,
-      },
-    })
-    await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: projectVersionId } })
+    // The project is the sealed world the product builds (creation Command, then one explicit output variant as the head
+    // Version); the proxy reviews below hang off that one immutable Version. The status the review transitions start from is
+    // the one the project had when the proxies were rendered.
+    const actor = testActor({ workspaceId, clientId: issued.client.id, credentialId: issued.credential.id, environment: 'production',
+      scopes: ['projects:read', 'projects:write', 'projects:approve'] })
+    const world = await seedSealedProject(client, { workspaceId, actor, prefix: 'format-quality', ids: { project: projectId }, name: 'Format quality E2E' })
+    const projectVersionId = world.head.version.id
+    const editPlanSnapshotId = world.head.editPlanSnapshot.id
+    const editPlan = JSON.parse(world.head.editPlanSnapshot.contentJson)
+    await client.v2Project.update({ where: { id: projectId }, data: { status: 'reviewing-proxy' } })
+    const variants = [
+      // The approved landscape is persisted first so the project can then move to `revising`.
+      { key: 'landscape', format: '16:9', width: 960, height: 540, presenter: { x: 90, y: 30, width: 780, height: 450 }, subtitle: { x: 100, y: 410, width: 760, height: 80 }, subject: { x: .35, y: .15, width: .3, height: .35 } },
+      { key: 'vertical', format: '9:16', width: 540, height: 960, presenter: { x: 80, y: 100, width: 380, height: 760 }, subtitle: { x: 45, y: 700, width: 450, height: 170 }, subject: { x: .25, y: .55, width: .5, height: .3 } },
+    ].map((variant) => ({
+      ...variant,
+      outputSpecId: readOutputFormatPreset(variant.format).spec.id,
+      outputPresetHash: readOutputFormatPreset(variant.format).presetHash,
+      artifactId: `format-quality-artifact-${variant.key}-${suffix}`,
+      manifestId: `format-quality-manifest-${variant.key}-${suffix}`,
+      operationId: `format-quality-operation-${variant.key}-${suffix}`,
+      reviewId: `format-quality-review-${variant.key}-${suffix}`,
+      inputHash: calculateVersionHash({ projectVersionId, variant: variant.key }),
+      proxySha256: calculateVersionHash({ artifact: variant.key, suffix }),
+    }))
 
     const persisted = []
     const reports = []
@@ -158,7 +117,7 @@ test('T-FR-165 persists one independent format verdict per output and blocks onl
       })
       await client.v2ProjectProxyRenderOperation.create({
         data: {
-          operationId: variant.operationId, workspaceId, projectId, projectVersionId, editPlanSnapshotId: snapshots[2].id,
+          operationId: variant.operationId, workspaceId, projectId, projectVersionId, editPlanSnapshotId,
           sourceArtifactId: variant.artifactId, sourceManifestId: variant.manifestId, colorPipelineBindingsJson: stableSerialize([]),
           inputHash: variant.inputHash, outputArtifactId: variant.artifactId, outputManifestId: variant.manifestId,
           originalFileName: `format-quality-${variant.key}.mp4`, createdAt,
@@ -258,15 +217,7 @@ test('T-FR-165 persists one independent format verdict per output and blocks onl
       assert.equal(decision.explanation, stored.formatQuality.explanation)
       assert.equal(decision.exportAllowed, stored.finalAllowed)
     }
-  } catch (error) {
-    primaryError = error
-    throw error
   } finally {
-    const cleanupErrors = []
-    await cleanup().catch((error) => cleanupErrors.push(error))
-    await client.$disconnect().catch((error) => cleanupErrors.push(error))
-    if (cleanupErrors.length) throw new AggregateError(
-      [...(primaryError ? [primaryError] : []), ...cleanupErrors], 'Format quality fixture failed with cleanup errors',
-    )
+    await client.$disconnect()
   }
 })

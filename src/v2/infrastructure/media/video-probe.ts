@@ -375,3 +375,119 @@ export async function inspectUploadedMedia(
     await handle?.close().catch(() => undefined)
   }
 }
+
+import { type OwnedFfmpegExecutor } from './ffmpeg-owned-process.ts'
+import type { OwnedDeadlineIo } from './ffmpeg-owned-io.ts'
+import { decimalSeconds, validateOutputObservedProbeV3, type OutputObservedProbeV3 } from '../../domain/output-materialization.ts'
+
+/** Full source sequence. The existing lightweight probe API stays unchanged.
+ * No native-frame ordinal is synthesized from avg_frame_rate. */
+
+export interface OwnedMediaProbeObservationV3 {
+  probe:Readonly<OutputObservedProbeV3>
+  executable:string
+  argv:readonly string[]
+  spawnObserved:true
+  closeObserved:true
+  exitCode:0
+}
+export async function observeMediaFramesV3(filePath:string,input:Readonly<{
+  mediaType:'video'|'audio';operationId:string;executor:OwnedFfmpegExecutor;io:OwnedDeadlineIo;deadlineMonotonicMs:number;
+  signal?:AbortSignal;environment?:NodeJS.ProcessEnv
+}>):Promise<Readonly<OwnedMediaProbeObservationV3>> {
+  if(!isAbsolute(filePath))throw new DomainError('INVALID_ARGUMENT','Observed source path must be absolute')
+  const binary=resolveBinary(input.environment??process.env)
+  if(!isAbsolute(binary))throw new DomainError('PERSISTENCE_NOT_CONFIGURED','Observed probe needs an exact binary file')
+  const before=await input.io.hashFile(binary,256*1024*1024)
+  const argv=['-v','error','-show_entries',
+    'format=start_time,duration,format_name:stream=index,codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,time_base,start_pts,start_time,duration_ts,duration,sample_rate,channels,pix_fmt,bits_per_raw_sample,color_space,color_transfer,color_primaries,color_range:stream_tags=rotate:stream_side_data=rotation,displaymatrix:frame=media_type,stream_index,best_effort_timestamp,duration,pkt_duration,nb_samples',
+    '-show_streams','-show_frames','-show_format','-of','json',filePath]
+  const result=await input.executor.execute({executable:binary,args:argv,
+    owner:{runId:input.operationId,operation:'normalization-frame-probe'},signal:input.signal,
+    deadlineMonotonicMs:input.deadlineMonotonicMs,timeoutMs:60000,maxOutputBytes:64*1024*1024})
+  const after=await input.io.hashFile(binary,256*1024*1024)
+  if(before.sha256!==after.sha256||before.byteSize!==after.byteSize)
+    throw new DomainError('PERSISTENCE_CONFLICT','Observed probe binary changed during execution')
+  const rawJson=result.stdout.toString('utf8')
+  const raw=JSON.parse(rawJson) as {streams:Record<string,unknown>[];frames:Record<string,unknown>[];format:{start_time:string}}
+  const candidates=raw.streams?.filter(s=>s.codec_type===input.mediaType)
+  if(!candidates?.length)throw new DomainError('RENDER_OUTPUT_INVALID','Observed source stream missing')
+  const stream=candidates[0],selected=raw.frames?.filter(f=>f.media_type===input.mediaType&&f.stream_index===stream.index)
+  if(!selected?.length)throw new DomainError('RENDER_OUTPUT_INVALID','Observed source frame sequence missing')
+  const split=(value:unknown)=>{if(typeof value!=='string'||!/^\d+\/\d+$/.test(value))
+    throw new DomainError('RENDER_OUTPUT_INVALID','Observed source rational missing')
+    const [numerator,denominator]=value.split('/');return {numerator,denominator}}
+  const timeBase=split(stream.time_base),fps=input.mediaType==='video'?split(stream.avg_frame_rate):null
+  const rotations=(stream.side_data_list as {rotation?:unknown}[]|undefined)?.filter(s=>s.rotation!==undefined).map(s=>Number(s.rotation))??[]
+  const rotateTag=(stream.tags as {rotate?:unknown}|undefined)?.rotate
+  if(rotateTag!==undefined)rotations.push(Number(rotateTag))
+  const frames=selected.map((f,frame)=>{
+    if(typeof f.best_effort_timestamp==='number'&&!Number.isSafeInteger(f.best_effort_timestamp))
+      throw new DomainError('RENDER_OUTPUT_INVALID','Observed PTS is unsafe after JSON decoding')
+    return {frame,pts:String(f.best_effort_timestamp),timeBase}
+  })
+  const frameEndPts=selected.map((f,i)=>{
+    const duration=f.duration??f.pkt_duration
+    if(typeof duration==='number'&&!Number.isSafeInteger(duration)||!/^\d+$/.test(String(duration))||BigInt(String(duration))<=BigInt(0))
+      throw new DomainError('RENDER_OUTPUT_INVALID','Observed frame duration missing or unsafe')
+    return (BigInt(frames[i]!.pts)+BigInt(String(duration))).toString()
+  })
+  const last=selected[selected.length-1],duration=last.duration??last.pkt_duration
+  if(typeof duration==='number'&&!Number.isSafeInteger(duration)||!/^\d+$/.test(String(duration)))
+    throw new DomainError('RENDER_OUTPUT_INVALID','Observed last-frame duration missing or unsafe')
+  const probe=validateOutputObservedProbeV3({schemaVersion:'output-observed-probe/v3',binarySha256:before.sha256,
+    rawJson,rawSha256:createHash('sha256').update(result.stdout).digest('hex'),streamIndex:Number(stream.index),
+    mediaType:input.mediaType,sampleRateHz:input.mediaType==='audio'?Number(stream.sample_rate):null,
+    channels:input.mediaType==='audio'?Number(stream.channels):null,
+    originSource:typeof raw.format?.start_time==='string'?'format-start-time':'stream-start-time',
+    originSeconds:decimalSeconds(typeof raw.format?.start_time==='string'?raw.format.start_time:stream.start_time as string),
+    width:input.mediaType==='video'?Number(stream.width):0,height:input.mediaType==='video'?Number(stream.height):0,
+    fps,rotationDegrees:rotations[0]??0,timeBase,frames,frameEndPts,endPts:(BigInt(frames[frames.length-1].pts)+BigInt(String(duration))).toString()})
+  if(!result.spawnObserved||!result.closeObserved||result.exitCode!==0||result.signal)
+    throw new DomainError('RENDER_OUTPUT_INVALID','Observed probe did not close successfully')
+  return Object.freeze({probe,executable:binary,argv:Object.freeze(argv),spawnObserved:true,closeObserved:true,exitCode:0})
+}
+
+export function videoMetadataFromObservedProbeV3(observed:Readonly<OutputObservedProbeV3>):Readonly<VideoProbeResult> {
+  const raw=JSON.parse(observed.rawJson) as {streams:Record<string,unknown>[];format?:Record<string,unknown>}
+  const video=raw.streams.find(s=>s.index===observed.streamIndex)!,audio=raw.streams.find(s=>s.codec_type==='audio')
+  const duration=positiveNumber(raw.format?.duration)||positiveNumber(video.duration)
+  const codec=token(video.codec_name),audioCodec=token(audio?.codec_name)
+  const container=typeof raw.format?.format_name==='string'?raw.format.format_name.trim():''
+  if(!duration||!codec||!audioCodec||!container)throw new DomainError('RENDER_OUTPUT_INVALID','Observed ingest metadata incomplete')
+  return Object.freeze({width:observed.width,height:observed.height,fps:Number(observed.fps!.numerator)/Number(observed.fps!.denominator),
+    duration,codec,audioCodec,container,color:detectedColor(video),
+    producer:{provider:'ffprobe' as const,version:'json-v1' as const,binaryDigest:observed.binarySha256}})
+}
+
+/** Audio shares the exact same full ffprobe stdout already authenticated by the
+ * observed video record. This projects a different stream, not another clock or
+ * a guessed duration and does not launch another process. */
+export function observedAudioFromVideoProbeV3(video:Readonly<OutputObservedProbeV3>):Readonly<OutputObservedProbeV3>|null {
+  const raw=JSON.parse(video.rawJson) as {streams:Record<string,unknown>[];frames:Record<string,unknown>[];format?:{start_time?:string}}
+  const stream=raw.streams.find(s=>s.codec_type==='audio')
+  if(!stream)return null
+  const frameData=raw.frames.filter(f=>f.media_type==='audio'&&f.stream_index===stream.index)
+  if(!frameData.length)throw new DomainError('RENDER_OUTPUT_INVALID','Observed audio stream has no full frame sequence')
+  const tb=String(stream.time_base).split('/')
+  const timeBase={numerator:tb[0],denominator:tb[1]},last=frameData[frameData.length-1],duration=last.duration??last.pkt_duration
+  if(typeof duration==='number'&&!Number.isSafeInteger(duration)||!/^\d+$/.test(String(duration)))
+    throw new DomainError('RENDER_OUTPUT_INVALID','Observed audio terminal duration unsafe')
+  const frames=frameData.map((f,frame)=>{
+    if(typeof f.best_effort_timestamp==='number'&&!Number.isSafeInteger(f.best_effort_timestamp))
+      throw new DomainError('RENDER_OUTPUT_INVALID','Observed audio timestamp unsafe')
+    return {frame,pts:String(f.best_effort_timestamp),timeBase}
+  })
+  const frameEndPts=frameData.map((f,i)=>{
+    const duration=f.duration??f.pkt_duration
+    if(typeof duration==='number'&&!Number.isSafeInteger(duration)||!/^\d+$/.test(String(duration))||BigInt(String(duration))<=BigInt(0))
+      throw new DomainError('RENDER_OUTPUT_INVALID','Observed audio frame duration unsafe')
+    return (BigInt(frames[i]!.pts)+BigInt(String(duration))).toString()
+  })
+  return validateOutputObservedProbeV3({schemaVersion:'output-observed-probe/v3',binarySha256:video.binarySha256,
+    rawJson:video.rawJson,rawSha256:video.rawSha256,streamIndex:Number(stream.index),mediaType:'audio',
+    sampleRateHz:Number(stream.sample_rate),channels:Number(stream.channels),fps:null,width:0,height:0,rotationDegrees:0,
+    originSource:typeof raw.format?.start_time==='string'?'format-start-time':'stream-start-time',
+    originSeconds:decimalSeconds(typeof raw.format?.start_time==='string'?raw.format.start_time:stream.start_time as string),
+    timeBase,frames,frameEndPts,endPts:(BigInt(frames[frames.length-1].pts)+BigInt(String(duration))).toString()})
+}

@@ -15,6 +15,11 @@ import {
 } from '../domain/sync-marker-detection.ts'
 import { MARKER_KINDS, MARKER_POSITIONS } from '../domain/sync-marker.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
+import { FACE0204_OUTPUT_BYTES, FACE0204_OUTPUT_POLICY_ID, FACE0204_OUTPUT_POLICY_SHA256, FACE0204_OUTPUT_SLOTS } from '../domain/face-detector-output.ts'
+import { FACE_EVIDENCE_POLICY, FACE_EVIDENCE_POLICY_SHA256, FACE_V9_OWNER_ACCEPTANCE_SHA256 } from '../domain/face-evidence-policy.ts'
+import { ACCEPTED_FACE_PRODUCERS } from '../domain/face-producer-registry.ts'
+import { createProjectOutputVariantRequestSchema, outputBoundVersionSchemaFields,
+  outputConsumptionSummarySchema } from './project-output-variant-contract.ts'
 import { PUBLIC_DATE_TIME_SCHEMA, PUBLIC_ID_SCHEMA } from './conventions.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import { PROJECT_DASHBOARD_EVENT_TYPES } from '../domain/public-event-feed.ts'
@@ -25,6 +30,7 @@ import {
   MVP_CORE_EVIDENCE_RESOURCE_TYPES,
 } from '../domain/mvp-core-gate.ts'
 import { DIRECTOR_TOOL_DESCRIPTORS } from '../domain/director-tools.ts'
+import { PUBLISHED_CONSUMPTION_REASONS } from '../domain/output-consumption.ts'
 import { SUBTITLE_SEGMENT_OVERRIDE_ANCHORS } from '../domain/subtitle-segment-override.ts'
 import { SUBTITLE_MODES, SUBTITLE_ORIGINS, SUBTITLE_PRESETS } from '../domain/subtitle-system.ts'
 import { PROVIDER_CALLBACK_REJECTIONS } from '../domain/provider-job-callback.ts'
@@ -663,15 +669,19 @@ const directorQualityReportReadSchema = {
     qualitySnapshot: {
       type: 'object', additionalProperties: false,
       required: ['id', 'contentSchemaVersion', 'contentHash'],
-      properties: { id: idSchema, contentSchemaVersion: { const: 2 }, contentHash: sha256Schema },
+      properties: { id: idSchema, contentSchemaVersion: { const: 3 }, contentHash: sha256Schema },
     },
     report: {
       type: 'object', additionalProperties: false,
-      required: ['schemaVersion', 'id', 'status', 'score', 'strategic', 'hardChecks', 'issues', 'criticVersion', 'evaluatedAt'],
+      required: ['schemaVersion', 'id', 'status', 'faceSafety', 'score', 'strategic', 'hardChecks', 'issues', 'criticVersion', 'evaluatedAt'],
       properties: {
-        schemaVersion: { const: 'director-quality-report/v2' },
+        schemaVersion: { const: 'director-quality-report/v3' },
         id: idSchema,
-        status: { enum: ['approved', 'approved-with-warnings', 'blocked'] },
+        status: { enum: ['approved', 'approved-with-warnings', 'review-required', 'blocked'] },
+        faceSafety: { type: 'object', additionalProperties: false, required: ['status', 'reasonCode', 'evidenceRefs'], properties: {
+          status: { enum: ['unknown', 'verified'] }, reasonCode: { type: 'string', minLength: 1, maxLength: 128 },
+          evidenceRefs: { type: 'array', maxItems: 128, items: idSchema },
+        } },
         score: { type: 'number', minimum: 0, maximum: 1 },
         strategic: directorStrategicQualityReportSchema,
         hardChecks: {
@@ -701,6 +711,26 @@ const directorQualityReportReadSchema = {
         },
         criticVersion: { type: 'string', minLength: 1, maxLength: 128 },
         evaluatedAt: dateTimeSchema,
+      },
+    },
+  },
+} as const
+const { faceSafety: _faceSafetySchema, ...directorReportPropertiesV1 } = directorQualityReportReadSchema.properties.report.properties
+const directorQualityReportReadSchemaV1 = {
+  ...directorQualityReportReadSchema,
+  properties: {
+    ...directorQualityReportReadSchema.properties,
+    qualitySnapshot: {
+      ...directorQualityReportReadSchema.properties.qualitySnapshot,
+      properties: { ...directorQualityReportReadSchema.properties.qualitySnapshot.properties, contentSchemaVersion: { const: 2 } },
+    },
+    report: {
+      ...directorQualityReportReadSchema.properties.report,
+      required: directorQualityReportReadSchema.properties.report.required.filter((key) => key !== 'faceSafety'),
+      properties: {
+        ...directorReportPropertiesV1,
+        schemaVersion: { const: 'director-quality-report/v2' },
+        status: { enum: ['approved', 'approved-with-warnings', 'blocked'] },
       },
     },
   },
@@ -8557,6 +8587,64 @@ const searchableProjectSchemaV4 = {
   },
 }
 
+const projectDashboardOperationSchemaV2 = {
+  ...projectDashboardOperationSchema,
+  properties: {
+    ...projectDashboardOperationSchema.properties,
+    type: { enum: [...projectDashboardOperationSchema.properties.type.enum, 'perception-producer-run'] },
+  },
+}
+const projectDashboardSummarySchemaV3 = {
+  ...projectDashboardSummarySchemaV2,
+  properties: {
+    ...projectDashboardSummarySchemaV2.properties,
+    latestOperation: { oneOf: [{ type: 'null' }, projectDashboardOperationSchemaV2] },
+  },
+}
+const searchableProjectSchemaV5 = {
+  ...searchableProjectSchemaV4,
+  properties: { ...searchableProjectSchemaV4.properties, dashboard: projectDashboardSummarySchemaV3 },
+}
+
+const projectDashboardOperationSchemaV3 = {
+  ...projectDashboardOperationSchemaV2,
+  properties: {
+    ...projectDashboardOperationSchemaV2.properties,
+    type: { enum: [...projectDashboardOperationSchemaV2.properties.type.enum, 'perception-temporal-run'] },
+    phase: { enum: [...projectDashboardOperationSchemaV2.properties.phase.enum, 'analyzing'] },
+  },
+}
+const projectDashboardSummarySchemaV4 = {
+  ...projectDashboardSummarySchemaV3,
+  properties: {
+    ...projectDashboardSummarySchemaV3.properties,
+    latestOperation: { oneOf: [{ type: 'null' }, projectDashboardOperationSchemaV3] },
+  },
+}
+const searchableProjectSchemaV6 = {
+  ...searchableProjectSchemaV5,
+  properties: { ...searchableProjectSchemaV5.properties, dashboard: projectDashboardSummarySchemaV4 },
+}
+
+const projectDashboardOperationSchemaV4 = {
+  ...projectDashboardOperationSchemaV3,
+  properties: {
+    ...projectDashboardOperationSchemaV3.properties,
+    type: { enum: [...projectDashboardOperationSchemaV3.properties.type.enum, 'perception-face-run'] },
+  },
+}
+const projectDashboardSummarySchemaV5 = {
+  ...projectDashboardSummarySchemaV4,
+  properties: {
+    ...projectDashboardSummarySchemaV4.properties,
+    latestOperation: { oneOf: [{ type: 'null' }, projectDashboardOperationSchemaV4] },
+  },
+}
+const searchableProjectSchemaV7 = {
+  ...searchableProjectSchemaV6,
+  properties: { ...searchableProjectSchemaV6.properties, dashboard: projectDashboardSummarySchemaV5 },
+}
+
 const projectAdministrationStateSchema = {
   type: 'object', additionalProperties: false,
   required: ['schemaVersion', 'revision', 'archivedFromStatus'],
@@ -8919,6 +9007,154 @@ const publicOperationSchemaV12 = {
   },
 }
 
+const publicOperationSchemaV13 = {
+  ...publicOperationSchemaV12,
+  properties: {
+    ...publicOperationSchemaV12.properties,
+    type: { enum: [...publicOperationSchemaV12.properties.type.enum, 'perception-producer-run'] },
+  },
+}
+
+const publicOperationSchemaV14 = {
+  ...publicOperationSchemaV13,
+  properties: {
+    ...publicOperationSchemaV13.properties,
+    type: { enum: [...publicOperationSchemaV13.properties.type.enum, 'perception-temporal-run'] },
+    phase: { enum: [...publicOperationSchemaV13.properties.phase.enum, 'analyzing'] },
+  },
+}
+
+const publicOperationSchemaV15 = {
+  ...publicOperationSchemaV14,
+  properties: {
+    ...publicOperationSchemaV14.properties,
+    type: { enum: [...publicOperationSchemaV14.properties.type.enum, 'perception-face-run'] },
+  },
+}
+
+const temporalClockSchema = { type: 'object', additionalProperties: false,
+  required: ['num', 'den'], properties: {
+    num: { type: 'integer', minimum: 1 }, den: { type: 'integer', minimum: 1 },
+  } }
+const temporalSourceRangeSchema = { type: 'object', additionalProperties: false,
+  required: ['startSourcePts', 'endSourcePts'], properties: {
+    startSourcePts: { type: 'integer', minimum: 0 }, endSourcePts: { type: 'integer', minimum: 1 },
+  } }
+const temporalTimelineRangeSchema = { type: 'object', additionalProperties: false,
+  required: ['startTimelineFrame', 'endTimelineFrame'], properties: {
+    startTimelineFrame: { type: 'integer', minimum: 0 }, endTimelineFrame: { type: 'integer', minimum: 1 },
+  } }
+const temporalShotPairSchema = { type: 'object', additionalProperties: false,
+  required: ['startSourcePts', 'endSourcePts', 'previousFrame', 'currentFrame',
+    'previousGridSha256', 'currentGridSha256', 'changeScore'], properties: {
+    ...temporalSourceRangeSchema.properties,
+    previousFrame: { type: 'integer', minimum: 0 }, currentFrame: { type: 'integer', minimum: 1 },
+    previousGridSha256: sha256Schema, currentGridSha256: sha256Schema,
+    changeScore: { type: 'number', minimum: 0, maximum: 1 },
+  } }
+const temporalMotionPairSchema = { type: 'object', additionalProperties: false,
+  required: ['startSourcePts', 'endSourcePts', 'previousFrame', 'currentFrame',
+    'vectorPxPerSecond', 'residualMeanAbsoluteLuma', 'ambiguity'], properties: {
+    ...temporalSourceRangeSchema.properties,
+    previousFrame: { type: 'integer', minimum: 0 }, currentFrame: { type: 'integer', minimum: 1 },
+    vectorPxPerSecond: { type: 'object', additionalProperties: false, required: ['x', 'y'],
+      properties: { x: { type: 'number' }, y: { type: 'number' } } },
+    residualMeanAbsoluteLuma: { type: 'number', minimum: 0, maximum: 1 },
+    ambiguity: { type: 'number', minimum: 0, maximum: 1 },
+  } }
+const temporalProjectedFields = { clipId: idSchema,
+  startTimelineFrame: { type: 'integer', minimum: 0 },
+  endTimelineFrame: { type: 'integer', minimum: 1 } }
+const temporalGapSchema = { type: 'object', additionalProperties: false,
+  required: ['startTimelineFrame', 'endTimelineFrame', 'reasonCode'], properties: {
+    ...temporalTimelineRangeSchema.properties,
+    reasonCode: { enum: ['NO_ADJACENT_OBSERVED_PAIR', 'UNRELIABLE_FRAME_DIFFERENCE'] },
+  } }
+const temporalEnvelopeSchema = { type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'authority', 'interpretation', 'faceSafety', 'id', 'workspaceId',
+    'projectId', 'projectVersionId', 'operationId', 'operationAttempt', 'operationFenceHash',
+    'sourceArtifactId', 'sourceSha256', 'editPlanSnapshotId', 'editPlanSnapshotHash',
+    'timelineDurationFrames', 'timelineFps', 'timeMap', 'timeMapHash', 'analysis',
+    'shot', 'motion', 'createdAt', 'envelopeHash'],
+  properties: {
+    schemaVersion: { const: 'temporal-producer-envelope/v1' },
+    authority: { const: 'server-produced' }, interpretation: { const: 'raw-measurements-only' },
+    faceSafety: { const: 'unknown' }, id: idSchema, workspaceId: idSchema, projectId: idSchema,
+    projectVersionId: idSchema, operationId: idSchema,
+    operationAttempt: { type: 'integer', minimum: 1 }, operationFenceHash: sha256Schema,
+    sourceArtifactId: idSchema, sourceSha256: sha256Schema, editPlanSnapshotId: idSchema,
+    editPlanSnapshotHash: sha256Schema, timelineDurationFrames: { type: 'integer', minimum: 2, maximum: 300 },
+    timelineFps: temporalClockSchema, timeMapHash: sha256Schema,
+    timeMap: { type: 'array', minItems: 1, maxItems: 300, items: {
+      type: 'object', additionalProperties: false,
+      required: ['clipId', 'sourceInFrame', 'sourceOutFrame', 'timelineInFrame', 'timelineOutFrame', 'rate'],
+      properties: { clipId: idSchema, sourceInFrame: { type: 'integer', minimum: 0 },
+        sourceOutFrame: { type: 'integer', minimum: 1, maximum: 300 },
+        timelineInFrame: { type: 'integer', minimum: 0 }, timelineOutFrame: { type: 'integer', minimum: 1 },
+        rate: { const: 1 } },
+    } },
+    analysis: { type: 'object', additionalProperties: false,
+      required: ['algorithmVersion', 'sourceSha256', 'sourceFps', 'sourceTimebase', 'sourceClock',
+        'sourceWidth', 'sourceHeight', 'observedFrameCount', 'assessedDomain', 'analysisGrid',
+        'runtime', 'shot', 'motion'],
+      properties: {
+        algorithmVersion: { const: 'visual-temporal-grid/v1' }, sourceSha256: sha256Schema,
+        sourceFps: temporalClockSchema, sourceTimebase: temporalClockSchema,
+        sourceClock: { const: 'constant-frame-rate' },
+        sourceWidth: { type: 'integer', minimum: 1, maximum: 1920 },
+        sourceHeight: { type: 'integer', minimum: 1, maximum: 1080 },
+        observedFrameCount: { type: 'integer', minimum: 2, maximum: 300 },
+        assessedDomain: temporalSourceRangeSchema,
+        analysisGrid: { type: 'object', additionalProperties: false, required: ['width', 'height'],
+          properties: { width: { const: 160 }, height: { const: 90 } } },
+        runtime: { type: 'object', additionalProperties: false,
+          required: ['ffmpegSha256', 'ffprobeSha256'], properties: {
+            ffmpegSha256: sha256Schema, ffprobeSha256: sha256Schema,
+          } },
+        shot: { type: 'object', additionalProperties: false,
+          required: ['observations', 'coverage', 'gaps'], properties: {
+            observations: { type: 'array', maxItems: 299, items: temporalShotPairSchema },
+            coverage: { type: 'array', maxItems: 300, items: temporalSourceRangeSchema },
+            gaps: { type: 'array', maxItems: 300, items: { type: 'object', additionalProperties: false,
+              required: ['startSourcePts', 'endSourcePts', 'reasonCode'], properties: {
+                ...temporalSourceRangeSchema.properties,
+                reasonCode: { const: 'UNRELIABLE_FRAME_DIFFERENCE' },
+              } } },
+          } },
+        motion: { type: 'object', additionalProperties: false,
+          required: ['observations', 'coverage', 'gaps'], properties: {
+            observations: { type: 'array', maxItems: 299, items: temporalMotionPairSchema },
+            coverage: { type: 'array', maxItems: 300, items: temporalSourceRangeSchema },
+            gaps: { type: 'array', maxItems: 300, items: { type: 'object', additionalProperties: false,
+              required: ['startSourcePts', 'endSourcePts', 'reasonCode'], properties: {
+                ...temporalSourceRangeSchema.properties,
+                reasonCode: { const: 'UNRELIABLE_FRAME_DIFFERENCE' },
+              } } },
+          } },
+      } },
+    shot: { type: 'object', additionalProperties: false,
+      required: ['observations', 'coverage', 'gaps'], properties: {
+        observations: { type: 'array', maxItems: 299, items: {
+          ...temporalShotPairSchema,
+          required: [...temporalShotPairSchema.required, 'clipId', 'startTimelineFrame', 'endTimelineFrame'],
+          properties: { ...temporalShotPairSchema.properties, ...temporalProjectedFields },
+        } },
+        coverage: { type: 'array', maxItems: 300, items: temporalTimelineRangeSchema },
+        gaps: { type: 'array', maxItems: 300, items: temporalGapSchema },
+      } },
+    motion: { type: 'object', additionalProperties: false,
+      required: ['observations', 'coverage', 'gaps'], properties: {
+        observations: { type: 'array', maxItems: 299, items: {
+          ...temporalMotionPairSchema,
+          required: [...temporalMotionPairSchema.required, 'clipId', 'startTimelineFrame', 'endTimelineFrame'],
+          properties: { ...temporalMotionPairSchema.properties, ...temporalProjectedFields },
+        } },
+        coverage: { type: 'array', maxItems: 300, items: temporalTimelineRangeSchema },
+        gaps: { type: 'array', maxItems: 300, items: temporalGapSchema },
+      } },
+    createdAt: dateTimeSchema, envelopeHash: sha256Schema,
+  } }
+
 const longFormStageNames = [
   'probe',
   'transcript',
@@ -8926,6 +9162,272 @@ const longFormStageNames = [
   'chunks',
   'moments',
 ]
+const faceEnvelopeSchema = { type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'authority', 'coverage', 'faceSafety', 'identity',
+    'id', 'workspaceId', 'projectId', 'projectVersionId', 'operationId', 'operationAttempt',
+    'operationFenceHash', 'sourceArtifactId', 'sourceSha256', 'editPlanSnapshotId',
+    'editPlanSnapshotHash', 'timelineDurationFrames', 'timelineFps', 'sourceFps',
+    'sourceTimebase', 'sourceClock', 'sourcePtsStart', 'sourcePtsRounding', 'sourceWidth',
+    'sourceHeight', 'sourceOrientation', 'timeMap', 'timeMapHash', 'detectorConfig',
+    'detectorConfigHash', 'producer', 'samplePolicy', 'samples', 'gaps', 'createdAt', 'envelopeHash'],
+  properties: {
+    schemaVersion: { const: 'face-producer-envelope/v1' }, authority: { const: 'server-produced' },
+    coverage: { const: 'sampled-only' }, faceSafety: { const: 'unknown' },
+    identity: { const: 'not-performed' }, id: idSchema, workspaceId: idSchema,
+    projectId: idSchema, projectVersionId: idSchema, operationId: idSchema,
+    operationAttempt: { type: 'integer', minimum: 1 }, operationFenceHash: sha256Schema,
+    sourceArtifactId: idSchema, sourceSha256: sha256Schema, editPlanSnapshotId: idSchema,
+    editPlanSnapshotHash: sha256Schema, timelineDurationFrames: { type: 'integer', minimum: 1, maximum: 300 },
+    timelineFps: temporalClockSchema, sourceFps: temporalClockSchema,
+    sourceTimebase: temporalClockSchema, sourceClock: { const: 'constant-frame-rate' },
+    sourcePtsStart: { type: 'integer', minimum: 0 }, sourcePtsRounding: { const: 'nearest' },
+    sourceWidth: { type: 'integer', minimum: 1, maximum: 1920 },
+    sourceHeight: { type: 'integer', minimum: 1, maximum: 1080 },
+    sourceOrientation: { const: 'rotation-0-exif-neutral' },
+    timeMap: { type: 'array', minItems: 1, maxItems: 1, items: {
+      type: 'object', additionalProperties: false,
+      required: ['clipId', 'sourceInFrame', 'sourceOutFrame', 'timelineInFrame', 'timelineOutFrame', 'rate'],
+      properties: { clipId: idSchema, sourceInFrame: { type: 'integer', minimum: 0 },
+        sourceOutFrame: { type: 'integer', minimum: 1, maximum: 300 },
+        timelineInFrame: { type: 'integer', minimum: 0 },
+        timelineOutFrame: { type: 'integer', minimum: 1, maximum: 300 }, rate: { const: 1 } },
+    } },
+    timeMapHash: sha256Schema,
+    detectorConfig: { type: 'object', additionalProperties: false,
+      required: ['inputWidth', 'inputHeight', 'longestSide', 'upscale', 'orientationPolicy',
+        'resizeInterpolation', 'canvasPlacement', 'scoreThreshold', 'nmsThreshold',
+        'topK', 'backend', 'threads'],
+      properties: { inputWidth: { const: 640 }, inputHeight: { const: 640 }, longestSide: { const: 640 },
+        upscale: { type: 'boolean' }, orientationPolicy: { const: 'ignore-exif-after-source-validation' },
+        resizeInterpolation: { const: 'area' }, canvasPlacement: { const: 'top-left-zero-pad' },
+        scoreThreshold: { const: 0.5 }, nmsThreshold: { const: 0.3 },
+        topK: { type: 'integer', minimum: 1, maximum: 5000 }, backend: { const: 'opencv-dnn-cpu' },
+        threads: { type: 'integer', minimum: 1, maximum: 4 } },
+    }, detectorConfigHash: sha256Schema,
+    producer: { type: 'object', additionalProperties: false,
+      required: ['name', 'modelSha256', 'modelLicenseSha256', 'modelSourceCommit',
+        'adapterSha256', 'bridgeSha256', 'executableSha256', 'opencvBinarySha256',
+        'opencvVersion', 'opencvPackageVersion', 'ffmpegSha256', 'ffprobeSha256', 'assessment'],
+      properties: { name: { const: 'yunet-cpu' },
+        modelSha256: { const: '8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4' },
+        modelLicenseSha256: { const: 'c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e9227e415326aa1b1aba958' },
+        modelSourceCommit: { const: '47534e27c9851bb1128ccc0102f1145e27f23f98' },
+        adapterSha256: sha256Schema,
+        bridgeSha256: { const: '6e541eee8b1f527467fbaa33f28819dde992f1fb27d9fa9efda4e751d78b7ade' },
+        executableSha256: sha256Schema, opencvBinarySha256: sha256Schema,
+        opencvVersion: idSchema, opencvPackageVersion: idSchema,
+        ffmpegSha256: sha256Schema, ffprobeSha256: sha256Schema,
+        assessment: { type: 'object', additionalProperties: false,
+          required: ['status', 'preregistrationSha256', 'developmentReportSha256', 'calibrationReportSha256'],
+          properties: { status: { const: 'failed-gate' },
+            preregistrationSha256: { const: 'e9de632da25f730b884ab6128830be99656836688e6d20cdec26c756aa48bba6' },
+            developmentReportSha256: { const: '55c4f6e3f639db80a1a02ceed2b249fba84492d0bbea53b50d53a3c222d8191d' },
+            calibrationReportSha256: { const: 'd29c1ca49344d027048e785d4baef0b2ce127f2f831223b7b5d63da9c8108b8b' } },
+        } },
+    },
+    samplePolicy: { type: 'object', additionalProperties: false,
+      required: ['strategy', 'intervalFrames', 'maxSamples'],
+      properties: { strategy: { const: 'fixed-interval' },
+        intervalFrames: { type: 'integer', minimum: 1, maximum: 300 }, maxSamples: { const: 30 } },
+    },
+    samples: { type: 'array', maxItems: 30, items: { type: 'object', additionalProperties: false,
+      required: ['sourceFrame', 'sourcePts', 'sourcePtsEvidenceHash', 'timelineFrame',
+        'imageSha256', 'frameWidth', 'frameHeight', 'status', 'boxes', 'reasonCode'],
+      properties: { sourceFrame: { type: 'integer', minimum: 0 }, sourcePts: { type: 'integer', minimum: 0 },
+        sourcePtsEvidenceHash: sha256Schema, timelineFrame: { type: 'integer', minimum: 0 },
+        imageSha256: sha256Schema, frameWidth: { type: 'integer', minimum: 1, maximum: 1920 },
+        frameHeight: { type: 'integer', minimum: 1, maximum: 1080 },
+        status: { enum: ['observed', 'unknown'] },
+        boxes: { type: 'array', maxItems: 128, items: { type: 'object', additionalProperties: false,
+          required: ['boxXYXY', 'confidence', 'clipped', 'classification'],
+          properties: { boxXYXY: { type: 'array', minItems: 4, maxItems: 4,
+            items: { type: 'number', minimum: 0, maximum: 1 } },
+          confidence: { type: 'number', minimum: 0, maximum: 1 }, clipped: { type: 'boolean' },
+          classification: { const: 'unverified-face-candidate' } },
+        } }, reasonCode: { oneOf: [{ type: 'null' }, { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' }] } },
+    } },
+    gaps: { type: 'array', maxItems: 31, items: { type: 'object', additionalProperties: false,
+      required: ['startTimelineFrame', 'endTimelineFrame', 'reasonCode'],
+      properties: { startTimelineFrame: { type: 'integer', minimum: 0 },
+        endTimelineFrame: { type: 'integer', minimum: 1, maximum: 300 },
+        reasonCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' } },
+    } }, createdAt: dateTimeSchema, envelopeHash: sha256Schema,
+  },
+}
+
+const acceptedFaceProducer = ACCEPTED_FACE_PRODUCERS[0]!
+const faceWindowEnvelopeSchema = { type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'authority', 'coverage', 'faceSafety', 'identity',
+    'id', 'workspaceId', 'projectId', 'projectVersionId', 'operationId', 'operationAttempt',
+    'operationFenceHash', 'sourceArtifactId', 'sourceSha256', 'editPlanSnapshotId',
+    'editPlanSnapshotHash', 'timelineDurationFrames', 'timelineFps', 'sourceFps',
+    'sourceTimebase', 'sourceClock', 'sourcePtsStart', 'sourcePtsRounding', 'sourceWidth',
+    'sourceHeight', 'sourceOrientation', 'timeMap', 'timeMapHash', 'window', 'policyId', 'policySha256',
+    'detectorConfig', 'detectorConfigHash', 'producer', 'samplePolicy', 'samples', 'gaps', 'createdAt', 'envelopeHash'],
+  properties: {
+    schemaVersion: { const: 'face-producer-envelope/v2' }, authority: { const: 'server-produced' },
+    coverage: { const: 'sampled-only' }, faceSafety: { const: 'unknown' },
+    identity: { const: 'not-performed' }, id: idSchema, workspaceId: idSchema,
+    projectId: idSchema, projectVersionId: idSchema, operationId: idSchema,
+    operationAttempt: { type: 'integer', minimum: 1 }, operationFenceHash: sha256Schema,
+    sourceArtifactId: idSchema, sourceSha256: sha256Schema, editPlanSnapshotId: idSchema,
+    editPlanSnapshotHash: sha256Schema, timelineDurationFrames: { type: 'integer', minimum: 1, maximum: 10_000_000 },
+    timelineFps: temporalClockSchema, sourceFps: temporalClockSchema,
+    sourceTimebase: temporalClockSchema, sourceClock: { const: 'constant-frame-rate' },
+    sourcePtsStart: { type: 'integer', minimum: 0 }, sourcePtsRounding: { const: 'nearest' },
+    sourceWidth: { type: 'integer', minimum: 1, maximum: 8192 },
+    sourceHeight: { type: 'integer', minimum: 1, maximum: 8192 },
+    sourceOrientation: { const: 'rotation-0-exif-neutral' },
+    timeMap: { type: 'array', minItems: 1, maxItems: 1, items: {
+      type: 'object', additionalProperties: false,
+      required: ['clipId', 'sourceInFrame', 'sourceOutFrame', 'timelineInFrame', 'timelineOutFrame', 'rate'],
+      properties: { clipId: idSchema, sourceInFrame: { type: 'integer', minimum: 0 },
+        sourceOutFrame: { type: 'integer', minimum: 1 },
+        timelineInFrame: { const: 0 },
+        timelineOutFrame: { type: 'integer', minimum: 1, maximum: 10_000_000 }, rate: { const: 1 } },
+    } },
+    timeMapHash: sha256Schema,
+    window: { type: 'object', additionalProperties: false, required: ['startTimelineFrame', 'endTimelineFrame'],
+      properties: { startTimelineFrame: { type: 'integer', minimum: 0 },
+        endTimelineFrame: { type: 'integer', minimum: 1, maximum: 10_000_000 } } },
+    policyId: { const: FACE_EVIDENCE_POLICY.id }, policySha256: { const: FACE_EVIDENCE_POLICY_SHA256 },
+    detectorConfig: { type: 'object', additionalProperties: false,
+      required: ['family', 'model', 'inputWidth', 'inputHeight', 'colorOrder', 'tensorLayout', 'tensorType', 'pixelRange',
+        'resize', 'orientationPolicy', 'frameEncoding', 'backend', 'precision', 'threads', 'streams', 'outputSlots',
+        'outputBytes', 'collectionScoreFloor'],
+      properties: { family: { const: 'openvino-ssd' }, model: { const: 'face-detection-0204' },
+        inputWidth: { const: 448 }, inputHeight: { const: 448 }, colorOrder: { const: 'bgr' },
+        tensorLayout: { const: 'nchw' }, tensorType: { const: 'float32' }, pixelRange: { const: '0-255' },
+        resize: { const: 'direct-bilinear' }, orientationPolicy: { const: 'ignore-exif-after-source-validation' },
+        frameEncoding: { const: 'png-lossless' }, backend: { const: 'openvino-cpu' }, precision: { const: 'f32' },
+        threads: { const: 2 }, streams: { const: 1 }, outputSlots: { const: FACE0204_OUTPUT_SLOTS },
+        outputBytes: { const: FACE0204_OUTPUT_BYTES },
+        collectionScoreFloor: { const: FACE_EVIDENCE_POLICY.detection.collectionScoreFloor } },
+    }, detectorConfigHash: sha256Schema,
+    producer: { type: 'object', additionalProperties: false,
+      required: ['name', 'model', 'outputPolicy', 'runtime', 'adapterSha256', 'bridgeSha256', 'pythonExecutableSha256',
+        'ffmpegSha256', 'ffprobeSha256', 'assessment'],
+      properties: { name: { const: acceptedFaceProducer.name },
+        model: { type: 'object', additionalProperties: false,
+          required: ['precision', 'xmlSha256', 'binSha256', 'xmlBytes', 'binBytes', 'licenseSha256', 'sourceCommit'],
+          properties: { precision: { const: 'FP32' }, xmlSha256: { const: acceptedFaceProducer.model.xmlSha256 },
+            binSha256: { const: acceptedFaceProducer.model.binSha256 }, xmlBytes: { const: acceptedFaceProducer.model.xmlBytes },
+            binBytes: { const: acceptedFaceProducer.model.binBytes },
+            licenseSha256: { const: acceptedFaceProducer.model.licenseSha256 },
+            sourceCommit: { const: acceptedFaceProducer.model.sourceCommit } } },
+        outputPolicy: { type: 'object', additionalProperties: false, required: ['id', 'sha256'],
+          properties: { id: { const: FACE0204_OUTPUT_POLICY_ID }, sha256: { const: FACE0204_OUTPUT_POLICY_SHA256 } } },
+        runtime: { type: 'object', additionalProperties: false,
+          required: ['platform', 'pythonVersion', 'openvinoVersion', 'openvinoPackageVersion', 'opencvVersion', 'numpyVersion', 'runtimeManifestSha256'],
+          properties: { platform: { enum: ['win32', 'linux'] }, pythonVersion: idSchema, openvinoVersion: idSchema,
+            openvinoPackageVersion: idSchema, opencvVersion: idSchema, numpyVersion: idSchema, runtimeManifestSha256: sha256Schema } },
+        adapterSha256: sha256Schema, bridgeSha256: sha256Schema, pythonExecutableSha256: sha256Schema,
+        ffmpegSha256: sha256Schema, ffprobeSha256: sha256Schema,
+        assessment: { type: 'object', additionalProperties: false,
+          required: ['status', 'scope', 'ownerAcceptanceSha256', 'v9ReceiptSha256', 'v9PreregistrationSha256', 'independentConfirmation', 'runtimeParity'],
+          properties: { status: { const: 'owner-accepted-scoped' }, scope: { const: 'foreground-faces-and-speaker' },
+            ownerAcceptanceSha256: { const: FACE_V9_OWNER_ACCEPTANCE_SHA256 },
+            v9ReceiptSha256: { const: acceptedFaceProducer.v9ReceiptSha256 },
+            v9PreregistrationSha256: { const: acceptedFaceProducer.v9PreregistrationSha256 },
+            independentConfirmation: { const: 'not-performed' },
+            runtimeParity: { type: 'object', additionalProperties: false, required: ['status', 'receiptSha256'],
+              properties: { status: { enum: ['pending', 'passed'] }, receiptSha256: { oneOf: [{ type: 'null' }, sha256Schema] } } } } } },
+    },
+    samplePolicy: { type: 'object', additionalProperties: false,
+      required: ['strategy', 'intervalFrames', 'maxSamples'],
+      properties: { strategy: { const: 'fixed-interval' },
+        intervalFrames: { type: 'integer', minimum: 1, maximum: 300 },
+        maxSamples: { const: FACE_EVIDENCE_POLICY.sampling.maxSamplesPerWindow } },
+    },
+    samples: { type: 'array', maxItems: FACE_EVIDENCE_POLICY.sampling.maxSamplesPerWindow, items: { type: 'object', additionalProperties: false,
+      required: ['sourceFrame', 'sourcePts', 'sourcePtsEvidenceHash', 'timelineFrame',
+        'imageSha256', 'frameWidth', 'frameHeight', 'status', 'boxes', 'rawOutput', 'reasonCode'],
+      properties: { sourceFrame: { type: 'integer', minimum: 0 }, sourcePts: { type: 'integer', minimum: 0 },
+        sourcePtsEvidenceHash: sha256Schema, timelineFrame: { type: 'integer', minimum: 0 },
+        imageSha256: sha256Schema, frameWidth: { type: 'integer', minimum: 1, maximum: 8192 },
+        frameHeight: { type: 'integer', minimum: 1, maximum: 8192 },
+        status: { enum: ['observed', 'unknown'] },
+        boxes: { type: 'array', maxItems: FACE0204_OUTPUT_SLOTS, items: { type: 'object', additionalProperties: false,
+          required: ['boxXYXY', 'confidence', 'clipped', 'classification'],
+          properties: { boxXYXY: { type: 'array', minItems: 4, maxItems: 4,
+            items: { type: 'number', minimum: 0, maximum: 1 } },
+          confidence: { type: 'number', minimum: FACE_EVIDENCE_POLICY.detection.collectionScoreFloor, maximum: 1 },
+          clipped: { type: 'boolean' }, classification: { const: 'unverified-face-candidate' } },
+        } },
+        rawOutput: { oneOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['sha256', 'bytes'],
+          properties: { sha256: sha256Schema, bytes: { const: FACE0204_OUTPUT_BYTES } } }] },
+        reasonCode: { oneOf: [{ type: 'null' }, { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' }] } },
+    } },
+    gaps: { type: 'array', maxItems: FACE_EVIDENCE_POLICY.sampling.maxSamplesPerWindow + 1, items: { type: 'object', additionalProperties: false,
+      required: ['startTimelineFrame', 'endTimelineFrame', 'reasonCode'],
+      properties: { startTimelineFrame: { type: 'integer', minimum: 0 },
+        endTimelineFrame: { type: 'integer', minimum: 1, maximum: 10_000_000 },
+        reasonCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' } },
+    } }, createdAt: dateTimeSchema, envelopeHash: sha256Schema,
+  },
+}
+const faceProducerAuthenticationSchema = { type: 'object', additionalProperties: false, required: ['authenticated', 'reasons'],
+  properties: { authenticated: { type: 'boolean' },
+    reasons: { type: 'array', maxItems: 32, items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' } } } }
+
+/**
+ * The sealed V9 SOURCE window (W65b, face-producer-envelope/v3). It names the source (artifact + SHA-256), the clock measured on
+ * its bytes and the SOURCE frames observed; it names no project, version, edit plan or time map. The detector and producer pins are
+ * the same objects the timeline envelope publishes, so both contracts move together with the domain constants.
+ */
+const faceSourceWindowEnvelopeSchema = { type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'authority', 'coverage', 'faceSafety', 'identity',
+    'id', 'workspaceId', 'operationId', 'operationAttempt', 'operationFenceHash', 'sourceArtifactId', 'sourceSha256',
+    'sourceFps', 'sourceTimebase', 'sourceClock', 'sourcePtsStart', 'sourcePtsRounding', 'sourceWidth', 'sourceHeight',
+    'sourceOrientation', 'window', 'policyId', 'policySha256', 'detectorConfig', 'detectorConfigHash', 'producer',
+    'samplePolicy', 'samples', 'gaps', 'createdAt', 'envelopeHash'],
+  properties: {
+    schemaVersion: { const: 'face-producer-envelope/v3' }, authority: { const: 'server-produced' },
+    coverage: { const: 'sampled-only' }, faceSafety: { const: 'unknown' },
+    identity: { const: 'not-performed' }, id: idSchema, workspaceId: idSchema, operationId: idSchema,
+    operationAttempt: { type: 'integer', minimum: 1 }, operationFenceHash: sha256Schema,
+    sourceArtifactId: idSchema, sourceSha256: sha256Schema,
+    // Only an integer frame rate has a provable frame mapping onto an edit, so the envelope cannot carry any other.
+    sourceFps: { type: 'object', additionalProperties: false, required: ['num', 'den'],
+      properties: { num: { type: 'integer', minimum: 1 }, den: { const: 1 } } },
+    sourceTimebase: temporalClockSchema, sourceClock: { const: 'constant-frame-rate' },
+    sourcePtsStart: { type: 'integer', minimum: 0 }, sourcePtsRounding: { const: 'nearest' },
+    sourceWidth: { type: 'integer', minimum: 1, maximum: 8192 },
+    sourceHeight: { type: 'integer', minimum: 1, maximum: 8192 },
+    sourceOrientation: { const: 'rotation-0-exif-neutral' },
+    window: { type: 'object', additionalProperties: false, required: ['startSourceFrame', 'endSourceFrame'],
+      properties: { startSourceFrame: { type: 'integer', minimum: 0 },
+        endSourceFrame: { type: 'integer', minimum: 1, maximum: 100_000_000 } } },
+    policyId: { const: FACE_EVIDENCE_POLICY.id }, policySha256: { const: FACE_EVIDENCE_POLICY_SHA256 },
+    detectorConfig: faceWindowEnvelopeSchema.properties.detectorConfig, detectorConfigHash: sha256Schema,
+    producer: faceWindowEnvelopeSchema.properties.producer,
+    samplePolicy: { type: 'object', additionalProperties: false,
+      required: ['strategy', 'intervalFrames', 'maxSamples'],
+      properties: { strategy: { const: 'fixed-interval' },
+        intervalFrames: { type: 'integer', minimum: 1, maximum: 300 },
+        maxSamples: { const: FACE_EVIDENCE_POLICY.sampling.maxSamplesPerWindow } },
+    },
+    samples: { type: 'array', maxItems: FACE_EVIDENCE_POLICY.sampling.maxSamplesPerWindow, items: { type: 'object', additionalProperties: false,
+      required: ['sourceFrame', 'sourcePts', 'sourcePtsEvidenceHash', 'imageSha256', 'frameWidth', 'frameHeight', 'status',
+        'boxes', 'rawOutput', 'reasonCode'],
+      properties: { sourceFrame: { type: 'integer', minimum: 0 }, sourcePts: { type: 'integer', minimum: 0 },
+        sourcePtsEvidenceHash: sha256Schema, imageSha256: sha256Schema,
+        frameWidth: { type: 'integer', minimum: 1, maximum: 8192 },
+        frameHeight: { type: 'integer', minimum: 1, maximum: 8192 },
+        status: { enum: ['observed', 'unknown'] },
+        boxes: faceWindowEnvelopeSchema.properties.samples.items.properties.boxes,
+        rawOutput: faceWindowEnvelopeSchema.properties.samples.items.properties.rawOutput,
+        reasonCode: { oneOf: [{ type: 'null' }, { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' }] } },
+    } },
+    gaps: { type: 'array', maxItems: FACE_EVIDENCE_POLICY.sampling.maxSamplesPerWindow + 1, items: { type: 'object', additionalProperties: false,
+      required: ['startSourceFrame', 'endSourceFrame', 'reasonCode'],
+      properties: { startSourceFrame: { type: 'integer', minimum: 0 },
+        endSourceFrame: { type: 'integer', minimum: 1, maximum: 100_000_000 },
+        reasonCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' } },
+    } }, createdAt: dateTimeSchema, envelopeHash: sha256Schema,
+  },
+}
+
 const longFormStageVersionSchema = {
   type: 'object',
   additionalProperties: false,
@@ -16475,7 +16977,41 @@ const gateArtifactSchema = {
   },
 }
 
-export const PUBLIC_SCHEMAS = defineSchemaRegistry([
+const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] = [
+  defineSchema('create-project-request', 4, 'Create empty output-bound project root', {
+    type: 'object', additionalProperties: false, required: ['name', 'objective'],
+    properties: { name: { type: 'string', minLength: 1, maxLength: 120 }, objective: strategicObjectiveSchema,
+      locale: { type: 'string', minLength: 2, maxLength: 35 }, briefing: { type: 'string', maxLength: 10000 },
+      desiredAction: desiredActionInputSchema }, allOf: desiredActionObjectiveRequirements,
+  }),
+  defineSchema('project-created', 5, 'Creation receipt with immutable empty State2 and Version2', successSchema({
+    type: 'object', additionalProperties: false, required: ['projectAtCreation', 'creationVersion', 'outputState', 'replayed'],
+    properties: { projectAtCreation: { ...searchableProjectSchemaV2,
+        properties: { ...searchableProjectSchemaV2.properties, name: { type: 'string', minLength: 1, maxLength: 120 },
+          format: false, currentVersionId: false } },
+      creationVersion: { type: 'object', additionalProperties: false,
+        required: ['id', 'sequence', 'baseHash', 'snapshotRefs', 'createdAt', 'outputContractVersion', 'outputStateId', 'outputStateHash'],
+        properties: { ...outputBoundVersionSchemaFields, outputContractVersion: { const: 2 }, sequence: { const: 1 }, parentVersionId: false } },
+      outputState: { type: 'object', additionalProperties: false, required: ['id', 'hash', 'entryCount', 'consumption'],
+        properties: { id: idSchema, hash: sha256Schema, entryCount: { const: 0 }, consumption: {
+          type: 'object', additionalProperties: false, required: ['status', 'reasons'], properties: {
+            status: { const: 'blocked' }, reasons: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string' } } } } } },
+      replayed: { type: 'boolean' } },
+  })),
+  defineSchema('create-project-output-variant-request', 1, 'Explicit output variant Command with full effective spec and delivery profile',
+    createProjectOutputVariantRequestSchema),
+  defineSchema('project-output-variant-created', 1, 'Immutable output variant Command receipt, State3 and Version3', successSchema({
+    type: 'object', additionalProperties: false, required: ['version', 'command', 'variant', 'replayed'], properties: {
+      version: { type: 'object', additionalProperties: false,
+        required: ['id', 'sequence', 'baseHash', 'snapshotRefs', 'createdAt', 'parentVersionId', 'outputContractVersion', 'outputStateId', 'outputStateHash'],
+        properties: { ...outputBoundVersionSchemaFields, outputContractVersion: { const: 3 }, sequence: { type: 'integer', minimum: 2 } } },
+      command: { type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'commandHash'],
+        properties: { id: idSchema, type: { const: 'create-output-variant' }, baseVersionId: idSchema, commandHash: sha256Schema } },
+      variant: { type: 'object', additionalProperties: false, required: ['id', 'outputSpecRevisionId', 'specHash', 'revisionNumber', 'consumption'],
+        properties: { id: idSchema, outputSpecRevisionId: idSchema, specHash: sha256Schema, revisionNumber: { const: 1 },
+          consumption: outputConsumptionSummarySchema } }, replayed: { type: 'boolean' },
+    },
+  })),
   defineSchema('subtitle-style-registry', 1, 'Content-addressed subtitle style registry', subtitleStyleRegistrySchemaV1),
   defineSchema('subtitle-style-registry', 2, 'Content-addressed subtitle style registry carrying casing, grouping, shadow and placement tokens', subtitleStyleRegistrySchema),
   defineSchema('subtitle-css-preview-request', 1, 'Instant subtitle CSS preview request', subtitleCssPreviewRequestSchema),
@@ -16552,6 +17088,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('perception-range-response', 1, 'Range query over one immutable project perception timeline', successSchema({
     type: 'object', additionalProperties: false, required: ['id', 'workspaceId', 'projectId', 'projectVersionId', 'createdAt', 'result'],
     properties: { id: idSchema, workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema, createdAt: dateTimeSchema, result: { type: 'object', additionalProperties: false, required: ['schemaVersion', 'timelineHash', 'range', 'kinds', 'observations', 'coverage', 'inventedValues'], properties: { schemaVersion: { const: 'perception-range/v1' }, timelineHash: sha256Schema, range: { type: 'object', additionalProperties: false, required: ['startMs', 'endMs'], properties: { startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 } } }, kinds: { type: 'array', minItems: 1, maxItems: 9, uniqueItems: true, items: perceptionKindSchema }, observations: { type: 'array', maxItems: 100000, items: perceptionObservationSchema }, coverage: { type: 'array', minItems: 1, maxItems: 9, items: perceptionCoverageSchema }, inventedValues: { const: 0 } } } },
+  })),
+  defineSchema('perception-timeline-put-response', 2, 'Persisted immutable project perception timeline', successSchema({
+    type: 'object', additionalProperties: false, required: ['id', 'projectId', 'projectVersionId', 'origin', 'timeline', 'createdAt', 'replayed'],
+    properties: { id: idSchema, projectId: idSchema, projectVersionId: idSchema, origin: { type: 'object', additionalProperties: false, required: ['kind', 'trust', 'suppliedByClientId'], properties: { kind: { const: 'manual-controlled' }, trust: { const: 'unverified' }, suppliedByClientId: idSchema } }, timeline: perceptionTimelineSchema, createdAt: dateTimeSchema, replayed: { type: 'boolean' } },
+  })),
+  defineSchema('perception-range-response', 2, 'Range query over one immutable project perception timeline', successSchema({
+    type: 'object', additionalProperties: false, required: ['id', 'workspaceId', 'projectId', 'projectVersionId', 'origin', 'createdAt', 'result'],
+    properties: { id: idSchema, workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema, origin: { type: 'object', additionalProperties: false, required: ['kind', 'trust', 'suppliedByClientId'], properties: { kind: { const: 'manual-controlled' }, trust: { const: 'unverified' }, suppliedByClientId: idSchema } }, createdAt: dateTimeSchema, result: { type: 'object', additionalProperties: false, required: ['schemaVersion', 'timelineHash', 'range', 'kinds', 'observations', 'coverage', 'inventedValues'], properties: { schemaVersion: { const: 'perception-range/v1' }, timelineHash: sha256Schema, range: { type: 'object', additionalProperties: false, required: ['startMs', 'endMs'], properties: { startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 } } }, kinds: { type: 'array', minItems: 1, maxItems: 9, uniqueItems: true, items: perceptionKindSchema }, observations: { type: 'array', maxItems: 100000, items: perceptionObservationSchema }, coverage: { type: 'array', minItems: 1, maxItems: 9, items: perceptionCoverageSchema }, inventedValues: { const: 0 } } } },
   })),
   defineSchema('editorial-beat-derive-request', 1, 'Semantic editorial beat derivation request', {
     type: 'object', additionalProperties: false, required: ['projectVersionId', 'transcriptId', 'expectedTranscriptHash', 'signals'],
@@ -18073,6 +18617,18 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchemaV12 },
     }),
   ),
+  defineSchema('public-operation-detail', 13, 'Public operation detail including perception producer runs',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation'],
+      properties: { operation: publicOperationSchemaV13 } }),
+  ),
+  defineSchema('public-operation-detail', 14, 'Public operation detail including raw temporal producer runs',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation'],
+      properties: { operation: publicOperationSchemaV14 } }),
+  ),
+  defineSchema('public-operation-detail', 15, 'Public operation detail including diagnostic face producer runs',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation'],
+      properties: { operation: publicOperationSchemaV15 } }),
+  ),
   defineSchema('project-final-export-attempt-history', 1, 'Immutable project final export attempt history',
     successSchema({
       type: 'object',
@@ -18169,6 +18725,50 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
             ],
           },
         },
+      },
+    }),
+  ),
+  defineSchema('project-final-export-attempt-history', 2, 'Immutable final export attempts with sanitized failure stage',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['operationId', 'projectId', 'projectVersionId', 'proxyReviewId', 'outputSpec', 'attempts'],
+      properties: {
+        operationId: idSchema, projectId: idSchema, projectVersionId: idSchema, proxyReviewId: idSchema,
+        outputSpec: { type: 'object', additionalProperties: false,
+          required: ['aspectRatio', 'width', 'height', 'fps', 'codec', 'audioCodec', 'container', 'quality'],
+          properties: {
+            aspectRatio: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+            width: { type: 'integer', minimum: 2, multipleOf: 2 }, height: { type: 'integer', minimum: 2, multipleOf: 2 },
+            fps: { type: 'integer', minimum: 1, maximum: 120 }, codec: { const: 'h264' },
+            audioCodec: { const: 'aac' }, container: { const: 'mp4' }, quality: { const: 'final' },
+          } },
+        attempts: { type: 'array', maxItems: 100, items: { oneOf: [
+          { type: 'object', additionalProperties: false,
+            required: ['attempt', 'status', 'validators', 'error', 'startedAt', 'completedAt'],
+            properties: {
+              attempt: { type: 'integer', minimum: 1 }, status: { const: 'failed' },
+              validators: { type: 'array', minItems: 1, maxItems: 100, items: {
+                type: 'object', additionalProperties: false, required: ['code', 'passed', 'message'],
+                properties: { code: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' }, passed: { type: 'boolean' }, message: { type: 'string', minLength: 1, maxLength: 500 } },
+              } },
+              error: { type: 'object', additionalProperties: false, required: ['code', 'message'],
+                properties: { code: { type: 'string', minLength: 1, maxLength: 64 }, message: { type: 'string', minLength: 1, maxLength: 500 },
+                  stage: { enum: ['source-read', 'color-plan', 'color-bindings', 'lut-materialization', 'input-validation', 'rights', 'source-materialization', 'render', 'output-verification', 'output-promotion', 'artifact-persistence'] } } },
+              startedAt: dateTimeSchema, completedAt: dateTimeSchema,
+            } },
+          { type: 'object', additionalProperties: false,
+            required: ['attempt', 'status', 'validators', 'output', 'startedAt', 'completedAt'],
+            properties: {
+              attempt: { type: 'integer', minimum: 1 }, status: { const: 'promoted' },
+              validators: { type: 'array', minItems: 1, maxItems: 100, items: {
+                type: 'object', additionalProperties: false, required: ['code', 'passed', 'message'],
+                properties: { code: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' }, passed: { type: 'boolean' }, message: { type: 'string', minLength: 1, maxLength: 500 } },
+              } },
+              output: { type: 'object', additionalProperties: false, required: ['artifactId', 'manifestId', 'sha256', 'byteSize'],
+                properties: { artifactId: idSchema, manifestId: idSchema, sha256: sha256Schema, byteSize: { type: 'integer', minimum: 1 } } },
+              startedAt: dateTimeSchema, completedAt: dateTimeSchema,
+            } },
+        ] } },
       },
     }),
   ),
@@ -18533,6 +19133,27 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('project-list', 7, 'Project dashboard list including perception producer operation status',
+    successSchema({ type: 'object', additionalProperties: false, required: ['projects'],
+      properties: {
+        projects: { type: 'array', items: searchableProjectSchemaV5 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
+      } }),
+  ),
+  defineSchema('project-list', 8, 'Project dashboard list including raw temporal operation status',
+    successSchema({ type: 'object', additionalProperties: false, required: ['projects'],
+      properties: {
+        projects: { type: 'array', items: searchableProjectSchemaV6 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
+      } }),
+  ),
+  defineSchema('project-list', 9, 'Project dashboard list including diagnostic face operation status',
+    successSchema({ type: 'object', additionalProperties: false, required: ['projects'],
+      properties: {
+        projects: { type: 'array', items: searchableProjectSchemaV7 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
+      } }),
+  ),
   defineSchema('rename-project-request', 1, 'Revision-fenced project rename command', {
     type: 'object', additionalProperties: false,
     required: ['baseRevision', 'name'],
@@ -18613,6 +19234,27 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
       },
     }),
+  ),
+  defineSchema('public-operation-list', 12, 'Public operation list including perception producer runs',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operations'],
+      properties: {
+        operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV13 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+      } }),
+  ),
+  defineSchema('public-operation-list', 13, 'Public operation list including raw temporal producer runs',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operations'],
+      properties: {
+        operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV14 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+      } }),
+  ),
+  defineSchema('public-operation-list', 14, 'Public operation list including diagnostic face producer runs',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operations'],
+      properties: {
+        operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV15 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+      } }),
   ),
   defineSchema('operation-telemetry-summary', 1, 'Bounded durable operation telemetry summary',
     successSchema({
@@ -20834,6 +21476,25 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       maxVelocityPerSecond: { type: 'number', minimum: 0.01, maximum: 2 }, maxAccelerationPerSecondSquared: { type: 'number', minimum: 0.01, maximum: 4 }, safetyMargin: { type: 'number', minimum: 0, maximum: 0.2 },
     },
   }),
+  defineSchema('reframe-plan-request', 2, 'Request reframe planning for an immutable version without caller observations', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'format'],
+    properties: {
+      baseVersionId: idSchema,
+      format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+    },
+  }),
+  defineSchema('reframe-plan-request-result', 2, 'Review-required result when approved server-owned face perception is unavailable', successSchema({
+    type: 'object', additionalProperties: false,
+    required: ['schemaVersion', 'status', 'plan', 'reasonCode', 'baseVersionId', 'format'],
+    properties: {
+      schemaVersion: { const: 'reframe-plan-request-result/v2' },
+      status: { const: 'review-required' },
+      plan: { type: 'null' },
+      reasonCode: { const: 'FACE_PERCEPTION_UNAVAILABLE' },
+      baseVersionId: idSchema,
+      format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+    },
+  })),
   defineSchema('reframe-plan', 1, 'Content-addressed per-format reframe plan with localized fallbacks', successSchema({
     type: 'object', additionalProperties: false, required: ['plan'], properties: { plan: {
       type: 'object', additionalProperties: false,
@@ -22664,7 +23325,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
-  ...([8, 9, 10, 11] as const).map((version) => defineSchema(
+  ...([8, 9, 10, 11, 12, 13] as const).map((version) => defineSchema(
     'project-workspace',
     version,
     version === 8
@@ -22673,12 +23334,58 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         ? 'Project workspace with canonical optional production brief'
         : version === 10
           ? 'Project workspace with evidence-bound compiled production brief'
-          : 'Project workspace with review and block Director confidence uncertainty',
+          : version === 11
+            ? 'Project workspace with review and block Director confidence uncertainty'
+            : version === 12
+              ? 'Project workspace with face-safety review status'
+              : 'Project workspace with snapshot-bound annotations and proxy review availability',
     successSchema({
       type: 'object', additionalProperties: false,
-      required: ['project', 'commands', 'directorRuns', 'media', 'transcripts', 'operationIds', 'operations'],
+      required: ['project', 'commands', 'directorRuns', 'media', 'transcripts', 'operationIds', 'operations', ...(version === 13 ? ['reviewAvailability'] : [])],
+      ...(version === 13 ? { allOf: [{
+        if: { type: 'object', properties: { version: {} }, required: ['version'] },
+        then: { type: 'object', properties: { reviewAvailability: { type: 'object', properties: { requestedVersionId: idSchema } } } },
+        else: { type: 'object', properties: { reviewAvailability: { type: 'object', properties: { requestedVersionId: { type: 'null' } } } } },
+      }] } : {}),
       properties: {
         project: searchableProjectSchemaV2,
+        ...(version === 13 ? { reviewAvailability: {
+          type: 'object', additionalProperties: false,
+          required: ['schemaVersion', 'requestedVersionId', 'annotations', 'proxyReview'],
+          allOf: [{
+            if: { type: 'object', properties: { requestedVersionId: { type: 'null' } } },
+            then: { type: 'object', properties: {
+              annotations: { type: 'object', properties: { state: { const: 'unavailable' }, reason: { const: 'no-version' } } },
+              proxyReview: { type: 'object', properties: { state: { const: 'unavailable' }, reason: { const: 'no-version' } } },
+            } },
+            else: { type: 'object', properties: {
+              annotations: { type: 'object', properties: { reason: { const: 'no-proxy' } } },
+              proxyReview: { type: 'object', properties: { reason: { const: 'no-report' } } },
+            } },
+          }],
+          properties: {
+            schemaVersion: { const: 'project-review-availability/v1' },
+            requestedVersionId: { anyOf: [idSchema, { type: 'null' }] },
+            annotations: { oneOf: [
+              { type: 'object', additionalProperties: false, required: ['state', 'reason'], properties: {
+                state: { const: 'unavailable' }, reason: { enum: ['no-version', 'no-proxy'] },
+              } },
+              { type: 'object', additionalProperties: false, required: ['state', 'sourceVersionId', 'proxyArtifactId', 'proxyHash', 'stale'], properties: {
+                state: { const: 'available' }, sourceVersionId: { anyOf: [idSchema, { type: 'null' }] },
+                proxyArtifactId: idSchema, proxyHash: sha256Schema, stale: { type: 'boolean' },
+              }, allOf: [{ if: { type: 'object', properties: { sourceVersionId: { type: 'null' } } }, then: { type: 'object', properties: { stale: { const: true } } } }] },
+            ] },
+            proxyReview: { oneOf: [
+              { type: 'object', additionalProperties: false, required: ['state', 'reason'], properties: {
+                state: { const: 'unavailable' }, reason: { enum: ['no-version', 'no-report'] },
+              } },
+              { type: 'object', additionalProperties: false, required: ['state', 'sourceVersionId', 'reviewId', 'proxyArtifactId', 'reviewHash'], properties: {
+                state: { const: 'available' }, sourceVersionId: idSchema, reviewId: idSchema,
+                proxyArtifactId: idSchema, reviewHash: sha256Schema,
+              } },
+            ] },
+          },
+        } } : {}),
         version: {
           type: 'object', additionalProperties: false,
           required: ['id', 'sequence', 'baseHash', 'createdAt', 'visibleState'],
@@ -22715,7 +23422,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               'objectiveVersion', 'rubricRef', 'baseVersionId', 'resultVersionId',
               'treatmentSnapshotId', 'storySnapshotId', 'qualitySnapshotId', 'qualityStatus',
               'qualityScore', 'decisionCount', 'assumptionCount', 'subtitleCueCount', 'transitionCount',
-              'automaticZoom', ...(version === 11 ? ['uncertainties'] : []), 'createdAt',
+              'automaticZoom', ...(version >= 11 ? ['uncertainties'] : []), 'createdAt',
             ],
             properties: {
               id: idSchema, status: { enum: ['planned', 'rendering', 'succeeded', 'failed'] },
@@ -22726,10 +23433,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               supersedesRunId: idSchema,
               baseVersionId: idSchema, resultVersionId: idSchema, treatmentSnapshotId: idSchema,
               storySnapshotId: idSchema, qualitySnapshotId: idSchema,
-              qualityStatus: { enum: ['approved', 'approved-with-warnings', 'blocked'] },
+              qualityStatus: { enum: version >= 12
+                ? ['approved', 'approved-with-warnings', 'review-required', 'blocked']
+                : ['approved', 'approved-with-warnings', 'blocked'] },
               qualityScore: { type: 'number', minimum: 0, maximum: 1 },
               decisionCount: { type: 'integer', minimum: 0, maximum: 64 }, assumptionCount: { type: 'integer', minimum: 0, maximum: 64 },
-              ...(version === 11 ? {
+              ...(version >= 11 ? {
                 uncertainties: {
                   type: 'array', maxItems: 64,
                   items: {
@@ -23934,6 +24643,58 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     ],
     allOf: desiredActionObjectiveRequirements,
   }),
+  defineSchema('apply-project-edit-command-request', 7, 'Typed project edit command that names the output variant a spoken-content removal edits', {
+    type: 'object', additionalProperties: false,
+    required: ['type', 'baseVersionId', 'baseHash'],
+    properties: {
+      type: { enum: ['remove-spoken-content', 'replace-source-transcript', 'run-director'] },
+      baseVersionId: idSchema,
+      baseHash: sha256Schema,
+      sourceTranscriptId: idSchema,
+      variantId: idSchema,
+      expectedTranscriptHash: sha256Schema,
+      objective: strategicObjectiveSchema,
+      desiredAction: desiredActionInputSchema,
+      rules: {
+        type: 'array', minItems: 1, maxItems: 32,
+        items: {
+          type: 'object', additionalProperties: false, required: ['id', 'label', 'alternatives'],
+          properties: {
+            id: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,63}$' }, label: { type: 'string', minLength: 1, maxLength: 160 },
+            alternatives: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 240 } },
+          },
+        },
+      },
+      exclusionOverrides: {
+        type: 'array', minItems: 1, maxItems: 32,
+        items: {
+          type: 'object', additionalProperties: false, required: ['sourceStartSeconds', 'sourceEndSeconds', 'ruleIds', 'reason'],
+          properties: {
+            sourceStartSeconds: { type: 'number', minimum: 0 }, sourceEndSeconds: { type: 'number', exclusiveMinimum: 0 },
+            ruleIds: { type: 'array', minItems: 1, maxItems: 32, uniqueItems: true, items: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,63}$' } },
+            reason: { type: 'string', minLength: 1, maxLength: 500 },
+          },
+        },
+      },
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+    oneOf: [
+      { required: ['sourceTranscriptId', 'rules', 'variantId'], properties: {
+        type: { const: 'remove-spoken-content' }, sourceTranscriptId: {}, rules: {}, variantId: {},
+        expectedTranscriptHash: false, objective: false, desiredAction: false,
+      } },
+      { required: ['sourceTranscriptId', 'expectedTranscriptHash'], properties: {
+        type: { const: 'replace-source-transcript' }, sourceTranscriptId: {}, expectedTranscriptHash: {},
+        rules: false, exclusionOverrides: false, objective: false, desiredAction: false, variantId: false,
+      } },
+      { required: ['objective'], properties: {
+        type: { const: 'run-director' }, objective: {}, desiredAction: {},
+        sourceTranscriptId: false, expectedTranscriptHash: false,
+        rules: false, exclusionOverrides: false, variantId: false,
+      } },
+    ],
+    allOf: desiredActionObjectiveRequirements,
+  }),
   defineSchema('project-edit-command-applied', 1, 'Applied project edit command response',
     successSchema({
       type: 'object', additionalProperties: false,
@@ -24445,6 +25206,122 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       ],
     }),
   ),
+  defineSchema('project-edit-command-applied', 8, 'Applied edit command response whose spoken-content exclusions state only the sealed fields',
+    successSchema({
+      oneOf: [
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'editorial', 'operation', 'replayed'],
+          properties: {
+            command: appliedProjectCommandSchema('remove-spoken-content'),
+            version: currentProjectVersionResultSchema(['brief', 'editPlan', 'policies']),
+            editorial: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'sourceTranscriptId', 'sourceArtifactId', 'exclusions', 'retainedSourceRanges',
+                'outputDurationFrames', 'fps', 'automaticZoom', 'protectedOpeningFrames',
+                'subtitleFaceProtection', 'impact', 'invalidations',
+              ],
+              properties: {
+                sourceTranscriptId: idSchema, sourceArtifactId: idSchema,
+                exclusions: {
+                  type: 'array', minItems: 1, maxItems: 128,
+                  items: {
+                    type: 'object', additionalProperties: false,
+                    required: ['sourceStartSeconds', 'sourceEndSeconds', 'ruleIds'],
+                    properties: {
+                      sourceStartSeconds: { type: 'number', minimum: 0 },
+                      sourceEndSeconds: { type: 'number', exclusiveMinimum: 0 },
+                      ruleIds: { type: 'array', minItems: 1, maxItems: 32, uniqueItems: true, items: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,63}$' } },
+                    },
+                  },
+                },
+                retainedSourceRanges: { type: 'array', minItems: 1, maxItems: 129 },
+                outputDurationFrames: { type: 'integer', minimum: 1 },
+                fps: { type: 'number', exclusiveMinimum: 0 }, automaticZoom: { const: false },
+                protectedOpeningFrames: { type: 'integer', minimum: 1 }, subtitleFaceProtection: { const: true },
+                impact: editorialCutImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+              },
+            },
+            operation: publicOperationSchemaV3,
+            replayed: { type: 'boolean' },
+          },
+        },
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'directorRun', 'operation', 'replayed'],
+          properties: {
+            command: appliedProjectCommandSchema('run-director'),
+            version: currentProjectVersionResultSchema([
+              'brief', 'perception', 'treatment', 'story', 'editPlan', 'quality', 'policies',
+            ]),
+            directorRun: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'id', 'status', 'plannerVersion', 'criticVersion', 'objective',
+                'objectiveVersion', 'rubricRef', 'baseVersionId', 'resultVersionId',
+                'perception', 'treatmentPlan', 'storyPlan', 'editPlan', 'qualityReport',
+                'decisions', 'assumptions', 'impact', 'invalidations', 'createdAt',
+              ],
+              properties: {
+                id: idSchema, status: { enum: ['planned', 'rendering', 'succeeded', 'failed'] },
+                plannerVersion: { type: 'string' }, criticVersion: { type: 'string' },
+                objective: strategicObjectiveSchema,
+                objectiveVersion: { type: 'integer', minimum: 1 },
+                rubricRef: { type: 'string', minLength: 3, maxLength: 128 },
+                supersedesRunId: idSchema,
+                baseVersionId: idSchema, resultVersionId: idSchema,
+                perception: { type: 'object', additionalProperties: false, required: ['snapshotId', 'summary'], properties: { snapshotId: idSchema, summary: { type: 'object' } } },
+                treatmentPlan: { type: 'object', additionalProperties: false, required: ['snapshotId', 'plan'], properties: { snapshotId: idSchema, plan: { type: 'object' } } },
+                storyPlan: { type: 'object', additionalProperties: false, required: ['snapshotId', 'plan'], properties: { snapshotId: idSchema, plan: { type: 'object' } } },
+                editPlan: {
+                  type: 'object', additionalProperties: false,
+                  required: ['snapshotId', 'id', 'durationFrames', 'fps', 'subtitleCueCount', 'transitionCount', 'automaticZoom'],
+                  properties: {
+                    snapshotId: idSchema, id: idSchema, durationFrames: { type: 'integer', minimum: 1 },
+                    fps: { type: 'number', exclusiveMinimum: 0 }, subtitleCueCount: { type: 'integer', minimum: 1 },
+                    transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: { const: false },
+                  },
+                },
+                qualityReport: { type: 'object', additionalProperties: false, required: ['snapshotId', 'report'], properties: { snapshotId: idSchema, report: { type: 'object' } } },
+                decisions: { type: 'array', minItems: 4, maxItems: 64, items: { type: 'object' } },
+                assumptions: { type: 'array', maxItems: 64, items: { type: 'string' } },
+                impact: directorRunImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+                createdAt: dateTimeSchema,
+              },
+            },
+            operation: publicOperationSchemaV3,
+            replayed: { type: 'boolean' },
+          },
+        },
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'sourceTranscript', 'replayed'],
+          properties: {
+            command: appliedProjectCommandSchema('replace-source-transcript'),
+            version: currentProjectVersionResultSchema(['brief', 'treatment', 'story', 'editPlan', 'policies']),
+            sourceTranscript: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'previousTranscriptId', 'previousTranscriptHash', 'replacementTranscriptId',
+                'replacementTranscriptHash', 'impact', 'invalidations', 'nextRequiredCapability',
+              ],
+              properties: {
+                previousTranscriptId: idSchema, previousTranscriptHash: sha256Schema,
+                replacementTranscriptId: idSchema, replacementTranscriptHash: sha256Schema,
+                impact: sourceTranscriptReplacementImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+                nextRequiredCapability: { const: 'apollo.projects.commands.apply:run-director' },
+              },
+            },
+            replayed: { type: 'boolean' },
+          },
+        },
+      ],
+    }),
+  ),
   defineSchema('enqueue-project-director-run-request', 1, 'Enqueue one fenced Director run against an immutable project version', {
     type: 'object',
     additionalProperties: false,
@@ -24512,6 +25389,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       type: 'object',
       additionalProperties: false,
       required: ['qualityReport'],
+      properties: { qualityReport: directorQualityReportReadSchemaV1 },
+    }),
+  ),
+  defineSchema('director-quality-report-read', 2, 'Read Director quality with explicit face-safety uncertainty',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['qualityReport'],
       properties: { qualityReport: directorQualityReportReadSchema },
     }),
   ),
@@ -25872,6 +26755,117 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         },
         replayed: { type: 'boolean' },
       },
+    }),
+  ),
+  defineSchema('perception-producer-run-request', 1, 'Queue bounded OCR perception against a server-resolved current source version', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'sourceArtifactId'],
+    properties: {
+      projectVersionId: idSchema, sourceArtifactId: idSchema,
+      sampleIntervalFrames: { type: 'integer', minimum: 1, maximum: 300 },
+    },
+  }),
+  defineSchema('perception-producer-operation-created', 1, 'Queued or replayed perception producer operation',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation', 'replayed'],
+      properties: { operation: publicOperationSchemaV13, replayed: { type: 'boolean' } } }),
+  ),
+  defineSchema('perception-producer-operation-read', 1, 'Perception operation with a sealed envelope only after success',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation'],
+      properties: {
+        operation: publicOperationSchemaV13,
+        envelope: { type: 'object', additionalProperties: true,
+          required: ['schemaVersion', 'id', 'projectVersionId', 'operationId', 'sourceArtifactId', 'sourceSha256', 'modality', 'samples', 'gaps', 'envelopeHash', 'faceSafety'],
+          properties: {
+            schemaVersion: { const: 'perception-producer-envelope/v1' }, id: idSchema,
+            projectVersionId: idSchema, operationId: idSchema, sourceArtifactId: idSchema,
+            sourceSha256: sha256Schema, modality: { const: 'ocr' },
+            samples: { type: 'array' }, gaps: { type: 'array' },
+            envelopeHash: sha256Schema, faceSafety: { const: 'unknown' },
+          } },
+      },
+      allOf: [{ if: { type: 'object', required: ['operation'], properties: {
+        operation: { type: 'object', required: ['status'], properties: { status: { const: 'succeeded' } } },
+      } }, then: { type: 'object', required: ['envelope'], properties: { envelope: { type: 'object' } } } }],
+    }),
+  ),
+  defineSchema('temporal-producer-run-request', 1, 'Queue raw temporal measurement against a server-resolved source version', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'sourceArtifactId'],
+    properties: { projectVersionId: idSchema, sourceArtifactId: idSchema },
+  }),
+  defineSchema('temporal-producer-operation-created', 1, 'Queued or replayed temporal producer operation',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation', 'replayed'],
+      properties: { operation: publicOperationSchemaV14, replayed: { type: 'boolean' } } }),
+  ),
+  defineSchema('temporal-producer-operation-read', 1, 'Temporal operation with raw sealed measurements only after success',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation'],
+      properties: { operation: publicOperationSchemaV14, envelope: temporalEnvelopeSchema },
+      allOf: [{ if: { type: 'object', required: ['operation'], properties: {
+        operation: { type: 'object', required: ['status'], properties: { status: { const: 'succeeded' } } },
+      } }, then: { type: 'object', required: ['envelope'],
+        properties: { envelope: temporalEnvelopeSchema } } }],
+    }),
+  ),
+  defineSchema('face-producer-run-request', 1, 'Queue sampled diagnostic face candidates from one server-resolved source clip', {
+    type: 'object', additionalProperties: false, required: ['projectVersionId', 'sourceArtifactId'],
+    properties: { projectVersionId: idSchema, sourceArtifactId: idSchema,
+      sampleIntervalFrames: { type: 'integer', minimum: 1, maximum: 300 } },
+  }),
+  defineSchema('face-producer-operation-created', 1, 'Queued or replayed diagnostic face producer operation',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation', 'replayed'],
+      properties: { operation: publicOperationSchemaV15, replayed: { type: 'boolean' } } }),
+  ),
+  defineSchema('face-producer-operation-read', 1, 'Face operation; success means only a sampled diagnostic envelope with faceSafety unknown',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation'],
+      properties: { operation: publicOperationSchemaV15, envelope: faceEnvelopeSchema },
+      allOf: [{ if: { type: 'object', required: ['operation'], properties: {
+        operation: { type: 'object', required: ['status'], properties: { status: { const: 'succeeded' } } },
+      } }, then: { type: 'object', required: ['envelope'],
+        properties: { envelope: faceEnvelopeSchema } } }],
+    }),
+  ),
+  defineSchema('face-window-run-request', 1, 'Queue one bounded timeline window (at most 300 frames) for the owner-accepted OpenVINO face detector (V9); cadence and thresholds are server-owned', {
+    type: 'object', additionalProperties: false, required: ['projectVersionId', 'sourceArtifactId', 'window'],
+    properties: { projectVersionId: idSchema, sourceArtifactId: idSchema,
+      window: { type: 'object', additionalProperties: false, required: ['startTimelineFrame', 'endTimelineFrame'],
+        description: 'Timeline frames [startTimelineFrame, endTimelineFrame); at most 300 frames and at most 60 sampled frames.',
+        properties: { startTimelineFrame: { type: 'integer', minimum: 0, maximum: 10_000_000 },
+          endTimelineFrame: { type: 'integer', minimum: 1, maximum: 10_000_000 } } } },
+  }),
+  defineSchema('face-window-operation-created', 1, 'Queued or replayed V9 face window operation',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation', 'replayed'],
+      properties: { operation: publicOperationSchemaV15, replayed: { type: 'boolean' } } }),
+  ),
+  defineSchema('face-window-operation-read', 1, 'V9 face window operation; success means only sampled, unverified face evidence for the window, with faceSafety unknown and the registry verdict on its producer',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation'],
+      properties: { operation: publicOperationSchemaV15, envelope: faceWindowEnvelopeSchema,
+        producerAuthentication: faceProducerAuthenticationSchema },
+      allOf: [{ if: { type: 'object', required: ['operation'], properties: {
+        operation: { type: 'object', required: ['status'], properties: { status: { const: 'succeeded' } } },
+      } }, then: { type: 'object', required: ['envelope', 'producerAuthentication'],
+        properties: { envelope: faceWindowEnvelopeSchema, producerAuthentication: faceProducerAuthenticationSchema } } }],
+    }),
+  ),
+  defineSchema('face-source-window-run-request', 1, 'Queue one bounded window of a source artifact\'s own frames (at most 300 frames) for the owner-accepted OpenVINO face detector (V9); the evidence belongs to the source and is reusable by every edit that plays it; cadence and thresholds are server-owned', {
+    type: 'object', additionalProperties: false, required: ['sourceArtifactId', 'window'],
+    properties: { sourceArtifactId: idSchema,
+      window: { type: 'object', additionalProperties: false, required: ['startSourceFrame', 'endSourceFrame'],
+        description: 'Source frames [startSourceFrame, endSourceFrame) on the source\'s own timeline; at most 300 frames, at most 60 sampled frames, ending at or before the source\'s last frame.',
+        properties: { startSourceFrame: { type: 'integer', minimum: 0, maximum: 100_000_000 },
+          endSourceFrame: { type: 'integer', minimum: 1, maximum: 100_000_000 } } } },
+  }),
+  defineSchema('face-source-window-operation-created', 1, 'Queued or replayed V9 face source window operation',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation', 'replayed'],
+      properties: { operation: publicOperationSchemaV15, replayed: { type: 'boolean' } } }),
+  ),
+  defineSchema('face-source-window-operation-read', 1, 'V9 face source window operation; success means only sampled, unverified face evidence over the source\'s own frames, with faceSafety unknown and the registry verdict on its producer',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation'],
+      properties: { operation: publicOperationSchemaV15, envelope: faceSourceWindowEnvelopeSchema,
+        producerAuthentication: faceProducerAuthenticationSchema },
+      allOf: [{ if: { type: 'object', required: ['operation'], properties: {
+        operation: { type: 'object', required: ['status'], properties: { status: { const: 'succeeded' } } },
+      } }, then: { type: 'object', required: ['envelope', 'producerAuthentication'],
+        properties: { envelope: faceSourceWindowEnvelopeSchema, producerAuthentication: faceProducerAuthenticationSchema } } }],
     }),
   ),
   defineSchema('create-synthetic-audio-master-request', 1, 'Approve immutable aligned audio before synthetic video generation', {
@@ -27735,9 +28729,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         baseVersionId: w20VersionRefSchema,
         baseHash: sha256Schema,
         reactionTrackId: idSchema,
-        // The project version the plan belongs to. The same cut under two
-        // project versions is two plans, which is why it is part of the
-        // snapshot's natural key.
+        // The project head the plan is compiled on. A plan is born with its own
+        // Version (a `compile-renderable-plan` Command on that head): the answer
+        // names that child, not this id, and a head that has moved since is a
+        // 409 VERSION_CONFLICT unless the same compile was already made on it
+        // (then it replays). The same cut on two heads is two plans, which is why
+        // it is part of the snapshot's natural key.
         projectVersionId: idSchema,
         // What the cut is for. It reaches the plan as a desired action, and
         // this compile sends no destination with it, so only the objectives
@@ -27751,11 +28748,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         // rounded number here would put a drift nobody chose into the timeline.
         //
         // It is part of the snapshot's natural key, because it is the timebase
-        // every clip is expressed in: compiling one map version into one
-        // project version at 25/1 and again at 30/1 produces two plans, each
-        // with its own `planId` and `planHash`, and neither supersedes the
-        // other. Repeating a compile at a rate already stored replays that
-        // plan and answers 200.
+        // every clip is expressed in: compiling one map version at 25/1 and
+        // again at 30/1 produces two plans, each with its own `planId`,
+        // `planHash` and Version (the second compile is made on the head the
+        // first one left), and neither supersedes the other. Repeating a compile
+        // at a rate already stored on the same head replays that plan and
+        // answers 200.
         planFps: rationalSchema,
       },
     },
@@ -27771,10 +28769,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       // content-addressed cut, so there is no later version of it to be stale
       // against, and it already fixed its frame rate exactly — a second answer
       // here would contradict the aggregate. With no rate to choose, the
-      // request contributes only the project version to the plan's identity,
-      // and a repeat compile always replays.
+      // request contributes only the head it is compiled on to the plan's
+      // identity, and a repeat compile on that head always replays.
       required: ['projectVersionId', 'objective'],
       properties: {
+        // The project head the plan is compiled on; the plan is born with the
+        // Version that is its child (see the react compile above).
         projectVersionId: idSchema,
         // Same restriction as the react compile: no destination travels with
         // the objective, so `discovery`, `awareness` and `warming` are the
@@ -28008,6 +29008,195 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       $id: { type: 'string', pattern: '^apollo://schemas/' },
       title: { type: 'string' },
     },
+  }),
+]
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Multi-output contract (W66 slice S3). A project holds several outputs (9:16, 16:9, ...). Everything that names one of them
+// names its STABLE State variant id (the `variantId` that `output-variants.create` returns), never an aspect ratio. Aspect
+// ratio is unique per State: two outputs of one ratio are refused `output-variant-ambiguous`. A published schema never
+// changes under its ref, so every schema below is a new version derived from the one it replaces (the old refs stay).
+// ---------------------------------------------------------------------------------------------------------------------
+
+type SchemaNode = { [key: string]: unknown }
+
+function schemaNode(parent: SchemaNode, ...path: readonly string[]): SchemaNode {
+  let current = parent
+  for (const key of path) {
+    const next = current[key]
+    assertDomain(
+      typeof next === 'object' && next !== null && !Array.isArray(next),
+      'INVALID_PUBLIC_SCHEMA',
+      'Derived public schema path is missing',
+      { path: path.join('.') },
+    )
+    current = next as SchemaNode
+  }
+  return current
+}
+
+function derivedSchema(
+  from: string,
+  to: Readonly<{ id: string; version: number; title: string }>,
+  patch: (body: SchemaNode) => void,
+): PublicSchemaDefinition {
+  const source = PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS.find((definition) => definition.ref === from)
+  assertDomain(source !== undefined, 'INVALID_PUBLIC_SCHEMA', 'Derived public schema has no source', { from })
+  const { $schema: _dialect, $id: _id, title: _title, ...contract } = source!.schema as SchemaNode
+  const body = structuredClone(contract) as SchemaNode
+  patch(body)
+  return defineSchema(to.id, to.version, to.title, body)
+}
+
+const STABLE_VARIANT_ID_DESCRIPTION =
+  'Stable output variant id of the project: the variantId that apollo.projects.output-variants.create returns and ' +
+  'apollo.projects.workspace.current.read lists in outputs. It names exactly one output and is never an aspect ratio. A project ' +
+  'cannot address two outputs of one aspect ratio apart (output-variant-ambiguous).'
+
+const reviewApplicationScopeSchemaV3 = {
+  ...reviewApplicationScopeSchema,
+  properties: {
+    ...reviewApplicationScopeSchema.properties,
+    formatIds: {
+      ...reviewApplicationScopeSchema.properties.formatIds,
+      description: 'Stable output variant ids of the reviewed Version State this annotation applies to. The reviewed output ' +
+        'is always included; a global format scope may name any members of that State.',
+    },
+  },
+}
+
+const reviewAnnotationSchemaV3 = {
+  ...reviewAnnotationSchemaV2,
+  properties: { ...reviewAnnotationSchemaV2.properties, applicationScope: reviewApplicationScopeSchemaV3 },
+}
+
+const reviewScopeContextSchemaV2 = {
+  ...reviewScopeContextSchema,
+  required: [...reviewScopeContextSchema.required, 'variantId', 'variantIds'],
+  properties: {
+    ...reviewScopeContextSchema.properties,
+    formatId: { ...idSchema, description: 'Aspect ratio of the reviewed output (display only; scopes name outputs by variantId).' },
+    variantId: { ...idSchema, description: 'Stable variant id of the reviewed output.' },
+    variantIds: {
+      type: 'array', minItems: 1, maxItems: 20, uniqueItems: true, items: idSchema,
+      description: 'Every output of the reviewed Version State: the members a format-scoped annotation may name.',
+    },
+  },
+}
+
+const PURPOSE_VERDICT_REASONS = [...PUBLISHED_CONSUMPTION_REASONS]
+const workspaceOutputPurposeSchema = {
+  oneOf: [
+    { type: 'object', additionalProperties: false, required: ['status'], properties: { status: { const: 'allowed' } } },
+    {
+      type: 'object', additionalProperties: false, required: ['status', 'reason'],
+      properties: { status: { const: 'blocked' }, reason: { enum: PURPOSE_VERDICT_REASONS } },
+    },
+  ],
+}
+
+const workspaceOutputsSchema = {
+  type: 'array', maxItems: 20,
+  description: 'Every output of the current Version State, in State order, with what each consumer purpose answers for it ' +
+    '(a description: the consumer decides when it is asked).',
+  items: {
+    type: 'object', additionalProperties: false, required: ['variantId', 'consumption'],
+    properties: {
+      variantId: { ...idSchema, description: STABLE_VARIANT_ID_DESCRIPTION },
+      aspectRatio: { type: 'string', minLength: 3, maxLength: 16, description: 'Aspect ratio the output spec carries; absent when it carries none.' },
+      consumption: {
+        type: 'object', additionalProperties: false, required: ['render', 'critic', 'final'],
+        properties: { render: workspaceOutputPurposeSchema, critic: workspaceOutputPurposeSchema, final: workspaceOutputPurposeSchema },
+      },
+    },
+  },
+}
+
+const variantIdProperty = (description: string) => ({ ...idSchema, description })
+
+export const PUBLIC_SCHEMAS = defineSchemaRegistry([
+  ...PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS,
+  derivedSchema('apollo://schemas/project-subtitle-configuration-set-request/v1', {
+    id: 'project-subtitle-configuration-set-request', version: 2,
+    title: 'Set one closed subtitle mode for ONE output of the project (named by its stable variant id), or revert it',
+  }, (body) => {
+    schemaNode(body, 'properties').variantId = variantIdProperty(`${STABLE_VARIANT_ID_DESCRIPTION} Only this output's renders go stale.`)
+  }),
+  derivedSchema('apollo://schemas/subtitle-segment-override-apply-request/v1', {
+    id: 'subtitle-segment-override-apply-request', version: 2,
+    title: 'Move position, style, text or visibility for ONE subtitle segment of ONE output (named by its stable variant id), or reset it',
+  }, (body) => {
+    schemaNode(body, 'properties').variantId = variantIdProperty(`${STABLE_VARIANT_ID_DESCRIPTION} Only this output's renders go stale.`)
+  }),
+  derivedSchema('apollo://schemas/export-subtitle-sidecar-request/v1', {
+    id: 'export-subtitle-sidecar-request', version: 2, title: 'Subtitle sidecar export request for one output',
+  }, (body) => {
+    schemaNode(body, 'properties').variantId = {
+      type: 'string', minLength: 1, maxLength: 128,
+      description: `${STABLE_VARIANT_ID_DESCRIPTION} The sidecar aligns the proxy or final render made for this output.`,
+    }
+  }),
+  derivedSchema('apollo://schemas/apply-project-manual-edit-request/v2', {
+    id: 'apply-project-manual-edit-request', version: 3,
+    title: 'Apply a normalized crop or another scoped manual edit, or restore an immutable version, from one output view',
+  }, (body) => {
+    schemaNode(body, 'properties').variantId = variantIdProperty(
+      'Stable output variant id of the output the edit was made on (the view). It must be an exact member of the base Version State. ' +
+      'The edit changes the shared EditPlan, so the renders of every output of the project go stale, not only this one.')
+  }),
+  derivedSchema('apollo://schemas/create-review-annotation-request/v2', {
+    id: 'create-review-annotation-request', version: 3,
+    title: 'Create project review annotation request for one output, scoped by stable variant ids',
+  }, (body) => {
+    const properties = schemaNode(body, 'properties')
+    properties.variantId = variantIdProperty(
+      `${STABLE_VARIANT_ID_DESCRIPTION} The annotation critiques this output's proxy. Optional only when the Version has exactly one output; ` +
+      'with several, naming none is refused (output-variant-required).')
+    properties.applicationScope = { ...reviewApplicationScopeSchemaV3, required: [] }
+  }),
+  defineSchema('review-annotation-created', 3, 'Review annotation creation response with application scope in stable variant ids',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['annotation', 'replayed'],
+      properties: { annotation: reviewAnnotationSchemaV3, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('project-review', 4, 'Project review of one output with stable variant scope context',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['session', 'versions', 'scopeContext', 'scenes', 'annotations'],
+      properties: {
+        session: reviewSessionSchemaV2,
+        versions: { type: 'array', minItems: 1, maxItems: 1000, items: reviewVersionSchemaV2 },
+        scopeContext: reviewScopeContextSchemaV2,
+        scenes: { type: 'array', maxItems: 1000, items: reviewSceneSchema },
+        annotations: { type: 'array', maxItems: 100, items: reviewAnnotationSchemaV3 },
+      },
+    }),
+  ),
+  defineSchema('project-proxy-render-request', 1, 'Optional body of a project proxy render enqueue', {
+    type: 'object', additionalProperties: false,
+    properties: {
+      variantId: variantIdProperty(`${STABLE_VARIANT_ID_DESCRIPTION} The proxy is rendered for this output. Optional only when the ` +
+        'project has exactly one output; with several, naming none is refused (output-variant-required).'),
+    },
+  }),
+  derivedSchema('apollo://schemas/project-final-export-request/v1', {
+    id: 'project-final-export-request', version: 2, title: 'Approve and export one output of the current project version',
+  }, (body) => {
+    const properties = schemaNode(body, 'properties')
+    properties.variantId = variantIdProperty(`${STABLE_VARIANT_ID_DESCRIPTION} The final is exported for this output. Optional only ` +
+      'when the project has exactly one output; with several, naming none is refused (output-variant-required).')
+    properties.format = {
+      ...(properties.format as SchemaNode),
+      description: 'Aspect ratio preset of the export. It must equal the aspect ratio of the output named by variantId; it never selects the output.',
+    }
+  }),
+  derivedSchema('apollo://schemas/project-workspace/v13', {
+    id: 'project-workspace', version: 14, title: 'Project workspace with the outputs of the current Version',
+  }, (body) => {
+    const data = schemaNode(body, 'properties', 'data')
+    data.required = [...(data.required as string[]), 'outputs']
+    schemaNode(data, 'properties').outputs = workspaceOutputsSchema
   }),
 ])
 

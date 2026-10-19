@@ -5,6 +5,7 @@ import net from 'node:net'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 
 const GATE = 'APOLLO_PROOF_INTEGRITY_E2E'
 
@@ -260,7 +261,7 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
   let serverLogs = ''
 
   try {
-    await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE')
+    await resetDisposableDatabase(client)
     await client.v2Workspace.create({
       data: {
         id: workspaceId,

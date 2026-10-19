@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readFile, rm } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import net from 'node:net'
-import { dirname, isAbsolute, join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
+import { variantBodyFor } from './helpers/explicit-project-http.mjs'
+import { commitSealedChild, persistReceiptForExistingVideo, seedSealedProject, testActor } from './helpers/pg-output-world.mjs'
 
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
@@ -16,8 +20,24 @@ const ffmpegStatic = require('ffmpeg-static')
 const ffprobeStatic = require('ffprobe-static').path
 const FORMATS = ['9:16', '16:9', '4:5', '1:1', '21:9']
 
+function matrixMediaBinaries(environment = process.env) {
+  return {
+    ffmpeg: environment.FFMPEG_BIN?.trim() || environment.FFMPEG_PATH?.trim() || ffmpegStatic,
+    ffprobe: environment.APOLLO_V2_FFPROBE_PATH?.trim() || environment.FFPROBE_PATH?.trim() ||
+      environment.FFPROBE_BIN?.trim() || environment.APOLLO_OCR_FFPROBE?.trim() || ffprobeStatic,
+  }
+}
+
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex')
+}
+
+function ownedChild(root, target, expectedPrefix) {
+  const inside = relative(resolve(root), resolve(target))
+  assert.ok(inside && inside !== '..' && !inside.startsWith(`..${sep}`) &&
+    !isAbsolute(inside) && basename(target).startsWith(expectedPrefix),
+  'matrix test cleanup target escaped its owned directory')
+  return resolve(target)
 }
 
 async function freePort() {
@@ -73,32 +93,209 @@ async function stopChild(child) {
     throw new Error(`Next server PID ${child.pid} did not stop`)
 }
 
-test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics through API, PostgreSQL and the real worker', {
+function matrixPerceptionSnapshot(id, sourceTranscriptId, createPerceptionTimeline) {
+  return {
+    schemaVersion: 1, id,
+    timeline: createPerceptionTimeline({ durationMs: 1000, observations: [] }),
+    summary: { id: `${id}-summary`, speechCoverage: 0,
+      visualCoverage: 'absent', faceCoverage: 'absent', confidence: 0,
+      sourceTranscriptId },
+  }
+}
+
+function matrixReviewRequiredQuality(id, desiredActionId, evaluatedAt,
+  createQualityReport, resolveStrategicRubric) {
+  const rubric = resolveStrategicRubric('discovery')
+  const strategic = createQualityReport({ objective: 'discovery',
+    evidence: rubric.criteria.map((criterion) => ({ criterionId: criterion.id,
+      score: 100, evidence: [`controlled:${criterion.id}`] })),
+    gates: { narrativeIntegrity: true, legibility: true, rights: true },
+    evaluatedAt })
+  return { rubric, report: {
+    schemaVersion: 'director-quality-report/v3', id,
+    status: 'review-required', score: 1, desiredActionRef: { id: desiredActionId },
+    strategic, faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
+    hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true,
+      subtitlesFaceSafe: false, subtitlesBounded: true, forbiddenSpeechAbsent: true,
+      timelineContinuous: true },
+    issues: [], criticVersion: 'matrix-controlled-critic-1.0.0', evaluatedAt,
+  } }
+}
+
+function matrixDeniedCommitBody() {
+  return { commitToken: 'blocked-preflight-no-token-'.padEnd(80, 'x'),
+    approval: { approved: true, note: 'Controlled request must be denied.' } }
+}
+
+async function matrixPublicValidators() {
+  const [{ default: Ajv2020 }, { default: addFormats }, { getPublicSchema }] = await Promise.all([
+    import('ajv/dist/2020.js'), import('ajv-formats'),
+    import('../../src/v2/public-api/schema-registry.ts'),
+  ])
+  const ajv = addFormats(new Ajv2020({ strict: false, allErrors: true }))
+  const compile = (name) => ajv.compile(getPublicSchema(`apollo://schemas/${name}/v1`).schema)
+  return {
+    preflightRequest: compile('export-matrix-preflight-request'),
+    preflightCreated: compile('export-matrix-preflight-created'),
+    commitRequest: compile('commit-export-matrix-request'),
+    matrixResponse: compile('export-matrix-response'),
+    errorResponse: ajv.compile(getPublicSchema('apollo://schemas/error-envelope/v5').schema),
+  }
+}
+
+test('export matrix controlled fixture hydrates unknown perception, quality and operation controls offline', async () => {
+  const validators = await matrixPublicValidators()
+  const [{ getPublicSchema }, { publicSchemaExamples }] = await Promise.all([
+    import('../../src/v2/public-api/schema-registry.ts'),
+    import('../../src/v2/public-api/schema-examples.ts'),
+  ])
+  for (const [name, validator] of [
+    ['export-matrix-preflight-request', validators.preflightRequest],
+    ['export-matrix-preflight-created', validators.preflightCreated],
+    ['commit-export-matrix-request', validators.commitRequest],
+    ['export-matrix-response', validators.matrixResponse],
+  ]) {
+    const examples = publicSchemaExamples(getPublicSchema(`apollo://schemas/${name}/v1`))
+    assert.ok(examples.length > 0, `${name} must have a public example`)
+    for (const example of examples) assert.equal(validator(example), true,
+      `${name}: ${JSON.stringify(validator.errors)}`)
+  }
+  const examplePreflightBody = { cells: [{ recipeId: 'review-required-master-v3',
+    projectId: 'matrix-offline-project', projectVersionId: 'matrix-offline-version',
+    projectVersionHash: 'a'.repeat(64), format: '9:16', locale: 'pt-BR' }],
+  limits: { maximumCostMinorUnits: 100000000, maximumStorageBytes: 9000000000000 } }
+  assert.equal(validators.preflightRequest(examplePreflightBody), true,
+    JSON.stringify(validators.preflightRequest.errors))
+  assert.equal(validators.commitRequest(matrixDeniedCommitBody()), true,
+    JSON.stringify(validators.commitRequest.errors))
+  const { createPerceptionTimeline } = await import('../../src/v2/domain/perception-timeline.ts')
+  const { parseDirectorPerceptionSnapshotUnchecked } = await import('../../src/v2/infrastructure/prisma/director-run-repository.ts')
+  const { createQualityReport, resolveStrategicRubric } = await import('../../src/v2/domain/strategic-rubric.ts')
+  const { parseFinalExportQuality } = await import('../../src/v2/infrastructure/prisma/project-final-export-repository.ts')
+  const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
+  const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
+  const { cancelPublicOperationService } = await import('../../src/v2/application/cancel-public-operation.ts')
+  const { retryPublicOperationService } = await import('../../src/v2/application/retry-public-operation.ts')
+  const perception = matrixPerceptionSnapshot('matrix-offline-perception', 'matrix-offline-transcript', createPerceptionTimeline)
+  const hydratedPerception = parseDirectorPerceptionSnapshotUnchecked({
+    contentJson: stableSerialize(perception), contentHash: calculateVersionHash(perception),
+    schemaVersion: 1, baseVersionId: 'matrix-offline-base',
+  })
+  assert.equal(hydratedPerception.summary.faceCoverage, 'absent')
+  assert.equal(hydratedPerception.timeline.observations.length, 0)
+  const evaluatedAt = '2026-08-24T20:00:00.000Z'
+  const { rubric, report } = matrixReviewRequiredQuality('matrix-offline-quality',
+    'matrix-offline-action', evaluatedAt, createQualityReport, resolveStrategicRubric)
+  const hydratedQuality = parseFinalExportQuality({ contentJson: stableSerialize(report),
+    contentHash: calculateVersionHash(report), contentSchemaVersion: 3,
+    objective: 'discovery', rubricRef: `${rubric.id}/v${rubric.version}` })
+  assert.equal(hydratedQuality.status, 'review-required')
+  assert.equal(hydratedQuality.faceSafety.status, 'unknown')
+  assert.equal(hydratedQuality.hardChecks.subtitlesFaceSafe, false)
+
+  const auditContext = createExternalAuditContext({ clientId: 'matrix-offline-client',
+    credentialId: 'matrix-offline-credential', workspaceId: 'matrix-offline-workspace',
+    environment: 'production' })
+  const actor = { ...auditContext, auditContext,
+    scopes: new Set(['projects:write', 'operations:cancel', 'operations:retry']),
+    authenticationKind: 'bearer', clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' }
+  const audit = materializeActorAuditContext(actor)
+  const calls = []
+  const operations = {
+    async cancel(input) { calls.push(['cancel', input]); return { operation: { status: 'canceled' } } },
+    async retry(input) { calls.push(['retry', input]); return { operation: { status: 'retrying' } } },
+  }
+  const clock = () => new Date(evaluatedAt)
+  const controlId = () => 'matrix-offline-control'
+  assert.equal((await cancelPublicOperationService({ operations, clock, createId: controlId })({
+    workspaceId: actor.workspaceId, operationId: 'matrix-offline-operation', actor })).status, 'canceled')
+  assert.equal((await retryPublicOperationService({ operations, clock, createId: controlId })({
+    workspaceId: actor.workspaceId, operationId: 'matrix-offline-operation', actor })).status, 'retrying')
+  assert.deepEqual(calls.map(([kind]) => kind), ['cancel', 'retry'])
+  for (const [, input] of calls) {
+    assert.equal(input.workspaceId, actor.workspaceId)
+    assert.equal(input.operationId, 'matrix-offline-operation')
+    assert.equal(input.authenticationAudit.contextHash, audit.contextHash)
+  }
+  assert.equal(calls[0][1].canceledAt, evaluatedAt)
+  assert.equal(calls[1][1].requestedAt, evaluatedAt)
+  assert.equal(Date.parse(calls[1][1].nextAttemptAt), Date.parse(evaluatedAt) + 1)
+  const explicit = matrixMediaBinaries({ FFMPEG_BIN: 'C:/controlled/ffmpeg.exe',
+    FFMPEG_PATH: 'C:/ignored/ffmpeg.exe', APOLLO_V2_FFPROBE_PATH: 'C:/controlled/ffprobe.exe',
+    FFPROBE_PATH: 'C:/ignored/ffprobe.exe' })
+  assert.equal(explicit.ffmpeg, 'C:/controlled/ffmpeg.exe')
+  assert.equal(explicit.ffprobe, 'C:/controlled/ffprobe.exe')
+  assert.equal(matrixMediaBinaries({}).ffmpeg, ffmpegStatic)
+  assert.equal(matrixMediaBinaries({}).ffprobe, ffprobeStatic)
+})
+
+test('T-F2-GATE/F2.028 admits the real API per burned caption without a global facial authority and preserves five-cell export mechanics through a controlled port', {
   skip: process.env.APOLLO_EXPORT_MATRIX_E2E !== '1' && 'set APOLLO_EXPORT_MATRIX_E2E=1 with an isolated database',
   timeout: 300_000,
-}, async () => {
+}, async (t) => {
   assert.ok(process.env.V2_DATABASE_URL)
   const databaseName = new URL(process.env.V2_DATABASE_URL).pathname.slice(1)
   assert.match(databaseName, /(?:^|_)e2e(?:_|$)/, 'the matrix E2E requires an isolated database')
   const artifactRoot = process.env.APOLLO_V2_ARTIFACT_ROOT?.trim() ?? ''
+  const evidenceRoot = process.env.APOLLO_LIBRARY_EVIDENCE_ROOT?.trim()
+  const { ffmpeg: ffmpegBin, ffprobe: ffprobeBin } = matrixMediaBinaries()
   assert.equal(isAbsolute(artifactRoot), true)
-  assert.ok(ffmpegStatic)
-  assert.ok(ffprobeStatic)
+  if (evidenceRoot) {
+    assert.equal(isAbsolute(evidenceRoot), true)
+    const relativeToCheckout = relative(resolve(process.cwd()), resolve(evidenceRoot))
+    assert.ok(relativeToCheckout === '..' || relativeToCheckout.startsWith(`..${sep}`) ||
+      isAbsolute(relativeToCheckout), 'matrix evidence must stay outside the checkout')
+  }
+  assert.ok(ffmpegBin)
+  assert.ok(ffprobeBin)
+  assert.equal(isAbsolute(ffmpegBin), true)
+  assert.equal(isAbsolute(ffprobeBin), true)
 
+  // This suite runs under tsx, where a static named import of a .ts module from an .mjs loses its names: it arrives dynamically.
   const { assetRightsRevision, evaluateAssetUse } = await import('../../src/v2/domain/asset-rights.ts')
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
+  const { createMediaArtifactManifestV2 } = await import('../../src/v2/domain/media-artifact.ts')
+  const { createMediaTranscript } = await import('../../src/v2/domain/media-transcript.ts')
   const { readOutputFormatPreset } = await import('../../src/v2/domain/output-format-registry.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
+  const { compileInitialSourceEditPlan } = await import('../../src/v2/application/apply-editorial-cut-command.ts')
+  const { createEditorialAudioTimelineHash } = await import('../../src/v2/domain/production-modes.ts')
+  const { runProjectDirectorService } = await import('../../src/v2/application/run-project-director.ts')
+  const { PrismaDirectorRunRepository } = await import('../../src/v2/infrastructure/prisma/director-run-repository.ts')
+  const { createEvidenceBoundBriefCompiler } = await import('../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts')
+  const { probeVideo } = await import('../../src/v2/infrastructure/media/video-probe.ts')
+  const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
+  const { createExportMatrixPreflightService, commitExportMatrixService } = await import('../../src/v2/application/export-matrices.ts')
+  const { runNextProjectFinalExportOperationService } = await import('../../src/v2/application/run-project-final-export-worker.ts')
+  const { cancelPublicOperationService } = await import('../../src/v2/application/cancel-public-operation.ts')
+  const { retryPublicOperationService } = await import('../../src/v2/application/retry-public-operation.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { setProjectLutSelectionService } = await import('../../src/v2/application/project-lut-selections.ts')
   const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
-  const { createProjectFinalExportWorker } = await import('../../src/v2/infrastructure/repository-factory.ts')
-  const { projectRenderSourcesFingerprint } = await import('../../src/v2/application/project-render-sources.ts')
+  const {
+    createArtifactSourceMaterializer, createAutomaticCatalogService,
+    createColorPipelineCompilationRepository, createMediaArtifactPersistenceRepository,
+    createProjectColorPlanRepository, createProjectLutSelectionRepository,
+    createRenderElementMapRepository, createWorkspaceLutRepository,
+  } = await import('../../src/v2/infrastructure/repository-factory.ts')
+  const { createLocalMediaUploadStorageFromEnvironment } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
+  const { createFfmpegEditorialProxyRendererFromEnvironment } = await import('../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts')
+  const { FfmpegCaptionPixelCritic } = await import('../../src/v2/infrastructure/media/ffmpeg-caption-pixel-critic.ts')
+  const { LocalProjectLutRenderMaterializer } = await import('../../src/v2/infrastructure/media/local-project-lut-render-materializer.ts')
+  const { createExportMatrixCapacityProviderFromEnvironment } = await import('../../src/v2/infrastructure/export-matrix-capacity.ts')
+  const { createPreflightCommitTokenIssuerFromEnvironment } = await import('../../src/v2/infrastructure/security/preflight-commit-token.ts')
+  const { createProtectedPayloadCipherFromEnvironment } = await import('../../src/v2/infrastructure/security/recipe-parameter-cipher.ts')
+  const { projectFinalRenderInputHash, projectRenderSourcesFingerprint } = await import('../../src/v2/application/project-render-sources.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
   const { PrismaProjectFinalExportRepository } = await import('../../src/v2/infrastructure/prisma/project-final-export-repository.ts')
+  const { PrismaProjectProxyRenderRepository } = await import('../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts')
+  const { PrismaExportMatrixRepository } = await import('../../src/v2/infrastructure/prisma/export-matrix-repository.ts')
+  const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
   const { PrismaProjectLutSelectionRepository } = await import('../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
+  const validators = await matrixPublicValidators()
 
   const client = new PrismaClient()
   const suffix = randomUUID().slice(0, 8)
@@ -107,14 +304,18 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
   const sourceManifestId = `matrix-source-manifest-${suffix}`
   const sourceArtifactKey = `workspaces/${workspaceId}/masters/shared-source.mp4`
   const sourcePath = join(artifactRoot, ...sourceArtifactKey.split('/'))
+  const renderWorkRoot = join(artifactRoot, `.matrix-work-${suffix}`)
   const createdAt = new Date('2026-08-24T20:00:00.000Z')
   let server
   let serverLogs = ''
+  let probeRoot
+  let primaryError
 
   try {
-    await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE')
+    probeRoot = await mkdtemp(join(tmpdir(), 'apollo-matrix-probe-'))
+    await resetDisposableDatabase(client)
     await mkdir(dirname(sourcePath), { recursive: true })
-    await execFileAsync(ffmpegStatic, [
+    await execFileAsync(ffmpegBin, [
       '-hide_banner', '-loglevel', 'error', '-y',
       '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30',
       '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
@@ -131,32 +332,30 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
       repository: new PrismaApiClientRepository(client), credentialCrypto: nodeApiCredentialCrypto, clock: () => createdAt,
     })({
       id: `matrix-client-${suffix}`, workspaceId, name: 'Export matrix E2E', environment: 'production',
-      scopes: ['projects:read', 'projects:write', 'operations:read', 'artifacts:read'],
+      scopes: ['projects:read', 'projects:write', 'operations:read', 'operations:cancel', 'operations:retry', 'artifacts:read'],
     })
 
     await client.v2MediaArtifact.create({ data: {
       id: sourceArtifactId, workspaceId, artifactKey: sourceArtifactKey, sha256: sourceSha,
       byteSize: BigInt(sourceBytes.byteLength), mediaType: 'video', container: 'mp4', status: 'available', createdAt,
     } })
+    const sourceProbe = await probeVideo(sourcePath)
+    const sourceManifest = createMediaArtifactManifestV2({ artifactKey: sourceArtifactKey, artifactSha256: sourceSha,
+      byteSize: sourceBytes.byteLength, mediaType: 'video', container: 'mp4',
+      recipe: { id: 'source-master', version: '1.0.0', parameters: { controlled: true } }, sources: [],
+      probe: { width: sourceProbe.width, height: sourceProbe.height, duration: sourceProbe.duration, fps: sourceProbe.fps } })
     await client.v2MediaArtifactManifest.create({ data: {
       id: sourceManifestId, workspaceId, artifactId: sourceArtifactId,
-      schemaVersion: 'media-artifact-manifest/v2', manifestHash: calculateVersionHash({ sourceManifestId }),
-      recipeId: 'source-master', recipeVersion: '1.0.0',
-      parametersHash: calculateVersionHash({ sourceManifestId, parameters: true }),
-      manifestJson: stableSerialize({
-        schemaVersion: 'media-artifact-manifest/v2',
-        artifact: { artifactKey: sourceArtifactKey, sha256: sourceSha, byteSize: sourceBytes.byteLength, mediaType: 'video', container: 'mp4' },
-        recipe: { id: 'source-master', version: '1.0.0', parametersHash: calculateVersionHash({ sourceManifestId, parameters: true }) },
-        sources: [],
-      }),
-      createdAt,
+      schemaVersion: 'media-artifact-manifest/v2', manifestHash: sourceManifest.manifestHash,
+      recipeId: 'source-master', recipeVersion: '1.0.0', parametersHash: sourceManifest.recipe.parametersHash,
+      manifestJson: stableSerialize(sourceManifest), createdAt,
     } })
     await setAssetRightsService({
       repository: new PrismaAssetRightsRepository(client), clock: () => createdAt,
       createId: () => `matrix-rights-${suffix}`,
     })({
       workspaceId, artifactId: sourceArtifactId, baseRevision: assetRightsRevision(sourceArtifactId, 0),
-      draft: { status: 'approved', allowedUses: ['editorial-reuse', 'rendering'], prohibitedUses: [], allowedLocales: ['pt-BR'], consent: { status: 'not-required', allowedUses: [] } },
+      draft: { status: 'approved', allowedUses: ['editing', 'editorial-reuse', 'rendering'], prohibitedUses: [], allowedLocales: ['pt-BR'], consent: { status: 'not-required', allowedUses: [] } },
       actor: { type: 'api-client', id: issued.client.id },
     })
 
@@ -178,115 +377,81 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
     } })
 
     const cells = []
+    const controlledEvidence = new Map()
+    const seedActor = testActor({ workspaceId, clientId: issued.client.id, credentialId: issued.credential.id, environment: 'production',
+      scopes: ['projects:write', 'media:write'] })
     for (const [index, format] of FORMATS.entries()) {
       const key = format.replace(':', 'x')
       const preset = readOutputFormatPreset(format)
       const projectId = `matrix-project-${key}-${suffix}`
       const baseVersionId = `matrix-base-${key}-${suffix}`
-      const versionId = `matrix-version-${key}-${suffix}`
-      const commandId = `matrix-command-${key}-${suffix}`
-      const directorRunId = `matrix-director-${key}-${suffix}`
+      const transcriptId = `matrix-transcript-${key}-${suffix}`
       const proxyArtifactId = `matrix-proxy-${key}-${suffix}`
       const proxyManifestId = `matrix-proxy-manifest-${key}-${suffix}`
       const proxyOperationId = `matrix-proxy-operation-${key}-${suffix}`
       const proxyReviewId = `matrix-proxy-review-${key}-${suffix}`
-      const snapshots = {
-        brief: `matrix-brief-${key}-${suffix}`, policies: `matrix-policies-${key}-${suffix}`,
-        perception: `matrix-perception-${key}-${suffix}`, treatment: `matrix-treatment-${key}-${suffix}`,
-        story: `matrix-story-${key}-${suffix}`,
-        baseEditPlan: `matrix-base-edit-plan-${key}-${suffix}`,
-        editPlan: `matrix-edit-plan-${key}-${suffix}`,
-        quality: `matrix-quality-${key}-${suffix}`,
-      }
-      const editPlan = {
-        schemaVersion: 2, state: 'compiled', id: `matrix-plan-${key}-${suffix}`, projectVersionId: versionId,
-        fps: 30, durationFrames: 30,
-        videoTracks: [{ id: `matrix-track-${key}-${suffix}`, kind: 'base-video', clips: [{
-          id: `matrix-clip-${key}-${suffix}`, sourceArtifactId, sourceInFrame: 0, sourceOutFrame: 30,
-          timelineInFrame: 0, timelineOutFrame: 30, rate: 1,
-        }] }],
-        subtitleTracks: [], transitions: [], movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
-        composition: {
-          layout: 'landscape-inset', background: 'blurred-source', foregroundScale: 1, verticalPosition: 0.5,
-          faceSafeFallback: [0.08, 0.08, 0.84, 0.84], subtitleSafeRegion: [0.08, 0.68, 0.84, 0.22],
-        },
-      }
-      const baseEditPlan = {
-        ...editPlan,
-        id: `matrix-base-plan-${key}-${suffix}`,
-        projectVersionId: baseVersionId,
-      }
-      const quality = {
-        schemaVersion: 'director-quality-report/v1', id: `matrix-quality-report-${key}-${suffix}`,
-        status: 'approved', score: 0.99, issues: [], evaluatedAt: createdAt.toISOString(),
-      }
+      // One transcript per source and content: the cells share the source, so the words name the cell.
+      const transcript = createMediaTranscript({ language: 'pt-BR', text: `Fonte controlada ${format}.`,
+        words: [{ word: 'Fonte', start: 0.1, end: 0.5 }, { word: `${key}.`, start: 0.5, end: 0.9 }],
+        segments: [{ id: 0, start: 0.1, end: 0.9, text: `Fonte controlada ${format}.` }], provider: 'controlled', model: 'matrix-fixture-v1' })
 
-      await client.v2Project.create({ data: {
-        id: projectId, workspaceId, name: `Matrix ${format}`, status: 'reviewing-proxy', objective: 'conversion',
-        format, locale: 'pt-BR', createdByType: 'api-client', createdById: issued.client.id, createdAt, updatedAt: createdAt,
+      // The project is born through the real creation Command with the cell's output as an explicit variant; its status is the
+      // fixture's own (the one write made to the project row besides the sealed writers).
+      await seedSealedProject(client, { workspaceId, actor: seedActor, prefix: `matrix-${key}-${suffix}`, ids: { project: projectId },
+        name: `Matrix ${format}`, objective: 'discovery', variant: variantBodyFor({ aspectRatio: format }) })
+      await client.v2Project.update({ where: { id: projectId }, data: { status: 'reviewing-proxy' } })
+      await client.v2ProjectMediaAsset.create({ data: {
+        id: randomUUID(), workspaceId, projectId, artifactId: sourceArtifactId, role: 'source-master',
+        originalFileName: 'shared-source.mp4', createdAt,
       } })
-      for (const [id, kind, schemaVersion, content] of [
-        [snapshots.brief, 'brief', 1, { schemaVersion: 1, productionBrief: { ownerInput: { text: `Matrix ${format}` } } }],
-        [snapshots.policies, 'policies', 1, { schemaVersion: 1, state: 'configured' }],
-        [snapshots.perception, 'perception', 1, { schemaVersion: 1, state: 'complete' }],
-        [snapshots.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
-        [snapshots.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
-        [snapshots.baseEditPlan, 'edit-plan', 2, baseEditPlan],
-        [snapshots.editPlan, 'edit-plan', 2, editPlan],
-        [snapshots.quality, 'quality-report', 1, quality],
-      ]) {
-        await client.v2ProjectSnapshot.create({ data: {
-          id, workspaceId, projectId, kind, schemaVersion, contentJson: stableSerialize(content),
-          contentHash: calculateVersionHash(content), createdAt,
-        } })
-      }
-      const baseHash = calculateVersionHash({ projectId, version: baseVersionId })
-      await client.v2ProjectVersion.create({ data: {
-        id: baseVersionId, workspaceId, projectId, sequence: 1, briefSnapshotId: snapshots.brief,
-        editPlanSnapshotId: snapshots.baseEditPlan, policiesSnapshotId: snapshots.policies,
-        baseHash, createdBy: issued.client.id, createdAt,
-      } })
-      await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: baseVersionId } })
+      await client.v2MediaTranscript.create({ data: { id: transcriptId, workspaceId, projectId, sourceArtifactId, sourceManifestId,
+        schemaVersion: transcript.schemaVersion, language: transcript.language, provider: transcript.provider, model: transcript.model,
+        providerVersion: 'controlled-v1', transcriptHash: transcript.transcriptHash, transcriptJson: stableSerialize(transcript), createdAt } })
+      // The base Version is a real child Command: it adopts this project's ingest receipt of the shared source and plays it whole.
+      await persistReceiptForExistingVideo(client, { workspaceId, projectId, actor: seedActor, artifactId: sourceArtifactId,
+        createdAt: createdAt.toISOString(), slug: `matrix-${key}-${suffix}` })
+      const basePlan = compileInitialSourceEditPlan({ id: `matrix-plan-${key}-${suffix}`, projectVersionId: baseVersionId,
+        transcriptId, transcript, sourceArtifactId, sourceDurationSeconds: sourceProbe.duration, fps: sourceProbe.fps,
+        createdAt: createdAt.toISOString() })
+      const base = await commitSealedChild(client, { workspaceId, projectId, actor: seedActor, suffix: `matrix-${key}-${suffix}-base`,
+        versionId: baseVersionId, mutatePlan: () => basePlan, adopt: [sourceArtifactId] })
       const noLut = await setProjectLutSelectionService({
         repository: new PrismaProjectLutSelectionRepository(client),
         createId: (kind) => `matrix-lut-${kind}-${key}-${suffix}`,
         createEventId: randomUUID,
         clock: () => createdAt,
       })({
-        workspaceId, projectId, baseVersionId, baseHash,
+        workspaceId, projectId, baseVersionId: base.version.id, baseHash: base.version.baseHash,
         selection: { mode: 'none' }, actor: { type: 'system', id: 'matrix-e2e-system' },
         idempotencyKey: `matrix-lut-none-${key}-${suffix}`,
         reason: 'Keep the export matrix colorimetrically neutral.',
       })
       assert.equal(noLut.selection.resolved.mode, 'none')
-      await client.v2EditCommand.create({ data: {
-        id: commandId, workspaceId, projectId, baseVersionId: noLut.version.id, baseHash: noLut.version.baseHash, type: 'run-director',
-        scopeJson: stableSerialize({ kind: 'video', targetIds: [] }),
-        payloadJson: stableSerialize({ schemaVersion: 1, directorRunId }), reason: 'Matrix E2E',
-        actorType: 'api-client', actorId: issued.client.id, idempotencyKey: `matrix-director-${key}-${suffix}`,
-        requestFingerprint: calculateVersionHash({ commandId }), createdAt,
-      } })
-      const versionHash = calculateVersionHash({ projectId, version: versionId })
-      await client.v2ProjectVersion.create({ data: {
-        id: versionId, workspaceId, projectId, sequence: 3, parentVersionId: noLut.version.id,
-        briefSnapshotId: snapshots.brief, treatmentSnapshotId: snapshots.treatment, storySnapshotId: snapshots.story,
-        editPlanSnapshotId: snapshots.editPlan, policiesSnapshotId: snapshots.policies,
-        baseHash: versionHash, createdBy: issued.client.id, commandId, createdAt,
-      } })
-      await client.v2DirectorRun.create({ data: {
-        id: directorRunId, workspaceId, projectId, commandId, baseVersionId: noLut.version.id, resultVersionId: versionId,
-        status: 'succeeded', objective: 'discovery', objectiveVersion: 1, rubricRef: 'awareness-discovery/v1',
-        plannerVersion: 'matrix-e2e-1.0.0', criticVersion: 'matrix-e2e-1.0.0',
-        perceptionSnapshotId: snapshots.perception, treatmentSnapshotId: snapshots.treatment,
-        storySnapshotId: snapshots.story, editPlanSnapshotId: snapshots.editPlan, qualitySnapshotId: snapshots.quality,
-        decisionsJson: '[]', assumptionsJson: '[]', initiatedByType: 'api-client', initiatedById: issued.client.id,
-        createdAt, updatedAt: createdAt,
-      } })
-      await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: versionId } })
-      await client.v2ProjectMediaAsset.create({ data: {
-        id: randomUUID(), workspaceId, projectId, artifactId: sourceArtifactId, role: 'source-master',
-        originalFileName: 'shared-source.mp4', createdAt,
-      } })
+      // The real Director reads the sealed parent: with no detector evidence its report is an honest v3 review-required one,
+      // neither this controlled media nor a proxy review proves facial clearance.
+      const directed = await runProjectDirectorService({
+        repository: new PrismaDirectorRunRepository(client), clock: () => createdAt, createEventId: randomUUID,
+        compileBrief: createEvidenceBoundBriefCompiler(),
+        createId: (kind) => `matrix-${kind}-${key}-${suffix}-${randomUUID().slice(0, 8)}`,
+      })({
+        workspaceId, projectId, baseVersionId: noLut.version.id, baseHash: noLut.version.baseHash, actor: seedActor,
+        idempotency: { key: `matrix-director-${key}-${suffix}` }, reason: 'Matrix E2E',
+      })
+      assert.equal(directed.run.qualityReport.status, 'review-required')
+      assert.equal(directed.run.qualityReport.faceSafety.status, 'unknown')
+      // The real Director leaves its run `planned`. This suite proves export MECHANICS through a controlled port, and the admission
+      // of a final export wants a `succeeded` run: that status is set here, explicitly, on the run's own mutable row. The stored
+      // QualityReport stays the real review-required / unknown one (nothing here approves it).
+      await client.v2DirectorRun.update({ where: { id: directed.run.id }, data: { status: 'succeeded' } })
+      const quality = directed.run.qualityReport
+      const versionId = directed.version.id
+      const versionHash = directed.version.baseHash
+      const directorRunId = directed.run.id
+      const editPlanSnapshotId = directed.version.snapshotRefs.editPlan
+      const qualitySnapshotId = directed.command.payload.snapshotRefs.quality
+      const editPlanRow = await client.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: editPlanSnapshotId } })
+      const qualityRow = await client.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: qualitySnapshotId } })
+      assert.equal(qualityRow.contentJson, stableSerialize(quality))
 
       const proxyKey = `workspaces/${workspaceId}/proxies/${key}.mp4`
       await client.v2MediaArtifact.create({ data: {
@@ -315,7 +480,7 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
       } })
       await client.v2ProjectProxyRenderOperation.create({ data: {
         operationId: proxyOperationId, workspaceId, projectId, projectVersionId: versionId,
-        editPlanSnapshotId: snapshots.editPlan, sourceArtifactId, sourceManifestId, inputHash: proxyInputHash,
+        editPlanSnapshotId, sourceArtifactId, sourceManifestId, inputHash: proxyInputHash,
         colorPipelineBindingsJson: stableSerialize([]),
         outputArtifactId: proxyArtifactId, outputManifestId: proxyManifestId,
         originalFileName: `${key}-proxy.mp4`, createdAt,
@@ -330,7 +495,13 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
         revision: 1, uploadReceivedAt: createdAt, renderCompletedAt: createdAt, timeToFirstProxyMs: 0n,
         createdAt, updatedAt: createdAt,
       } })
-      cells.push({ recipeId: 'approved-master-v1', projectId, projectVersionId: versionId, projectVersionHash: versionHash, format, locale: 'pt-BR' })
+      cells.push({ recipeId: 'review-required-master-v3', projectId, projectVersionId: versionId,
+        projectVersionHash: versionHash, format, locale: 'pt-BR' })
+      controlledEvidence.set(projectId, Object.freeze({ directorRunId, qualitySnapshotId,
+        qualitySnapshotHash: qualityRow.contentHash, quality,
+        editPlanSnapshotId, editPlanHash: editPlanRow.contentHash,
+        proxyReviewId, proxyReviewHash: calculateVersionHash({ proxyReviewId, versionId, proxyArtifactId, status: 'ready-for-final' }),
+        proxyArtifactId, proxyManifestId, sourceArtifactId, sourceManifestId, sourceSha256: sourceSha }))
     }
 
     const port = await freePort()
@@ -374,35 +545,224 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
       assert.equal(response.status, 201, `${await response.text()}\n${serverLogs.slice(-4_000)}`)
     }
 
+    const preflightBody = { cells, limits: { maximumCostMinorUnits: 100000000, maximumStorageBytes: 9000000000000 } }
+    assert.equal(validators.preflightRequest(preflightBody), true, JSON.stringify(validators.preflightRequest.errors))
     const preflightResponse = await fetch(`${baseUrl}/v1/export-matrix-preflights`, {
       method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': `matrix-preflight-${suffix}` },
-      body: JSON.stringify({ cells, limits: { maximumCostMinorUnits: 100000000, maximumStorageBytes: 9000000000000 } }),
+      body: JSON.stringify(preflightBody),
     })
     const preflight = await preflightResponse.json()
     assert.equal(preflightResponse.status, 201, `${JSON.stringify(preflight)}\n${serverLogs.slice(-4_000)}`)
-    assert.equal(preflight.data.preflight.allowed, true)
+    assert.equal(validators.preflightCreated(preflight), true, JSON.stringify(validators.preflightCreated.errors))
+    // W65b (final-caption-certification/v1): nothing grants a global facial safety, and nothing needs to. The stored Director report is the
+    // honest one (review-required, face unknown) and the proxy review of each project is approved; that is the only reservation the report
+    // carries, so the real admission accepts it and the preflight answers what it exists to answer: five ready cells with no blocker and the
+    // commit token. The final then certifies each burned caption itself (its own proofs), so a blocked preflight is not the outcome here.
+    assert.equal(preflight.data.preflight.allowed, true, JSON.stringify(preflight.data.preflight.blockers))
     assert.equal(preflight.data.preflight.definition.cells.length, 5)
     assert.equal(new Set(preflight.data.preflight.definition.cells.map((cell) => cell.outputFileName)).size, 5)
+    assert.deepEqual(preflight.data.preflight.blockers, [])
+    assert.deepEqual(preflight.data.preflight.cells.flatMap((cell) => cell.blockers), [])
+    assert.equal(preflight.data.preflight.cells.filter((cell) => cell.ready && cell.rightsAllowed).length, 5)
+    assert.equal(typeof preflight.data.commitToken, 'string')
+    assert.ok(preflight.data.commitToken.length >= 80)
 
-    const commitResponse = await fetch(`${baseUrl}/v1/export-matrix-preflights/${preflight.data.preflightId}/commit`, {
+    // A commit that does not present the preflight's own token still starts nothing: the token is the only way in.
+    const deniedCommitBody = matrixDeniedCommitBody()
+    assert.equal(validators.commitRequest(deniedCommitBody), true, JSON.stringify(validators.commitRequest.errors))
+    assert.notEqual(deniedCommitBody.commitToken, preflight.data.commitToken)
+    const deniedCommit = await fetch(`${baseUrl}/v1/export-matrix-preflights/${preflight.data.preflightId}/commit`, {
       method: 'POST', headers: { authorization, 'content-type': 'application/json' },
-      body: JSON.stringify({ commitToken: preflight.data.commitToken, approval: { approved: true, note: 'Matrix E2E approved.' } }),
+      body: JSON.stringify(deniedCommitBody),
     })
-    const committed = await commitResponse.json()
-    assert.equal(commitResponse.status, 202, `${JSON.stringify(committed)}\n${serverLogs.slice(-4_000)}`)
-    const matrixId = committed.data.matrix.id
-    assert.equal(committed.data.matrix.status, 'queued')
-    assert.equal(new Set(committed.data.matrix.cells.map((cell) => cell.operationId)).size, 5)
+    const deniedCommitPayload = await deniedCommit.json()
+    assert.equal(deniedCommit.status, 403, JSON.stringify(deniedCommitPayload))
+    assert.equal(validators.errorResponse(deniedCommitPayload), true, JSON.stringify(validators.errorResponse.errors))
+    assert.equal(deniedCommitPayload.error.code, 'PREFLIGHT_TOKEN_INVALID')
+    assert.equal(await client.v2ExportMatrix.count({ where: { workspaceId } }), 0)
+    assert.equal(await client.v2PublicOperation.count({ where: { workspaceId, type: 'project-final-export' } }), 0)
+    assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId } }), 0)
 
+    // This port exists only in this test process. It checks PostgreSQL lineage,
+    // source bytes and exact scope before letting the application exercise
+    // export mechanics on the fixture's own media. The stored reports remain
+    // review-required/unknown. (The real admission above is not the thing this
+    // port replaces any more; it keeps the cells on this synthetic source and
+    // pins its identity on every read.)
+    const sourceReader = new PrismaProjectProxyRenderRepository(client)
+    const realProjects = new PrismaProjectFinalExportRepository(client)
+    async function readControlledSource(input, immutable) {
+      const cell = cells.find((candidate) => candidate.projectId === input.projectId)
+      const evidence = controlledEvidence.get(input.projectId)
+      if (!cell || !evidence || input.workspaceId !== workspaceId ||
+          input.projectVersionId !== cell.projectVersionId ||
+          input.projectVersionHash !== cell.projectVersionHash ||
+          (immutable && ['editPlanSnapshotId', 'directorRunId', 'qualitySnapshotId',
+            'qualitySnapshotHash', 'proxyReviewId', 'proxyReviewHash', 'proxyArtifactId',
+            'sourceArtifactId', 'sourceManifestId'].some((key) => input[key] !== evidence[key]))) return null
+      const source = immutable ? await sourceReader.readImmutableSource(input)
+        : await sourceReader.readCurrentSource({ workspaceId, projectId: cell.projectId })
+      if (!source || source.projectVersionId !== cell.projectVersionId ||
+          source.editPlanSnapshotId !== evidence.editPlanSnapshotId ||
+          source.editPlanHash !== evidence.editPlanHash ||
+          source.sourceArtifactId !== sourceArtifactId || source.sourceManifestId !== sourceManifestId ||
+          source.sourceSha256 !== evidence.sourceSha256 || source.format !== cell.format ||
+          source.renderSources.length !== 1 ||
+          source.renderSources[0].artifactId !== sourceArtifactId ||
+          source.renderSources[0].manifestId !== sourceManifestId ||
+          source.renderSources[0].sha256 !== evidence.sourceSha256) return null
+      const [project, version, run, quality, review, sourceArtifact, sourceManifest,
+        proxyArtifact, proxyManifest] = await Promise.all([
+        client.v2Project.findFirst({ where: { id: cell.projectId, workspaceId } }),
+        client.v2ProjectVersion.findFirst({ where: { id: cell.projectVersionId,
+          workspaceId, projectId: cell.projectId, baseHash: cell.projectVersionHash } }),
+        client.v2DirectorRun.findFirst({ where: { id: evidence.directorRunId,
+          workspaceId, projectId: cell.projectId, resultVersionId: cell.projectVersionId,
+          qualitySnapshotId: evidence.qualitySnapshotId, status: 'succeeded' } }),
+        client.v2ProjectSnapshot.findFirst({ where: { id: evidence.qualitySnapshotId,
+          workspaceId, projectId: cell.projectId, kind: 'quality-report' } }),
+        client.v2ProxyReview.findFirst({ where: { id: evidence.proxyReviewId,
+          workspaceId, projectId: cell.projectId, projectVersionId: cell.projectVersionId,
+          reviewHash: evidence.proxyReviewHash, proxyArtifactId: evidence.proxyArtifactId,
+          status: 'ready-for-final', finalAllowed: true } }),
+        client.v2MediaArtifact.findFirst({ where: { id: sourceArtifactId, workspaceId,
+          sha256: evidence.sourceSha256, status: 'available' } }),
+        client.v2MediaArtifactManifest.findFirst({ where: { id: sourceManifestId,
+          workspaceId, artifactId: sourceArtifactId } }),
+        client.v2MediaArtifact.findFirst({ where: { id: evidence.proxyArtifactId,
+          workspaceId, status: 'available' } }),
+        client.v2MediaArtifactManifest.findFirst({ where: { id: evidence.proxyManifestId,
+          workspaceId, artifactId: evidence.proxyArtifactId } }),
+      ])
+      if (!project || (!immutable && project.currentVersionId !== cell.projectVersionId) ||
+          !version || version.editPlanSnapshotId !== evidence.editPlanSnapshotId ||
+          !run || !quality || quality.schemaVersion !== 3 ||
+          quality.contentHash !== evidence.qualitySnapshotHash ||
+          quality.contentJson !== stableSerialize(evidence.quality) ||
+          !review || !sourceArtifact || Number(sourceArtifact.byteSize) !== sourceBytes.byteLength ||
+          !sourceManifest || !proxyArtifact || !proxyManifest ||
+          review.proxyManifestId !== evidence.proxyManifestId ||
+          proxyManifest.artifactId !== evidence.proxyArtifactId ||
+          proxyArtifact.artifactKey !== JSON.parse(proxyManifest.manifestJson).artifact.artifactKey) return null
+      const sourceDeclaration = JSON.parse(sourceManifest.manifestJson).artifact
+      if (sourceDeclaration.artifactKey !== sourceArtifactKey ||
+          sourceDeclaration.sha256 !== evidence.sourceSha256 ||
+          sourceDeclaration.byteSize !== sourceBytes.byteLength) return null
+      // The Director's plan keeps its caption cues: the final export worker derives the unknown-face review plan they require
+      // from this very source (the same derivation the proxy worker runs), so the real renderer admits them instead of the port rendering the cut without them.
+      return Object.freeze({ ...source, projectVersionHash: cell.projectVersionHash,
+        locale: project.locale ?? 'pt-BR', directorRunId: evidence.directorRunId,
+        qualitySnapshotId: evidence.qualitySnapshotId,
+        qualitySnapshotHash: evidence.qualitySnapshotHash,
+        qualityStatus: 'approved', qualityScore: evidence.quality.score,
+        proxyReviewId: evidence.proxyReviewId, proxyReviewHash: evidence.proxyReviewHash,
+        proxyArtifactId: evidence.proxyArtifactId })
+    }
+    const controlledProjects = Object.freeze({
+      readApprovedCurrentSource: (input) => readControlledSource(input, false),
+      readImmutableApprovedSource: (input) => readControlledSource(input, true),
+      resolveOutputVariantByFormat: (input) => realProjects.resolveOutputVariantByFormat(input),
+      convergeOutputIdentity: (input) => realProjects.convergeOutputIdentity(input),
+      attachCompletedOutput: (input) => realProjects.attachCompletedOutput(input),
+      markExportFailed: (input) => realProjects.markExportFailed(input),
+      recordAttempt: (input) => realProjects.recordAttempt(input),
+      readAttemptHistory: (input) => realProjects.readAttemptHistory(input),
+    })
+    const auditContext = createExternalAuditContext({ clientId: issued.client.id,
+      credentialId: issued.credential.id, workspaceId, environment: 'production' })
+    const controlledActor = { ...auditContext, auditContext,
+      scopes: new Set(['projects:write', 'operations:cancel', 'operations:retry']),
+      authenticationKind: 'bearer', clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' }
     const workerEnvironment = {
       ...process.env, APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
-      APOLLO_V2_RENDER_WORK_ROOT: join(artifactRoot, '.matrix-work'),
+      APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
+      FFMPEG_PATH: ffmpegBin,
+      APOLLO_V2_RENDER_WORK_ROOT: renderWorkRoot,
       APOLLO_V2_RENDER_LEASE_MS: '120000', APOLLO_V2_RENDER_HEARTBEAT_MS: '5000',
       APOLLO_V2_WORKER_RETRY_BASE_MS: '1', APOLLO_V2_WORKER_RETRY_MAX_MS: '1',
       APOLLO_PROTECTED_PAYLOAD_KEY_ID: 'matrix-e2e-key',
       APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 9).toString('base64url'),
     }
-    const failingWorker = createProjectFinalExportWorker({ ...workerEnvironment, FFMPEG_PATH: process.execPath })
+    const matrices = new PrismaExportMatrixRepository(client)
+    const rights = new PrismaAssetRightsRepository(client)
+    const operations = new PrismaPublicOperationRepository(client, randomUUID,
+      () => createProtectedPayloadCipherFromEnvironment(workerEnvironment))
+    const tokenIssuer = createPreflightCommitTokenIssuerFromEnvironment({
+      APOLLO_PREFLIGHT_COMMIT_TOKEN_SECRET: `matrix-token-${suffix}`.padEnd(48, 'x'),
+    })
+    const controlledPreflight = await createExportMatrixPreflightService({
+      matrices, projects: controlledProjects, rights,
+      colorPipelines: createColorPipelineCompilationRepository(),
+      capacity: createExportMatrixCapacityProviderFromEnvironment({
+        APOLLO_EXPORT_MATRIX_MAX_COST_MINOR_UNITS: '100000000',
+        APOLLO_EXPORT_MATRIX_AVAILABLE_STORAGE_BYTES: '9000000000000',
+      }),
+      tokenIssuer, clock: () => new Date(),
+      createPreflightId: () => `preflight-matrix-controlled-${suffix}`,
+    })({ workspaceId, cells, requestedMaximumCostMinorUnits: 100000000,
+      requestedMaximumStorageBytes: 9000000000000, actor: controlledActor,
+      idempotencyKey: `matrix-controlled-preflight-${suffix}` })
+    assert.equal(controlledPreflight.record.preflight.allowed, true)
+    assert.equal(controlledPreflight.record.preflight.definition.cells.length, 5)
+    const committed = await commitExportMatrixService({
+      matrices, projects: controlledProjects, rights, operations,
+      colorPipelines: createColorPipelineCompilationRepository(), tokenIssuer,
+      clock: () => new Date(), createId: (kind) => `${kind}-matrix-controlled-${randomUUID()}`,
+    })({ workspaceId, preflightId: controlledPreflight.record.id,
+      commitToken: controlledPreflight.commitToken,
+      approval: { approved: true, note: 'Controlled export mechanics only.' },
+      actor: controlledActor })
+    const matrixId = committed.matrix.id
+    assert.equal(committed.matrix.status, 'queued', JSON.stringify(committed.matrix).slice(0, 3000))
+    assert.equal(new Set(committed.matrix.cells.map((cell) => cell.operationId)).size, 5)
+
+    // What the real renderer was asked to draw, read back from the render call and from the ASS file it wrote.
+    const renderTrace = []
+    function tracedRenderer(renderer) {
+      return Object.freeze({
+        async render(input) {
+          const result = await renderer.render(input)
+          // The renderer works under <artifact root>/.work/<operation id>; a path that did not exist read as an empty file and made 'no dialogue' vacuous.
+          const ass = await readFile(join(artifactRoot, '.work', input.operationId, 'captions.ass'), 'utf8').catch(() => '')
+          const plan = input.placementPlan
+          renderTrace.push(Object.freeze({
+            renderKind: input.renderKind, format: input.format,
+            cues: input.subtitleCues?.length ?? 0, ctas: input.ctaOverlays?.length ?? 0,
+            anchorSchema: plan?.subtitleAnchorPlan?.schemaVersion ?? null,
+            decided: plan?.subtitleAnchorPlan?.decisions.length ?? 0,
+            suppressed: plan?.subtitleAnchorPlan?.decisions.filter((decision) => decision.suppressed).length ?? 0,
+            canvas: plan ? `${plan.canvas.width}x${plan.canvas.height}` : null,
+            outputCanvas: `${input.outputSpec.width}x${input.outputSpec.height}`,
+            dialogues: ass.split('\n').filter((line) => line.startsWith('Dialogue:')).length,
+          }))
+          return result
+        },
+        cleanup: (operationId) => renderer.cleanup(operationId),
+      })
+    }
+    function controlledWorker(ffmpegPath, trace = false) {
+      const renderer = createFfmpegEditorialProxyRendererFromEnvironment({ ...workerEnvironment, FFMPEG_PATH: ffmpegPath })
+      return runNextProjectFinalExportOperationService({
+        operations, projects: controlledProjects, rights,
+        artifacts: createMediaArtifactPersistenceRepository(workerEnvironment),
+        storage: createLocalMediaUploadStorageFromEnvironment(workerEnvironment),
+        renderer: trace ? tracedRenderer(renderer) : renderer,
+        // W65b: a final that burns a caption is refused before the encode without a pixel critic to confirm it on the delivered MP4. The
+        // composition root wires this very critic (repository-factory.ts) on the worker's own FFmpeg; the failing worker never reaches it.
+        captionPixelCritic: new FfmpegCaptionPixelCritic({ ffmpegPath }),
+        renderElementMaps: createRenderElementMapRepository(),
+        colorPipelines: createColorPipelineCompilationRepository(),
+        colorPlans: createProjectColorPlanRepository(),
+        luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(),
+          join(artifactRoot, '.lut-work'), createWorkspaceLutRepository()),
+        sources: createArtifactSourceMaterializer(workerEnvironment),
+        catalogOutput: createAutomaticCatalogService(),
+        leaseDurationMs: 120_000, heartbeatIntervalMs: 5_000,
+        retryBaseDelayMs: 1, retryMaxDelayMs: 1,
+      })
+    }
+    const failingWorker = controlledWorker(process.execPath)
     const retryOutcome = await failingWorker(`matrix-worker-retry-${suffix}`)
     const retryOperation = retryOutcome
       ? await client.v2PublicOperation.findUnique({ where: { id: retryOutcome.operationId } })
@@ -411,7 +771,7 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
       ? await client.v2ProjectFinalExportOperation.findUnique({ where: { operationId: retryOutcome.operationId } })
       : null
     const retrySource = retryDetail
-      ? await new PrismaProjectFinalExportRepository(client).readImmutableApprovedSource({
+      ? await controlledProjects.readImmutableApprovedSource({
         workspaceId: retryDetail.workspaceId,
         projectId: retryDetail.projectId,
         projectVersionId: retryDetail.projectVersionId,
@@ -439,8 +799,8 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
       quality: retryDetail.outputQuality,
     } : null
     const recomputedInputHash = retryDetail && retrySource && retryOutputSpec
-      ? calculateVersionHash({
-        kind: 'project-final-export/v1', projectId: retryDetail.projectId,
+      ? projectFinalRenderInputHash({
+        projectId: retryDetail.projectId,
         projectVersionId: retryDetail.projectVersionId, projectVersionHash: retryDetail.projectVersionHash,
         editPlanSnapshotId: retrySource.editPlanSnapshotId, editPlanHash: retrySource.editPlanHash,
         directorRunId: retrySource.directorRunId, qualitySnapshotId: retrySource.qualitySnapshotId,
@@ -450,6 +810,7 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
         sourceSha256: retrySource.sourceSha256,
         renderSourcesFingerprint: projectRenderSourcesFingerprint(retrySource.renderSources),
         colorPipelineBindings: retryBindings, outputSpec: retryOutputSpec,
+        outputConsumptionSealHash: retrySource.outputConsumption.sealHash,
       })
       : null
     assert.equal(retryOutcome?.status, 'retrying', stableSerialize({
@@ -459,6 +820,8 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
       errorRetryable: retryOperation?.errorRetryable,
       attempt: retryOperation?.attempt,
       maxAttempts: retryOperation?.maxAttempts,
+      attempts: retryOutcome ? (await client.v2ProjectFinalExportAttempt.findMany({ where: { operationId: retryOutcome.operationId } }))
+        .map((entry) => ({ attempt: entry.attempt, status: entry.status, code: entry.errorCode, stage: entry.errorStage, validators: entry.validatorsJson })) : [],
       workerChecks: {
         sourceFound: Boolean(retrySource),
         inputHashMatches: recomputedInputHash === retryDetail?.inputHash,
@@ -469,16 +832,33 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
         bindingCount: retryBindings.length,
         renderSourceIds: retrySource?.renderSources.map((source) => source.artifactId),
         bindingSourceIds: retryBindings.map((binding) => binding.sourceArtifactId),
+        planFps: retrySource?.editPlan.fps,
+        outputFps: retryOutputSpec?.fps,
+        proxyReviewMatches: retrySource?.proxyReviewId === retryDetail?.proxyReviewId && retrySource?.proxyReviewHash === retryDetail?.proxyReviewHash,
+        audioTimelineMatches: retrySource ? retrySource.editPlan.audioTimelineHash === undefined
+          || retrySource.editPlan.audioTimelineHash === createEditorialAudioTimelineHash({ fps: retrySource.editPlan.fps,
+            clips: retrySource.editPlan.videoTracks.find((track) => track.kind === 'base-video').clips }) : null,
       },
     }))
     const retryResponse = await fetch(`${baseUrl}/v1/export-matrices/${matrixId}`, { headers: { authorization } })
     const retrying = await retryResponse.json()
     assert.equal(retryResponse.status, 200)
+    assert.equal(validators.matrixResponse(retrying), true, JSON.stringify(validators.matrixResponse.errors))
     assert.equal(retrying.data.matrix.cells.filter((cell) => cell.status === 'retrying').length, 1)
     assert.equal(retrying.data.matrix.cells.filter((cell) => cell.status === 'queued').length, 4)
+    const canceled = await cancelPublicOperationService({ operations })({
+      workspaceId, operationId: retryOutcome.operationId, actor: controlledActor })
+    assert.equal(canceled.status, 'canceled')
+    assert.equal((await client.v2ExportMatrixCell.findFirstOrThrow({
+      where: { workspaceId, operationId: retryOutcome.operationId },
+      include: { operation: true },
+    })).operation.status, 'canceled')
+    const resumed = await retryPublicOperationService({ operations })({
+      workspaceId, operationId: retryOutcome.operationId, actor: controlledActor })
+    assert.equal(resumed.status, 'retrying')
     await new Promise((resolve) => setTimeout(resolve, 25))
 
-    const worker = createProjectFinalExportWorker(workerEnvironment)
+    const worker = controlledWorker(ffmpegBin, true)
     const assertSucceeded = async (outcome) => {
       const operation = outcome
         ? await client.v2PublicOperation.findUnique({ where: { id: outcome.operationId } })
@@ -513,6 +893,7 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
     const partialResponse = await fetch(`${baseUrl}/v1/export-matrices/${matrixId}`, { headers: { authorization } })
     const partial = await partialResponse.json()
     assert.equal(partialResponse.status, 200)
+    assert.equal(validators.matrixResponse(partial), true, JSON.stringify(validators.matrixResponse.errors))
     assert.equal(partial.data.matrix.status, 'running')
     assert.equal(partial.data.matrix.cells.filter((cell) => cell.status === 'ready').length, 3)
     assert.equal(partial.data.matrix.cells.filter((cell) => cell.status === 'queued').length, 2)
@@ -524,11 +905,41 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
     const readyResponse = await fetch(`${baseUrl}/v1/export-matrices/${matrixId}`, { headers: { authorization } })
     const ready = await readyResponse.json()
     assert.equal(readyResponse.status, 200)
+    assert.equal(validators.matrixResponse(ready), true, JSON.stringify(validators.matrixResponse.errors))
     assert.equal(ready.data.matrix.status, 'ready')
     assert.deepEqual(ready.data.matrix.cells.map((cell) => cell.status), Array(5).fill('ready'))
     assert.deepEqual(ready.data.matrix.cells.map((cell) => cell.attempt).toSorted(), [1, 1, 1, 1, 2])
     assert.equal(new Set(ready.data.matrix.cells.map((cell) => cell.outputArtifactId)).size, 5)
     assert.equal(new Set(ready.data.matrix.cells.map((cell) => cell.outputManifestId)).size, 5)
+
+    // The Director's captions are no longer stripped, and they are not all suppressed either (W65b, final-caption-certification/v1):
+    // every one of the five finals reached the real renderer with its cues and the placement plan for them (anchor plan v3, policy
+    // omit-and-list), on the canvas of its own OutputSpec. A cue that sits in a certified band is BURNED (one ASS dialogue); a cue
+    // that cannot be certified is OMITTED and listed (`suppressed`, no dialogue). A final that burns at least one cue is rendered a
+    // second time, a control encode of the same input without the burned cues, so the pixel critic can measure the delivered MP4
+    // against it; a final that burns nothing needs no control.
+    const deliverables = renderTrace.filter((trace) => trace.cues >= 1)
+    const controls = renderTrace.filter((trace) => trace.cues === 0)
+    assert.equal(deliverables.length, 5, stableSerialize(renderTrace))
+    assert.deepEqual(deliverables.map((trace) => trace.format).toSorted(), [...FORMATS].toSorted())
+    for (const trace of deliverables) {
+      assert.equal(trace.renderKind, 'final', stableSerialize(trace))
+      assert.equal(trace.anchorSchema, 'subtitle-anchor-plan/v3', stableSerialize(trace))
+      assert.equal(trace.decided, trace.cues, stableSerialize(trace))
+      assert.equal(trace.canvas, trace.outputCanvas, stableSerialize(trace))
+      assert.equal(trace.dialogues, trace.cues - trace.suppressed + trace.ctas, stableSerialize(trace))
+    }
+    const burnedFormats = deliverables.filter((trace) => trace.suppressed < trace.cues).map((trace) => trace.format).toSorted()
+    assert.ok(burnedFormats.length >= 1 && burnedFormats.length < deliverables.length,
+      `the fixture burns some cues and omits others, so both paths are exercised: ${stableSerialize(renderTrace)}`)
+    assert.deepEqual(controls.map((trace) => trace.format).toSorted(), burnedFormats, stableSerialize(renderTrace))
+    for (const trace of controls) {
+      assert.equal(trace.renderKind, 'final', stableSerialize(trace))
+      assert.equal(trace.canvas, trace.outputCanvas, stableSerialize(trace))
+      assert.equal(trace.dialogues, 0, stableSerialize(trace))
+    }
+    assert.equal(renderTrace.length, deliverables.length + controls.length, stableSerialize(renderTrace))
+    t.diagnostic(`final render trace: ${stableSerialize(renderTrace)}`)
 
     const formatCritics = await client.v2ProjectFinalExportOperation.findMany({
       where: {
@@ -551,17 +962,26 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
     )
     assert.ok(formatCritics.every((item) =>
       item.qualitySnapshotHash === item.qualitySnapshot.contentHash &&
-      JSON.parse(item.qualitySnapshot.contentJson).status === 'approved'))
+      JSON.parse(item.qualitySnapshot.contentJson).status === 'review-required' &&
+      JSON.parse(item.qualitySnapshot.contentJson).faceSafety.status === 'unknown'))
 
     const outputHashes = new Set()
+    const verifiedOutputs = []
     for (const cell of ready.data.matrix.cells) {
       const artifact = await client.v2MediaArtifact.findUnique({ where: { id: cell.outputArtifactId } })
       assert.ok(artifact)
       outputHashes.add(artifact.sha256)
       const outputPath = join(artifactRoot, ...artifact.artifactKey.split('/'))
-      const { stdout } = await execFileAsync(ffprobeStatic, [
+      const outputBytes = await readFile(outputPath)
+      assert.equal(sha256(outputBytes), artifact.sha256)
+      // Some Windows FFprobe builds cannot open long artifact paths.
+      // Verify the same bytes in an owned short scratch path before probing.
+      const probePath = join(probeRoot, `${cell.format.replace(':', 'x')}.mp4`)
+      await copyFile(outputPath, probePath)
+      assert.equal(sha256(await readFile(probePath)), artifact.sha256)
+      const { stdout } = await execFileAsync(ffprobeBin, [
         '-v', 'error', '-count_frames', '-select_streams', 'v:0',
-        '-show_entries', 'stream=codec_name,width,height,nb_read_frames', '-of', 'json', outputPath,
+        '-show_entries', 'stream=codec_name,width,height,nb_read_frames', '-of', 'json', probePath,
       ], { timeout: 30_000 })
       const stream = JSON.parse(stdout).streams[0]
       const preset = readOutputFormatPreset(cell.format).spec
@@ -569,16 +989,71 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
       assert.equal(stream.width, preset.width)
       assert.equal(stream.height, preset.height)
       assert.equal(Number(stream.nb_read_frames), 30)
-      assert.equal(sha256(await readFile(outputPath)), artifact.sha256)
+      await execFileAsync(ffmpegBin, [
+        '-hide_banner', '-loglevel', 'error', '-xerror', '-threads', '2',
+        '-i', probePath, '-map', '0:v:0', '-map', '0:a?', '-f', 'null', '-',
+      ], { timeout: 60_000, maxBuffer: 2 * 1024 * 1024 })
+      const verifiedBytes = await readFile(probePath)
+      assert.equal(verifiedBytes.byteLength, Number(artifact.byteSize))
+      assert.equal(sha256(verifiedBytes), artifact.sha256)
+      const critic = formatCritics.find((item) => item.operationId === cell.operationId)
+      assert.ok(critic)
+      verifiedOutputs.push({ format: cell.format, outputSpec: preset,
+        operationId: cell.operationId, artifactId: artifact.id,
+        artifactKey: artifact.artifactKey, artifactSha256: artifact.sha256,
+        artifactByteSize: verifiedBytes.byteLength, manifestId: cell.outputManifestId,
+        qualitySnapshotId: critic.qualitySnapshotId,
+        qualitySnapshotHash: critic.qualitySnapshotHash,
+        qualityStatus: JSON.parse(critic.qualitySnapshot.contentJson).status,
+        probePath })
     }
     assert.equal(outputHashes.size, 5)
     assert.equal(await client.v2ProjectMediaAsset.count({ where: { workspaceId, artifactId: sourceArtifactId, role: 'source-master' } }), 5)
     assert.equal(await client.v2ExportMatrix.count({ where: { workspaceId } }), 1)
     assert.equal(await client.v2ExportMatrixCell.count({ where: { workspaceId } }), 5)
+    if (evidenceRoot) {
+      const runEvidenceRoot = ownedChild(evidenceRoot, join(evidenceRoot, `matrix-${suffix}`), 'matrix-')
+      await mkdir(runEvidenceRoot, { recursive: true })
+      const outputs = []
+      for (const output of verifiedOutputs) {
+        const fileName = `${output.format.replace(':', 'x')}.mp4`
+        const preservedPath = ownedChild(runEvidenceRoot, join(runEvidenceRoot, fileName), '')
+        await copyFile(output.probePath, preservedPath)
+        const preservedBytes = await readFile(preservedPath)
+        assert.equal(preservedBytes.byteLength, output.artifactByteSize)
+        assert.equal(sha256(preservedBytes), output.artifactSha256)
+        const { probePath: _privateScratchPath, ...metadata } = output
+        outputs.push({ ...metadata, fileName })
+      }
+      assert.equal(outputs.length, 5)
+      await writeFile(ownedChild(runEvidenceRoot, join(runEvidenceRoot, 'manifest.json'), ''),
+        JSON.stringify({ schemaVersion: 'export-matrix-controlled-mechanics-proof/v1',
+          proofScope: 'controlled-mechanics', faceSafety: 'unknown',
+          publicApiCommitBlocked: true, fullDecode: 'passed',
+          workspaceId, matrixId, sourceArtifactId, sourceSha256: sourceSha,
+          outputs, deployed: false, ownerAccepted: false }, null, 2), { flag: 'wx' })
+    }
+  } catch (error) {
+    primaryError = error
   } finally {
-    await stopChild(server)
-    await client.$disconnect()
-    await rm(join(artifactRoot, 'workspaces', workspaceId), { recursive: true, force: true })
-    await rm(join(artifactRoot, '.matrix-work'), { recursive: true, force: true })
+    const cleanupErrors = []
+    for (const cleanup of [
+      () => stopChild(server),
+      async () => {
+        const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
+        await disconnectV2PostgresClient()
+      },
+      () => client.$disconnect(),
+      () => rm(ownedChild(join(artifactRoot, 'workspaces'),
+        join(artifactRoot, 'workspaces', workspaceId), 'matrix-workspace-'), { recursive: true, force: true }),
+      () => rm(ownedChild(artifactRoot, renderWorkRoot, '.matrix-work-'), { recursive: true, force: true }),
+      ...(probeRoot ? [() => rm(ownedChild(tmpdir(), probeRoot, 'apollo-matrix-probe-'),
+        { recursive: true, force: true })] : []),
+    ]) {
+      try { await cleanup() } catch (error) { cleanupErrors.push(error) }
+    }
+    if (primaryError && cleanupErrors.length) throw new AggregateError([primaryError, ...cleanupErrors], 'Matrix proof and cleanup failed')
+    if (primaryError) throw primaryError
+    if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Matrix proof cleanup failed')
   }
 })

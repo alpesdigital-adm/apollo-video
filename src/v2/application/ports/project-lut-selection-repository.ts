@@ -1,12 +1,11 @@
 import type { EditCommand } from '../../domain/edit-command.ts'
 import type { ProjectLutSelection, ProjectLutSelectionRequest } from '../../domain/project-lut-selection.ts'
-import type { ProjectVersion } from '../../domain/project-version.ts'
-import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
+import type { OperationalOutputParentV3, OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
+import type { ProjectVersionV3 } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type { WorkspaceLutVersion } from '../../domain/workspace-lut.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
 import type { ProjectLutSelectionImpactV1 } from '../../domain/project-lut-selection-impact.ts'
-import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export type ProjectLutSelectionCommandPayloadV2 = ProjectLutSelectionRequest & Readonly<{
   schemaVersion: 2
@@ -15,18 +14,19 @@ export type ProjectLutSelectionCommandPayloadV2 = ProjectLutSelectionRequest & R
 }>
 
 export interface ProjectLutSelectionContext {
-  currentVersion: Readonly<ProjectVersion>
-  currentEditPlan: Readonly<Record<string, unknown>>
-  currentEditPlanSchemaVersion: number
+  /** The sealed output bundle of the current head: the exact parent the Command's Version is born from. */
+  parent: OperationalOutputParentV3
   workspaceDefaultRevision?: number
   resolvedLutVersion?: Readonly<WorkspaceLutVersion>
   currentDurationFrames: number
-  proxyVariantId: string
+  /** Every output of the project: the stable variant ids of the sealed State the Command's child Version carries. */
+  variantIds: readonly string[]
+  /** The renders of the head Version, each attributed to its own output. */
   outputReferences: readonly Readonly<CommandImpactOutputReference>[]
 }
 export interface ProjectLutSelectionResult {
   command: Readonly<EditCommand<ProjectLutSelectionCommandPayloadV2>>
-  version: Readonly<ProjectVersion>
+  version: Readonly<ProjectVersionV3>
   selection: Readonly<ProjectLutSelection>
   impact: Readonly<ProjectLutSelectionImpactV1>
   invalidations: readonly Readonly<CommandArtifactInvalidationV1>[]
@@ -37,12 +37,9 @@ export interface EffectiveProjectLutSelection {
   resolvedLutVersion?: Readonly<WorkspaceLutVersion>
 }
 export interface ProjectLutSelectionCommit {
-  command: Readonly<EditCommand<ProjectLutSelectionCommandPayloadV2>>
-  authenticationAudit?: Readonly<ApiAccessAuditContext>
-  version: Readonly<ProjectVersion>
-  editPlanSnapshot: Readonly<ProjectSnapshot>
+  /** Version, State, EditPlan, Command and credential audit, sealed together by the child-command transition. */
+  bundle: Readonly<OperationalOutputVersionBundleV3>
   selection: Readonly<ProjectLutSelection>
-  requestFingerprint: string
   event: Readonly<PublicEvent>
 }
 export interface ProjectLutSelectionRepository {

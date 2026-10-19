@@ -6,7 +6,12 @@ export interface ApprovedProjectFinalExportSource extends ProjectProxyRenderSour
   directorRunId: string
   qualitySnapshotId: string
   qualitySnapshotHash: string
-  qualityStatus: 'approved' | 'approved-with-warnings'
+  qualityStatus: 'approved' | 'approved-with-warnings' | 'review-required'
+  /**
+   * Why the Director's report is admissible for a final (W65b): a verified face safety (legacy), or the per-cue caption
+   * certification the final worker performs on what it burns. Neither ever sets a global face safety.
+   */
+  admissionBasis: 'verified-face-safety' | 'per-cue-caption-certification'
   qualityScore: number
   proxyReviewId: string
   proxyReviewHash: string
@@ -45,11 +50,17 @@ export interface ProjectFinalExportAttemptHistory {
     error?: Readonly<{
       code: string
       message: string
+      stage?: ProjectFinalExportFailureStage
     }>
     startedAt: string
     completedAt: string
   }>[]
 }
+
+export type ProjectFinalExportFailureStage =
+  | 'source-read' | 'color-plan' | 'color-bindings' | 'lut-materialization'
+  | 'input-validation' | 'rights' | 'source-materialization' | 'render'
+  | 'output-verification' | 'output-promotion' | 'artifact-persistence'
 
 export interface ProjectFinalExportRepository {
   readApprovedCurrentSource(input: {
@@ -57,7 +68,20 @@ export interface ProjectFinalExportRepository {
     projectId: string
     projectVersionId: string
     projectVersionHash: string
+    /** The State variant to export; absent means the State's only output. */
+    variantId?: string
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null>
+  /**
+   * The stable variant of the only output of `projectVersionId` whose sealed aspect ratio is `format` (null when none has it; two
+   * outputs of one ratio are refused with `output-variant-ambiguous`). For callers whose request names a format and not a variant
+   * (an export matrix cell): the format of a cell is explicit, so addressing the output by it is exact, never a guess.
+   */
+  resolveOutputVariantByFormat(input: {
+    workspaceId: string
+    projectId: string
+    projectVersionId: string
+    format: string
+  }): Promise<string | null>
   readImmutableApprovedSource(input: {
     workspaceId: string
     projectId: string
@@ -72,6 +96,10 @@ export interface ProjectFinalExportRepository {
     proxyArtifactId: string
     sourceArtifactId: string
     sourceManifestId: string
+    /** The State variant to export; absent means the State's only output. */
+    variantId?: string
+    /** The worker refuses (PERSISTENCE_CONFLICT), before it renders anything, when the sealed Version is no longer the project's head. */
+    requireCurrent?: boolean
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null>
   convergeOutputIdentity(input: {
     workspaceId: string
@@ -119,6 +147,7 @@ export interface ProjectFinalExportRepository {
     error?: Readonly<{
       code: string
       message: string
+      stage?: ProjectFinalExportFailureStage
     }>
     startedAt: string
     completedAt: string

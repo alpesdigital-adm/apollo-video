@@ -46,6 +46,10 @@ async function waitForServer(baseUrl, server) {
   throw new Error('Timed out waiting for Next server')
 }
 
+// The outbox ids of this run are its own: the rows of a run stay in the database (the sealed rows are append-only) and the quality job
+// runs many suites against one database, so a fixed id collided with the suite that used the same one first.
+const EVENT_RUN = (await import('node:crypto')).randomUUID().slice(0, 8)
+
 test('T-FR-103 presenter lifecycle and generation gates hold from the browser to PostgreSQL', {
   skip: !process.env.V2_DATABASE_URL && 'V2_DATABASE_URL is required',
   timeout: 900_000,
@@ -66,45 +70,8 @@ test('T-FR-103 presenter lifecycle and generation gates hold from the browser to
   let serverLogs = ''
   let workerLogs = ''
 
-  const cleanup = async () => {
-    const identityIds = (await client.v2WorkspaceMember.findMany({
-      where: { workspaceId }, select: { identityId: true },
-    })).map((member) => member.identityId)
-    await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-    await client.v2SyntheticBlockConcatenation.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticBlockGeneration.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactLineage.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2UiSession.deleteMany({ where: { workspaceId } })
-    const { uiLoginThrottleKey, uiSessionSubjectHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
-    const sessionEnvironment = { APOLLO_UI_SESSION_SECRET: uiSessionSecret }
-    await client.v2UiLoginAttempt.deleteMany({ where: { subjectHash: uiSessionSubjectHash(uiUsername, sessionEnvironment) } })
-    await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: uiLoginThrottleKey('direct', uiUsername, sessionEnvironment) } })
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } })
-    await client.v2WorkspaceMember.deleteMany({ where: { workspaceId } })
-    if (identityIds.length > 0) await client.v2HumanIdentity.deleteMany({ where: { id: { in: identityIds } } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     const { createProjectService } = await import('../../src/v2/application/create-project.ts')
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
@@ -113,7 +80,7 @@ test('T-FR-103 presenter lifecycle and generation gates hold from the browser to
     const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
 
     if (storageDriver === 's3') {
       const aws = await import('@aws-sdk/client-s3')
@@ -141,12 +108,12 @@ test('T-FR-103 presenter lifecycle and generation gates hold from the browser to
     let entity = 0
     let event = 0
     const project = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client), clock: () => new Date(),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(),
       createId: (kind) => `${kind}-presenter-e2e-${++entity}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(300_000 + ++event).padStart(12, '0')}`,
-    })({ workspaceId, name: 'Projeto do presenter', objective: 'awareness', format: '9:16', actor, idempotency: { clientId: issued.client.id, key: 'presenter-e2e-project' } })
-    const projectId = project.project.id
-    const projectVersionId = project.version.id
+      createEventId: () => `${EVENT_RUN}-0000-4000-8000-${String(300_000 + ++event).padStart(12, '0')}`,
+    })({ workspaceId, name: 'Projeto do presenter', objective: 'awareness', actor, idempotencyKey: 'presenter-e2e-project' })
+    const projectId = project.projectAtCreation.id
+    const projectVersionId = project.creationVersion.id
 
     for (const [artifactId, character] of [['presenter-e2e-consent-1', 'a'], ['presenter-e2e-consent-2', 'b']]) {
       await client.v2MediaArtifact.create({
@@ -428,7 +395,6 @@ test('T-FR-103 presenter lifecycle and generation gates hold from the browser to
     await stopProcess(worker)
     await stopProcess(server)
     if (stub) await new Promise((resolve) => stub.close(resolve))
-    await cleanup()
     await client.$disconnect()
     if (objectStore) {
       const versions = await objectStore.client.send(new objectStore.aws.ListObjectVersionsCommand({ Bucket: objectStore.bucket }))

@@ -48,12 +48,6 @@ test('PostgreSQL preview publication rejects canceled, expired and replaced inge
     await assert.rejects(() => repository.publish({ ...input, leaseOwner: 'replacement-worker', attempt: 2 }), /unexpired ingest lease/i)
     assert.equal(await prisma.v2MediaLibraryEntry.count({ where: { workspaceId } }), 0)
   } finally {
-    await prisma.v2MediaLibraryEntry.deleteMany({ where: { workspaceId } })
-    await prisma.v2PublicOperation.deleteMany({ where: { workspaceId } })
-    await prisma.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await prisma.v2Project.deleteMany({ where: { workspaceId } })
-    await prisma.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } })
     await prisma.$disconnect()
   }
 })

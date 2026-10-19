@@ -13,7 +13,8 @@ import type {
   ResumeWaitingPublicOperationCommand,
 } from '../../application/ports/public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
-import { stableSerialize } from '../../domain/canonical-hash.ts'
+import { evaluatePerceptionSourceAnalysisRights } from '../../domain/perception-source-rights.ts'
+import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
 import { createRenderInputPayload } from '../../domain/render-input-payload.ts'
 import type { RecipeParameterCipher } from '../../application/ports/recipe-parameter-cipher.ts'
 import {
@@ -55,6 +56,13 @@ import {
 import { resolveStrategicObjective } from '../../domain/strategic-objective.ts'
 import { bindDirectorObjective } from '../../domain/strategic-objective.ts'
 import { parseDesiredAction } from '../../domain/desired-action.ts'
+import { hydrateAssetRights } from './asset-rights-repository.ts'
+import { materializeManualEditPlan } from '../../domain/manual-editing.ts'
+import { legacyProxyBelongsToOutput, readSafeReusableProxyReceipt } from './proxy-reuse-safety.ts'
+import { assertInlineProxySourceAuthority, lockProxySourceArtifacts } from './proxy-source-authority.ts'
+import { requirePersistedOutputConsumptionV3 } from './output-state-consumption.ts'
+import { editPlanReferencesSource } from './perception-producer-request-context-repository.ts'
+import { lockProducerPublishProject, lockProducerPublishSource, producerPublishClock } from './producer-publish-fence.ts'
 import {
   persistPublicEvents,
   type PublicEventOutboxTransaction,
@@ -84,6 +92,9 @@ export type StoredOperation = Prisma.V2PublicOperationGetPayload<{
     sourceCleanupPlan: true
     longFormIndexWorkflow: true
     projectDirectorRun: { include: { directorRun: true } }
+    perceptionProducerOperation: true
+    temporalProducerOperation: true
+    faceProducerOperation: true
     syntheticProductionRender: true
   }
 }>
@@ -111,6 +122,9 @@ export const OPERATION_INCLUDE = {
   sourceCleanupPlan: true,
   longFormIndexWorkflow: true,
   projectDirectorRun: { include: { directorRun: true } },
+  perceptionProducerOperation: true,
+  temporalProducerOperation: true,
+  faceProducerOperation: true,
   syntheticProductionRender: true,
 } as const
 
@@ -177,6 +191,21 @@ function parseStoredRecord(value: string, field: string): Record<string, unknown
   } catch {
     throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
   }
+}
+
+
+/**
+ * The YuNet diagnostic has no window; the V9 timeline profile has a bounded window of TIMELINE frames; the V9 source profile (W65b)
+ * a bounded window of SOURCE frames and none on the timeline (mirrors the table CHECK).
+ */
+function validFaceProfileWindow(
+  profile: string, start: number | null, end: number | null, sourceStart: number | null = null, sourceEnd: number | null = null,
+): boolean {
+  const bounded = (from: number | null, to: number | null) => from !== null && to !== null && Number.isSafeInteger(from) &&
+    Number.isSafeInteger(to) && from >= 0 && to > from && to - from <= 300
+  if (profile === 'yunet-v5-diagnostic') return start === null && end === null && sourceStart === null && sourceEnd === null
+  if (profile === 'openvino-face0204-v9') return bounded(start, end) && sourceStart === null && sourceEnd === null
+  return profile === 'openvino-face0204-v9-source' && start === null && end === null && bounded(sourceStart, sourceEnd)
 }
 
 function hydrateSyntheticRenderContext(
@@ -251,7 +280,10 @@ function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
 }
 
 function isSerializationConflict(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034'
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false
+  if (error.code === 'P2034') return true
+  return error.code === 'P2010' && 'meta' in error && typeof error.meta === 'object' &&
+    error.meta !== null && 'code' in error.meta && error.meta.code === '40001'
 }
 
 function parseResult(value: string | null): PublicOperationResult | undefined {
@@ -397,6 +429,9 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
     ? hydrateLongFormCostSource(longFormDetail)
     : undefined
   const directorDetail = row.projectDirectorRun
+  const perceptionDetail = row.perceptionProducerOperation
+  const temporalDetail = row.temporalProducerOperation
+  const faceDetail = row.faceProducerOperation
   const syntheticRenderDetail = row.syntheticProductionRender
   const syntheticRenderContext = syntheticRenderDetail
     ? hydrateSyntheticRenderContext(syntheticRenderDetail)
@@ -408,6 +443,9 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
   const isSourceCleanup = row.type === 'source-cleanup'
   const isLongFormIndex = row.type === 'long-form-index'
   const isDirector = row.type === 'project-director-run'
+  const isPerception = row.type === 'perception-producer-run'
+  const isTemporal = row.type === 'perception-temporal-run'
+  const isFace = row.type === 'perception-face-run'
   const isSyntheticRender = row.type === 'synthetic-production-render'
   const projectColorBindings = projectRenderDetail
     ? parseColorPipelineBindings(projectRenderDetail.colorPipelineBindingsJson)
@@ -424,8 +462,8 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
     ? parseColorPipelineBindings(finalExportDetail.colorPipelineBindingsJson)
     : undefined
   if (
-    (((isDirector || isSyntheticRender) && row.targetType !== 'project-version') ||
-      (!isDirector && !isSyntheticRender && row.targetType !== 'media-artifact')) ||
+    (((isDirector || isSyntheticRender || isPerception || isTemporal || isFace) && row.targetType !== 'project-version') ||
+      (!isDirector && !isSyntheticRender && !isPerception && !isTemporal && !isFace && row.targetType !== 'media-artifact')) ||
     [
       isRender,
       isIngest,
@@ -434,10 +472,13 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
       isSourceCleanup,
       isLongFormIndex,
       isDirector,
+      isPerception,
+      isTemporal,
+      isFace,
       isSyntheticRender,
     ].filter(Boolean).length !== 1
     || [renderDetail, ingestDetail, projectRenderDetail, finalExportDetail,
-      sourceCleanupDetail, longFormDetail, directorDetail, syntheticRenderDetail]
+      sourceCleanupDetail, longFormDetail, directorDetail, perceptionDetail, temporalDetail, faceDetail, syntheticRenderDetail]
       .filter(Boolean).length !== 1
   ) {
     throw new DomainError(
@@ -487,6 +528,7 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
       projectRenderDetail.sourceArtifactId, projectRenderDetail.sourceManifestId, projectRenderDetail.outputArtifactId,
       projectRenderDetail.outputManifestId].every((value) => ID_PATTERN.test(value)) ||
     !SHA256_PATTERN.test(projectRenderDetail.inputHash) || hasPartialProjectReuse ||
+    (projectRenderDetail.outputVariantId !== null && !ID_PATTERN.test(projectRenderDetail.outputVariantId)) ||
     (isProjectReuse && (
       row.status !== 'succeeded' || row.phase !== 'completed' ||
       !ID_PATTERN.test(projectRenderDetail.reusedFromOperationId as string) ||
@@ -511,6 +553,7 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
     ![finalExportDetail.projectVersionHash, finalExportDetail.qualitySnapshotHash,
       finalExportDetail.proxyReviewHash, finalExportDetail.inputHash].every((value) => SHA256_PATTERN.test(value)) ||
     !['9:16', '16:9', '4:5', '1:1', '21:9'].includes(finalExportDetail.outputAspectRatio) ||
+    (finalExportDetail.outputVariantId !== null && !ID_PATTERN.test(finalExportDetail.outputVariantId)) ||
     ![finalExportDetail.outputWidth, finalExportDetail.outputHeight, finalExportDetail.outputFps].every((value) => Number.isSafeInteger(value) && value > 0) ||
     finalExportDetail.outputWidth % 2 !== 0 || finalExportDetail.outputHeight % 2 !== 0 ||
     finalExportDetail.outputCodec !== 'h264' ||
@@ -633,6 +676,52 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
       { operationId: row.id },
     )
   }
+  if (isPerception && (
+    !perceptionDetail || row.projectId !== perceptionDetail.projectId ||
+    row.workspaceId !== perceptionDetail.workspaceId ||
+    row.targetId !== perceptionDetail.projectVersionId ||
+    perceptionDetail.operationId !== row.id ||
+    ![perceptionDetail.projectId, perceptionDetail.projectVersionId,
+      perceptionDetail.sourceArtifactId, perceptionDetail.editPlanSnapshotId]
+      .every((value) => ID_PATTERN.test(value)) ||
+    ![perceptionDetail.projectVersionHash, perceptionDetail.sourceSha256,
+      perceptionDetail.editPlanSnapshotHash, perceptionDetail.requestHash]
+      .every((value) => SHA256_PATTERN.test(value)) ||
+    !Number.isSafeInteger(perceptionDetail.sampleIntervalFrames) ||
+    perceptionDetail.sampleIntervalFrames < 1 || perceptionDetail.sampleIntervalFrames > 300
+  )) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored perception producer operation context is invalid', { operationId: row.id })
+  }
+  if (isTemporal && (
+    !temporalDetail || row.projectId !== temporalDetail.projectId ||
+    row.workspaceId !== temporalDetail.workspaceId || row.targetId !== temporalDetail.projectVersionId ||
+    temporalDetail.operationId !== row.id ||
+    ![temporalDetail.projectId, temporalDetail.projectVersionId,
+      temporalDetail.sourceArtifactId, temporalDetail.editPlanSnapshotId]
+      .every((value) => ID_PATTERN.test(value)) ||
+    ![temporalDetail.projectVersionHash, temporalDetail.sourceSha256,
+      temporalDetail.editPlanSnapshotHash, temporalDetail.requestHash]
+      .every((value) => SHA256_PATTERN.test(value))
+  )) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored temporal producer operation context is invalid', { operationId: row.id })
+  }
+  if (isFace && (
+    !faceDetail || row.projectId !== faceDetail.projectId ||
+    row.workspaceId !== faceDetail.workspaceId || row.targetId !== faceDetail.projectVersionId ||
+    faceDetail.operationId !== row.id ||
+    ![faceDetail.projectId, faceDetail.projectVersionId,
+      faceDetail.sourceArtifactId, faceDetail.editPlanSnapshotId]
+      .every((value) => ID_PATTERN.test(value)) ||
+    ![faceDetail.projectVersionHash, faceDetail.sourceSha256,
+      faceDetail.editPlanSnapshotHash, faceDetail.requestHash]
+      .every((value) => SHA256_PATTERN.test(value)) ||
+    !Number.isSafeInteger(faceDetail.sampleIntervalFrames) ||
+    faceDetail.sampleIntervalFrames < 1 || faceDetail.sampleIntervalFrames > 300 ||
+    !validFaceProfileWindow(faceDetail.detectorProfile, faceDetail.windowStartTimelineFrame, faceDetail.windowEndTimelineFrame,
+      faceDetail.windowStartSourceFrame, faceDetail.windowEndSourceFrame)
+  )) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored face producer operation context is invalid', { operationId: row.id })
+  }
   const outputFields = checkpointFields(renderDetail)
   const hasAnyCheckpoint = outputFields.some((value) => value !== null)
   if (
@@ -720,11 +809,13 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
         : {}),
       cancelable: row.cancelable,
       retryable: row.retryable,
-      target: isDirector || isSyntheticRender ? {
+      target: isDirector || isSyntheticRender || isPerception || isTemporal || isFace ? {
         type: 'project-version',
         id: isDirector
           ? directorDetail!.resultVersionId
-          : syntheticRenderContext!.projectVersionId,
+          : isPerception ? perceptionDetail!.projectVersionId
+            : isTemporal ? temporalDetail!.projectVersionId
+              : isFace ? faceDetail!.projectVersionId : syntheticRenderContext!.projectVersionId,
       } : {
         type: 'media-artifact',
         id: isRender
@@ -838,6 +929,7 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
         outputArtifactId: projectRenderDetail!.outputArtifactId,
         outputManifestId: projectRenderDetail!.outputManifestId,
         originalFileName: projectRenderDetail!.originalFileName,
+        ...(projectRenderDetail!.outputVariantId ? { outputVariantId: projectRenderDetail!.outputVariantId } : {}),
       } : isProjectRender ? {
         kind: 'project-proxy-render' as const,
         projectId: projectRenderDetail!.projectId,
@@ -850,6 +942,7 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
         outputArtifactId: projectRenderDetail!.outputArtifactId,
         outputManifestId: projectRenderDetail!.outputManifestId,
         originalFileName: projectRenderDetail!.originalFileName,
+        ...(projectRenderDetail!.outputVariantId ? { outputVariantId: projectRenderDetail!.outputVariantId } : {}),
         ...(projectRenderDetail!.renderablePlanHash ? { renderableSnapshot: {
           planId: projectRenderDetail!.renderablePlanId!,
           planHash: projectRenderDetail!.renderablePlanHash,
@@ -894,6 +987,7 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
           ...(finalExportDetail!.approvalNote ? { note: finalExportDetail!.approvalNote } : {}),
         },
         originalFileName: finalExportDetail!.originalFileName,
+        ...(finalExportDetail!.outputVariantId ? { outputVariantId: finalExportDetail!.outputVariantId } : {}),
       } : isSourceCleanup ? {
         kind: 'source-cleanup' as const,
         projectId: sourceCleanupDetail!.projectId,
@@ -913,6 +1007,45 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
         workflowId: longFormDetail!.id,
         sourceArtifactId: longFormDetail!.sourceArtifactId,
         sourceManifestId: longFormDetail!.sourceManifestId,
+      } : isPerception ? {
+        kind: 'perception-producer-run' as const,
+        projectId: perceptionDetail!.projectId,
+        projectVersionId: perceptionDetail!.projectVersionId,
+        projectVersionHash: perceptionDetail!.projectVersionHash,
+        sourceArtifactId: perceptionDetail!.sourceArtifactId,
+        sourceSha256: perceptionDetail!.sourceSha256,
+        editPlanSnapshotId: perceptionDetail!.editPlanSnapshotId,
+        editPlanSnapshotHash: perceptionDetail!.editPlanSnapshotHash,
+        sampleIntervalFrames: perceptionDetail!.sampleIntervalFrames,
+        requestHash: perceptionDetail!.requestHash,
+      } : isTemporal ? {
+        kind: 'perception-temporal-run' as const,
+        projectId: temporalDetail!.projectId,
+        projectVersionId: temporalDetail!.projectVersionId,
+        projectVersionHash: temporalDetail!.projectVersionHash,
+        sourceArtifactId: temporalDetail!.sourceArtifactId,
+        sourceSha256: temporalDetail!.sourceSha256,
+        editPlanSnapshotId: temporalDetail!.editPlanSnapshotId,
+        editPlanSnapshotHash: temporalDetail!.editPlanSnapshotHash,
+        requestHash: temporalDetail!.requestHash,
+      } : isFace ? {
+        kind: 'perception-face-run' as const,
+        projectId: faceDetail!.projectId,
+        projectVersionId: faceDetail!.projectVersionId,
+        projectVersionHash: faceDetail!.projectVersionHash,
+        sourceArtifactId: faceDetail!.sourceArtifactId,
+        sourceSha256: faceDetail!.sourceSha256,
+        editPlanSnapshotId: faceDetail!.editPlanSnapshotId,
+        editPlanSnapshotHash: faceDetail!.editPlanSnapshotHash,
+        sampleIntervalFrames: faceDetail!.sampleIntervalFrames,
+        requestHash: faceDetail!.requestHash,
+        detectorProfile: faceDetail!.detectorProfile as 'yunet-v5-diagnostic' | 'openvino-face0204-v9' | 'openvino-face0204-v9-source',
+        ...(faceDetail!.windowStartTimelineFrame !== null && faceDetail!.windowEndTimelineFrame !== null
+          ? { window: Object.freeze({ startTimelineFrame: faceDetail!.windowStartTimelineFrame, endTimelineFrame: faceDetail!.windowEndTimelineFrame }) }
+          : {}),
+        ...(faceDetail!.windowStartSourceFrame !== null && faceDetail!.windowEndSourceFrame !== null
+          ? { sourceWindow: Object.freeze({ startSourceFrame: faceDetail!.windowStartSourceFrame, endSourceFrame: faceDetail!.windowEndSourceFrame }) }
+          : {}),
       } : {
         kind: 'project-director-run' as const,
         projectId: directorDetail!.projectId,
@@ -994,6 +1127,28 @@ export async function persistManyOperationStatusEvents(
   await persistPublicEvents(transaction, events)
 }
 
+/**
+ * A project is in `rendering-final` (or `completed`) because of a final export of its current Version. The project has ONE status,
+ * but a Version has one export per output: another output's export of that very Version is admitted beside it with the status left
+ * as it is, provided a sibling export (queued, running or done) put it there and NO live or finished export of THIS output exists
+ * (an output is exported once per Version, exactly as a single-output project always was).
+ */
+async function admitSiblingFinalExport(transaction: Prisma.TransactionClient, input: Readonly<{
+  workspaceId: string; projectId: string; projectVersionId: string; operationId: string
+  outputVariantId: string; outputAspectRatio: string
+}>): Promise<boolean> {
+  const finals = await transaction.v2ProjectFinalExportOperation.findMany({
+    where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.projectVersionId,
+      operationId: { not: input.operationId }, operation: { status: { notIn: ['failed', 'canceled'] } } },
+    select: { outputVariantId: true, outputAspectRatio: true },
+  })
+  const ofThisOutput = (row: Readonly<{ outputVariantId: string | null; outputAspectRatio: string }>) =>
+    row.outputVariantId === input.outputVariantId || (row.outputVariantId === null && row.outputAspectRatio === input.outputAspectRatio)
+  if (finals.length === 0 || finals.some(ofThisOutput)) return false
+  return await transaction.v2Project.count({ where: { id: input.projectId, workspaceId: input.workspaceId,
+    currentVersionId: input.projectVersionId, status: { in: ['rendering-final', 'completed'] } } }) === 1
+}
+
 async function transitionCurrentProxyProject(
   transaction: Prisma.TransactionClient,
   operation: StoredOperation,
@@ -1002,23 +1157,49 @@ async function transitionCurrentProxyProject(
 ): Promise<boolean> {
   const context = operation.projectProxyRender
   if (operation.type !== 'project-proxy-render' || !context) return false
+  // An explicit renderable snapshot is historical and does not own the project head.
+  if (context.renderablePlanHash) return false
   // Acquire the project lock before the next statement takes its read snapshot.
   // A concurrent admission either finishes first and is visible to `none`, or
   // waits and must revalidate the status after this transition commits.
   await transaction.$queryRaw`SELECT id FROM projects WHERE id = ${context.projectId} FOR UPDATE`
+  // The failure of one output's render does not fail a project whose other output of the same Version is still being rendered:
+  // that render goes on to its own review, which needs the project where it is.
+  const liveSiblings = status === 'failed' && context.outputVariantId
+    ? [{ publicOperations: { none: {
+        type: 'project-proxy-render', status: { in: ['queued', 'running', 'retrying', 'waiting'] },
+        projectProxyRender: { is: { projectVersionId: context.projectVersionId, NOT: { outputVariantId: context.outputVariantId } } },
+      } } }]
+    : []
   const changed = await transaction.v2Project.updateMany({
     where: {
       id: context.projectId, workspaceId: operation.workspaceId,
       currentVersionId: context.projectVersionId, status: { in: [...from] },
+      ...(liveSiblings.length > 0 ? { AND: liveSiblings } : {}),
       publicOperations: { none: {
         type: 'project-proxy-render',
-        projectProxyRender: { is: { projectVersionId: context.projectVersionId } },
+        // A newer render supersedes this one only when it is for the SAME output: the renders of the other outputs of one Version
+        // are siblings, not successors (a legacy row, made for no stated output, is superseded by any newer render of the Version).
+        projectProxyRender: { is: { projectVersionId: context.projectVersionId,
+          ...(context.outputVariantId ? { outputVariantId: context.outputVariantId } : {}) } },
         OR: [{ createdAt: { gt: operation.createdAt } }, { createdAt: operation.createdAt, id: { gt: operation.id } }],
       } },
     },
     data: { status },
   })
   return changed.count === 1
+}
+
+export async function readPublicOperation(
+  client: Pick<Prisma.TransactionClient, 'v2PublicOperation'>,
+  workspaceId: string,
+  operationId: string,
+): Promise<PublicOperationRecord | null> {
+  const stored = await client.v2PublicOperation.findFirst({
+    where: { id: operationId, workspaceId },
+    include: OPERATION_INCLUDE,
+  })
+  return stored ? hydratePublicOperationRecord(stored) : null
 }
 
 export class PrismaPublicOperationRepository implements PublicOperationRepository {
@@ -1193,7 +1374,8 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       if (!persisted) return null
       const result = hydratePublicOperationRecord(persisted)
       if (updated.count === 1) {
-        if (stored.type === 'project-proxy-render' && !await transitionCurrentProxyProject(
+        if (stored.type === 'project-proxy-render' && !stored.projectProxyRender?.renderablePlanHash &&
+          !await transitionCurrentProxyProject(
           transaction, stored, ['failed', 'rendering-proxy'], 'rendering-proxy',
         )) throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Proxy retry no longer owns the current project version and operation')
         await transaction.v2PublicOperationControlCommand.create({
@@ -1235,8 +1417,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     workspaceId: string,
     operationId: string,
   ): Promise<PublicOperationRecord | null> {
-    const stored = await this.findStoredById(workspaceId, operationId)
-    return stored ? hydratePublicOperationRecord(stored) : null
+    return readPublicOperation(this.client, workspaceId, operationId)
   }
 
   async list(input: PublicOperationListQuery): Promise<readonly PublicOperationRecord[]> {
@@ -1370,6 +1551,16 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     const directorContext = input.operation.type === 'project-director-run' && input.context.kind === 'project-director-run'
       ? input.context
       : undefined
+    const perceptionContext = input.operation.type === 'perception-producer-run' && input.context.kind === 'perception-producer-run'
+      ? input.context
+      : undefined
+    const temporalContext = input.operation.type === 'perception-temporal-run' && input.context.kind === 'perception-temporal-run'
+      ? input.context
+      : undefined
+    const faceContext = input.operation.type === 'perception-face-run' && input.context.kind === 'perception-face-run'
+      ? input.context
+      : undefined
+    const producerContext = perceptionContext ?? temporalContext ?? faceContext
     const mediaTarget = input.operation.target.type === 'media-artifact'
       ? input.operation.target
       : undefined
@@ -1380,8 +1571,51 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       ) ||
       !SHA256_PATTERN.test(input.requestFingerprint) ||
       (input.traceId !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(input.traceId)) ||
-      (!renderContext && !syntheticRenderContext && !ingestContext && !projectRenderContext && !projectReuseContext && !finalExportContext && !directorContext) ||
-      (!directorContext && !syntheticRenderContext && !mediaTarget) ||
+      (!renderContext && !syntheticRenderContext && !ingestContext && !projectRenderContext && !projectReuseContext && !finalExportContext && !directorContext && !producerContext) ||
+      (!directorContext && !syntheticRenderContext && !producerContext && !mediaTarget) ||
+      (perceptionContext && (
+        input.operation.projectId !== perceptionContext.projectId ||
+        input.operation.target.type !== 'project-version' ||
+        input.operation.target.id !== perceptionContext.projectVersionId ||
+        ![perceptionContext.projectId, perceptionContext.projectVersionId,
+          perceptionContext.sourceArtifactId, perceptionContext.editPlanSnapshotId]
+          .every((value) => ID_PATTERN.test(value)) ||
+        ![perceptionContext.projectVersionHash, perceptionContext.sourceSha256,
+          perceptionContext.editPlanSnapshotHash, perceptionContext.requestHash]
+          .every((value) => SHA256_PATTERN.test(value)) ||
+        perceptionContext.requestHash !== input.requestFingerprint ||
+        !Number.isSafeInteger(perceptionContext.sampleIntervalFrames) ||
+        perceptionContext.sampleIntervalFrames < 1 || perceptionContext.sampleIntervalFrames > 300
+      )) ||
+      (temporalContext && (
+        input.operation.projectId !== temporalContext.projectId ||
+        input.operation.target.type !== 'project-version' ||
+        input.operation.target.id !== temporalContext.projectVersionId ||
+        ![temporalContext.projectId, temporalContext.projectVersionId,
+          temporalContext.sourceArtifactId, temporalContext.editPlanSnapshotId]
+          .every((value) => ID_PATTERN.test(value)) ||
+        ![temporalContext.projectVersionHash, temporalContext.sourceSha256,
+          temporalContext.editPlanSnapshotHash, temporalContext.requestHash]
+          .every((value) => SHA256_PATTERN.test(value)) ||
+        temporalContext.requestHash !== input.requestFingerprint
+      )) ||
+      (faceContext && (
+        input.operation.projectId !== faceContext.projectId ||
+        input.operation.target.type !== 'project-version' ||
+        input.operation.target.id !== faceContext.projectVersionId ||
+        ![faceContext.projectId, faceContext.projectVersionId,
+          faceContext.sourceArtifactId, faceContext.editPlanSnapshotId]
+          .every((value) => ID_PATTERN.test(value)) ||
+        ![faceContext.projectVersionHash, faceContext.sourceSha256,
+          faceContext.editPlanSnapshotHash, faceContext.requestHash]
+          .every((value) => SHA256_PATTERN.test(value)) ||
+        faceContext.requestHash !== input.requestFingerprint ||
+        !Number.isSafeInteger(faceContext.sampleIntervalFrames) ||
+        faceContext.sampleIntervalFrames < 1 || faceContext.sampleIntervalFrames > 300 ||
+        !validFaceProfileWindow(faceContext.detectorProfile ?? 'yunet-v5-diagnostic',
+          faceContext.window?.startTimelineFrame ?? null, faceContext.window?.endTimelineFrame ?? null,
+          faceContext.sourceWindow?.startSourceFrame ?? null, faceContext.sourceWindow?.endSourceFrame ?? null)
+      )) ||
       (renderContext && (input.operation.projectId !== undefined || !SHA256_PATTERN.test(renderContext.inputHash) || !ID_PATTERN.test(renderContext.authorizationId))) ||
       (syntheticRenderContext && (
         input.operation.projectId !== syntheticRenderContext.projectId ||
@@ -1415,6 +1649,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         !validColorPipelineBindings(projectRenderContext.colorPipelineBindings) ||
         projectRenderContext.outputArtifactId !== input.operation.target.id ||
         projectRenderContext.outputManifestId !== mediaTarget?.manifestId ||
+        (projectRenderContext.outputVariantId !== undefined && !ID_PATTERN.test(projectRenderContext.outputVariantId)) ||
         projectRenderContext.originalFileName.trim().length < 1 || projectRenderContext.originalFileName.length > 240
         || (projectRenderContext.renderableSnapshot !== undefined && (
           ![projectRenderContext.renderableSnapshot.planId, projectRenderContext.renderableSnapshot.sourceId, projectRenderContext.renderableSnapshot.variantId].every((value) => ID_PATTERN.test(value)) ||
@@ -1437,6 +1672,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         !SHA256_PATTERN.test(projectReuseContext.inputHash) ||
         projectReuseContext.outputArtifactId !== input.operation.target.id ||
         projectReuseContext.outputManifestId !== mediaTarget?.manifestId ||
+        (projectReuseContext.outputVariantId !== undefined && !ID_PATTERN.test(projectReuseContext.outputVariantId)) ||
         projectReuseContext.originalFileName.trim().length < 1 ||
         projectReuseContext.originalFileName.length > 240
       )) ||
@@ -1453,6 +1689,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         !validColorPipelineBindings(finalExportContext.colorPipelineBindings) ||
         finalExportContext.outputArtifactId !== input.operation.target.id ||
         finalExportContext.outputManifestId !== mediaTarget?.manifestId ||
+        (finalExportContext.outputVariantId !== undefined && !ID_PATTERN.test(finalExportContext.outputVariantId)) ||
         !['9:16', '16:9', '4:5', '1:1', '21:9'].includes(finalExportContext.outputSpec.aspectRatio) ||
         ![finalExportContext.outputSpec.width, finalExportContext.outputSpec.height, finalExportContext.outputSpec.fps].every((value) => Number.isSafeInteger(value) && value > 0) ||
         finalExportContext.outputSpec.width % 2 !== 0 || finalExportContext.outputSpec.height % 2 !== 0 ||
@@ -1520,6 +1757,10 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         }
 
         let reusedColorPipelineBindingsJson: string | undefined
+        let reusedRenderMap: NonNullable<Awaited<ReturnType<typeof readSafeReusableProxyReceipt>>>['map'] | undefined
+        let revalidateInlineReuseContext: (() => Promise<void>) | undefined
+        // The stable State variant the persisted verdict admitted for this render or export: the row is written with it.
+        let admittedOutputVariantId: string | undefined
         let ingestUploadKind: 'video' | 'audio' | 'image' | undefined
         let persistedSyntheticRenderContext: SyntheticProductionRenderContext | undefined
         if (syntheticRenderContext) {
@@ -1650,6 +1891,12 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           ingestUploadKind = upload.kind as 'video' | 'audio' | 'image'
         }
         if (projectRenderContext) {
+          // The same persisted `render` verdict the enqueue and the worker applied, on the exact Version the context names and for
+          // the output it names (a context without one is the State's only output; a State with several refuses it).
+          const admitted = await requirePersistedOutputConsumptionV3(transaction, { workspaceId: input.operation.workspaceId,
+            projectId: projectRenderContext.projectId, versionId: projectRenderContext.projectVersionId, purpose: 'render',
+            ...(projectRenderContext.outputVariantId !== undefined ? { variantId: projectRenderContext.outputVariantId } : {}) })
+          admittedOutputVariantId = admitted.seal.variantId
           const [source, renderableSnapshot, colorPipelines] = await Promise.all([transaction.v2Project.findFirst({
             where: { id: projectRenderContext.projectId, workspaceId: input.operation.workspaceId },
             include: {
@@ -1688,7 +1935,18 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           }
         }
         if (projectReuseContext) {
-          const [version, reusedOperation, artifact, manifest] = await Promise.all([
+          // The output the unchanged reuse is FOR: the persisted `render` verdict of the child Version (a context without an output
+          // is the State's only output). The base proxy it carries over must be this output's, never another output's.
+          const reuseConsumption = await requirePersistedOutputConsumptionV3(transaction, { workspaceId: input.operation.workspaceId,
+            projectId: projectReuseContext.projectId, versionId: projectReuseContext.projectVersionId, purpose: 'render',
+            ...(projectReuseContext.outputVariantId !== undefined ? { variantId: projectReuseContext.outputVariantId } : {}) })
+          admittedOutputVariantId = reuseConsumption.seal.variantId
+          const baseProxyLegacy = await legacyProxyBelongsToOutput(transaction, { workspaceId: input.operation.workspaceId,
+            projectId: projectReuseContext.projectId, versionId: projectReuseContext.baseVersionId, outputVariantId: admittedOutputVariantId })
+          const baseProxyOfOutput = baseProxyLegacy
+            ? { OR: [{ outputVariantId: admittedOutputVariantId }, { outputVariantId: null }] }
+            : { outputVariantId: admittedOutputVariantId }
+          const [version, baseVersion, reusedOperation, artifact, manifest] = await Promise.all([
             transaction.v2ProjectVersion.findFirst({
               where: {
                 id: projectReuseContext.projectVersionId,
@@ -1702,7 +1960,11 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
                   },
                 },
               },
-              include: { command: true },
+              include: { command: true, editPlanSnapshot: true },
+            }),
+            transaction.v2ProjectVersion.findFirst({
+              where: { id: projectReuseContext.baseVersionId, workspaceId: input.operation.workspaceId, projectId: projectReuseContext.projectId },
+              include: { editPlanSnapshot: true },
             }),
             transaction.v2ProjectProxyRenderOperation.findFirst({
               where: {
@@ -1714,6 +1976,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
                 sourceManifestId: projectReuseContext.sourceManifestId,
                 outputArtifactId: projectReuseContext.outputArtifactId,
                 outputManifestId: projectReuseContext.outputManifestId,
+                ...baseProxyOfOutput,
                 operation: { status: 'succeeded', phase: 'completed' },
               },
               select: { colorPipelineBindingsJson: true },
@@ -1757,10 +2020,112 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               'Project proxy reuse is not bound to an unchanged immutable Command and completed base proxy',
             )
           }
+
+          // Reconstruct the only admitted no-render edit from the actual base
+          // snapshot. Impact booleans alone cannot certify unchanged geometry.
+          if (!baseVersion?.editPlanSnapshot || !version.editPlanSnapshot ||
+              version.command.baseHash !== baseVersion.baseHash || version.sequence !== baseVersion.sequence + 1) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse requires exact base and child plans')
+          }
+          const payload = parseStoredRecord(version.command.payloadJson, 'proxy reuse Command payload')
+          const gesture = payload.operation as Record<string, unknown> | undefined
+          if (payload.action !== 'apply' || !gesture || gesture.kind !== 'select' ||
+              typeof gesture.clipId !== 'string' || typeof payload.variantId !== 'string' ||
+              payload.targetId !== gesture.clipId || payload.expectedRevision !== baseVersion.sequence) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse requires the actual selection Command')
+          }
+          const planFromRow = (row: typeof version.editPlanSnapshot, versionId: string) => {
+            const plan = parseStoredRecord(row.contentJson, 'proxy reuse EditPlan')
+            if (row.workspaceId !== input.operation.workspaceId || row.projectId !== projectReuseContext.projectId ||
+                row.kind !== 'edit-plan' || row.schemaVersion !== 2 || plan.projectVersionId !== versionId ||
+                calculateCanonicalHash(plan) !== row.contentHash) {
+              throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse plan scope or seal mismatch')
+            }
+            return plan
+          }
+          const basePlan = planFromRow(baseVersion.editPlanSnapshot, projectReuseContext.baseVersionId)
+          const childPlan = planFromRow(version.editPlanSnapshot, projectReuseContext.projectVersionId)
+          let expectedPlan: Readonly<Record<string, unknown>>
+          try {
+            expectedPlan = materializeManualEditPlan({ editPlan: basePlan,
+              operation: { kind: 'select', clipId: gesture.clipId },
+              newVersionId: projectReuseContext.projectVersionId, createdAt: version.createdAt.toISOString(),
+              availableAssetIds: [], variantId: payload.variantId })
+          } catch {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse selection cannot materialize its actual base')
+          }
+          if (stableSerialize(expectedPlan) !== stableSerialize(childPlan)) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse child changed render content')
+          }
           parseColorPipelineBindings(reusedOperation.colorPipelineBindingsJson)
+          revalidateInlineReuseContext = async () => {
+            const [childNow, baseNow, detailNow] = await Promise.all([
+              transaction.v2ProjectVersion.findFirst({ where: {
+                id: projectReuseContext.projectVersionId, workspaceId: input.operation.workspaceId,
+                projectId: projectReuseContext.projectId, editPlanSnapshotId: projectReuseContext.editPlanSnapshotId,
+                currentForProjects: { some: { id: projectReuseContext.projectId, workspaceId: input.operation.workspaceId } },
+              }, include: { command: true, editPlanSnapshot: true } }),
+              transaction.v2ProjectVersion.findFirst({ where: { id: projectReuseContext.baseVersionId,
+                workspaceId: input.operation.workspaceId, projectId: projectReuseContext.projectId },
+              include: { editPlanSnapshot: true } }),
+              transaction.v2ProjectProxyRenderOperation.findFirst({ where: {
+                operationId: projectReuseContext.reusedFromOperationId, workspaceId: input.operation.workspaceId,
+                projectId: projectReuseContext.projectId, projectVersionId: projectReuseContext.baseVersionId,
+                sourceArtifactId: projectReuseContext.sourceArtifactId, sourceManifestId: projectReuseContext.sourceManifestId,
+                outputArtifactId: projectReuseContext.outputArtifactId, outputManifestId: projectReuseContext.outputManifestId,
+                ...baseProxyOfOutput,
+                operation: { status: 'succeeded', phase: 'completed' },
+              }, select: { colorPipelineBindingsJson: true } }),
+            ])
+            if (!childNow?.command || !baseNow || !detailNow ||
+                childNow.parentVersionId !== version.parentVersionId || childNow.sequence !== version.sequence ||
+                childNow.createdAt.getTime() !== version.createdAt.getTime() ||
+                childNow.command.id !== version.command!.id || childNow.command.type !== version.command!.type ||
+                childNow.command.baseVersionId !== version.command!.baseVersionId ||
+                childNow.command.baseHash !== version.command!.baseHash || childNow.command.payloadJson !== version.command!.payloadJson ||
+                childNow.editPlanSnapshot.contentHash !== version.editPlanSnapshot.contentHash ||
+                childNow.editPlanSnapshot.contentJson !== version.editPlanSnapshot.contentJson ||
+                baseNow.baseHash !== baseVersion.baseHash || baseNow.sequence !== baseVersion.sequence ||
+                baseNow.editPlanSnapshot.contentHash !== baseVersion.editPlanSnapshot.contentHash ||
+                baseNow.editPlanSnapshot.contentJson !== baseVersion.editPlanSnapshot.contentJson ||
+                detailNow.colorPipelineBindingsJson !== reusedOperation.colorPipelineBindingsJson) {
+              throw new DomainError('PERSISTENCE_CONFLICT', 'Inline reuse Command or source context changed')
+            }
+          }
+          const safeReuse = await readSafeReusableProxyReceipt(transaction, {
+            workspaceId: input.operation.workspaceId,
+            projectId: projectReuseContext.projectId,
+            baseVersionId: projectReuseContext.baseVersionId,
+            operationId: projectReuseContext.reusedFromOperationId,
+            artifactId: projectReuseContext.outputArtifactId,
+            manifestId: projectReuseContext.outputManifestId,
+            outputVariantId: admittedOutputVariantId,
+            sourceArtifactId: projectReuseContext.sourceArtifactId,
+            plan: basePlan as unknown as Parameters<typeof lockProxySourceArtifacts>[1]['plan'],
+          })
+          if (!safeReuse) throw new DomainError('PERSISTENCE_CONFLICT',
+            'Project proxy reuse has no compatible subtitle-suppression receipt')
+          if (safeReuse.map.fps !== childPlan.fps || safeReuse.map.durationFrames !== childPlan.durationFrames) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse map clock differs from unchanged plan')
+          }
+          await revalidateInlineReuseContext()
+          await assertInlineProxySourceAuthority(transaction, { workspaceId: input.operation.workspaceId, ...projectReuseContext,
+            variantId: admittedOutputVariantId })
           reusedColorPipelineBindingsJson = reusedOperation.colorPipelineBindingsJson
+          reusedRenderMap = safeReuse.map
         }
         if (finalExportContext) {
+          // The owner transaction applies the same persisted `final` verdict the enqueue and the worker applied, on the exact
+          // Version the context names (the light reader: sealed Version + State rows only, never the audit rebuild). A Version
+          // the verdict does not admit for a final export is refused with its published reason before any approval is read.
+          const admittedFinal = await requirePersistedOutputConsumptionV3(transaction, { workspaceId: input.operation.workspaceId,
+            projectId: finalExportContext.projectId, versionId: finalExportContext.projectVersionId, purpose: 'final',
+            ...(finalExportContext.outputVariantId !== undefined ? { variantId: finalExportContext.outputVariantId } : {}) })
+          // The OutputSpec this export was approved with is the preset of the output's own aspect ratio, never another output's.
+          if (admittedFinal.aspectRatio !== finalExportContext.outputSpec.aspectRatio) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Final export OutputSpec is not the aspect ratio of the output it is approved for')
+          }
+          admittedOutputVariantId = admittedFinal.seal.variantId
           const [source, colorPipelines] = await Promise.all([transaction.v2Project.findFirst({
             where: {
               id: finalExportContext.projectId,
@@ -1893,6 +2258,45 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           }
         }
 
+        if (producerContext) {
+          await lockProducerPublishProject(transaction, producerContext.projectId, input.operation.workspaceId)
+          await lockProducerPublishSource(transaction, producerContext.sourceArtifactId, input.operation.workspaceId)
+          const [project, version, attached, artifact] = await Promise.all([
+            transaction.v2Project.findFirst({
+              where: { id: producerContext.projectId, workspaceId: input.operation.workspaceId,
+                currentVersionId: producerContext.projectVersionId },
+              select: { id: true, locale: true },
+            }),
+            transaction.v2ProjectVersion.findFirst({
+              where: { id: producerContext.projectVersionId, workspaceId: input.operation.workspaceId,
+                projectId: producerContext.projectId, baseHash: producerContext.projectVersionHash,
+                editPlanSnapshotId: producerContext.editPlanSnapshotId },
+              include: { editPlanSnapshot: true },
+            }),
+            transaction.v2ProjectMediaAsset.findFirst({
+              where: { workspaceId: input.operation.workspaceId, projectId: producerContext.projectId,
+                artifactId: producerContext.sourceArtifactId, role: 'source-master' },
+              select: { id: true },
+            }),
+            transaction.v2MediaArtifact.findFirst({
+              where: { id: producerContext.sourceArtifactId, workspaceId: input.operation.workspaceId,
+                sha256: producerContext.sourceSha256, status: 'available', mediaType: 'video' },
+              include: { currentRightsSnapshot: true },
+            }),
+          ])
+          const checkedAt = await producerPublishClock(transaction)
+          if (!project || !version || !attached || !artifact ||
+              version.editPlanSnapshot.kind !== 'edit-plan' ||
+              version.editPlanSnapshot.contentHash !== producerContext.editPlanSnapshotHash ||
+              !editPlanReferencesSource(version.editPlanSnapshot.contentJson, producerContext.sourceArtifactId) ||
+              evaluatePerceptionSourceAnalysisRights(artifact.currentRightsSnapshot
+                ? hydrateAssetRights(artifact.currentRightsSnapshot) : null,
+              { workspaceId: input.operation.workspaceId,
+                locale: project.locale ?? 'und' }, checkedAt).outcome !== 'allow') {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Perception producer source, version or rights are unavailable')
+          }
+        }
+
         await transaction.v2PublicOperation.create({
           data: {
             id: input.operation.id,
@@ -2015,18 +2419,23 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           }
         } else if (projectRenderContext || projectReuseContext) {
           const context = projectRenderContext ?? projectReuseContext!
-          const nextProjectStatus = projectReuseContext ? 'reviewing-proxy' : 'rendering-proxy'
-          const project = await transaction.v2Project.updateMany({
-            where: {
-              id: context.projectId,
-              workspaceId: input.operation.workspaceId,
-              currentVersionId: context.projectVersionId,
-              status: { in: projectStatusTransitionSources(nextProjectStatus, { includeSame: true }) },
-            },
-            data: { status: nextProjectStatus },
-          })
-          if (project.count !== 1) {
-            throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot enter proxy rendering from its current version and status')
+          // Explicit renderable snapshots are immutable historical targets. Their
+          // scoped source/version/plan/color bindings were checked above; admitting
+          // one must not move the current project head or its workflow status.
+          if (!projectRenderContext?.renderableSnapshot) {
+            const nextProjectStatus = projectReuseContext ? 'reviewing-proxy' : 'rendering-proxy'
+            const project = await transaction.v2Project.updateMany({
+              where: {
+                id: context.projectId,
+                workspaceId: input.operation.workspaceId,
+                currentVersionId: context.projectVersionId,
+                status: { in: projectStatusTransitionSources(nextProjectStatus, { includeSame: true }) },
+              },
+              data: { status: nextProjectStatus },
+            })
+            if (project.count !== 1) {
+              throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot enter proxy rendering from its current version and status')
+            }
           }
           await transaction.v2ProjectProxyRenderOperation.create({
             data: {
@@ -2044,6 +2453,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               outputArtifactId: context.outputArtifactId,
               outputManifestId: context.outputManifestId,
               originalFileName: context.originalFileName,
+              outputVariantId: admittedOutputVariantId!,
               ...(projectRenderContext?.renderableSnapshot ? {
                 renderablePlanHash: projectRenderContext.renderableSnapshot.planHash,
                 renderablePlanId: projectRenderContext.renderableSnapshot.planId,
@@ -2061,6 +2471,18 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               } : {}),
             },
           })
+
+          if (projectReuseContext) {
+            if (!reusedRenderMap) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse lost its validated map')
+            // A new scoped identity carries the SAME validated map content. This
+            // is part of operation/detail/CAS/outbox admission, never a review.
+            await transaction.v2RenderElementMap.create({ data: {
+              id: randomUUID(), workspaceId: input.operation.workspaceId,
+              projectId: context.projectId, projectVersionId: context.projectVersionId,
+              proxyArtifactId: context.outputArtifactId, ...reusedRenderMap,
+              createdAt: new Date(input.operation.createdAt),
+            } })
+          }
         } else if (finalExportContext) {
           await transaction.v2ProjectFinalExportOperation.create({
             data: {
@@ -2083,6 +2505,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               outputArtifactId: finalExportContext!.outputArtifactId,
               outputManifestId: finalExportContext!.outputManifestId,
               outputAspectRatio: finalExportContext!.outputSpec.aspectRatio,
+              outputVariantId: admittedOutputVariantId!,
               outputWidth: finalExportContext!.outputSpec.width,
               outputHeight: finalExportContext!.outputSpec.height,
               outputFps: finalExportContext!.outputSpec.fps,
@@ -2106,9 +2529,63 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             },
             data: { status: 'rendering-final' },
           })
-          if (project.count !== 1) {
+          if (project.count !== 1 && !(await admitSiblingFinalExport(transaction, {
+            workspaceId: input.operation.workspaceId, projectId: finalExportContext!.projectId,
+            projectVersionId: finalExportContext!.projectVersionId, operationId: input.operation.id,
+            outputVariantId: admittedOutputVariantId!, outputAspectRatio: finalExportContext!.outputSpec.aspectRatio }))) {
             throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot enter final rendering from its current status')
           }
+        } else if (perceptionContext) {
+          await transaction.v2PerceptionProducerOperation.create({
+            data: {
+              operationId: input.operation.id,
+              workspaceId: input.operation.workspaceId,
+              projectId: perceptionContext.projectId,
+              projectVersionId: perceptionContext.projectVersionId,
+              projectVersionHash: perceptionContext.projectVersionHash,
+              sourceArtifactId: perceptionContext.sourceArtifactId,
+              sourceSha256: perceptionContext.sourceSha256,
+              editPlanSnapshotId: perceptionContext.editPlanSnapshotId,
+              editPlanSnapshotHash: perceptionContext.editPlanSnapshotHash,
+              sampleIntervalFrames: perceptionContext.sampleIntervalFrames,
+              requestHash: perceptionContext.requestHash,
+              createdAt: new Date(input.operation.createdAt),
+            },
+          })
+        } else if (temporalContext) {
+          await transaction.v2TemporalProducerOperation.create({ data: {
+            operationId: input.operation.id,
+            workspaceId: input.operation.workspaceId,
+            projectId: temporalContext.projectId,
+            projectVersionId: temporalContext.projectVersionId,
+            projectVersionHash: temporalContext.projectVersionHash,
+            sourceArtifactId: temporalContext.sourceArtifactId,
+            sourceSha256: temporalContext.sourceSha256,
+            editPlanSnapshotId: temporalContext.editPlanSnapshotId,
+            editPlanSnapshotHash: temporalContext.editPlanSnapshotHash,
+            requestHash: temporalContext.requestHash,
+            createdAt: new Date(input.operation.createdAt),
+          } })
+        } else if (faceContext) {
+          await transaction.v2FaceProducerOperation.create({ data: {
+            operationId: input.operation.id,
+            workspaceId: input.operation.workspaceId,
+            projectId: faceContext.projectId,
+            projectVersionId: faceContext.projectVersionId,
+            projectVersionHash: faceContext.projectVersionHash,
+            sourceArtifactId: faceContext.sourceArtifactId,
+            sourceSha256: faceContext.sourceSha256,
+            editPlanSnapshotId: faceContext.editPlanSnapshotId,
+            editPlanSnapshotHash: faceContext.editPlanSnapshotHash,
+            sampleIntervalFrames: faceContext.sampleIntervalFrames,
+            requestHash: faceContext.requestHash,
+            detectorProfile: faceContext.detectorProfile ?? 'yunet-v5-diagnostic',
+            windowStartTimelineFrame: faceContext.window?.startTimelineFrame ?? null,
+            windowEndTimelineFrame: faceContext.window?.endTimelineFrame ?? null,
+            windowStartSourceFrame: faceContext.sourceWindow?.startSourceFrame ?? null,
+            windowEndSourceFrame: faceContext.sourceWindow?.endSourceFrame ?? null,
+            createdAt: new Date(input.operation.createdAt),
+          } })
         } else {
           await transaction.v2ProjectDirectorOperation.create({
             data: {
@@ -2146,6 +2623,12 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           record.operation,
           this.createEventId,
         )
+        if (projectReuseContext) {
+          if (!revalidateInlineReuseContext) throw new DomainError('PERSISTENCE_CONFLICT', 'Inline reuse context fence is absent')
+          await revalidateInlineReuseContext()
+          await assertInlineProxySourceAuthority(transaction, { workspaceId: input.operation.workspaceId, ...projectReuseContext,
+            ...(admittedOutputVariantId !== undefined ? { variantId: admittedOutputVariantId } : {}) })
+        }
         return { ...record, replayed: false }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
@@ -2359,11 +2842,21 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     transition: (operation: PublicOperation) => Readonly<PublicOperation>,
     requiresCheckpoint = false,
   ): Promise<PublicOperationRecord | null> {
+    return this.client.$transaction((transaction) => this.transitionRunningInTransaction(
+      transaction, input, transition, requiresCheckpoint,
+    ))
+  }
+
+  private async transitionRunningInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: PublicOperationLeaseCommand,
+    transition: (operation: PublicOperation) => Readonly<PublicOperation>,
+    requiresCheckpoint = false,
+  ): Promise<PublicOperationRecord | null> {
     const now = parseCommandDate(input.now, 'now')
     if (!ID_PATTERN.test(input.leaseOwner)) {
       throw new DomainError('INVALID_PUBLIC_OPERATION', 'Worker lease owner is invalid')
     }
-    return this.client.$transaction(async (transaction) => {
       const stored = await transaction.v2PublicOperation.findUnique({
         where: { id: input.operationId },
         include: OPERATION_INCLUDE,
@@ -2445,7 +2938,16 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         this.createEventId,
       )
       return result
-    })
+  }
+
+  /** Complete a proxy render inside the caller's attachment transaction. */
+  succeedProxyInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: PublicOperationLeaseCommand,
+  ): Promise<PublicOperationRecord | null> {
+    return this.transitionRunningInTransaction(
+      transaction, input, (operation) => succeedPublicOperation(operation, input.now), true,
+    )
   }
 
   async advancePhase(input: PublicOperationLeaseCommand & {

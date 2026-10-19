@@ -8,25 +8,17 @@ const clientId = 'novelty-budget-int-client'
 const credentialId = 'novelty-budget-int-credential'
 const at = (second) => new Date(Date.parse('2029-03-01T00:00:00.000Z') + second * 1_000).toISOString()
 
+// The outbox ids of this run are its own: the rows of a run stay in the database (the sealed rows are append-only) and the quality job
+// runs many suites against one database, so a fixed id collided with the suite that used the same one first.
+const EVENT_RUN = (await import('node:crypto')).randomUUID().slice(0, 8)
+
 test('T-FR-114 persists a deterministic novelty verdict PostgreSQL itself refuses to contradict', {
   skip: !process.env.V2_DATABASE_URL && 'V2_DATABASE_URL is required',
   timeout: 240_000,
 }, async () => {
   const client = new PrismaClient({ datasources: { db: { url: process.env.V2_DATABASE_URL } } })
-  const cleanup = async () => {
-    await client.v2NoveltyBudgetDecisionLine.deleteMany({ where: { workspaceId } })
-    await client.v2NoveltyBudgetDecision.deleteMany({ where: { workspaceId } })
-    await client.v2NoveltyBudgetPolicy.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     const { createProjectService } = await import('../../src/v2/application/create-project.ts')
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
@@ -34,7 +26,7 @@ test('T-FR-114 persists a deterministic novelty verdict PostgreSQL itself refuse
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
     const { PrismaNoveltyBudgetRepository } = await import('../../src/v2/infrastructure/prisma/novelty-budget-repository.ts')
     const {
       DEFAULT_NOVELTY_BUDGET_POLICY,
@@ -58,14 +50,14 @@ test('T-FR-114 persists a deterministic novelty verdict PostgreSQL itself refuse
     })
     let entity = 0, event = 0
     const created = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client),
       clock: () => new Date(at(0)),
       createId: (kind) => `${kind}-novelty-${++entity}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(810_000 + ++event).padStart(12, '0')}`,
-    })({ workspaceId, name: 'Novelty project', objective: 'awareness', format: '9:16', actor, idempotency: { clientId, key: 'novelty-project' } })
+      createEventId: () => `${EVENT_RUN}-0000-4000-8000-${String(810_000 + ++event).padStart(12, '0')}`,
+    })({ workspaceId, name: 'Novelty project', objective: 'awareness', actor, idempotencyKey: 'novelty-project' })
 
-    const projectId = created.project.id
-    const projectVersionId = created.project.currentVersionId
+    const projectId = created.projectAtCreation.id
+    const projectVersionId = created.creationVersion.id
     const repository = new PrismaNoveltyBudgetRepository(client)
 
     const policy = createNoveltyBudgetPolicy({ ...DEFAULT_NOVELTY_BUDGET_POLICY, id: 'novelty-policy-integration' })
@@ -172,7 +164,6 @@ test('T-FR-114 persists a deterministic novelty verdict PostgreSQL itself refuse
       /does not match its hash/,
     )
   } finally {
-    await cleanup()
     await client.$disconnect()
   }
 })

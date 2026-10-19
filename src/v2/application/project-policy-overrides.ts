@@ -11,8 +11,8 @@ import {
   projectOverridePolicySnapshot,
   resolveProjectOverrides,
 } from '../domain/project-overrides.ts'
+import { reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import {
   materializeActorAuditContext,
@@ -49,7 +49,7 @@ function resolvedValues(resolved: ReturnType<typeof resolveProjectOverrides>) {
 
 export function setProjectPolicyOverridesService(dependencies: {
   repository: ProjectPolicyOverridesRepository
-  createId: (kind: 'command' | 'version' | 'snapshot') => string
+  createId: (kind: 'command' | 'version' | 'snapshot' | 'edit-plan-snapshot' | 'state' | 'materialization') => string
   createEventId: () => string
   clock?: () => Date
 }) {
@@ -88,7 +88,8 @@ export function setProjectPolicyOverridesService(dependencies: {
     }
     const context = await dependencies.repository.readContext({ workspaceId, projectId })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Project policy context was not found')
-    if (context.currentVersion.id !== baseVersionId || context.currentVersion.baseHash !== request.baseHash) throw new DomainError('VERSION_CONFLICT', 'Project policy base version is stale')
+    const parent = context.parent; const currentVersion = parent.version
+    if (currentVersion.id !== baseVersionId || currentVersion.baseHash !== request.baseHash) throw new DomainError('VERSION_CONFLICT', 'Project policy base version is stale')
     const previousOverrides = overridesFromPolicy(context.currentPolicySnapshot.content)
     assertDomain(stableSerialize(previousOverrides) !== stableSerialize(overrides), 'INVALID_ARGUMENT', 'Project overrides are unchanged')
     const workspaceDefaults = workspaceDefaultsFromPolicy(context.currentPolicySnapshot.content)
@@ -98,6 +99,8 @@ export function setProjectPolicyOverridesService(dependencies: {
     const commandId = id(dependencies.createId('command'), 'commandId')
     const versionId = id(dependencies.createId('version'), 'versionId')
     const snapshotId = id(dependencies.createId('snapshot'), 'snapshotId')
+    const editPlanSnapshotId = id(dependencies.createId('edit-plan-snapshot'), 'editPlanSnapshotId')
+    const stateId = id(dependencies.createId('state'), 'stateId')
     const policyState = projectOverridePolicySnapshot({
       workspaceId, projectId, projectVersionId: versionId, commandId,
       workspaceDefaults, overrides, createdAt,
@@ -139,17 +142,15 @@ export function setProjectPolicyOverridesService(dependencies: {
       author, type: 'set-project-policy-overrides', scope: { project: true }, payload,
       ...(reason ? { reason } : {}), idempotencyKey, createdAt,
     })
-    const version = createProjectVersion({
-      id: versionId, workspaceId, projectId, sequence: context.currentVersion.sequence + 1,
-      parentVersionId: context.currentVersion.id,
-      snapshotRefs: { ...context.currentVersion.snapshotRefs, policies: snapshotId },
-      baseHash: calculateCanonicalHash({
-        schemaVersion: 'project-version-policy-overrides/v1',
-        previousBaseHash: context.currentVersion.baseHash, commandId,
-        policySnapshotHash: policyHash, impactHash: impact.impactHash,
-      }),
-      createdBy: author.id, commandId, createdAt,
+    // The Policy Snapshot is born with the Version; the EditPlan is the parent's under the new Version's identity.
+    const bundle = transitionProjectOutputState({
+      parent, command, audit: authenticationAudit, requestFingerprint,
+      allocation: { workspaceId, projectId, resultVersionId: versionId, stateId, parentVersionId: currentVersion.id, sequence: currentVersion.sequence + 1, createdBy: author.id, createdAt },
+      editPlanSnapshot: reidentifiedEditPlanSnapshot(parent, { snapshotId: editPlanSnapshotId, versionId, createdAt }),
+      replacementSnapshots: [policySnapshot],
+      createMaterializationId: () => id(dependencies.createId('materialization'), 'materializationId'),
     })
+    const version = bundle.version
     const event = createPublicEvent({
       id: dependencies.createEventId(), type: 'project.version.created', version: '1.0.0',
       workspaceId, occurredAt: createdAt, sequence: version.sequence,
@@ -164,10 +165,7 @@ export function setProjectPolicyOverridesService(dependencies: {
         nextRequiredCapability: payload.nextRequiredCapability, createdAt,
       },
     })
-    return dependencies.repository.commitOrReplay({
-      command, authenticationAudit, version, policySnapshot,
-      workspaceDefaults, overrides, resolved, requestFingerprint, event,
-    })
+    return dependencies.repository.commitOrReplay({ bundle, workspaceDefaults, overrides, resolved, event })
   }
 }
 

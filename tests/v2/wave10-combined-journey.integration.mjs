@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { copyFile, mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import test from 'node:test'
 
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
@@ -16,21 +16,17 @@ import {
 import { calculatePerceptionTimelineRecordHash } from '../../src/v2/application/perception-timelines.ts'
 import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
-import { replaceSourceTranscriptService } from '../../src/v2/application/replace-source-transcript.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
-import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
 import { applySubtitleSegmentOverrideService } from '../../src/v2/application/subtitle-segment-overrides.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
+import { ASS_EMISSION_POLICY } from '../../src/v2/domain/ass-emission-policy.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
-import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { readOutputFormatPreset } from '../../src/v2/domain/output-format-registry.ts'
 import { createPerceptionTimeline, PERCEPTION_KINDS } from '../../src/v2/domain/perception-timeline.ts'
-import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
-import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import {
   advancePublicOperationPhase,
   retryOrFailPublicOperation,
@@ -39,59 +35,57 @@ import {
 } from '../../src/v2/domain/public-operation.ts'
 import { createRenderReframePlan } from '../../src/v2/domain/render-reframe-plan.ts'
 import { renderElementMapHash, validateRenderElementMap } from '../../src/v2/domain/review-system.ts'
-import { createSourceTranscriptArtifactInvalidations } from '../../src/v2/domain/source-transcript-replacement.ts'
-import {
-  deriveSubtitleAnchorBands,
-  subtitleAnchorDecisionFor,
-} from '../../src/v2/domain/subtitle-anchor-plan.ts'
-import { deriveSubtitleRegion } from '../../src/v2/domain/subtitle-region.ts'
+import { subtitleAnchorDecisionFor } from '../../src/v2/domain/subtitle-anchor-plan.ts'
 import {
   applySubtitleSegmentOverrides,
   reapplyProtectedSubtitleSegmentOverrides,
   requirePersistedSubtitleSegmentOverride,
 } from '../../src/v2/domain/subtitle-segment-override.ts'
-import {
-  collectRenderedSubtitleCues,
-  encodeSubtitleSidecar,
-  parseSubtitleSidecar,
-  subtitleSidecarFrameToMs,
-} from '../../src/v2/domain/subtitle-sidecar.ts'
+import { collectRenderedSubtitleCues } from '../../src/v2/domain/subtitle-sidecar.ts'
 import {
   materializeSubtitlePresetSnapshot,
   requireSubtitlePresetSnapshot,
   SUBTITLE_STYLE_REGISTRY,
   subtitlePresetHash,
 } from '../../src/v2/domain/subtitle-system.ts'
-import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
+import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from '../../src/v2/infrastructure/media/ffmpeg-binary.ts'
 import {
   LocalArtifactSourceMaterializer,
   LocalMediaUploadStorage,
 } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
 import { TemporaryFileSubtitleSidecarStaging } from '../../src/v2/infrastructure/media/subtitle-sidecar-staging.ts'
+import { replaceThenDirect, sealedMasterHead } from './helpers/retimed-journey-world.mjs'
+import { fakeOutputWorld, withConsumption } from './helpers/output-consumption-fakes.mjs'
+import { TWO_OUTPUT_SPECS } from './helpers/m1b-two-output-world.mjs'
 
 // ---------------------------------------------------------------------------
 // Wave 10 — ONE combined journey across F1.035, F1.036, F1.037 and F1.038.
 //
 // A single directed StoryPlan/transcript produces two output variants. The
 // subtitle preset travels as a content-addressed snapshot (F1.035); the anchor of
-// every cue is decided from a persisted PerceptionTimeline instead of the default
-// bottom band (F1.036); one protected `text` exception is applied to exactly one
-// (variant, range) pair (F1.037); and the SRT/VTT sidecars are derived from the
-// RenderElementMap the very same render operation persisted (F1.038).
+// every cue records unknown face coverage and is suppressed (F1.036); one
+// protected text exception changes exactly one planned (variant, range) pair
+// (F1.037); zero rendered cues reject SRT/VTT derivation without effects (F1.038).
 //
 // Everything below runs production code: replace-source-transcript ->
 // run-project-director -> applySubtitleSegmentOverrideService ->
 // enqueue-project-proxy-render -> runNextProjectProxyRenderOperationService (the
 // real V2 worker) -> FfmpegEditorialProxyRenderer (real FFmpeg) ->
 // LocalMediaUploadStorage -> exportProjectSubtitleSidecarService. Only
-// persistence is in memory, and every in-memory adapter re-runs the same
-// integrity checks the Prisma adapter runs on read.
+// persistence is in memory. This proves controlled mechanics, not PostgreSQL
+// publication or caller-intent/face approval. Positive perceptual placement,
+// burned captions/overrides and rendered-cue sidecars remain pending authority.
 // ---------------------------------------------------------------------------
 
 const require = createRequire(import.meta.url)
-const ffmpegPath = require('ffmpeg-static')
-const ffprobePath = require('ffprobe-static').path
+const ffmpegPath = resolveFfmpegBinary(process.env.FFMPEG_BIN)
+const ffprobePath = resolveFfprobeBinaryPath(require('ffprobe-static').path, process.env.FFPROBE_BIN, process.env, undefined, null)
+assert.ok(isAbsolute(ffmpegPath) && isAbsolute(ffprobePath), 'Controlled render proof requires explicit resolved media binaries')
+console.info(JSON.stringify({ schemaVersion: 'wave10-render-binaries/v1',
+  ffmpeg: { path: ffmpegPath, sha256: createHash('sha256').update(await readFile(ffmpegPath)).digest('hex') },
+  ffprobe: { path: ffprobePath, sha256: createHash('sha256').update(await readFile(ffprobePath)).digest('hex') },
+}))
 
 const FPS = 30
 const WORKSPACE_ID = 'workspace-wave10-combined'
@@ -112,6 +106,10 @@ const OVERRIDE_SEGMENT_ID = 'subtitle-cue-2'
 const OVERRIDE_TEXT = 'Correcao aprovada pelo dono'
 const OVERRIDE_VARIANT = '9:16'
 const SIBLING_VARIANT = '16:9'
+// S3: an output is named by its stable State variant id, never by its aspect ratio. The ratios above are the render FORMATS of the two outputs.
+const STABLE_VARIANT = Object.freeze(Object.fromEntries(TWO_OUTPUT_SPECS.map((spec) => [spec.aspectRatio, spec.variantId])))
+const OVERRIDE_VARIANT_ID = STABLE_VARIANT[OVERRIDE_VARIANT]
+const SIBLING_VARIANT_ID = STABLE_VARIANT[SIBLING_VARIANT]
 
 const CANVAS = Object.freeze({
   '9:16': Object.freeze({ width: 540, height: 960 }),
@@ -174,14 +172,6 @@ const PERCEPTION_TIMELINE = createPerceptionTimeline({
   coverage: PERCEPTION_KINDS.map((kind) => ({ kind, ranges: kind === 'face' ? [[0, DURATION_MS]] : [] })),
 })
 
-const anchorBandsFor = (format) => {
-  const preset = readOutputFormatPreset(format)
-  return deriveSubtitleAnchorBands({
-    region: deriveSubtitleRegion({ spec: preset.spec, presetId: PRESET_ID }),
-    safeArea: preset.spec.safeArea,
-  })
-}
-
 function proxyActor() {
   const auditContext = createExternalAuditContext({
     clientId: 'client-wave10', credentialId: 'credential-wave10',
@@ -232,15 +222,6 @@ function transcriptFromSourceFrames(entries) {
 const currentTranscript = transcriptFromSourceFrames([['rascunho', 6, 15]])
 const replacementTranscript = transcriptFromSourceFrames(WORD_SOURCE_FRAMES)
 
-function baseVersion() {
-  return createProjectVersion({
-    id: 'version-base', workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
-    sequence: 4, parentVersionId: 'version-parent',
-    snapshotRefs: { brief: 'snapshot-brief', editPlan: 'snapshot-edit-plan', policies: 'snapshot-policies' },
-    baseHash: 'a'.repeat(64), createdBy: 'client-wave10', createdAt: CREATED_AT,
-  })
-}
-
 function compiledEditPlan() {
   return {
     schemaVersion: 2, state: 'compiled', id: 'edit-plan-base', projectVersionId: 'version-base',
@@ -262,146 +243,45 @@ function compiledEditPlan() {
 }
 
 // --------------------------------------------------------------------------
-// In-memory persistence for the replacement + Director half.
+// Replacement + Director half on a sealed world: the parent is a real ProjectVersion3/State3 (the pure W66 builder), the
+// recording is this suite's master, and only persistence is replaced (see helpers/retimed-journey-world.mjs).
 // --------------------------------------------------------------------------
-
-class ReplacementRepository {
-  committed
-  async findIdempotentResult() { return this.committed ?? null }
-  async readContext() {
-    return {
-      currentVersion: baseVersion(), editPlan: compiledEditPlan(), editPlanHash: 'b'.repeat(64),
-      currentTranscript: {
-        id: 'transcript-current', transcriptHash: currentTranscript.transcriptHash,
-        sourceArtifactId: MASTER_ARTIFACT_ID,
-      },
-      replacementTranscript: {
-        id: 'transcript-replacement', transcriptHash: replacementTranscript.transcriptHash,
-        sourceArtifactId: MASTER_ARTIFACT_ID, transcript: replacementTranscript,
-      },
-      outputReferences: OUTPUT_REFERENCES('version-base'),
-    }
-  }
-
-  async commitOrReplay(bundle) {
-    const result = {
-      command: bundle.command, version: bundle.version,
-      editPlan: JSON.parse(bundle.snapshot.contentJson), impact: bundle.command.payload.impact,
-      invalidations: createSourceTranscriptArtifactInvalidations({
-        impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt,
-      }),
-      replayed: false, snapshot: bundle.snapshot,
-    }
-    this.committed = { requestFingerprint: bundle.requestFingerprint, result }
-    return result
-  }
-}
 
 const OUTPUT_REFERENCES = (versionId) => [
   { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: versionId, variantId: '9:16' },
   { artifactId: 'proxy-16x9', kind: 'proxy', sourceVersionId: versionId, variantId: '16:9' },
 ]
 
-class DirectorRepository {
-  constructor(editPlan, currentVersion) {
-    this.editPlan = editPlan
-    this.currentVersion = currentVersion
-    this.records = new Map()
-  }
-
-  async findIdempotentResult({ workspaceId, projectId, idempotencyKey }) {
-    return this.records.get(`${workspaceId}:${projectId}:${idempotencyKey}`) ?? null
-  }
-
-  async readContext({ workspaceId, projectId }) {
-    if (workspaceId !== WORKSPACE_ID || projectId !== PROJECT_ID) return null
-    return {
-      workspaceId,
-      project: { id: projectId, objective: 'discovery', format: '9:16', locale: 'pt-BR' },
-      currentVersion: this.currentVersion,
-      brief: {
-        objective: 'discovery',
-        desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
-        productionBrief: createProductionBrief({ ownerText: 'Tom: direto, natural e sem efeitos gratuitos.' }),
-      },
-      policies: { automaticZoom: false, faceProtection: true, guardrails: [] },
-      editPlan: this.editPlan,
-      currentDurationFrames: this.editPlan.durationFrames,
-      proxyVariantId: '9:16',
-      sourceRights: {
-        state: 'present', snapshotId: 'rights-wave10-master',
-        snapshotHash: 'e'.repeat(64), status: 'approved', consentStatus: 'not-required',
-      },
-      outputReferences: OUTPUT_REFERENCES(this.currentVersion.id),
-      transcript: {
-        id: 'transcript-replacement', sourceArtifactId: MASTER_ARTIFACT_ID, language: 'pt-BR',
-        provider: 'groq', model: 'whisper-large-v3',
-        transcriptHash: this.editPlan.retimedTranscript.sourceTranscriptHash,
-      },
-    }
-  }
-
-  async commitOrReplay(bundle) {
-    const impact = parseDirectorRunImpact(bundle.command.payload.impact)
-    const result = Object.freeze({
-      run: bundle.run, command: bundle.command, version: bundle.version, impact,
-      invalidations: createDirectorRunInvalidations({ impact, createdAt: bundle.command.createdAt }),
-      snapshots: bundle.snapshots, replayed: false,
-    })
-    this.records.set(`${bundle.command.workspaceId}:${bundle.command.projectId}:${bundle.command.idempotencyKey}`, {
-      requestFingerprint: bundle.requestFingerprint, result,
-    })
-    return result
-  }
-}
-
-/** Runs replacement -> Director ONCE, so every variant renders one persisted snapshot. */
-let directedOnce
-async function directOnce() {
-  if (directedOnce) return directedOnce
-  const replacementRepository = new ReplacementRepository()
-  let replacementIds = 0
-  const replace = replaceSourceTranscriptService({
-    repository: replacementRepository,
-    clock: () => new Date('2026-08-21T09:10:00.000Z'),
-    createId: () => ['edit-command-replace', 'version-retimed', 'snapshot-retimed'][replacementIds++],
-    createEventId: () => '123e4567-e89b-42d3-a456-426614174020',
+/**
+ * Runs replacement -> Director ONCE per master, so every variant renders one persisted snapshot. The sealed recording
+ * carries the real master's digest and size, so the cache is keyed by that digest (every test regenerates the master).
+ */
+const directedByMaster = new Map()
+async function directOnce(masterPath) {
+  const masterBytes = await readFile(masterPath)
+  const masterSha256 = createHash('sha256').update(masterBytes).digest('hex')
+  if (directedByMaster.has(masterSha256)) return directedByMaster.get(masterSha256)
+  const { actor, head } = await sealedMasterHead({
+    workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, clientId: 'client-wave10', credentialId: 'credential-wave10',
+    master: { artifactId: MASTER_ARTIFACT_ID, durationSeconds: 6, sourceKey: MASTER_ARTIFACT_KEY,
+      sourceSha256: masterSha256, sourceByteSize: masterBytes.byteLength },
+    plan: compiledEditPlan(), suffix: 'wave10-base', twoOutputs: true,
   })
-  const replacement = await replace({
-    workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
-    baseVersionId: 'version-base', baseHash: 'a'.repeat(64),
-    replacementTranscriptId: 'transcript-replacement',
-    expectedTranscriptHash: replacementTranscript.transcriptHash,
-    actor: proxyActor(),
-    idempotencyKey: 'wave10-combined-transcript-replacement',
-  })
-  const persisted = JSON.parse(replacement.snapshot.contentJson)
-  const directorRepository = new DirectorRepository(persisted, replacement.version)
-  const counters = new Map()
-  let event = 0
-  const runDirector = runProjectDirectorService({
-    repository: directorRepository,
-    clock: () => new Date('2026-08-21T09:20:00.000Z'),
-    createId: (kind) => {
-      const next = (counters.get(kind) ?? 0) + 1
-      counters.set(kind, next)
-      return `${kind}-${next}`
-    },
-    createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}`,
-    compileBrief: createEvidenceBoundBriefCompiler(),
-  })
-  const directed = await runDirector({
-    workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
-    baseVersionId: replacement.version.id, baseHash: replacement.version.baseHash,
-    actor: proxyActor(),
-    idempotency: { key: 'wave10-combined-director-run' },
+  const journey = await replaceThenDirect({
+    head, actor,
+    currentTranscript: { id: 'transcript-current', transcriptHash: currentTranscript.transcriptHash, sourceArtifactId: MASTER_ARTIFACT_ID },
+    replacement: { id: 'transcript-replacement', sourceArtifactId: MASTER_ARTIFACT_ID, transcript: replacementTranscript },
+    outputReferences: OUTPUT_REFERENCES,
+    sourceRights: { snapshotId: 'rights-wave10-master', snapshotHash: 'e'.repeat(64) },
+    replaceClock: () => new Date('2026-10-17T09:10:00.000Z'),
+    directorClock: () => new Date('2026-10-17T09:20:00.000Z'),
+    replaceIds: (kind, ordinal) => `${kind}-wave10-retimed-${ordinal}`,
+    directorIdSuffix: '-wave10-director',
+    idempotency: { replace: 'wave10-combined-transcript-replacement', director: 'wave10-combined-director-run' },
     reason: 'Dirigir uma composicao unica para duas variantes de formato.',
   })
-  const editPlanSnapshot = directed.snapshots.find((item) => item.kind === 'edit-plan')
-  const directedPlan = JSON.parse(editPlanSnapshot.contentJson)
-  assert.equal(editPlanSnapshot.contentHash, calculateVersionHash(directedPlan))
-  directedOnce = { replacement, persisted, directed, directedPlan, editPlanSnapshot }
-  return directedOnce
+  directedByMaster.set(masterSha256, journey)
+  return journey
 }
 
 // --------------------------------------------------------------------------
@@ -420,7 +300,7 @@ class PerceptionTimelineRepository {
 
   record(projectVersionId, timeline) {
     const content = Object.freeze({
-      schemaVersion: 'persisted-perception-timeline/v1',
+      schemaVersion: 'persisted-perception-timeline/v2',
       id: `perception-${projectVersionId}`,
       workspaceId: WORKSPACE_ID,
       projectId: PROJECT_ID,
@@ -479,12 +359,15 @@ function hydratePerceptionRow(row) {
 // --------------------------------------------------------------------------
 
 class SubtitleSegmentOverrideRepository {
-  constructor(version, segments) {
-    this.version = version
+  /** @param parent the sealed bundle the chain starts from; every commit becomes the sealed parent of the next one */
+  constructor(parent, segments) {
+    this.current = parent
     this.segments = segments
     this.rows = []
     this.idempotent = new Map()
   }
+
+  get version() { return this.current.version }
 
   headOf(variantId, segmentId) {
     return this.rows.filter((row) =>
@@ -499,28 +382,27 @@ class SubtitleSegmentOverrideRepository {
     if (workspaceId !== WORKSPACE_ID || projectId !== PROJECT_ID) return null
     const history = this.headOf(variantId, segmentId)
     return {
-      currentVersion: this.version,
+      parent: this.current,
       durationFrames: DURATION_FRAMES,
       segments: this.segments,
-      variantIds: [OVERRIDE_VARIANT, SIBLING_VARIANT],
+      variantIds: this.current.state.document.entries.map((entry) => entry.variantId),
       outputReferences: OUTPUT_REFERENCES(this.version.id),
       currentOverride: history.at(-1)?.subtitleOverride ?? null,
       previousOverride: history.at(-2)?.subtitleOverride ?? null,
     }
   }
 
-  async commitOrReplay(bundle) {
+  async commitOrReplay(input) {
     // The Postgres adapter re-derives the document before it is stored; so does this one.
-    requirePersistedSubtitleSegmentOverride(bundle.subtitleOverride)
-    this.version = bundle.version
+    requirePersistedSubtitleSegmentOverride(input.subtitleOverride)
+    const { command, requestFingerprint } = input.bundle.origin
+    this.current = input.bundle
     const result = Object.freeze({
-      command: bundle.command, version: bundle.version,
-      subtitleOverride: bundle.subtitleOverride, impact: bundle.impact, replayed: false,
+      command, version: input.bundle.version,
+      subtitleOverride: input.subtitleOverride, impact: input.impact, replayed: false,
     })
     this.rows.push(result)
-    this.idempotent.set(`${bundle.command.workspaceId}:${bundle.command.projectId}:${bundle.command.idempotencyKey}`, {
-      requestFingerprint: bundle.requestFingerprint, result,
-    })
+    this.idempotent.set(`${command.workspaceId}:${command.projectId}:${command.idempotencyKey}`, { requestFingerprint, result })
     return result
   }
 
@@ -546,6 +428,7 @@ function inMemoryArtifacts() {
   const byId = new Map()
   const byKey = new Map()
   return {
+    get size() { return byId.size },
     seed(record) { byId.set(record.id, record); byKey.set(record.artifactKey, record) },
     async findById(workspaceId, artifactId) {
       const record = byId.get(artifactId)
@@ -687,19 +570,6 @@ function glyphRows(raw, format) {
 
 const glyphTotal = (raw, format) => glyphRows(raw, format).reduce((sum, row) => sum + row.count, 0)
 
-function glyphCentreRow(raw, format) {
-  const rows = glyphRows(raw, format)
-  if (rows.length === 0) return Number.NaN
-  const total = rows.reduce((sum, row) => sum + row.count, 0)
-  return rows.reduce((sum, row) => sum + row.y * row.count, 0) / total
-}
-
-const bandPixels = (band, format) => Object.freeze({
-  top: Math.round(band.y * CANVAS[format].height),
-  bottom: Math.round((band.y + band.height) * CANVAS[format].height),
-  centre: Math.round((band.y + band.height / 2) * CANVAS[format].height),
-})
-
 async function writeColourMaster(masterPath) {
   execFileSync(ffmpegPath, [
     '-hide_banner', '-loglevel', 'error', '-y',
@@ -750,12 +620,18 @@ const subtitleResolution = () => Object.freeze({
 // The render half: real enqueue service, real worker, real FFmpeg.
 // --------------------------------------------------------------------------
 
+// S3: a render consumes ONE persisted verdict (`render`) of the output it is made for and seals it into its input hash.
+const renderConsumption = (versionId, format) => fakeOutputWorld({
+  workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, versionId,
+  entries: TWO_OUTPUT_SPECS.map((spec) => ({ variantId: spec.variantId, aspectRatio: spec.aspectRatio })),
+}).consumption('render', STABLE_VARIANT[format])
+
 function renderSourceFor(input) {
   const editPlan = {
     ...input.directedPlan,
     subtitleTracks: input.directedPlan.subtitleTracks.map((track) => ({ ...track, cues: input.cues })),
   }
-  return Object.freeze({
+  return withConsumption(Object.freeze({
     projectId: PROJECT_ID,
     projectVersionId: input.projectVersionId,
     editPlanSnapshotId: input.editPlanSnapshotId,
@@ -778,7 +654,7 @@ function renderSourceFor(input) {
     criticIssues: Object.freeze([]),
     subtitleResolution: input.subtitleResolution,
     reframePlan: reframePlanFor(input.format),
-  })
+  }), renderConsumption(input.projectVersionId, input.format))
 }
 
 async function renderThroughRealWorker(input) {
@@ -800,6 +676,7 @@ async function renderThroughRealWorker(input) {
   let context
   let lease
   let failure
+  let perceptionReadCalls = 0
   const phases = []
   const record = () => ({ operation, context })
   const matches = (command) => lease && lease.owner === command.leaseOwner &&
@@ -829,12 +706,7 @@ async function renderThroughRealWorker(input) {
       phases.push(command.phase)
       return true
     },
-    async succeed(command) {
-      if (!matches(command)) return null
-      operation = succeedPublicOperation(operation, command.now)
-      lease = undefined
-      return record()
-    },
+    async succeed() { assert.fail('Proxy completion must atomically publish review and success through the project port') },
     async failOrRetry(command) {
       if (!matches(command)) return null
       failure = command.error
@@ -865,7 +737,7 @@ async function renderThroughRealWorker(input) {
   const workRoot = join(input.root, `work-${input.suffix}`)
   const renderer = new FfmpegEditorialProxyRenderer({ workRoot, ffmpegPath })
   const realStorage = new LocalMediaUploadStorage(artifactRoot)
-  const captured = { lutCleaned: 0, rendererCleaned: 0, renderCalls: 0 }
+  const captured = { lutCleaned: 0, rendererCleaned: 0, renderCalls: 0, atomicCompletions: 0 }
   const deps = {
     async catalogOutput() {},
     operations,
@@ -885,7 +757,38 @@ async function renderThroughRealWorker(input) {
         assert.equal(query.editPlanSnapshotId, source.editPlanSnapshotId)
         return immutableSource
       },
-      async attachCompletedOutput(attached) { captured.attached = attached },
+      async attachCompletedOutput(attached) {
+        // Controlled persistence semantics only; no PostgreSQL publication claim.
+        assert.equal(operation.status, 'running')
+        assert.ok(matches({ leaseOwner: attached.lease.owner, attempt: attached.lease.attempt, now: attached.lease.now }))
+        assert.equal(attached.workspaceId, WORKSPACE_ID)
+        assert.equal(attached.operationId, operation.id)
+        assert.equal(attached.projectId, context.projectId)
+        assert.equal(attached.projectVersionId, context.projectVersionId)
+        assert.equal(attached.variantId, STABLE_VARIANT[source.format], 'the render is attributed to the stable variant of its output')
+        assert.equal(attached.format, source.format)
+        assert.equal(attached.originalFileName, context.originalFileName)
+        assert.equal(attached.createdAt, attached.review.renderCompletedAt)
+        assert.equal(attached.outputArtifactId, context.outputArtifactId)
+        assert.equal(attached.outputManifestId, context.outputManifestId)
+        assert.equal(attached.review.projectVersionId, context.projectVersionId)
+        assert.equal(attached.review.proxyArtifactId, context.outputArtifactId)
+        assert.equal(attached.review.proxyManifestId, context.outputManifestId)
+        assert.equal(attached.review.inputHash, context.inputHash)
+        assert.equal(attached.recipeParameters.inputHash, context.inputHash)
+        assert.equal(captured.manifest.recipe.parametersHash, calculateCanonicalHash(attached.recipeParameters))
+        assert.equal(captured.elementMap.proxyHash, captured.stored.sha256)
+        assert.equal(captured.manifest.artifact.sha256, captured.stored.sha256)
+        const { reviewHash, ...reviewDocument } = attached.review
+        assert.equal(reviewHash, calculateCanonicalHash(reviewDocument))
+        assert.equal(attached.ocrReceipt, null)
+        const completed = succeedPublicOperation(operation, attached.lease.now)
+        captured.attached = attached
+        captured.review = attached.review
+        captured.atomicCompletions += 1
+        operation = completed
+        lease = undefined
+      },
     },
     artifacts: {
       async persistOrReplay(persist) {
@@ -911,25 +814,28 @@ async function renderThroughRealWorker(input) {
       async render(renderInput) {
         captured.renderCalls += 1
         captured.renderInput = renderInput
-        return renderer.render(renderInput)
+        const previousProbePath = process.env.APOLLO_V2_FFPROBE_PATH
+        process.env.APOLLO_V2_FFPROBE_PATH = ffprobePath
+        try { return await renderer.render(renderInput) }
+        finally {
+          if (previousProbePath === undefined) delete process.env.APOLLO_V2_FFPROBE_PATH
+          else process.env.APOLLO_V2_FFPROBE_PATH = previousProbePath
+        }
       },
       async cleanup(operationId) {
         captured.rendererCleaned += 1
         return renderer.cleanup(operationId)
       },
     },
-    perceptionTimelines: input.perceptionTimelines,
+    perceptionTimelines: { async findLatest(...args) {
+      perceptionReadCalls += 1
+      return input.perceptionTimelines?.findLatest(...args) ?? null
+    } },
     renderElementMaps: {
       async persistOrReplay(persist) {
         captured.elementMap = persist.map
         captured.elementMapTarget = persist
         return { record: {}, replayed: false }
-      },
-    },
-    proxyReviews: {
-      async persistGenerated(persist) {
-        captured.review = persist.review
-        return { ...persist.review, id: persist.id }
       },
     },
     sources: new LocalArtifactSourceMaterializer(artifactRoot),
@@ -940,8 +846,8 @@ async function renderThroughRealWorker(input) {
 
   const outcome = await runNextProjectProxyRenderOperationService(deps)(`worker-${input.suffix}`)
   return {
-    ...captured, outcome, phases, failure, source, compilation, artifactRoot, workRoot,
-    enqueuedContext: enqueued.context, operation, renderer,
+    ...captured, outcome, phases, failure, source, compilation, artifactRoot, workRoot, perceptionReadCalls,
+    enqueuedContext: enqueued.context, operation, lease, renderer,
     expectedInputHash: projectProxyRenderInputHash({
       source,
       colorPipelineBindings: [{
@@ -963,6 +869,8 @@ async function renderThroughRealWorker(input) {
  */
 function assertRecipeParameters(rendered, expected) {
   const parameters = {
+    // W69 (cb868e7f): the pinned subtitle-clock policy is part of the recipe parameters, so a policy change invalidates reuse.
+    assEmissionPolicy: ASS_EMISSION_POLICY,
     inputHash: rendered.expectedInputHash,
     audioTimelineHash: rendered.renderInput.audioTimelineHash,
     projectVersionId: rendered.source.projectVersionId,
@@ -985,6 +893,7 @@ function assertRecipeParameters(rendered, expected) {
     subtitlePresetSnapshotHash: expected.snapshotHash,
     subtitleAnchorPlanHash: expected.anchorPlanHash,
     perceptionTimelineHash: expected.perceptionTimelineHash,
+    ocrReceipt: null,
   }
   assert.equal(
     rendered.manifest.recipe.parametersHash,
@@ -1001,6 +910,25 @@ function assertRenderedVariant(rendered, expected) {
   assert.equal(rendered.failure, undefined, `render ${expected.operationId} failed: ${JSON.stringify(rendered.failure)}`)
   assert.deepEqual(rendered.outcome, { operationId: expected.operationId, status: 'succeeded' })
   assert.equal(rendered.operation.status, 'succeeded')
+  assert.equal(rendered.atomicCompletions, 1)
+  assert.equal(rendered.lease, undefined)
+  assert.equal(rendered.perceptionReadCalls, 0, 'Caller perception rows cannot enter the scoped producer authority')
+  const anchor = rendered.renderInput.placementPlan.subtitleAnchorPlan
+  // No source dimensions and no face window reach this worker: the projection is unavailable and every band is unknown.
+  assert.equal(anchor.schemaVersion, 'subtitle-anchor-plan/v3')
+  assert.equal(anchor.faceClearance.faceSafety, 'unknown')
+  assert.equal(anchor.faceClearance.projectionHash, null)
+  assert.deepEqual(anchor.decisions.map((item) => [item.cueId, item.startFrame, item.endFrame, item.anchor, item.bounds, item.suppressed]),
+    rendered.renderInput.subtitleCues.map((cue) => [cue.id, cue.startFrame, cue.endFrame, null, null, true]))
+  assert.equal(anchor.perceptionTimelineHash, null)
+  // W65b: the proxy plans under the final's rule, so the withheld cues are listed warnings: the review waits for their
+  // acknowledgement ('warning-ack-required') and the final stays closed until then. The cues are still not drawn.
+  assert.equal(rendered.review.status, 'warning-ack-required')
+  assert.equal(rendered.review.finalAllowed, false)
+  assert.equal(rendered.elementMap.elements.some((element) => element.type === 'subtitle'), false)
+  const faceIssues = rendered.review.criticIssues.filter((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE')
+  assert.deepEqual(faceIssues.map((issue) => [issue.severity, issue.evidenceRange.startFrame, issue.evidenceRange.endFrame, issue.elementIds[0]]),
+    rendered.renderInput.subtitleCues.map((cue) => ['warning', cue.startFrame, cue.endFrame, `subtitle:${cue.id}`]))
   assert.deepEqual(rendered.phases, ['rendering', 'verifying', 'persisting'])
   assert.equal(rendered.enqueuedContext.inputHash, rendered.expectedInputHash)
   assert.equal(rendered.renderInput.format, expected.format)
@@ -1012,6 +940,7 @@ function assertRenderedVariant(rendered, expected) {
   assert.equal(rendered.elementMap.proxyHash, rendered.stored.sha256)
   assert.equal(rendered.review.inputHash, rendered.expectedInputHash)
   assert.equal(rendered.review.outputSpecId, readOutputFormatPreset(expected.format).spec.id)
+  assert.deepEqual(rendered.review.technicalIssues, [])
   assert.equal(rendered.rendererCleaned, 1)
   assert.equal(rendered.lutCleaned, 1)
 }
@@ -1020,9 +949,9 @@ function assertRenderedVariant(rendered, expected) {
 // The journey.
 // ---------------------------------------------------------------------------
 
-test('T-WAVE10 one journey: versioned preset, perception anchor, scoped protected override, real proxy and its sidecar', {
+test('T-WAVE10 controlled presets/overrides and real proxy; unknown suppresses captions and rejects sidecars', {
   timeout: 30 * 60_000,
-}, async () => {
+}, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'apollo-wave10-combined-'))
   const masterPath = join(root, 'wave10-master.mp4')
   try {
@@ -1047,7 +976,9 @@ test('T-WAVE10 one journey: versioned preset, perception anchor, scoped protecte
       createdAt: CREATED_AT,
     })
 
-    const journey = await directOnce()
+    const journey = await directOnce(masterPath)
+    assert.equal(journey.directed.run.qualityReport.status, 'review-required')
+    assert.equal(journey.directed.run.qualityReport.faceSafety.status, 'unknown')
     const directedCues = journey.directedPlan.subtitleTracks.flatMap((track) => track.cues)
     assert.deepEqual(
       directedCues.map((cue) => [cue.id, cue.startFrame, cue.endFrame, cue.text]),
@@ -1111,56 +1042,35 @@ test('T-WAVE10 one journey: versioned preset, perception anchor, scoped protecte
         snapshotHash: snapshot.snapshotHash,
         registryHash: snapshot.registryHash,
         anchorPlanHash: rendered.renderInput.placementPlan.subtitleAnchorPlan.anchorPlanHash,
-        perceptionTimelineHash: PERCEPTION_TIMELINE.timelineHash,
+        perceptionTimelineHash: null,
       })
       console.log(`R1 ${rendered.source.format} recipe parametersHash=${rendered.manifest.recipe.parametersHash.slice(0, 12)} (preset ${PRESET_ID} v1, snapshot ${snapshot.snapshotHash.slice(0, 12)})`)
     }
 
-    // ===== Requirement 2: the anchor is decided by the persisted perception ====
+    // ===== Requirement 2: caller perception does not establish facial authority ====
     const anchorPlan = basePortrait.renderInput.placementPlan.subtitleAnchorPlan
     assert.ok(anchorPlan, 'a render with cues and a perception timeline must carry an anchor plan')
-    assert.equal(anchorPlan.perceptionTimelineHash, PERCEPTION_TIMELINE.timelineHash)
+    assert.equal(anchorPlan.perceptionTimelineHash, null)
     assert.equal(anchorPlan.presetId, PRESET_ID)
     assert.equal(anchorPlan.presetHash, snapshot.presetHash)
     assert.equal(anchorPlan.registryHash, snapshot.registryHash)
-    const portraitBands = anchorBandsFor(OVERRIDE_VARIANT)
     for (const [cueId] of EXPECTED_CUES) {
       const decision = subtitleAnchorDecisionFor(anchorPlan, cueId)
       assert.ok(decision, `cue ${cueId} must carry an anchor decision`)
-      assert.equal(decision.anchor, 'upper-third', `${cueId} must be pushed off the default bottom band`)
-      assert.equal(decision.suppressed, false)
-      assert.ok(decision.blockerIds.includes('face-presenter-low'))
-      assert.ok(decision.eligibleAnchors.includes('upper-third'))
-      assert.equal(decision.eligibleAnchors.includes('bottom'), false)
+      assert.equal(decision.anchor, null)
+      assert.equal(decision.bounds, null)
+      assert.equal(decision.suppressed, true)
+      assert.deepEqual([...decision.eligibleAnchors], [])
+      assert.ok(decision.issues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'))
     }
-    // The decision and its evidence already reached the persisted recipe (the
-    // parametersHash equality above binds anchorPlanHash and perceptionTimelineHash).
-    // The RenderElementMap describes the very rectangle the plan decided.
-    const upperThird = portraitBands['upper-third']
-    for (const [cueId] of EXPECTED_CUES) {
-      const element = basePortrait.elementMap.elements.find((item) => item.elementId === `subtitle:${cueId}`)
-      assert.ok(element, `cue ${cueId} must appear in the RenderElementMap`)
-      assert.equal(element.bounds.y, Math.round(upperThird.y * CANVAS[OVERRIDE_VARIANT].height))
-      assert.equal(element.bounds.height, Math.round(upperThird.height * CANVAS[OVERRIDE_VARIANT].height))
-    }
-    // Pixel proof: the glyphs really land on the decided band, far from the default one.
-    const decidedBand = bandPixels(upperThird, OVERRIDE_VARIANT)
-    const defaultBand = bandPixels(portraitBands.bottom, OVERRIDE_VARIANT)
+    // Pixels independently show suppression at every planned cue instant.
     for (const [cueId] of EXPECTED_CUES) {
       const raw = frameAt(basePortrait.stored.path, CUE_SAMPLE_SECONDS[cueId], OVERRIDE_VARIANT)
-      const rows = glyphRows(raw, OVERRIDE_VARIANT)
-      const centre = glyphCentreRow(raw, OVERRIDE_VARIANT)
-      console.log(`R2 ${cueId}: glyph rows ${rows[0]?.y}..${rows.at(-1)?.y} centre ${centre.toFixed(1)}; decided band ${decidedBand.top}..${decidedBand.bottom} (centre ${decidedBand.centre}); default bottom band centre ${defaultBand.centre}`)
-      assert.ok(rows.length > 0, `${cueId} must be burned into the frame`)
-      assert.ok(Math.abs(centre - decidedBand.centre) <= 14, `glyph centre ${centre.toFixed(1)} must track the decided band centre ${decidedBand.centre}`)
-      assert.ok(rows[0].y >= decidedBand.top - 10 && rows.at(-1).y <= decidedBand.bottom + 10, 'every glyph row must lie inside the decided band')
-      assert.ok(rows.at(-1).y < Math.round(0.6 * CANVAS[OVERRIDE_VARIANT].height), 'no glyph may reach the presenter')
+      assert.equal(glyphTotal(raw, OVERRIDE_VARIANT), 0, `${cueId} must remain suppressed with unknown facial coverage`)
     }
 
-    // ----- The counterfactual: with no evidence the same plan anchors bottom ---
-    // Same EditPlan, same preset, same reframe: only the perception repository
-    // differs. If the anchor were authored instead of derived, these two renders
-    // would be identical.
+    // With or without caller perception, the same render remains unknown and
+    // suppressed. Neither caller-controlled port is a producer receipt.
     const withoutPerception = await renderThroughRealWorker({
       root, suffix: 'no-perception',
       perceptionTimelines: { async findLatest() { return null } },
@@ -1175,62 +1085,55 @@ test('T-WAVE10 one journey: versioned preset, perception anchor, scoped protecte
     assertRenderedVariant(withoutPerception, { operationId: 'operation-no-perception', format: OVERRIDE_VARIANT })
     const blindPlan = withoutPerception.renderInput.placementPlan.subtitleAnchorPlan
     assert.equal(blindPlan.perceptionTimelineHash, null)
-    assert.deepEqual(blindPlan.decisions.map((item) => item.anchor), ['bottom', 'bottom', 'bottom'])
-    assert.notEqual(blindPlan.anchorPlanHash, anchorPlan.anchorPlanHash)
-    assert.notEqual(
+    assert.deepEqual(blindPlan.decisions.map((item) => item.anchor), [null, null, null])
+    assert.equal(blindPlan.anchorPlanHash, anchorPlan.anchorPlanHash)
+    assert.equal(
       withoutPerception.manifest.recipe.parametersHash,
       basePortrait.manifest.recipe.parametersHash,
-      'the recipe identity must move when the anchor evidence moves',
+      'Ignored caller perception cannot change the authoritative recipe identity',
     )
-    const blindCentre = glyphCentreRow(
-      frameAt(withoutPerception.stored.path, CUE_SAMPLE_SECONDS['subtitle-cue-1'], OVERRIDE_VARIANT),
-      OVERRIDE_VARIANT,
-    )
-    const seeingCentre = glyphCentreRow(
-      frameAt(basePortrait.stored.path, CUE_SAMPLE_SECONDS['subtitle-cue-1'], OVERRIDE_VARIANT),
-      OVERRIDE_VARIANT,
-    )
-    console.log(`R2 counterfactual: glyph centre without perception ${blindCentre.toFixed(1)} (bottom band centre ${defaultBand.centre}) vs with perception ${seeingCentre.toFixed(1)} (upper-third centre ${decidedBand.centre})`)
-    assert.ok(Math.abs(blindCentre - defaultBand.centre) <= 14, 'without evidence the cue stays on the reserved bottom band')
-    assert.ok(blindCentre - seeingCentre > 400, `the evidence moved the subtitle ${(blindCentre - seeingCentre).toFixed(1)}px up the canvas`)
+    assert.equal(glyphTotal(frameAt(withoutPerception.stored.path, CUE_SAMPLE_SECONDS['subtitle-cue-1'], OVERRIDE_VARIANT), OVERRIDE_VARIANT), 0)
 
     // ===== Requirement 3: one protected override, one variant, one range ======
     const overrideRepository = new SubtitleSegmentOverrideRepository(
-      journey.directed.version,
+      journey.directed.bundle,
       directedCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame, text: cue.text })),
     )
     let overrideCounter = 0
+    let materializationCounter = 0
     const applyOverride = applySubtitleSegmentOverrideService({
       repository: overrideRepository,
-      clock: () => new Date(`2026-08-21T10:0${overrideCounter}:00.000Z`),
-      createId: (kind) => `${kind}-subtitle-override-${overrideCounter}`,
+      clock: () => new Date(`2026-10-17T10:0${overrideCounter}:00.000Z`),
+      // every output of the State re-materializes from the new plan, each under its own materialization id
+      createId: (kind) => kind === 'materialization'
+        ? `${kind}-subtitle-override-${overrideCounter}-${++materializationCounter}` : `${kind}-subtitle-override-${overrideCounter}`,
     })
     overrideCounter += 1
     const applied = await applyOverride({
       workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
       baseVersionId: journey.directed.version.id, baseHash: journey.directed.version.baseHash,
-      variantId: OVERRIDE_VARIANT, segmentId: OVERRIDE_SEGMENT_ID, action: 'set',
+      variantId: OVERRIDE_VARIANT_ID, segmentId: OVERRIDE_SEGMENT_ID, action: 'set',
       dimensions: [{ kind: 'text', text: OVERRIDE_TEXT }], protected: true,
       actor: proxyActor(), idempotencyKey: 'wave10-subtitle-override-text',
       reason: 'Correcao pontual de uma fala, apenas no vertical.',
     })
     const exception = applied.subtitleOverride
-    assert.equal(exception.variantId, OVERRIDE_VARIANT)
+    assert.equal(exception.variantId, OVERRIDE_VARIANT_ID)
     assert.equal(exception.segmentId, OVERRIDE_SEGMENT_ID)
     assert.deepEqual({ ...exception.range }, { startFrame: 70, endFrame: 100 })
     assert.equal(exception.protected, true)
     assert.deepEqual(exception.dimensions.map((item) => item.kind), ['text'])
     assert.equal(applied.command.type, 'apply-subtitle-segment-override')
-    assert.deepEqual([...applied.command.scope.outputSpecIds], [OVERRIDE_VARIANT])
+    assert.deepEqual([...applied.command.scope.outputVariantIds], [OVERRIDE_VARIANT_ID])
     assert.deepEqual({ ...applied.command.scope.frameRange }, { startFrame: 70, endFrame: 100 })
     console.log(`R3 override ${exception.id} overrideHash=${exception.overrideHash.slice(0, 12)} version=${applied.version.id} range=[70,100) variant=${OVERRIDE_VARIANT}`)
 
-    const overrides = await overrideRepository.listCurrentByVariant({ variantId: OVERRIDE_VARIANT })
+    const overrides = await overrideRepository.listCurrentByVariant({ variantId: OVERRIDE_VARIANT_ID })
     const portraitApplication = applySubtitleSegmentOverrides({
-      cues: directedCues, overrides, variantId: OVERRIDE_VARIANT,
+      cues: directedCues, overrides, variantId: OVERRIDE_VARIANT_ID,
     })
     const siblingApplication = applySubtitleSegmentOverrides({
-      cues: directedCues, overrides, variantId: SIBLING_VARIANT,
+      cues: directedCues, overrides, variantId: SIBLING_VARIANT_ID,
     })
     assert.deepEqual(
       portraitApplication.applied.map((item) => [item.overrideId, item.segmentId, [...item.kinds]]),
@@ -1282,7 +1185,8 @@ test('T-WAVE10 one journey: versioned preset, perception anchor, scoped protecte
       ['Abertura clara', 'meio', 'final'],
     )
 
-    // ----- Pixel proof: the new text is visible ONLY in the target variant -----
+    // Planned text changes only the target; unknown face coverage suppresses
+    // the original and overridden text in both rendered variants.
     const ink = (rendered, format, cueId) =>
       glyphTotal(frameAt(rendered.stored.path, CUE_SAMPLE_SECONDS[cueId], format), format)
     const portraitBefore = ink(basePortrait, OVERRIDE_VARIANT, OVERRIDE_SEGMENT_ID)
@@ -1290,8 +1194,7 @@ test('T-WAVE10 one journey: versioned preset, perception anchor, scoped protecte
     const landscapeBefore = ink(baseLandscape, SIBLING_VARIANT, OVERRIDE_SEGMENT_ID)
     const landscapeAfter = ink(untouchedLandscape, SIBLING_VARIANT, OVERRIDE_SEGMENT_ID)
     console.log(`R3 glyph pixels at ${OVERRIDE_SEGMENT_ID}: 9:16 ${portraitBefore} -> ${portraitAfter}; 16:9 ${landscapeBefore} -> ${landscapeAfter}`)
-    assert.ok(portraitAfter > portraitBefore * 1.5,
-      `the 27-character exception must burn far more ink than "meio": ${portraitBefore} -> ${portraitAfter}`)
+    assert.deepEqual([portraitBefore, portraitAfter, landscapeBefore, landscapeAfter], [0, 0, 0, 0])
     assert.equal(landscapeAfter, landscapeBefore,
       `the sibling variant must be pixel-identical at ${OVERRIDE_SEGMENT_ID}: ${landscapeBefore} vs ${landscapeAfter}`)
     // Ranges outside the exception are untouched in the target variant too.
@@ -1306,18 +1209,8 @@ test('T-WAVE10 one journey: versioned preset, perception anchor, scoped protecte
       const afterFrame = frameAt(overriddenPortrait.stored.path, CUE_SAMPLE_SECONDS[cueId], OVERRIDE_VARIANT)
       const before = glyphTotal(beforeFrame, OVERRIDE_VARIANT)
       const after = glyphTotal(afterFrame, OVERRIDE_VARIANT)
-      const beforeRows = glyphRows(beforeFrame, OVERRIDE_VARIANT)
-      const afterRows = glyphRows(afterFrame, OVERRIDE_VARIANT)
       console.log(`R3 glyph pixels at ${cueId} (outside the exception range): 9:16 ${before} -> ${after}`)
-      assert.deepEqual(
-        [afterRows.at(0)?.y, afterRows.at(-1)?.y],
-        [beforeRows.at(0)?.y, beforeRows.at(-1)?.y],
-        `${cueId} lies outside [70,100) and must keep the same glyph bounds`,
-      )
-      assert.ok(
-        Math.abs(after - before) <= Math.max(2, Math.ceil(before * 0.01)),
-        `${cueId} decoded ink drift must stay within the lossy-codec tolerance: ${before} vs ${after}`,
-      )
+      assert.deepEqual([before, after], [0, 0], `${cueId} remains suppressed outside the exception range`)
     }
     // And the whole sibling render is identical: same element map and the very
     // same MP4 bytes, so the exception left no trace at all in 16:9.
@@ -1334,7 +1227,7 @@ test('T-WAVE10 one journey: versioned preset, perception anchor, scoped protecte
     const unprotected = await applyOverride({
       workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
       baseVersionId: overrideRepository.version.id, baseHash: overrideRepository.version.baseHash,
-      variantId: OVERRIDE_VARIANT, segmentId: 'subtitle-cue-3', action: 'set',
+      variantId: OVERRIDE_VARIANT_ID, segmentId: 'subtitle-cue-3', action: 'set',
       dimensions: [{ kind: 'position', anchor: 'top' }], protected: false,
       actor: proxyActor(), idempotencyKey: 'wave10-subtitle-override-unprotected',
     })
@@ -1342,8 +1235,8 @@ test('T-WAVE10 one journey: versioned preset, perception anchor, scoped protecte
     const recompiled = reapplyProtectedSubtitleSegmentOverrides({
       // A fresh Director pass produces the same ranges with the original texts.
       recompiledCues: directedCues,
-      overrides: await overrideRepository.listCurrentByVariant({ variantId: OVERRIDE_VARIANT }),
-      variantId: OVERRIDE_VARIANT,
+      overrides: await overrideRepository.listCurrentByVariant({ variantId: OVERRIDE_VARIANT_ID }),
+      variantId: OVERRIDE_VARIANT_ID,
     })
     assert.deepEqual(
       recompiled.cues.map((cue) => [cue.id, cue.text]),
@@ -1397,7 +1290,7 @@ test('T-WAVE10 one journey: versioned preset, perception anchor, scoped protecte
       projectVersionId: applied.version.id,
       projectVersionSequence: applied.version.sequence,
       isCurrentVersion: true,
-      variantId: OVERRIDE_VARIANT,
+      variantId: OVERRIDE_VARIANT_ID,
       outputKind: 'proxy',
       outputArtifactId: 'artifact-override-9x16-proxy',
       outputManifestId: 'manifest-override-9x16-proxy',
@@ -1412,114 +1305,67 @@ test('T-WAVE10 one journey: versioned preset, perception anchor, scoped protecte
       renderElementMapHash: mapHash,
       map: overriddenPortrait.elementMap,
       cueTexts,
+      review: { status: 'ready-for-final', finalAllowed: true, reviewHash: 'd'.repeat(64) },
     })
-    const alignments = new Map([[`${applied.version.id}:${OVERRIDE_VARIANT}`, alignment]])
-    alignments.set(`head:${OVERRIDE_VARIANT}`, alignment)
+    const alignments = new Map([[`${applied.version.id}:${OVERRIDE_VARIANT_ID}`, alignment]])
+    alignments.set(`head:${OVERRIDE_VARIANT_ID}`, alignment)
     const sidecars = inMemorySidecars(alignments)
+    const effects = { artifactPersistence: 0, promotion: 0, staging: 0 }
+    const beforeArtifactCount = artifacts.size
+    const sidecarStorage = new LocalMediaUploadStorage(artifactRoot)
+    const sidecarStaging = new TemporaryFileSubtitleSidecarStaging(join(root, 'staging'))
     const sidecarDependencies = {
-      sidecars, artifacts, persistence: artifacts,
-      storage: new LocalMediaUploadStorage(artifactRoot),
-      staging: new TemporaryFileSubtitleSidecarStaging(join(root, 'staging')),
+      sidecars, artifacts, persistence: { async persistOrReplay(...args) {
+        effects.artifactPersistence += 1; return artifacts.persistOrReplay(...args)
+      } },
+      storage: { async promoteDerived(...args) { effects.promotion += 1; return sidecarStorage.promoteDerived(...args) } },
+      staging: { async stage(...args) { effects.staging += 1; return sidecarStaging.stage(...args) } },
       clock: () => new Date('2026-08-21T11:00:00.000Z'),
     }
     const exportSidecar = exportProjectSubtitleSidecarService(sidecarDependencies)
-    const srt = await exportSidecar({
+    assert.throws(() => collectRenderedSubtitleCues({ map: persistedMap, texts: cueTexts }),
+      (error) => error.code === 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH')
+    for (const format of ['srt', 'vtt']) await assert.rejects(exportSidecar({
       workspaceId: WORKSPACE_ID, actor: proxyActor(), projectId: PROJECT_ID,
-      variantId: OVERRIDE_VARIANT, format: 'srt', idempotencyKey: 'wave10-sidecar-srt',
-    })
-    const vtt = await exportSidecar({
-      workspaceId: WORKSPACE_ID, actor: proxyActor(), projectId: PROJECT_ID,
-      variantId: OVERRIDE_VARIANT, format: 'vtt', idempotencyKey: 'wave10-sidecar-vtt',
-    })
-
-    for (const result of [srt, vtt]) {
-      const path = join(artifactRoot, ...result.sidecar.artifactKey.split('/'))
-      const bytes = await readFile(path)
-      assert.equal(createHash('sha256').update(bytes).digest('hex'), result.sidecar.sha256)
-      assert.equal(bytes.byteLength, result.sidecar.byteSize)
-      // Bound to the very MP4 and the very map of this operation.
-      assert.equal(result.sidecar.outputSha256, proxySha256)
-      assert.equal(result.sidecar.renderElementMapHash, mapHash)
-      assert.equal(result.sidecar.renderInputHash, overriddenPortrait.expectedInputHash)
-      assert.equal(result.sidecar.projectVersionId, applied.version.id)
-      assert.equal(result.replayed, false)
-      // End-to-end coherence: the sidecar carries the exception, not the original.
-      const parsed = parseSubtitleSidecar(bytes, result.sidecar.format)
-      assert.equal(parsed.length, 3)
-      assert.deepEqual(parsed.map((cue) => cue.text), ['Abertura clara', OVERRIDE_TEXT, 'final'])
-      assert.deepEqual(
-        parsed.map((cue) => [cue.startMs, cue.endMs]),
-        EXPECTED_CUES.map(([, startFrame, endFrame]) => [
-          subtitleSidecarFrameToMs(startFrame, FPS), subtitleSidecarFrameToMs(endFrame, FPS),
-        ]),
-      )
-      assert.ok(bytes.includes(Buffer.from(OVERRIDE_TEXT, 'utf8')), 'the exception text must be in the sidecar bytes')
-      console.log(`R5 ${result.sidecar.format}: ${result.sidecar.byteSize} bytes sha256=${result.sidecar.sha256.slice(0, 12)} cues=${result.sidecar.cueCount}`)
-    }
-    assert.notEqual(srt.sidecar.sha256, vtt.sidecar.sha256)
-
-    // Reconstruction is byte-identical: the same persisted map re-encodes to the
-    // same digest, recomputed here through the production domain functions.
-    const reconstructed = encodeSubtitleSidecar({
-      cues: collectRenderedSubtitleCues({ map: persistedMap, texts: cueTexts }),
-      format: 'srt', locale: 'pt-BR',
-      durationMs: subtitleSidecarFrameToMs(persistedMap.durationFrames, persistedMap.fps),
-    })
-    assert.equal(reconstructed.sha256, srt.sidecar.sha256)
-    assert.equal(reconstructed.byteSize, srt.sidecar.byteSize)
-    const rerun = await exportSidecar({
-      workspaceId: WORKSPACE_ID, actor: proxyActor(), projectId: PROJECT_ID,
-      variantId: OVERRIDE_VARIANT, format: 'srt', idempotencyKey: 'wave10-sidecar-srt-again',
-    })
-    assert.equal(rerun.sidecar.sha256, srt.sidecar.sha256)
-    assert.equal(rerun.sidecar.artifactId, srt.sidecar.artifactId)
-    assert.equal(rerun.sidecar.lineageHash, srt.sidecar.lineageHash)
-    assert.equal(rerun.replayed, true)
-    assert.equal(sidecars.rows.length, 2, 'srt and vtt are one row each; a re-derivation adds none')
+      variantId: OVERRIDE_VARIANT_ID, format, idempotencyKey: `wave10-sidecar-${format}`,
+    }), (error) => error.code === 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH')
+    assert.equal(sidecars.rows.length, 0, 'No sidecar may be invented from suppressed cues')
     const listed = await listProjectSubtitleSidecarsService({ sidecars })({
       workspaceId: WORKSPACE_ID, actor: proxyActor(), projectId: PROJECT_ID,
     })
-    assert.equal(listed.sidecars.length, 2)
-    console.log(`R5 reconstruction byte-identical: sha256=${reconstructed.sha256.slice(0, 12)} bytes=${reconstructed.byteSize}, replay added no row (${sidecars.rows.length} rows)`)
-
-    // The sidecar artifact's lineage points at the MP4 this journey rendered.
-    const sidecarArtifact = await artifacts.findById(WORKSPACE_ID, srt.sidecar.artifactId)
-    assert.equal(sidecarArtifact.container, 'srt')
-    assert.equal(sidecarArtifact.mediaType, 'data')
-    assert.equal(sidecarArtifact.manifests[0].recipe.id, 'subtitle-sidecar')
-    assert.equal(sidecarArtifact.manifests[0].sources[0].sha256, proxySha256)
-    assert.equal(sidecarArtifact.manifests[0].sources[0].artifactKey, overriddenPortrait.stored.key)
+    assert.equal(listed.sidecars.length, 0)
 
     // ===== Requirement 7 (sidecar half): a tampered map is refused ============
     const tamperedHash = { ...alignment, renderElementMapHash: 'f'.repeat(64) }
-    alignments.set(`head:${OVERRIDE_VARIANT}`, tamperedHash)
+    alignments.set(`head:${OVERRIDE_VARIANT_ID}`, tamperedHash)
     await assert.rejects(
       () => exportSidecar({
         workspaceId: WORKSPACE_ID, actor: proxyActor(), projectId: PROJECT_ID,
-        variantId: OVERRIDE_VARIANT, format: 'srt', idempotencyKey: 'wave10-sidecar-tamper-hash',
+        variantId: OVERRIDE_VARIANT_ID, format: 'srt', idempotencyKey: 'wave10-sidecar-tamper-hash',
       }),
       (error) => error.code === 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
     )
-    // A cue widened inside the map after the render.
+    // Actual rendered geometry removed after publication changes the map hash.
+    assert.ok(alignment.map.elements.length > 0)
     const widened = {
       ...alignment,
       map: {
         ...alignment.map,
-        elements: alignment.map.elements.filter((element) =>
-          !(element.elementId === `subtitle:${OVERRIDE_SEGMENT_ID}` && element.frame === 99)),
+        elements: alignment.map.elements.slice(1),
       },
     }
-    alignments.set(`head:${OVERRIDE_VARIANT}`, widened)
+    assert.notEqual(renderElementMapHash(widened.map), mapHash, 'The geometry-tamper negative must change the real map')
+    alignments.set(`head:${OVERRIDE_VARIANT_ID}`, widened)
     await assert.rejects(
       () => exportSidecar({
         workspaceId: WORKSPACE_ID, actor: proxyActor(), projectId: PROJECT_ID,
-        variantId: OVERRIDE_VARIANT, format: 'srt', idempotencyKey: 'wave10-sidecar-tamper-map',
+        variantId: OVERRIDE_VARIANT_ID, format: 'srt', idempotencyKey: 'wave10-sidecar-tamper-map',
       }),
       (error) => error.code === 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
     )
     // An alignment redirected at an artifact that no render produced. The master
     // was ingested, not rendered, so its manifest recipe is not a render recipe.
-    alignments.set(`head:${OVERRIDE_VARIANT}`, {
+    alignments.set(`head:${OVERRIDE_VARIANT_ID}`, {
       ...alignment,
       outputArtifactId: MASTER_ARTIFACT_ID,
       outputManifestId: MASTER_MANIFEST_ID,
@@ -1529,13 +1375,17 @@ test('T-WAVE10 one journey: versioned preset, perception anchor, scoped protecte
     await assert.rejects(
       () => exportSidecar({
         workspaceId: WORKSPACE_ID, actor: proxyActor(), projectId: PROJECT_ID,
-        variantId: OVERRIDE_VARIANT, format: 'srt', idempotencyKey: 'wave10-sidecar-tamper-artifact',
+        variantId: OVERRIDE_VARIANT_ID, format: 'srt', idempotencyKey: 'wave10-sidecar-tamper-artifact',
       }),
       (error) => error.code === 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
     )
-    assert.equal(sidecars.rows.length, 2, 'no tampered attempt may persist a sidecar')
-    alignments.set(`head:${OVERRIDE_VARIANT}`, alignment)
-    console.log('R7 sidecar: a rewritten map hash, a dropped cue frame and a non-render artifact all fail closed')
+    assert.equal(sidecars.rows.length, 0, 'No tampered attempt may persist a sidecar')
+    assert.equal(artifacts.size, beforeArtifactCount)
+    assert.deepEqual(effects, { artifactPersistence: 0, promotion: 0, staging: 0 })
+    alignments.set(`head:${OVERRIDE_VARIANT_ID}`, alignment)
+    t.diagnostic(JSON.stringify({ proofScope: 'controlled-worker-render-mechanics', faceSafety: 'unknown', editorialAcceptance: false,
+      sidecarAdmission: { code: 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH', persistedRows: 0, effects },
+      pending: ['authoritative perceptual placement', 'burned caption/override timing', 'rendered-cue SRT/VTT and replay/lineage'] }))
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -1545,7 +1395,7 @@ test('T-WAVE10 one journey: versioned preset, perception anchor, scoped protecte
 // Requirement 7 (render half): nothing tampered ever reaches FFmpeg.
 // ---------------------------------------------------------------------------
 
-test('T-WAVE10 a tampered preset snapshot or perception evidence never reaches the renderer', {
+test('T-WAVE10 tampered presets/anchors fail closed; caller perception cannot authorize captions', {
   timeout: 20 * 60_000,
 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'apollo-wave10-tamper-'))
@@ -1566,7 +1416,7 @@ test('T-WAVE10 a tampered preset snapshot or perception evidence never reaches t
       container: 'mp4', status: 'available', lifecycleRevision: 1,
       manifests: [], createdAt: CREATED_AT,
     })
-    const journey = await directOnce()
+    const journey = await directOnce(masterPath)
     const directedCues = journey.directedPlan.subtitleTracks.flatMap((track) => track.cues)
     const perceptionTimelines = new PerceptionTimelineRepository()
     const cleanRow = perceptionTimelines.record(journey.directed.version.id, PERCEPTION_TIMELINE)
@@ -1626,11 +1476,8 @@ test('T-WAVE10 a tampered preset snapshot or perception evidence never reaches t
       assert.equal(rejected.review, undefined)
     }
 
-    // --- Family 2: the perception evidence behind the anchor plan (F1.036) ---
-    // The anchor plan is DERIVED by the worker, so persistence cannot carry a
-    // forged `anchorPlanHash`; what persistence can carry is forged evidence. A
-    // row whose observations no longer hash to the stored digest is refused on
-    // read — the same gate `PrismaPerceptionTimelineRepository.hydrate` runs.
+    // Family 2 keeps the controlled row integrity negative separate from
+    // authority: neither a valid nor forged caller row can authorize this worker.
     const tamperedRow = {
       ...cleanRow,
       timeline: {
@@ -1642,12 +1489,15 @@ test('T-WAVE10 a tampered preset snapshot or perception evidence never reaches t
     }
     const tamperedPerception = new PerceptionTimelineRepository()
     tamperedPerception.persistRow(tamperedRow)
+    await assert.rejects(tamperedPerception.findLatest({ workspaceId: WORKSPACE_ID, projectId: PROJECT_ID }),
+      (error) => error.code === 'PERSISTENCE_CONFLICT')
     const forgedEvidence = await run('tamper-perception-evidence', { perceptionTimelines: tamperedPerception })
-    console.log(`R7 perceptionTimeline: outcome=${JSON.stringify(forgedEvidence.outcome)} phases=${JSON.stringify(forgedEvidence.phases)} renderCalls=${forgedEvidence.renderCalls} error=${forgedEvidence.failure.code}`)
-    assert.deepEqual(forgedEvidence.outcome, { operationId: 'operation-tamper-perception-evidence', status: 'failed' })
-    assert.deepEqual(forgedEvidence.phases, [])
-    assert.equal(forgedEvidence.renderCalls, 0)
-    assert.equal(forgedEvidence.stored, undefined)
+    assertRenderedVariant(forgedEvidence, { operationId: 'operation-tamper-perception-evidence', format: OVERRIDE_VARIANT })
+    assert.equal(forgedEvidence.perceptionReadCalls, 0)
+    assert.equal(forgedEvidence.renderCalls, 1)
+    assert.equal(forgedEvidence.review.status, 'warning-ack-required')
+    for (const [cueId] of EXPECTED_CUES) assert.equal(glyphTotal(
+      frameAt(forgedEvidence.stored.path, CUE_SAMPLE_SECONDS[cueId], OVERRIDE_VARIANT), OVERRIDE_VARIANT), 0)
 
     // --- Family 3: `anchorPlanHash` at the renderer's own trust boundary -----
     const clean = await run('tamper-control')

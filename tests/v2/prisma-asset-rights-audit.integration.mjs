@@ -27,18 +27,7 @@ test('asset rights revisions persist exact external actors while reusing snapsho
   const clientId = `rights-client-${suffix}`
   const artifactId = `rights-artifact-${suffix}`
   const repository = new PrismaAssetRightsRepository(prisma)
-  const cleanup = async () => {
-    await prisma.v2AssetRightsChange.deleteMany({ where: { workspaceId } })
-    await prisma.v2MediaArtifact.updateMany({
-      where: { workspaceId }, data: { currentRightsSnapshotId: null },
-    })
-    await prisma.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId } })
-    await prisma.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await prisma.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
   try {
-    await cleanup()
     await prisma.v2Workspace.create({ data: {
       id: workspaceId, slug: `rights-audit-${suffix}`, name: 'Rights audit integration',
     } })
@@ -96,7 +85,6 @@ test('asset rights revisions persist exact external actors while reusing snapsho
       (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
     )
   } finally {
-    await cleanup()
     await prisma.$disconnect()
   }
 })

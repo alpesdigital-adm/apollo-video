@@ -164,7 +164,11 @@ function isPrismaCode(error: unknown, code: string): boolean {
 }
 
 export class PrismaAssetSelectionRepository implements AssetSelectionRepository {
-  constructor(private readonly client: PrismaClient = getV2PostgresClient()) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
+  }
 
   async readProjectContext(input: {
     workspaceId: string

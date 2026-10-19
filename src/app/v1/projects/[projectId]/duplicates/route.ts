@@ -88,6 +88,7 @@ export async function POST(
         kind === 'project-media-asset'
           ? randomUUID()
           : `${kind}-${randomUUID()}`,
+      createEventId: randomUUID,
     })({
       workspaceId: actor.workspaceId,
       projectId,

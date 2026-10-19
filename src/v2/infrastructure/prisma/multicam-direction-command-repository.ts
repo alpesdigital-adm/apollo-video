@@ -1,3 +1,5 @@
+import type { AdoptableObservationReader } from '../../application/ports/adoptable-observation-reader.ts'
+import { readAdoptableObservationsV3 } from './output-adoptable-observations.ts'
 import {
   Prisma,
   type PrismaClient,
@@ -21,13 +23,15 @@ import {
   createMulticamDirectionInvalidations,
   parseMulticamDirectionImpact,
 } from '../../domain/multicam-direction-impact.ts'
-import { createProjectVersion } from '../../domain/project-version.ts'
+import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { renderOutputReferences } from '../../domain/output-variant-references.ts'
+import { childCommandOf } from '../../domain/project-output-state-transition.ts'
+import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { rational, type Rational } from '../../domain/session-time.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
-import {
-  editCommandExternalActorAuditData,
-  hydrateEditCommandExternalActorAudit,
-} from './edit-command-actor-audit.ts'
+import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
+import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 /**
  * The project side of `direct-multicam-session` against PostgreSQL (F4.012).
@@ -152,22 +156,8 @@ function hydrateStoredCommand(row: StoredCommand, replayed: boolean): MulticamDi
     createdAt: row.createdAt.toISOString(),
   })
   const versionRow = row.resultVersion
-  const version = createProjectVersion({
-    id: versionRow.id,
-    workspaceId: versionRow.workspaceId,
-    projectId: versionRow.projectId,
-    sequence: versionRow.sequence,
-    parentVersionId: versionRow.parentVersionId ?? undefined,
-    snapshotRefs: {
-      brief: versionRow.briefSnapshotId,
-      editPlan: versionRow.editPlanSnapshotId,
-      policies: versionRow.policiesSnapshotId,
-    },
-    baseHash: versionRow.baseHash,
-    createdBy: versionRow.createdBy,
-    commandId: versionRow.commandId ?? undefined,
-    createdAt: versionRow.createdAt.toISOString(),
-  })
+  if (row.commandHash !== command.commandHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored multicam direction command seal is invalid')
+  const version = hydrateProjectVersionRowV3(versionRow)
   const editPlan = parseRecord(versionRow.editPlanSnapshot.contentJson, 'multicam EditPlan') as unknown as DirectedEditPlan
   assertSnapshotHash(editPlan, versionRow.editPlanSnapshot.contentHash, 'the multicam EditPlan a retry hands back')
   if (editPlan.projectVersionId !== version.id) {
@@ -211,6 +201,11 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
     this.client = client
   }
 
+  /** The persisted receipts of the recordings a new plan consumes and the head State does not observe (see adoptable-observations). */
+  async readAdoptableObservations(input: Parameters<AdoptableObservationReader['readAdoptableObservations']>[0]) {
+    return readAdoptableObservationsV3(this.client, input)
+  }
+
   async findIdempotentResult(input: {
     workspaceId: string
     projectId: string
@@ -243,10 +238,13 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
   }): Promise<Readonly<MulticamDirectionCommandContext> | null> {
     const project = await this.client.v2Project.findFirst({
       where: { id: input.projectId, workspaceId: input.workspaceId },
-      include: { currentVersion: { include: { editPlanSnapshot: true } } },
+      include: { currentVersion: true },
     })
     if (!project?.currentVersion) return null
     const versionRow = project.currentVersion
+    const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: versionRow.id })
+    if (!parent) return null
+    const planSnapshot = operationalBundlePlanV3(parent)
     const [assets, proxyOutputs, finalOutputs] = await Promise.all([
       this.client.v2ProjectMediaAsset.findMany({
         where: { workspaceId: input.workspaceId, projectId: input.projectId },
@@ -263,7 +261,7 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
           projectVersionId: versionRow.id,
           operation: { status: 'succeeded', phase: 'completed' },
         },
-        select: { outputArtifactId: true },
+        select: { outputArtifactId: true, outputVariantId: true },
       }),
       this.client.v2ProjectFinalExportOperation.findMany({
         where: {
@@ -272,7 +270,7 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
           projectVersionId: versionRow.id,
           operation: { status: 'succeeded', phase: 'completed' },
         },
-        select: { outputArtifactId: true, outputAspectRatio: true },
+        select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
       }),
     ])
     const mediaLinks: Readonly<MulticamProjectMediaLink>[] = assets.map((asset) => {
@@ -288,9 +286,9 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
         frameRate: probe ? probedFrameRate(probe) : null,
       })
     })
-    const currentPlan = parseRecord(versionRow.editPlanSnapshot.contentJson, 'current project EditPlan') as unknown as
+    const currentPlan = parseRecord(planSnapshot.contentJson, 'current project EditPlan') as unknown as
       EditorialCutEditPlan | DirectedEditPlan
-    assertSnapshotHash(currentPlan, versionRow.editPlanSnapshot.contentHash, 'the project EditPlan this direction is derived on top of')
+    assertSnapshotHash(currentPlan, planSnapshot.contentHash, 'the project EditPlan this direction is derived on top of')
     const currentDurationFrames = Number(currentPlan.durationFrames)
     if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames <= 0) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan duration is invalid')
@@ -299,43 +297,31 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
       workspaceId: project.workspaceId,
       projectId: project.id,
       objective: project.objective as MulticamDirectionCommandContext['objective'],
-      currentVersion: createProjectVersion({
-        id: versionRow.id,
-        workspaceId: versionRow.workspaceId,
-        projectId: versionRow.projectId,
-        sequence: versionRow.sequence,
-        parentVersionId: versionRow.parentVersionId ?? undefined,
-        snapshotRefs: {
-          brief: versionRow.briefSnapshotId,
-          editPlan: versionRow.editPlanSnapshotId,
-          policies: versionRow.policiesSnapshotId,
-        },
-        baseHash: versionRow.baseHash,
-        createdBy: versionRow.createdBy,
-        commandId: versionRow.commandId ?? undefined,
-        createdAt: versionRow.createdAt.toISOString(),
-      }),
+      parent,
+      currentVersion: parent.version,
       currentPlan: Object.freeze(currentPlan),
       currentDurationFrames,
-      proxyVariantId: project.format ?? '9:16',
-      outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({
-          artifactId: output.outputArtifactId, kind: 'proxy' as const,
-          sourceVersionId: versionRow.id, variantId: project.format ?? '9:16',
-        })),
-        ...finalOutputs.map((output) => Object.freeze({
-          artifactId: output.outputArtifactId, kind: 'final' as const,
-          sourceVersionId: versionRow.id, variantId: output.outputAspectRatio,
-        })),
-      ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
+      // A multicam direction is project-wide: its impact covers EVERY output the sealed State carries, each render attributed to its own.
+      variantIds: Object.freeze(parent.state.document.entries.map((entry) => entry.variantId)),
+      outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: versionRow.id, proxies: proxyOutputs, finals: finalOutputs }),
       mediaLinks: Object.freeze(mediaLinks),
     })
   }
 
   async commitOrReplay(
-    bundle: MulticamDirectionCommandCommit,
+    input: MulticamDirectionCommandCommit,
     serializationAttempt = 1,
   ): Promise<Readonly<MulticamDirectionCommandResult>> {
+    const sealed = childCommandOf<DirectMulticamSessionPayload>(input.bundle)
+    if (!sealed.audit) throw new DomainError('AUTH_INVALID', 'A multicam direction requires an authenticated external actor')
+    // Local view with the names the transaction below was written against.
+    const bundle = {
+      command: sealed.command, authenticationAudit: sealed.audit, requestFingerprint: sealed.requestFingerprint,
+      version: input.bundle.version, editPlan: input.editPlan, event: input.event, directionEvidence: input.directionEvidence,
+    }
+    if (bundle.command.type !== 'direct-multicam-session' || bundle.version.commandId !== bundle.command.id || bundle.version.parentVersionId !== bundle.command.baseVersionId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Multicam direction Version does not belong to its Command')
+    }
     try {
       return await this.client.$transaction(async (transaction) => {
         const existing = await transaction.v2EditCommand.findUnique({
@@ -368,7 +354,8 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
           project.currentVersion.id !== bundle.command.baseVersionId ||
           project.currentVersion.baseHash !== bundle.command.baseHash ||
           bundle.version.parentVersionId !== project.currentVersion.id ||
-          bundle.version.sequence !== project.currentVersion.sequence + 1
+          bundle.version.sequence !== project.currentVersion.sequence + 1 ||
+          input.bundle.state.document.parentStateHash !== project.currentVersion.outputStateHash
         ) {
           throw new DomainError('VERSION_CONFLICT', 'Project version changed before multicam direction commit', {
             currentVersionId: project.currentVersion.id,
@@ -397,87 +384,32 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
             storedDirectionHash: storedDirection?.directionHash ?? null,
           })
         }
-        const currentOutputs = [
-          ...(await transaction.v2ProjectProxyRenderOperation.findMany({
+        const currentOutputs = renderOutputReferences({
+          state: input.bundle.state,
+          sourceVersionId: bundle.command.baseVersionId,
+          proxies: await transaction.v2ProjectProxyRenderOperation.findMany({
             where: {
               workspaceId: bundle.command.workspaceId,
               projectId: bundle.command.projectId,
               projectVersionId: bundle.command.baseVersionId,
               operation: { status: 'succeeded', phase: 'completed' },
             },
-            select: { outputArtifactId: true },
-          })).map((output) => ({
-            artifactId: output.outputArtifactId, kind: 'proxy' as const,
-            sourceVersionId: bundle.command.baseVersionId, variantId: project.format ?? '9:16',
-          })),
-          ...(await transaction.v2ProjectFinalExportOperation.findMany({
+            select: { outputArtifactId: true, outputVariantId: true },
+          }),
+          finals: await transaction.v2ProjectFinalExportOperation.findMany({
             where: {
               workspaceId: bundle.command.workspaceId,
               projectId: bundle.command.projectId,
               projectVersionId: bundle.command.baseVersionId,
               operation: { status: 'succeeded', phase: 'completed' },
             },
-            select: { outputArtifactId: true, outputAspectRatio: true },
-          })).map((output) => ({
-            artifactId: output.outputArtifactId, kind: 'final' as const,
-            sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio,
-          })),
-        ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
+            select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
+          }),
+        })
         if (stableSerialize(currentOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) {
           throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before multicam direction commit')
         }
-        await transaction.v2EditCommand.create({
-          data: {
-            id: bundle.command.id,
-            workspaceId: bundle.command.workspaceId,
-            projectId: bundle.command.projectId,
-            baseVersionId: bundle.command.baseVersionId,
-            baseHash: bundle.command.baseHash,
-            type: bundle.command.type,
-            scopeJson: stableSerialize(bundle.command.scope),
-            payloadJson: stableSerialize(bundle.command.payload),
-            reason: bundle.command.reason,
-            actorType: bundle.command.author.type,
-            actorId: bundle.command.author.id,
-            delegatedUserId: bundle.command.author.delegatedUserId,
-            ...editCommandExternalActorAuditData(
-              bundle.authenticationAudit,
-              bundle.command.workspaceId,
-              bundle.command.author,
-            ),
-            idempotencyKey: bundle.command.idempotencyKey,
-            requestFingerprint: bundle.requestFingerprint,
-            createdAt: new Date(bundle.command.createdAt),
-          },
-        })
-        await transaction.v2ProjectSnapshot.create({
-          data: {
-            id: bundle.snapshot.id,
-            workspaceId: bundle.snapshot.workspaceId,
-            projectId: bundle.snapshot.projectId,
-            kind: bundle.snapshot.kind,
-            schemaVersion: bundle.snapshot.contentSchemaVersion,
-            contentJson: bundle.snapshot.contentJson,
-            contentHash: bundle.snapshot.contentHash,
-            createdAt: new Date(bundle.snapshot.createdAt),
-          },
-        })
-        await transaction.v2ProjectVersion.create({
-          data: {
-            id: bundle.version.id,
-            workspaceId: bundle.version.workspaceId,
-            projectId: bundle.version.projectId,
-            sequence: bundle.version.sequence,
-            parentVersionId: bundle.version.parentVersionId,
-            briefSnapshotId: bundle.version.snapshotRefs.brief!,
-            editPlanSnapshotId: bundle.version.snapshotRefs.editPlan,
-            policiesSnapshotId: bundle.version.snapshotRefs.policies,
-            baseHash: bundle.version.baseHash,
-            createdBy: bundle.version.createdBy,
-            commandId: bundle.command.id,
-            createdAt: new Date(bundle.version.createdAt),
-          },
-        })
+        await commitProjectVersionWithOutputState(transaction, input.bundle)
         const invalidations = createMulticamDirectionInvalidations({
           impact: bundle.command.payload.impact,
           createdAt: bundle.command.createdAt,
@@ -536,15 +468,16 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
             dataJson: stableSerialize(bundle.event.data),
           },
         })
+        await settleDeferredOutputGuards(transaction)
         const stored = await transaction.v2EditCommand.findUniqueOrThrow({
           where: { id: bundle.command.id },
           include: { resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true },
         })
         return hydrateStoredCommand(stored, false)
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
-        return this.commitOrReplay(bundle, serializationAttempt + 1)
+        return this.commitOrReplay(input, serializationAttempt + 1)
       }
       if (isPrismaCode(error, 'P2002')) {
         const existing = await this.findIdempotentResult({

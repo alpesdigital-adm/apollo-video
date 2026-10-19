@@ -11,7 +11,7 @@ import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
-import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
+import { projectFinalRenderInputHash, projectRenderSourcesFingerprint, sourceOutputVariantId } from './project-render-sources.ts'
 import { requirePreflightForActionService } from './preflight-gate.ts'
 import { resolveRenderColorPipelineBindings } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
@@ -50,6 +50,12 @@ export function enqueueProjectFinalExportService(dependencies: {
     projectVersionId: string
     projectVersionHash: string
     format: string
+    /**
+     * The stable State variant to export. Optional ONLY when the State has exactly one output (a State with several outputs is
+     * refused with `output-variant-required`, never guessed from `format`). `format` must then be the aspect ratio of that
+     * output's entry: it names the preset, it never selects the output.
+     */
+    variantId?: string
     approval: { approved: true; note?: string }
     actor: AuthenticatedExternalActor
     idempotencyKey: string
@@ -60,6 +66,7 @@ export function enqueueProjectFinalExportService(dependencies: {
     const projectId = validateId(request.projectId, 'projectId')
     const projectVersionId = validateId(request.projectVersionId, 'projectVersionId')
     const projectVersionHash = validateHash(request.projectVersionHash, 'projectVersionHash')
+    const variantId = request.variantId === undefined ? undefined : validateId(request.variantId, 'variantId')
     requireScope(request.actor, 'projects:write')
     const audit = materializeActorAuditContext(request.actor)
     assertDomain(audit.workspaceId === workspaceId, 'AUTH_INVALID', 'Authenticated workspace does not match export request')
@@ -85,6 +92,7 @@ export function enqueueProjectFinalExportService(dependencies: {
       projectId,
       projectVersionId,
       projectVersionHash,
+      ...(variantId === undefined ? {} : { variantId }),
     })
     if (!source) throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Current project version does not have an approved DirectorRun, QualityReport and post-render proxy review')
     assertDomain(source.format === request.format, 'INVALID_OUTPUT_SPEC', 'Final export format must match the approved project format')
@@ -130,8 +138,7 @@ export function enqueueProjectFinalExportService(dependencies: {
       repository: dependencies.colorPipelines, workspaceId, projectId, sources: source.renderSources,
     })
 
-    const inputHash = calculateVersionHash({
-      kind: 'project-final-export/v1',
+    const inputHash = projectFinalRenderInputHash({
       projectId,
       projectVersionId,
       projectVersionHash,
@@ -149,6 +156,8 @@ export function enqueueProjectFinalExportService(dependencies: {
       renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
       colorPipelineBindings,
       outputSpec: finalOutputSpec,
+      // The `final` verdict this source was read through: the exact Version, State, variant revision and materialization.
+      outputConsumptionSealHash: source.outputConsumption.sealHash,
     })
     const requestFingerprint = calculateVersionHash({
       type: 'project-final-export',
@@ -206,6 +215,8 @@ export function enqueueProjectFinalExportService(dependencies: {
           ...(approvalNote ? { note: approvalNote } : {}),
         },
         originalFileName: outputFileName ?? `${source.originalFileName.replace(/\.[^.]+$/, '').slice(0, 190)}-final-${outputSpec.width}x${outputSpec.height}.mp4`,
+        // The output the `final` verdict was read for: the operation is persisted with it, and the worker reads through it.
+        outputVariantId: sourceOutputVariantId(source),
       },
       idempotencyKey,
       requestFingerprint,

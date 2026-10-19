@@ -8,30 +8,38 @@ import type {
 } from '../../application/ports/project-final-export-repository.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { admitDirectorQualityForFinal } from '../../domain/final-caption-certification.ts'
 import { projectStatusTransitionPath } from '../../domain/project.ts'
 import { readOutputFormatPreset } from '../../domain/output-format-registry.ts'
+import { outputVariantsOf } from '../../domain/output-consumption.ts'
+import { renderOperationVariantId } from '../../domain/output-variant-references.ts'
 import type { OutputAspectRatio } from '../../domain/output-spec.ts'
+import { sourceOutputVariantId } from '../../application/project-render-sources.ts'
+import { readStoredOutputStateV3 } from './output-state-consumption.ts'
+import { legacyProxyBelongsToOutput } from './proxy-reuse-safety.ts'
 import { PrismaProjectProxyRenderRepository } from './project-proxy-render-repository.ts'
+import { parseDirectorQualityReport } from './director-run-repository.ts'
+import { PrismaPerceptionProducerEnvelopeRepository } from './perception-producer-envelope-repository.ts'
 
-function parseQuality(value: string): { status: string; score: number } {
-  try {
-    const parsed = JSON.parse(value) as unknown
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('invalid')
-    const quality = parsed as Record<string, unknown>
-    if (typeof quality.status !== 'string' || typeof quality.score !== 'number' || !Number.isFinite(quality.score)) throw new Error('invalid')
-    return { status: quality.status, score: quality.score }
-  } catch {
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored final export QualityReport is invalid')
-  }
+const FAILURE_STAGES = new Set([
+  'source-read', 'color-plan', 'color-bindings', 'lut-materialization',
+  'input-validation', 'rights', 'source-materialization', 'render',
+  'output-verification', 'output-promotion', 'artifact-persistence',
+])
+
+export function parseFinalExportQuality(input: Parameters<typeof parseDirectorQualityReport>[0]) {
+  return parseDirectorQualityReport(input)
 }
 
 export class PrismaProjectFinalExportRepository implements ProjectFinalExportRepository {
   private readonly sourceReader: PrismaProjectProxyRenderRepository
+  private readonly perceptionEvidence: PrismaPerceptionProducerEnvelopeRepository
   private readonly client: PrismaClient
 
   constructor(client: PrismaClient) {
     this.client = client
     this.sourceReader = new PrismaProjectProxyRenderRepository(client)
+    this.perceptionEvidence = new PrismaPerceptionProducerEnvelopeRepository(client)
   }
 
   private async readApproval(input: {
@@ -46,8 +54,13 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     proxyReviewHash?: string
     proxyArtifactId?: string
     outputSpecId: string
+    /** The stable State variant the export is for: the approving proxy review must be the one rendered for THIS output. */
+    outputVariantId: string
     requireCurrent: boolean
   }) {
+    // A review rendered before the column existed (no stated output) is this output's only when the Version has that one output.
+    const legacyReviews = await legacyProxyBelongsToOutput(this.client, { workspaceId: input.workspaceId,
+      projectId: input.projectId, versionId: input.projectVersionId, outputVariantId: input.outputVariantId })
     const project = await this.client.v2Project.findFirst({
       where: {
         id: input.projectId,
@@ -76,6 +89,9 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
           where: {
             projectVersionId: input.projectVersionId,
             outputSpecId: input.outputSpecId,
+            operation: legacyReviews
+              ? { OR: [{ outputVariantId: input.outputVariantId }, { outputVariantId: null }] }
+              : { outputVariantId: input.outputVariantId },
             finalAllowed: true,
             status: 'ready-for-final',
             ...(input.proxyReviewId ? { id: input.proxyReviewId } : {}),
@@ -97,14 +113,34 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     const proxyReview = project?.proxyReviews[0]
     if (!project || !version || !directorRun || !proxyReview) return null
     if (input.qualitySnapshotHash && directorRun.qualitySnapshot.contentHash !== input.qualitySnapshotHash) return null
-    const quality = parseQuality(directorRun.qualitySnapshot.contentJson)
-    if (!['approved', 'approved-with-warnings'].includes(quality.status)) return null
+    const quality = parseFinalExportQuality({
+      contentJson: directorRun.qualitySnapshot.contentJson,
+      contentHash: directorRun.qualitySnapshot.contentHash,
+      contentSchemaVersion: directorRun.qualitySnapshot.schemaVersion,
+      objective: directorRun.objective, rubricRef: directorRun.rubricRef,
+    })
+    // W65b. A global facial safety is never granted (the Director's claim stays `unknown`), so the admission is decided on what
+    // the final burns: `per-cue-caption-certification` admits the report the Director really produces when the unknown face claim
+    // is its ONLY reservation, and the worker then certifies every burned cue and omits the rest. A report that DOES claim a
+    // verified face safety keeps the original requirement: every evidence ref must be a face perception envelope of the run.
+    const admission = admitDirectorQualityForFinal(quality)
+    if (!admission.admitted) return null
+    if (admission.basis === 'verified-face-safety') {
+      for (const reference of quality.faceSafety.evidenceRefs) {
+        const evidence = await this.perceptionEvidence.read({ id: reference,
+          workspaceId: input.workspaceId, projectId: input.projectId,
+          inputVersionId: directorRun.baseVersionId, now: new Date() })
+        // OCR is source-authenticated but carries no facial clearance. No face producer is authorized yet.
+        if (!evidence || String(evidence.modality) !== 'face') return null
+      }
+    }
     return Object.freeze({
       locale: project.locale ?? 'pt-BR',
       directorRunId: directorRun.id,
       qualitySnapshotId: directorRun.qualitySnapshotId,
       qualitySnapshotHash: directorRun.qualitySnapshot.contentHash,
-      qualityStatus: quality.status as 'approved' | 'approved-with-warnings',
+      qualityStatus: quality.status as 'approved' | 'approved-with-warnings' | 'review-required',
+      admissionBasis: admission.basis,
       qualityScore: quality.score,
       proxyReviewId: proxyReview.id,
       proxyReviewHash: proxyReview.reviewHash,
@@ -117,12 +153,32 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     projectId: string
     projectVersionId: string
     projectVersionHash: string
+    variantId?: string
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null> {
-    const source = await this.sourceReader.readCurrentSource({ workspaceId: input.workspaceId, projectId: input.projectId })
-    if (!source) return null
-    const approval = await this.readApproval({ ...input, outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: true })
-    if (!source || !approval || source.projectVersionId !== input.projectVersionId) return null
+    // The final verdict first: a Version the persisted consumption does not admit for a final export (a cut copy still without
+    // perception authority, a copy never cut, ...) refuses with its published reason before any approval is looked up.
+    const source = await this.sourceReader.readCurrentSource({ workspaceId: input.workspaceId, projectId: input.projectId, purpose: 'final',
+      ...(input.variantId === undefined ? {} : { variantId: input.variantId }) })
+    if (!source || source.projectVersionId !== input.projectVersionId) return null
+    const approval = await this.readApproval({ ...input, outputVariantId: sourceOutputVariantId(source),
+      outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: true })
+    if (!approval) return null
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
+  }
+
+  /**
+   * The output a format names in one Version: the stable variant of the only entry whose sealed spec carries that aspect ratio.
+   * `null` when none does; two outputs of one ratio are refused (`output-variant-ambiguous`), exactly as everywhere else. This
+   * is how a caller whose request names a format and not a variant (an export matrix cell) addresses an output without a guess.
+   */
+  async resolveOutputVariantByFormat(input: Parameters<ProjectFinalExportRepository['resolveOutputVariantByFormat']>[0]): Promise<string | null> {
+    const stored = await readStoredOutputStateV3(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: input.projectVersionId })
+    if (!stored) return null
+    const matches = outputVariantsOf(stored.state).filter((variant) => variant.aspectRatio === input.format)
+    if (matches.length > 1) {
+      throw new DomainError('PRECONDITION_REQUIRED', 'Two outputs of this project share one aspect ratio', { reason: 'output-variant-ambiguous' })
+    }
+    return matches[0]?.variantId ?? null
   }
 
   async readImmutableApprovedSource(input: {
@@ -139,11 +195,19 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     proxyArtifactId: string
     sourceArtifactId: string
     sourceManifestId: string
+    variantId?: string
+    requireCurrent?: boolean
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null> {
-    const source = await this.sourceReader.readImmutableSource(input)
+    const source = await this.sourceReader.readImmutableSource({
+      workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.projectVersionId,
+      editPlanSnapshotId: input.editPlanSnapshotId, sourceArtifactId: input.sourceArtifactId, sourceManifestId: input.sourceManifestId,
+      purpose: 'final', ...(input.variantId === undefined ? {} : { variantId: input.variantId }),
+      ...(input.requireCurrent === true ? { requireCurrent: true } : {}),
+    })
     if (!source) return null
-    const approval = await this.readApproval({ ...input, outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: false })
-    if (!source || !approval) return null
+    const approval = await this.readApproval({ ...input, outputVariantId: sourceOutputVariantId(source),
+      outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: false })
+    if (!approval) return null
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
   }
 
@@ -200,6 +264,13 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
         transaction.v2MediaArtifactManifest.findFirst({ where: { id: input.outputManifestId, workspaceId: input.workspaceId, artifactId: input.outputArtifactId } }),
       ])
       if (!operation || !artifact || !manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed project final export is inconsistent')
+      // The invalidations this export resolves are attributed to the output it was made for: its stable State variant (a row written
+      // before the column existed is attributed by its ratio, only when exactly one output of the Version has it).
+      const outputVariantId = operation.outputVariantId ?? await (async () => {
+        const stored = await readStoredOutputStateV3(transaction, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: input.projectVersionId })
+        if (!stored) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed project final export has no sealed State')
+        return renderOperationVariantId(stored.state, { outputVariantId: null, outputAspectRatio: operation.outputAspectRatio })
+      })()
       await transaction.v2ProjectMediaAsset.upsert({
         where: { projectId_artifactId_role: { projectId: input.projectId, artifactId: input.outputArtifactId, role: 'final-output' } },
         create: {
@@ -219,7 +290,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
           projectId: input.projectId,
           resultVersionId: input.projectVersionId,
           kind: 'final',
-          variantId: operation.outputAspectRatio,
+          variantId: outputVariantId,
           resolutions: { none: { operation: { status: 'succeeded' } } },
         },
         select: { id: true },
@@ -266,6 +337,13 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       select: { projectVersionId: true },
     })
     if (!operation) return
+    // Another output's export of the same Version, queued, running or done, owns the project's status: this export failing is its
+    // own failure (the operation records it), never the project's, or the sibling's completion would find a failed project.
+    const siblings = await this.client.v2ProjectFinalExportOperation.count({
+      where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: operation.projectVersionId,
+        operationId: { not: input.operationId }, operation: { status: { notIn: ['failed', 'canceled'] } } },
+    })
+    if (siblings > 0) return
     const project = await this.client.v2Project.updateMany({
       where: {
         id: input.projectId,
@@ -308,7 +386,8 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
         input.output !== undefined ||
         !input.error ||
         input.error.code.trim().length < 1 ||
-        input.error.message.trim().length < 1
+        input.error.message.trim().length < 1 ||
+        (input.error.stage !== undefined && !FAILURE_STAGES.has(input.error.stage))
       ))
     ) throw new DomainError('PERSISTENCE_CONFLICT', 'Final export attempt is invalid')
     const validatorsJson = stableSerialize(input.validators)
@@ -332,6 +411,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
           existing.outputByteSize === (input.output ? BigInt(input.output.byteSize) : null) &&
           existing.errorCode === (input.error?.code ?? null) &&
           existing.errorMessage === (input.error?.message ?? null) &&
+          existing.errorStage === (input.error?.stage ?? null) &&
           existing.startedAt.getTime() === startedAt.getTime() &&
           existing.completedAt.getTime() === completedAt.getTime()
         if (!converged) {
@@ -368,6 +448,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
           outputByteSize: input.output ? BigInt(input.output.byteSize) : undefined,
           errorCode: input.error?.code,
           errorMessage: input.error?.message,
+          errorStage: input.error?.stage,
           startedAt,
           completedAt,
         },
@@ -437,6 +518,9 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       if (byteSize !== undefined && (!Number.isSafeInteger(byteSize) || byteSize < 1)) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Stored final export byte size is invalid')
       }
+      if (attempt.errorStage !== null && !FAILURE_STAGES.has(attempt.errorStage)) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Stored final export failure stage is invalid')
+      }
       return Object.freeze({
         attempt: attempt.attempt,
         status: attempt.status as 'failed' | 'promoted',
@@ -452,7 +536,8 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
             }
           : {}),
         ...(attempt.errorCode && attempt.errorMessage
-          ? { error: Object.freeze({ code: attempt.errorCode, message: attempt.errorMessage }) }
+          ? { error: Object.freeze({ code: attempt.errorCode, message: attempt.errorMessage,
+              ...(attempt.errorStage ? { stage: attempt.errorStage as NonNullable<ProjectFinalExportAttemptHistory['attempts'][number]['error']>['stage'] } : {}) }) }
           : {}),
         startedAt: attempt.startedAt.toISOString(),
         completedAt: attempt.completedAt.toISOString(),

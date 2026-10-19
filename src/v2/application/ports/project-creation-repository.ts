@@ -1,33 +1,5 @@
-import type { Project } from '../../domain/project.ts'
-import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
-import type { ProjectVersion } from '../../domain/project-version.ts'
-import type { PublicEvent } from '../../domain/public-event.ts'
-import type { ProjectCreationCommand } from '../../domain/project-creation-command.ts'
+import type { CreationOutputBundleRepositoryV2 } from './output-version-bundle-repository.ts'
 
-export interface ProjectCreationIdempotency {
-  id: string
-  workspaceId: string
-  clientId: string
-  key: string
-  requestFingerprint: string
-  expiresAt: string
-}
-
-export interface ProjectCreationBundle {
-  project: Project
-  version: ProjectVersion
-  snapshots: readonly ProjectSnapshot[]
-  events: readonly Readonly<PublicEvent>[]
-  auditCommand: Readonly<ProjectCreationCommand>
-  idempotency: ProjectCreationIdempotency
-}
-
-export interface ProjectCreationResult {
-  project: Project
-  version: ProjectVersion
-  replayed: boolean
-}
-
-export interface ProjectCreationRepository {
-  createOrReplay(bundle: ProjectCreationBundle): Promise<ProjectCreationResult>
-}
+/** Creation commits the complete Command2/State2/Version2 root. A bare
+ * Version or project.format is not accepted by this port. */
+export interface ProjectCreationRepository extends CreationOutputBundleRepositoryV2 {}

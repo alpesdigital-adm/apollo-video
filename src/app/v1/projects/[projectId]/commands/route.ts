@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
-import { applyEditorialCutCommandService } from '@/v2/application/apply-editorial-cut-command'
+import { applyEditorialCutCommandService, type EditorialCutEditPlan } from '@/v2/application/apply-editorial-cut-command'
 import {
   requireScope,
 } from '@/v2/application/authenticate-api-client'
@@ -38,6 +38,7 @@ interface CommandBody {
   baseVersionId?: unknown
   baseHash?: unknown
   sourceTranscriptId?: unknown
+  variantId?: unknown
   expectedTranscriptHash?: unknown
   rules?: unknown
   reason?: unknown
@@ -97,7 +98,7 @@ export async function POST(
       throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON')
     }
     if (typeof body !== 'object' || body === null) throw new DomainError('INVALID_ARGUMENT', 'Request body must be an object')
-    if (Object.keys(body).some((key) => !['type', 'baseVersionId', 'baseHash', 'sourceTranscriptId', 'expectedTranscriptHash', 'rules', 'reason', 'exclusionOverrides', 'objective', 'desiredAction'].includes(key))) {
+    if (Object.keys(body).some((key) => !['type', 'baseVersionId', 'baseHash', 'sourceTranscriptId', 'variantId', 'expectedTranscriptHash', 'rules', 'reason', 'exclusionOverrides', 'objective', 'desiredAction'].includes(key))) {
       throw new DomainError('INVALID_ARGUMENT', 'Request body contains an unsupported field')
     }
     if (typeof body.baseVersionId !== 'string' || typeof body.baseHash !== 'string') throw new DomainError('INVALID_ARGUMENT', 'baseVersionId and baseHash must be strings')
@@ -105,7 +106,7 @@ export async function POST(
     if (body.objective !== undefined && typeof body.objective !== 'string') throw new DomainError('INVALID_ARGUMENT', 'objective must be a string')
     const { projectId } = await context.params
     if (body.type === 'run-director') {
-      if (body.sourceTranscriptId !== undefined || body.expectedTranscriptHash !== undefined || body.rules !== undefined || body.exclusionOverrides !== undefined) {
+      if (body.sourceTranscriptId !== undefined || body.variantId !== undefined || body.expectedTranscriptHash !== undefined || body.rules !== undefined || body.exclusionOverrides !== undefined) {
         throw new DomainError('INVALID_ARGUMENT', 'run-director does not accept cut-rule fields')
       }
       const result = await runProjectDirectorService({
@@ -200,6 +201,7 @@ export async function POST(
       if (
         typeof body.sourceTranscriptId !== 'string' ||
         typeof body.expectedTranscriptHash !== 'string' ||
+        body.variantId !== undefined ||
         body.rules !== undefined || body.exclusionOverrides !== undefined ||
         body.objective !== undefined || body.desiredAction !== undefined
       ) throw new DomainError('INVALID_ARGUMENT', 'replace-source-transcript requires only sourceTranscriptId and expectedTranscriptHash')
@@ -249,6 +251,8 @@ export async function POST(
     }
     if (body.type !== 'remove-spoken-content') throw new DomainError('INVALID_ARGUMENT', 'type must be remove-spoken-content, replace-source-transcript or run-director')
     if (typeof body.sourceTranscriptId !== 'string') throw new DomainError('INVALID_ARGUMENT', 'sourceTranscriptId must be a string')
+    // The editorial cut targets one stable output variant; the service never infers it from the project.
+    if (typeof body.variantId !== 'string') throw new DomainError('INVALID_ARGUMENT', 'variantId must be a string')
     if (body.objective !== undefined || body.desiredAction !== undefined) throw new DomainError('INVALID_ARGUMENT', 'remove-spoken-content does not accept Director objective fields')
     if (body.expectedTranscriptHash !== undefined) throw new DomainError('INVALID_ARGUMENT', 'remove-spoken-content does not accept expectedTranscriptHash')
     const exclusionOverrides = parseExclusionOverrides(body.exclusionOverrides)
@@ -263,12 +267,15 @@ export async function POST(
       baseVersionId: body.baseVersionId,
       baseHash: body.baseHash,
       sourceTranscriptId: body.sourceTranscriptId,
+      variantId: body.variantId,
       rules: parseRules(body.rules),
       ...(exclusionOverrides ? { exclusionOverrides } : {}),
       ...(body.reason?.trim() ? { reason: body.reason.trim() } : {}),
       actor,
       idempotency: { clientId: actor.clientId, key: idempotencyKey },
     })
+    // The sealed Command3 plan only promises validated fields; the response reads the compiled editorial plan fields.
+    const editPlan = result.editPlan as unknown as Readonly<EditorialCutEditPlan>
     const proxy = await enqueueProjectProxyRenderService({
       projects: createProjectProxyRenderRepository(),
       operations: createPublicOperationRepository(),
@@ -301,15 +308,18 @@ export async function POST(
           createdAt: result.version.createdAt,
         }, { current: true, previewAvailable: false }),
         editorial: {
-          sourceTranscriptId: result.editPlan.retimedTranscript.sourceTranscriptId,
-          sourceArtifactId: result.editPlan.sources[0]!.artifactId,
-          exclusions: result.exclusions,
+          sourceTranscriptId: editPlan.retimedTranscript.sourceTranscriptId,
+          sourceArtifactId: editPlan.sources[0]!.artifactId,
+          // Only what the Command seals and validates is stated: range and the rules that matched it.
+          exclusions: result.exclusions.map(({ sourceStartSeconds, sourceEndSeconds, ruleIds }) => ({
+            sourceStartSeconds, sourceEndSeconds, ruleIds: [...ruleIds],
+          })),
           retainedSourceRanges: result.retainedSourceRanges,
-          outputDurationFrames: result.editPlan.durationFrames,
-          fps: result.editPlan.fps,
-          automaticZoom: result.editPlan.movementPolicy.automaticZoom,
-          protectedOpeningFrames: result.editPlan.movementPolicy.protectedOpeningFrames,
-          subtitleFaceProtection: result.editPlan.subtitlePolicy.faceProtection,
+          outputDurationFrames: editPlan.durationFrames,
+          fps: editPlan.fps,
+          automaticZoom: editPlan.movementPolicy.automaticZoom,
+          protectedOpeningFrames: editPlan.movementPolicy.protectedOpeningFrames,
+          subtitleFaceProtection: editPlan.subtitlePolicy.faceProtection,
           impact: result.impact,
           invalidations: result.invalidations,
         },

@@ -52,5 +52,5 @@ test('T-FR-translation-preflight PostgreSQL atomically consumes one bound cost c
     assert.equal((await prisma.v2LocalizationRun.findUniqueOrThrow({ where: { id: poisonQueued.run.id } })).status, 'failed')
     assert.equal(await prisma.v2LocalizationRun.count({ where: { workspaceId: poisonFixture.workspaceId, status: 'requested' } }), 0)
   } catch (error) { testFailure = error; throw error }
-  finally { try { for (const owned of [poisonFixture, fixture]) if (owned) { await prisma.v2LocalizationRunRevision.deleteMany({ where: { workspaceId: owned.workspaceId } }); await prisma.v2LocalizationRun.deleteMany({ where: { workspaceId: owned.workspaceId } }); await prisma.v2LocalizationTranslationPreflight.deleteMany({ where: { workspaceId: owned.workspaceId } }); await owned.cleanup() } } catch (cleanupError) { if (testFailure) throw new AggregateError([testFailure, cleanupError], 'Localization preflight proof and cleanup both failed'); throw cleanupError } finally { await prisma.$disconnect() } }
+  finally { await prisma.$disconnect() }
 })

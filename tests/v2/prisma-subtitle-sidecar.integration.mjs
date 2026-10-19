@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
@@ -11,17 +12,17 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  * compose (`npm run infra:postgres:up`) provides one, and there the test runs
  * for real: it proves the migration, the foreign keys, the lineage uniqueness
  * and the idempotency uniqueness that the in-memory pipeline proof cannot.
+ *
+ * The project is the sealed world the product builds (creation Command, then one explicit
+ * output variant: see helpers/pg-output-world.mjs). Sealed rows are append-only, so every
+ * identity is unique to this run and nothing is cleaned up.
  */
-const WORKSPACE = 'subtitle-sidecar-integration-workspace'
-const PROJECT = 'subtitle-sidecar-integration-project'
-const VERSION = 'subtitle-sidecar-integration-version'
-const OUTPUT_ARTIFACT = 'subtitle-sidecar-integration-output'
-const SIDECAR_ARTIFACT = 'subtitle-sidecar-integration-file'
 const sha = (character) => character.repeat(64)
 const createdAt = new Date('2026-08-14T09:00:00.000Z')
 
+// The generated V2 client reads V2_DATABASE_URL, so that is the variable that says a database is configured.
 async function reachableClient() {
-  if (!process.env.DATABASE_URL) return null
+  if (!process.env.V2_DATABASE_URL) return null
   const client = new PrismaClient()
   try {
     await client.$queryRaw`SELECT 1`
@@ -32,80 +33,55 @@ async function reachableClient() {
   }
 }
 
-async function cleanup(client) {
-  await client.v2ProjectSubtitleSidecar.deleteMany({ where: { workspaceId: WORKSPACE } })
-  await client.v2ProjectVersion.deleteMany({ where: { workspaceId: WORKSPACE } })
-  await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId: WORKSPACE } })
-  await client.v2Project.deleteMany({ where: { workspaceId: WORKSPACE } })
-  await client.v2MediaArtifact.deleteMany({ where: { workspaceId: WORKSPACE } })
-  await client.v2Workspace.deleteMany({ where: { id: WORKSPACE } })
+function identities() {
+  const run = randomUUID().replaceAll('-', '').slice(0, 12)
+  return Object.freeze({
+    run,
+    workspace: `subtitle-sidecar-int-${run}-workspace`,
+    project: `subtitle-sidecar-int-${run}-project`,
+    client: `subtitle-sidecar-int-${run}-client`,
+    outputArtifact: `subtitle-sidecar-int-${run}-output`,
+    sidecarArtifact: `subtitle-sidecar-int-${run}-file`,
+  })
 }
 
-async function seed(client) {
-  await client.v2Workspace.create({
-    data: {
-      id: WORKSPACE, name: 'Subtitle sidecar integration', status: 'active',
-      createdAt, updatedAt: createdAt,
-    },
-  })
-  await client.v2Project.create({
-    data: {
-      id: PROJECT, workspaceId: WORKSPACE, name: 'Sidecar E2E', status: 'reviewing-proxy',
-      objective: 'discovery', format: '9:16', locale: 'pt-BR',
-      createdByType: 'api-client', createdById: 'client-sidecar',
-      createdAt, updatedAt: createdAt,
-    },
-  })
-  const snapshots = [
-    { id: `${VERSION}-brief`, kind: 'brief' },
-    { id: `${VERSION}-policies`, kind: 'policies' },
-    { id: `${VERSION}-edit-plan`, kind: 'edit-plan' },
-  ]
-  for (const snapshot of snapshots) {
-    await client.v2ProjectSnapshot.create({
-      data: {
-        id: snapshot.id, workspaceId: WORKSPACE, projectId: PROJECT, kind: snapshot.kind,
-        schemaVersion: 1, contentJson: '{}', contentHash: sha('c'), createdAt,
-      },
-    })
-  }
-  await client.v2ProjectVersion.create({
-    data: {
-      id: VERSION, workspaceId: WORKSPACE, projectId: PROJECT, sequence: 1,
-      briefSnapshotId: snapshots[0].id, editPlanSnapshotId: snapshots[2].id,
-      policiesSnapshotId: snapshots[1].id, baseHash: sha('d'),
-      createdBy: 'client-sidecar', createdAt,
-    },
-  })
+async function seed(client, ids) {
+  const { seedReviewProject } = await import('./helpers/review-edit-world.mjs')
+  const { testActor } = await import('./helpers/pg-output-world.mjs')
+  const actor = testActor({ workspaceId: ids.workspace, clientId: ids.client, credentialId: `${ids.client}-credential`,
+    environment: 'production' })
+  const world = await seedReviewProject(client, { workspaceId: ids.workspace, actor, prefix: `subtitle-sidecar-${ids.run}`,
+    ids: { project: ids.project }, name: 'Sidecar E2E', aspectRatio: '9:16', status: 'reviewing-proxy', at: () => createdAt })
   for (const [id, key, checksum, mediaType, container] of [
-    [OUTPUT_ARTIFACT, 'proxies/output.mp4', sha('e'), 'video', 'mp4'],
-    [SIDECAR_ARTIFACT, 'subtitles/sidecar.srt', sha('a'), 'data', 'srt'],
+    [ids.outputArtifact, 'proxies/output.mp4', sha('e'), 'video', 'mp4'],
+    [ids.sidecarArtifact, 'subtitles/sidecar.srt', sha('a'), 'data', 'srt'],
   ]) {
     await client.v2MediaArtifact.create({
       data: {
-        id, workspaceId: WORKSPACE, artifactKey: key, sha256: checksum, byteSize: 106n,
+        id, workspaceId: ids.workspace, artifactKey: `${ids.run}/${key}`, sha256: checksum, byteSize: 106n,
         mediaType, container, status: 'available', createdAt,
       },
     })
   }
+  return world
 }
 
-function record(overrides = {}) {
+function record(ids, world, overrides = {}) {
   return {
-    id: 'subtitle-sidecar-integration-1',
-    workspaceId: WORKSPACE,
-    projectId: PROJECT,
-    projectVersionId: VERSION,
+    id: `subtitle-sidecar-integration-${ids.run}-1`,
+    workspaceId: ids.workspace,
+    projectId: ids.project,
+    projectVersionId: world.head.version.id,
     variantId: '9:16',
     outputKind: 'proxy',
-    outputArtifactId: OUTPUT_ARTIFACT,
+    outputArtifactId: ids.outputArtifact,
     outputManifestId: 'manifest-output-1',
     outputSha256: sha('e'),
     format: 'srt',
     locale: 'pt-BR',
-    artifactId: SIDECAR_ARTIFACT,
+    artifactId: ids.sidecarArtifact,
     manifestId: 'manifest-sidecar-1',
-    artifactKey: 'subtitles/sidecar.srt',
+    artifactKey: `${ids.run}/subtitles/sidecar.srt`,
     sha256: sha('a'),
     byteSize: 106,
     encoding: 'utf-8-bom',
@@ -113,7 +89,7 @@ function record(overrides = {}) {
     lineageHash: sha('b'),
     renderElementMapHash: sha('f'),
     renderInputHash: sha('9'),
-    editPlanSnapshotId: `${VERSION}-edit-plan`,
+    editPlanSnapshotId: world.head.editPlanSnapshot.id,
     createdAt: createdAt.toISOString(),
     ...overrides,
   }
@@ -131,13 +107,14 @@ test('T-FR-175 subtitle sidecars persist with real lineage, replay and idempoten
     '../../src/v2/infrastructure/prisma/subtitle-sidecar-repository.ts'
   )
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
+  const ids = identities()
   try {
-    await cleanup(client)
-    await seed(client)
+    const world = await seed(client, ids)
     const repository = new PrismaSubtitleSidecarRepository(client)
+    const base = (overrides) => record(ids, world, overrides)
 
     const first = await repository.persistOrReplay({
-      record: record(), idempotencyKey: 'idem-1', requestFingerprint: sha('1'),
+      record: base(), idempotencyKey: `${ids.run}-idem-1`, requestFingerprint: sha('1'),
     })
     assert.equal(first.replayed, false)
     assert.equal(first.record.sha256, sha('a'))
@@ -145,66 +122,65 @@ test('T-FR-175 subtitle sidecars persist with real lineage, replay and idempoten
 
     // Same lineage, different key: one row, replayed.
     const sameLineage = await repository.persistOrReplay({
-      record: record(), idempotencyKey: 'idem-2', requestFingerprint: sha('2'),
+      record: base(), idempotencyKey: `${ids.run}-idem-2`, requestFingerprint: sha('2'),
     })
     assert.equal(sameLineage.replayed, true)
     assert.equal(sameLineage.record.id, first.record.id)
 
     // Same key, same fingerprint: replay.
     const replay = await repository.persistOrReplay({
-      record: record(), idempotencyKey: 'idem-1', requestFingerprint: sha('1'),
+      record: base(), idempotencyKey: `${ids.run}-idem-1`, requestFingerprint: sha('1'),
     })
     assert.equal(replay.replayed, true)
 
     const idempotent = await repository.findIdempotent({
-      workspaceId: WORKSPACE, projectId: PROJECT, idempotencyKey: 'idem-1',
+      workspaceId: ids.workspace, projectId: ids.project, idempotencyKey: `${ids.run}-idem-1`,
     })
     assert.equal(idempotent.requestFingerprint, sha('1'))
     assert.equal(idempotent.record.id, first.record.id)
 
     // A different derivation is a different row, never an overwrite.
     const vtt = await repository.persistOrReplay({
-      record: record({
-        id: 'subtitle-sidecar-integration-2', format: 'vtt', lineageHash: sha('7'),
+      record: base({
+        id: `subtitle-sidecar-integration-${ids.run}-2`, format: 'vtt', lineageHash: sha('7'),
       }),
-      idempotencyKey: 'idem-3', requestFingerprint: sha('3'),
+      idempotencyKey: `${ids.run}-idem-3`, requestFingerprint: sha('3'),
     })
     assert.equal(vtt.replayed, false)
 
     const listed = await repository.list({
-      workspaceId: WORKSPACE, projectId: PROJECT, limit: 50,
+      workspaceId: ids.workspace, projectId: ids.project, limit: 50,
     })
     assert.equal(listed.length, 2)
     const onlySrt = await repository.list({
-      workspaceId: WORKSPACE, projectId: PROJECT, format: 'srt', limit: 50,
+      workspaceId: ids.workspace, projectId: ids.project, format: 'srt', limit: 50,
     })
     assert.equal(onlySrt.length, 1)
     assert.equal(onlySrt[0].format, 'srt')
 
     // Another workspace never sees the rows.
     const foreign = await repository.list({
-      workspaceId: 'another-workspace', projectId: PROJECT, limit: 50,
+      workspaceId: 'another-workspace', projectId: ids.project, limit: 50,
     })
     assert.equal(foreign.length, 0)
 
     // The row is bound to real artifacts: an unknown artifact cannot be stored.
     await assert.rejects(() => repository.persistOrReplay({
-      record: record({
-        id: 'subtitle-sidecar-integration-3',
+      record: base({
+        id: `subtitle-sidecar-integration-${ids.run}-3`,
         lineageHash: sha('8'),
         artifactId: 'artifact-that-does-not-exist',
       }),
-      idempotencyKey: 'idem-4',
+      idempotencyKey: `${ids.run}-idem-4`,
       requestFingerprint: sha('4'),
     }))
 
     assert.equal(
-      await client.v2ProjectSubtitleSidecar.count({ where: { workspaceId: WORKSPACE } }),
+      await client.v2ProjectSubtitleSidecar.count({ where: { workspaceId: ids.workspace } }),
       2,
     )
     assert.equal(typeof DomainError, 'function')
   } finally {
-    await cleanup(client).catch(() => undefined)
     await client.$disconnect()
   }
 })

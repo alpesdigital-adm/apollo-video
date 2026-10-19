@@ -1,13 +1,25 @@
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
-const workspaceId = 'master-asset-int-workspace'
-const foreignWorkspaceId = 'master-asset-int-foreign'
-const clientId = 'master-asset-int-client'
-const credentialId = 'master-asset-int-credential'
+// Sealed rows are append-only and nothing here deletes them, so every identity carries this invocation's RUN: the suite
+// runs beside other suites (and again) in one database.
+const RUN = randomUUID().replaceAll('-', '').slice(0, 10)
+const workspaceId = `master-asset-int-workspace-${RUN}`
+const foreignWorkspaceId = `master-asset-int-foreign-${RUN}`
+const clientId = `master-asset-int-client-${RUN}`
+const credentialId = `master-asset-int-credential-${RUN}`
+const profileId = `master-presenter-${RUN}`
+const providerJobId = `master-provider-job-${RUN}`
+const planId = `master-plan-${RUN}`
+const planVersionId = `master-plan-v1-${RUN}`
+const blockId = `master-block-${RUN}`
+const masterId = `master-1-${RUN}`
+const secondMasterId = `master-2-${RUN}`
+const thirdMasterId = `master-3-${RUN}`
+const segmentBlockIds = [`block-1-${RUN}`, `block-2-${RUN}`]
 const hash = (character) => character.repeat(64)
 const at = (second) => new Date(Date.parse('2029-04-01T00:00:00.000Z') + second * 1_000).toISOString()
 
@@ -17,44 +29,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
 }, async () => {
   const client = new PrismaClient({ datasources: { db: { url: process.env.V2_DATABASE_URL } } })
 
-  const cleanupWorkspace = async (id) => {
-    await client.v2SyntheticCriticIssue.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticCriticMeasurement.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticCriticEvaluator.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticCriticReport.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId: id }, data: { currentVersionId: null } })
-    await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticSpeechSegment.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticMasterArtifact.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticMasterAsset.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderJob.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId: id } })
-    await client.v2MediaArtifact.updateMany({ where: { workspaceId: id }, data: { currentRightsSnapshotId: null, rightsRevision: 0 } })
-    await client.v2AssetRightsChange.deleteMany({ where: { workspaceId: id } })
-    await client.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId: id } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: id } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId: id } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId: id } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId: id } })
-    await client.v2Project.deleteMany({ where: { workspaceId: id } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId: id } })
-    await client.v2Workspace.deleteMany({ where: { id } })
-  }
-  const cleanup = async () => {
-    await cleanupWorkspace(workspaceId)
-    await cleanupWorkspace(foreignWorkspaceId)
-  }
-
   try {
-    await cleanup()
     const { createProjectService } = await import('../../src/v2/application/create-project.ts')
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
@@ -69,7 +44,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
     const { PrismaMediaArtifactRepository } = await import('../../src/v2/infrastructure/prisma/media-artifact-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
     const { PrismaSyntheticMasterAssetRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-master-asset-repository.ts')
     const { PrismaSyntheticCriticReportRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-report-repository.ts')
@@ -95,21 +70,20 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     const auditContext = materializeActorAuditContext(actor)
 
     let entity = 0
-    let event = 0
     const project = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client), clock: () => new Date(at(0)),
-      createId: (kind) => `${kind}-master-${++entity}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(700_000 + ++event).padStart(12, '0')}`,
-    })({ workspaceId, name: 'Master persistido', objective: 'awareness', format: '9:16', actor, idempotency: { clientId, key: 'master-project' } })
-    const projectId = project.project.id
-    const projectVersionId = project.version.id
+      repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(at(0)),
+      createId: (kind) => `${kind}-master-${RUN}-${++entity}`,
+      createEventId: randomUUID,
+    })({ workspaceId, name: 'Master persistido', objective: 'awareness', actor, idempotencyKey: 'master-project' })
+    const projectId = project.projectAtCreation.id
+    const projectVersionId = project.creationVersion.id
 
     // Media artifacts the master points at, plus the consent evidence.
     const artifactIds = {
-      'provider-original': 'master-original',
-      'normalized-video': 'master-normalized',
-      'final-audio': 'master-audio',
-      alignment: 'master-alignment',
+      'provider-original': `master-original-${RUN}`,
+      'normalized-video': `master-normalized-${RUN}`,
+      'final-audio': `master-audio-${RUN}`,
+      alignment: `master-alignment-${RUN}`,
     }
     const artifactShas = { 'provider-original': hash('a'), 'normalized-video': hash('b'), 'final-audio': hash('c'), alignment: hash('d') }
     const artifactMedia = { 'provider-original': ['video', 'mp4'], 'normalized-video': ['video', 'mp4'], 'final-audio': ['audio', 'wav'], alignment: ['data', 'json'] }
@@ -121,15 +95,17 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
         },
       })
     }
+    const consentEvidenceId = `master-consent-evidence-${RUN}`
+    const outputSpeechEvidenceId = `master-output-speech-evidence-${RUN}`
     await client.v2MediaArtifact.create({
       data: {
-        id: 'master-consent-evidence', workspaceId, artifactKey: 'master/consent.json', sha256: hash('e'),
+        id: consentEvidenceId, workspaceId, artifactKey: 'master/consent.json', sha256: hash('e'),
         byteSize: 512n, mediaType: 'data', container: 'json', status: 'available', createdAt: new Date(at(0)),
       },
     })
     await client.v2MediaArtifact.create({
       data: {
-        id: 'master-output-speech-evidence', workspaceId, artifactKey: 'master/output-speech.json', sha256: hash('9'),
+        id: outputSpeechEvidenceId, workspaceId, artifactKey: 'master/output-speech.json', sha256: hash('9'),
         byteSize: 512n, mediaType: 'data', container: 'json', status: 'available', createdAt: new Date(at(0)),
       },
     })
@@ -139,12 +115,12 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
       artifacts: new PrismaMediaArtifactRepository(client),
       clock: () => new Date(at(0)),
     })({
-      workspaceId, profileId: 'master-presenter', version: 1, actorIdentityId: 'master-identity',
+      workspaceId, profileId, version: 1, actorIdentityId: 'master-identity',
       avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_master' },
       voice: { id: 'voice_master', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {
-        id: 'master-consent-v1', evidenceArtifactId: 'master-consent-evidence', granted: true,
+        id: `master-consent-v1-${RUN}`, evidenceArtifactId: consentEvidenceId, granted: true,
         allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
         allowedOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
       },
@@ -156,7 +132,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     const rightsRepository = new PrismaAssetRightsRepository(client)
     for (const [index, artifactId] of Object.values(artifactIds).entries()) {
       const snapshot = createAssetRightsSnapshot({
-        id: `master-rights-${index + 1}`, workspaceId, artifactId, sequence: 1,
+        id: `master-rights-${RUN}-${index + 1}`, workspaceId, artifactId, sequence: 1,
         draft: {
           status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
           allowedSyntheticOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
@@ -173,7 +149,6 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     // An approved provider job, sealed by its critic result hash: the fixture
     // the repository must keep verifying at commit time.
     let criticResultHash = hash('f')
-    const providerJobId = 'master-provider-job'
     await client.v2ProviderJob.create({
       data: {
         id: providerJobId, workspaceId, projectId, originProjectVersionId: projectVersionId,
@@ -193,17 +168,17 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     // opened, instead of at an id derived from the provider job.
     await client.v2SyntheticScriptPlan.create({
       data: {
-        id: 'master-plan', workspaceId, projectId, schemaVersion: 'synthetic-script-plan/v1',
+        id: planId, workspaceId, projectId, schemaVersion: 'synthetic-script-plan/v1',
         requestFingerprint: hash('1'), idempotencyKey: 'master-plan-key', createdByClientId: clientId,
         actorContextHash: auditContext.contextHash, createdAt: new Date(at(0)), updatedAt: new Date(at(0)),
       },
     })
     await client.v2SyntheticScriptPlanVersion.create({
       data: {
-        id: 'master-plan-v1', planId: 'master-plan', workspaceId, projectId, sequence: 1,
+        id: planVersionId, planId, workspaceId, projectId, sequence: 1,
         projectVersionId, profileSnapshotId, schemaVersion: 'synthetic-script-plan-version/v1',
         locale: 'pt-BR', segmentationVersion: 'synthetic-script-segmentation/v1',
-        scriptHash: hash('2'), commandType: 'create-plan', blockSequenceJson: '["master-block"]',
+        scriptHash: hash('2'), commandType: 'create-plan', blockSequenceJson: JSON.stringify([blockId]),
         impactJson: '{}', commandImpactHash: hash('3'), planVersionHash: hash('4'),
         requestFingerprint: hash('1'), idempotencyKey: 'master-plan-version-key',
         createdByClientId: clientId, actorContextHash: auditContext.contextHash, createdAt: new Date(at(0)),
@@ -211,16 +186,16 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     })
     await client.v2SyntheticScriptBlock.create({
       data: {
-        id: 'master-block', workspaceId, projectId, planId: 'master-plan',
+        id: blockId, workspaceId, projectId, planId,
         schemaVersion: 'synthetic-script-block/v1', exactText: 'Primeira ideia do roteiro.',
         normalizedTextHash: hash('5'), locale: 'pt-BR', occurrence: 1,
-        createdInVersionId: 'master-plan-v1', originKind: 'initial-segmentation',
+        createdInVersionId: planVersionId, originKind: 'initial-segmentation',
         blockHash: hash('6'), createdAt: new Date(at(0)),
       },
     })
     const criticMeasured = (dimension, evaluatorId, value, unit, threshold) => ({
       dimension, status: 'measured', evaluatorId, value, unit, threshold,
-      confidence: 1, evidenceRefs: ['artifact://master-original'], range: null, note: null,
+      confidence: 1, evidenceRefs: [`artifact://${artifactIds['provider-original']}`], range: null, note: null,
     })
     const criticUnavailable = (dimension, note) => ({
       dimension, status: 'unavailable', evaluatorId: null, value: null, unit: null,
@@ -241,12 +216,12 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
       speechEvidence: { kind: 'controlled', evaluatorId: 'controlled-output-speech', evaluatorVersion: '1.0.0', outputTranscriptHash: reportScriptHash, observedIdentityRef: 'avatar_master' },
     })
     const criticReport = createSyntheticCriticReport({
-      id: 'master-critic-report-1', workspaceId, projectId, blockId: 'master-block',
+      id: `master-critic-report-1-${RUN}`, workspaceId, projectId, blockId,
       providerJobId,
       capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
       artifactId: artifactIds['normalized-video'], artifactSha256: artifactShas['normalized-video'],
       audioArtifactId: null, alignmentArtifactId: artifactIds.alignment,
-      outputSpeechEvidence, outputSpeechEvidenceArtifactId: 'master-output-speech-evidence',
+      outputSpeechEvidence, outputSpeechEvidenceArtifactId: outputSpeechEvidenceId,
       scriptHash: reportScriptHash, profileSnapshotId, expectedIdentityRef: 'avatar_master',
       expectationHash: hash('8'),
       evaluationContextHash: createHash('sha256')
@@ -284,8 +259,8 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
 
     const repository = new PrismaSyntheticMasterAssetRepository(client)
     const masterInput = (overrides = {}) => createSyntheticMasterAsset({
-      id: 'master-1', workspaceId, projectId, projectVersionId,
-      profileId: 'master-presenter', profileSnapshotId, profileVersion: 1,
+      id: masterId, workspaceId, projectId, projectVersionId,
+      profileId, profileSnapshotId, profileVersion: 1,
       consentSnapshotHash: hash('5'), authorizationHash: hash('2'), rightsSnapshotId: null,
       artifacts: Object.entries(artifactIds).map(([role, id]) => ({
         role, artifactId: id, sha256: artifactShas[role], byteSize: 4_096,
@@ -317,7 +292,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     })
     assert.equal(created.replayed, false)
     assert.equal(created.value.master.masterHash.length, 64)
-    assert.equal(await client.v2SyntheticMasterArtifact.count({ where: { workspaceId, masterId: 'master-1' } }), 4)
+    assert.equal(await client.v2SyntheticMasterArtifact.count({ where: { workspaceId, masterId } }), 4)
 
     // 2. Replay is idempotent and byte-equivalent, without a second row.
     const replay = await repository.create({
@@ -330,7 +305,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     assert.equal(await client.v2SyntheticMasterAsset.count({ where: { workspaceId } }), 1)
 
     // 3. Reads are content-addressed and job-addressed.
-    const read = await repository.read({ workspaceId, masterId: 'master-1' })
+    const read = await repository.read({ workspaceId, masterId })
     assert.deepEqual(read.master, created.value.master)
     assert.deepEqual((await repository.findByProviderJob({ workspaceId, providerJobId })).master, created.value.master)
     assert.deepEqual((await repository.findByMasterHash({ workspaceId, masterHash: created.value.master.masterHash })).master, created.value.master)
@@ -351,7 +326,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     //    fails closed before anything is written.
     await assert.rejects(
       repository.create({
-        master: masterInput({ id: 'master-2', scriptText: 'Outro roteiro completamente diferente.' }),
+        master: masterInput({ id: secondMasterId, scriptText: 'Outro roteiro completamente diferente.' }),
         profileSnapshotHash: hash('c'), criticResultHash,
         authorityScope: { use: 'ads', market: 'BRA', locale: 'pt-BR' },
         requestFingerprint: hash('9'), idempotencyKey: 'master-seal-3', authenticationAudit: auditContext,
@@ -360,7 +335,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     )
     await assert.rejects(
       repository.create({
-        master: masterInput({ id: 'master-3', scriptText: 'Mais um roteiro diferente ainda.' }),
+        master: masterInput({ id: thirdMasterId, scriptText: 'Mais um roteiro diferente ainda.' }),
         profileSnapshotHash, criticResultHash: hash('b'),
         authorityScope: { use: 'ads', market: 'BRA', locale: 'pt-BR' },
         requestFingerprint: hash('9'), idempotencyKey: 'master-seal-4', authenticationAudit: auditContext,
@@ -370,23 +345,23 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     assert.equal(await client.v2SyntheticMasterAsset.count({ where: { workspaceId } }), 1)
 
     // 6. Cross-workspace invisibility.
-    assert.equal(await repository.read({ workspaceId: foreignWorkspaceId, masterId: 'master-1' }), null)
+    assert.equal(await repository.read({ workspaceId: foreignWorkspaceId, masterId }), null)
     assert.equal(await repository.findByProviderJob({ workspaceId: foreignWorkspaceId, providerJobId }), null)
     assert.equal((await repository.list({ workspaceId: foreignWorkspaceId, limit: 10 })).length, 0)
 
     // 7. Hydration fails closed when a row is edited behind the application.
-    await client.v2SyntheticMasterAsset.update({ where: { id: 'master-1' }, data: { costMinorUnits: 1 } })
-    await assert.rejects(repository.read({ workspaceId, masterId: 'master-1' }), /failed integrity validation/)
-    await client.v2SyntheticMasterAsset.update({ where: { id: 'master-1' }, data: { costMinorUnits: 150 } })
-    assert.ok(await repository.read({ workspaceId, masterId: 'master-1' }))
+    await client.v2SyntheticMasterAsset.update({ where: { id: masterId }, data: { costMinorUnits: 1 } })
+    await assert.rejects(repository.read({ workspaceId, masterId }), /failed integrity validation/)
+    await client.v2SyntheticMasterAsset.update({ where: { id: masterId }, data: { costMinorUnits: 150 } })
+    assert.ok(await repository.read({ workspaceId, masterId }))
 
     await client.v2SyntheticMasterArtifact.update({
-      where: { masterId_role: { masterId: 'master-1', role: 'final-audio' } },
+      where: { masterId_role: { masterId, role: 'final-audio' } },
       data: { sha256: hash('9') },
     })
-    await assert.rejects(repository.read({ workspaceId, masterId: 'master-1' }), /final-audio artifact was altered/)
+    await assert.rejects(repository.read({ workspaceId, masterId }), /final-audio artifact was altered/)
     await client.v2SyntheticMasterArtifact.update({
-      where: { masterId_role: { masterId: 'master-1', role: 'final-audio' } },
+      where: { masterId_role: { masterId, role: 'final-audio' } },
       data: { sha256: artifactShas['final-audio'] },
     })
 
@@ -412,20 +387,20 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
       createId: ({ blockId, occurrence }) => `segment-${blockId}-${occurrence}`,
     })
     const blocks = [
-      { blockId: 'block-1', exactText: 'Primeira ideia do roteiro.', occurrence: 1 },
-      { blockId: 'block-2', exactText: 'Segunda ideia bem forte.', occurrence: 1 },
+      { blockId: segmentBlockIds[0], exactText: 'Primeira ideia do roteiro.', occurrence: 1 },
+      { blockId: segmentBlockIds[1], exactText: 'Segunda ideia bem forte.', occurrence: 1 },
     ]
-    const catalogued = await catalogSegments({ workspaceId, masterId: 'master-1', blocks, actor })
+    const catalogued = await catalogSegments({ workspaceId, masterId, blocks, actor })
     assert.equal(catalogued.replayed, false)
     assert.equal(catalogued.segments.length, 2)
     assert.deepEqual(catalogued.segments.map((segment) => [segment.startMs, segment.endMs]), [[0, 1_900], [2_300, 3_900]])
-    assert.equal(catalogued.segments[0].audioArtifactId, 'master-audio')
-    assert.equal(catalogued.segments[0].videoArtifactId, 'master-normalized')
+    assert.equal(catalogued.segments[0].audioArtifactId, artifactIds['final-audio'])
+    assert.equal(catalogued.segments[0].videoArtifactId, artifactIds['normalized-video'])
     assert.equal(catalogued.segments[0].identity.profileVersion, 1)
     assert.equal(catalogued.segments[0].masterHash, created.value.master.masterHash)
 
     // Re-cataloguing the same master returns the stored rows, never duplicates.
-    const recatalogued = await catalogSegments({ workspaceId, masterId: 'master-1', blocks, actor })
+    const recatalogued = await catalogSegments({ workspaceId, masterId, blocks, actor })
     assert.equal(recatalogued.replayed, true)
     assert.deepEqual(recatalogued.segments, catalogued.segments)
     assert.equal(await client.v2SyntheticSpeechSegment.count({ where: { workspaceId } }), 2)
@@ -435,13 +410,12 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     assert.equal((await segmentRepository.search({ workspaceId: foreignWorkspaceId, limit: 10 })).length, 0)
 
     // A segment row edited behind the application fails closed.
-    await client.v2SyntheticSpeechSegment.update({ where: { id: 'segment-block-1-1' }, data: { endMs: 2_100 } })
-    await assert.rejects(segmentRepository.read({ workspaceId, segmentId: 'segment-block-1-1' }), /hash does not match/)
+    await client.v2SyntheticSpeechSegment.update({ where: { id: `segment-${segmentBlockIds[0]}-1` }, data: { endMs: 2_100 } })
+    await assert.rejects(segmentRepository.read({ workspaceId, segmentId: `segment-${segmentBlockIds[0]}-1` }), /hash does not match/)
 
-    await client.v2SyntheticMasterAsset.update({ where: { id: 'master-1' }, data: { masterJson: '{not json' } })
-    await assert.rejects(repository.read({ workspaceId, masterId: 'master-1' }), /JSON is invalid/)
+    await client.v2SyntheticMasterAsset.update({ where: { id: masterId }, data: { masterJson: '{not json' } })
+    await assert.rejects(repository.read({ workspaceId, masterId }), /JSON is invalid/)
   } finally {
-    await cleanup()
     await client.$disconnect()
   }
 })

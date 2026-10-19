@@ -7,6 +7,7 @@ import { createColorPipelineCompilationRepository, createProjectProxyRenderRepos
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { presentPublicOperation, presentSuccess } from '@/v2/public-api/presenters'
+import { parseProxyRenderBody } from '@/v2/public-api/project-output-variant-request-contract'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,12 +17,15 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const actor = await authenticateExternalRequest(request)
     requireScope(actor, 'projects:write')
     const { projectId } = await context.params
+    // The optional body names the output (its stable State variant id); an empty body is the single-output request.
+    const body = parseProxyRenderBody(await request.text())
     const result = await enqueueProjectProxyRenderService({
       projects: createProjectProxyRenderRepository(), operations: createPublicOperationRepository(),
       colorPipelines: createColorPipelineCompilationRepository(),
       clock: () => new Date(), createId: (kind) => `${kind}-${randomUUID()}`,
     })({
       workspaceId: actor.workspaceId, projectId, actor,
+      ...(body.variantId === undefined ? {} : { variantId: body.variantId }),
       idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '',
       traceId: requestId,
     })

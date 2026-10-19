@@ -14,6 +14,7 @@ import {
   type DirectedSubtitleCue,
 } from "../domain/director-run.ts";
 import { calculateRenderablePlanHash } from "./renderable-edit-plan.ts";
+import { renderableCompileVersionId } from "./compile-renderable-plan-version.ts";
 
 export const LOCALIZATION_MEDIA_COMPILER_VERSION =
   "localization-media-compiler/2026-09-08-v1" as const;
@@ -38,6 +39,8 @@ export interface CompileLocalizationMediaInput {
   }>[];
   format: string;
   planId: string;
+  /** The media run this plan answers: the derivation the renderable plan is stored under. */
+  runId: string;
   createdAt: string;
 }
 
@@ -164,9 +167,31 @@ export function compileLocalizationMedia(input: CompileLocalizationMediaInput) {
     clips: localizedClips,
     musicTracks: basePlan.audioTracks,
   });
+  // The renderable plan is born with the Version that publishes it, a child of the head the canonical script was approved on. The
+  // plan document carries that Version and its hash covers the document, so the identity of the compile (the derivation it is
+  // stored under) is fixed from the inputs that decide the cut and cannot include the plan's own hash.
+  const lineageHash = calculateCanonicalHash({
+    compilerVersion: LOCALIZATION_MEDIA_COMPILER_VERSION,
+    runId: input.runId,
+    variantHash: variant.variantHash,
+    canonicalContentHash: canonical.contentHash,
+    basePlanId: basePlan.id,
+    planId: input.planId,
+    audioSha256: audio.sha256,
+    alignmentSha256: audio.alignmentSha256,
+    format: input.format,
+  });
   const planBody: DirectedEditPlan = {
     ...basePlan,
     id: input.planId,
+    projectVersionId: renderableCompileVersionId({
+      workspaceId: variant.workspaceId,
+      projectId: variant.projectId,
+      origin: "localization",
+      sourceId: input.runId,
+      sourceHash: lineageHash,
+      baseVersionId: basePlan.projectVersionId,
+    }),
     durationFrames,
     videoTracks: Object.freeze([
       { ...basePlan.videoTracks[0]!, clips: Object.freeze(localizedClips) },
@@ -191,6 +216,7 @@ export function compileLocalizationMedia(input: CompileLocalizationMediaInput) {
         ...new Set([
           ...basePlan.lineageRefs,
           `localization:${variant.id}:${variant.variantHash}`,
+          `localization:${input.runId}:${lineageHash}`,
           `audio:${audio.artifactId}:${audio.sha256}`,
           `alignment:${audio.alignmentArtifactId}:${audio.alignmentSha256}`,
         ]),
@@ -236,15 +262,6 @@ export function compileLocalizationMedia(input: CompileLocalizationMediaInput) {
     planHash,
     blockDurations: Object.freeze(blockDurations),
     durationDeviation: Object.freeze({ ...deviation, threshold: 0.15 }),
-    lineageHash: calculateCanonicalHash({
-      compilerVersion: LOCALIZATION_MEDIA_COMPILER_VERSION,
-      variantHash: variant.variantHash,
-      canonicalContentHash: canonical.contentHash,
-      basePlanId: basePlan.id,
-      planHash,
-      audioSha256: audio.sha256,
-      alignmentSha256: audio.alignmentSha256,
-      format: input.format,
-    }),
+    lineageHash,
   });
 }

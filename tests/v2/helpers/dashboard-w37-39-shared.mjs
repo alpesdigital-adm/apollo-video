@@ -164,12 +164,12 @@ export async function createProjectViaApi({ baseUrl, authorization, name, key, b
     method: 'POST', path: '/v1/projects', authorization,
     headers: { 'idempotency-key': key },
     body: {
-      name, objective: 'discovery', format: '9:16', locale: 'pt-BR',
+      name, objective: 'discovery', locale: 'pt-BR',
       briefing: briefing ?? 'Público: gestores. Oferta: conteúdo. Tom: direto e natural.',
     },
   })
   assert.equal(response.status, 201, JSON.stringify(response.json))
-  return { project: response.json.data.project, version: response.json.data.version }
+  return { project: response.json.data.projectAtCreation, version: response.json.data.creationVersion }
 }
 
 const ADMINISTRATION_EVENT_TYPES = ['project.name.changed', 'project.status.changed']
@@ -192,6 +192,26 @@ export async function projectOracle(client, workspaceId, projectId) {
     }),
   ])
   return plain({ project, versions, snapshots, administrationCommands, editCommandCount, creationCommand, mediaAssets, events })
+}
+
+/**
+ * The rights an operator grants a raw master through the production service (a rights snapshot, never a bare pointer). 6.0.0: a
+ * Fork copies the source project's media links only while the current rights allow the use that link serves (editing), and
+ * refuses with ASSET_RIGHTS_BLOCKED otherwise, so a master that a journey duplicates must be granted before it is duplicated.
+ */
+export async function grantMasterRights(client, { workspaceId, artifactId, clientId, id }) {
+  const { assetRightsRevision } = await import('../../../src/v2/domain/asset-rights.ts')
+  const { setAssetRightsService } = await import('../../../src/v2/application/set-asset-rights.ts')
+  const { PrismaAssetRightsRepository } = await import('../../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
+  const createdAt = new Date()
+  return setAssetRightsService({ repository: new PrismaAssetRightsRepository(client), clock: () => createdAt, createId: () => id })({
+    workspaceId, artifactId, baseRevision: assetRightsRevision(artifactId, 0),
+    draft: {
+      status: 'approved', allowedUses: ['editing', 'editorial-reuse', 'rendering'], prohibitedUses: [],
+      allowedLocales: ['pt-BR'], consent: { status: 'not-required', allowedUses: [] },
+    },
+    actor: { type: 'api-client', id: clientId },
+  })
 }
 
 export function oracleDigest(oracle, keys = ['project', 'versions', 'snapshots', 'mediaAssets']) {

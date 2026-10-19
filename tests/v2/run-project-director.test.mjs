@@ -1,4 +1,6 @@
+import { assertDirectorSnapshotContent, bindDirectorSnapshotIdentities } from '../../src/v2/application/director-snapshot-identity.ts'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
@@ -8,11 +10,14 @@ import { enqueueProjectDirectorRunService } from '../../src/v2/application/enque
 import { runNextProjectDirectorOperationService } from '../../src/v2/application/run-project-director-operation-worker.ts'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
-import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
+import { PrismaDirectorRunRepository } from '../../src/v2/infrastructure/prisma/director-run-repository.ts'
+import { childCommandOf } from '../../src/v2/domain/project-output-state-transition.ts'
+import { ingestedRecordings, ingestedWorld, recompiledChild, worldActor } from './helpers/output-world.mjs'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
+import { createPerceptionProducerEnvelope } from '../../src/v2/domain/perception-producer-envelope.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
-import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
+import { createDirectorRunImpact, createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 import { validateDirectorDecisions } from '../../src/v2/domain/director-run.ts'
 import {
   advancePublicOperationPhase,
@@ -27,7 +32,37 @@ import {
   authenticationAudit as testAuthenticationAudit,
 } from './helpers/authentication-audit.mjs'
 
-const baseHash = 'a'.repeat(64)
+// Every run starts from a real sealed Version3/State3 of the shared output world: an ingested 14 second source and
+// the compiled editorial timeline below as the head's EditPlan.
+const world = await ingestedWorld({
+  actor: worldActor({ workspaceId: 'workspace-1', clientId: 'client-1', credentialId: 'credential-director-world', environment: 'production' }),
+  sourceDurationSeconds: 14,
+})
+const head = recompiledChild(world.parent, world.actor, () => structuredClone(compiledEditorialPlan()),
+  { suffix: 'director-base', versionId: 'project-version-4', snapshotId: 'snapshot-edit-4' })
+const baseHash = head.version.baseHash
+const variantIdsOf = (bundle) => bundle.state.document.entries.map((entry) => entry.variantId)
+
+// The same project with TWO outputs (the published variant and a sibling) over the same compiled editorial timeline.
+const twoOutputWorld = await ingestedWorld({
+  actor: world.actor, sourceDurationSeconds: 14, sibling: true,
+})
+const twoOutputHead = recompiledChild(twoOutputWorld.parent, twoOutputWorld.actor, () => structuredClone(compiledEditorialPlan()),
+  { suffix: 'director-base', versionId: 'project-version-4', snapshotId: 'snapshot-edit-4' })
+
+// The same project when the selected B-roll insert was ingested before the master: the head State observes the master
+// alone, and the insert's receipt is the one its own ingest persisted.
+const insertWorld = await ingestedRecordings(['artifact-selected-insert-1', 'ingest3'], {
+  actor: world.actor, durations: { 'artifact-selected-insert-1': 14, ingest3: 14 },
+})
+const insertHead = recompiledChild(insertWorld.parent, insertWorld.actor, () => structuredClone(compiledEditorialPlan()),
+  { suffix: 'director-base', versionId: 'project-version-4', snapshotId: 'snapshot-edit-4' })
+
+/** The prepared commit with the Command, audit, request fingerprint and Version its sealed bundle carries. */
+function directorView(commit) {
+  const sealed = childCommandOf(commit.bundle)
+  return { ...commit, command: sealed.command, authenticationAudit: sealed.audit, requestFingerprint: sealed.requestFingerprint, version: commit.bundle.version }
+}
 
 test('Director quality read is workspace-scoped and returns the exact immutable snapshot binding', async () => {
   const expected = Object.freeze({
@@ -99,24 +134,24 @@ function compiledEditorialPlan(selectedInsert = false, ctaText) {
     storyPlanId: null,
     fps: 30,
     durationFrames: 300,
-    sources: Object.freeze([{ id: 'source-1', artifactId: 'artifact-master-1', kind: 'video', durationSeconds: 14 }]),
+    sources: Object.freeze([{ id: 'source-1', artifactId: 'artifact-source3', kind: 'video', durationSeconds: 14 }]),
     videoTracks: Object.freeze([{ id: 'track-base', kind: 'base-video', clips: Object.freeze([
-      Object.freeze({ id: 'clip-1', sourceArtifactId: 'artifact-master-1', sourceInFrame: 0, sourceOutFrame: 100, timelineInFrame: 0, timelineOutFrame: 100, rate: 1 }),
+      Object.freeze({ id: 'clip-1', sourceArtifactId: 'artifact-source3', sourceInFrame: 0, sourceOutFrame: 100, timelineInFrame: 0, timelineOutFrame: 100, rate: 1 }),
       Object.freeze({
         id: 'clip-2',
-        sourceArtifactId: selectedInsert ? 'artifact-selected-insert-1' : 'artifact-master-1',
+        sourceArtifactId: selectedInsert ? 'artifact-selected-insert-1' : 'artifact-source3',
         sourceInFrame: selectedInsert ? 0 : 160,
         sourceOutFrame: selectedInsert ? 100 : 260,
         timelineInFrame: 100,
         timelineOutFrame: 200,
         rate: 1,
         ...(selectedInsert ? {
-          audioSourceArtifactId: 'artifact-master-1',
+          audioSourceArtifactId: 'artifact-source3',
           audioSourceInFrame: 160,
           audioSourceOutFrame: 260,
         } : {}),
       }),
-      Object.freeze({ id: 'clip-3', sourceArtifactId: 'artifact-master-1', sourceInFrame: 320, sourceOutFrame: 420, timelineInFrame: 200, timelineOutFrame: 300, rate: 1 }),
+      Object.freeze({ id: 'clip-3', sourceArtifactId: 'artifact-source3', sourceInFrame: 320, sourceOutFrame: 420, timelineInFrame: 200, timelineOutFrame: 300, rate: 1 }),
     ]) }]),
     overlayTracks: Object.freeze([]), subtitleTracks: Object.freeze([]), audioTracks: Object.freeze([]), effectTracks: Object.freeze([]),
     markers: Object.freeze([
@@ -124,7 +159,7 @@ function compiledEditorialPlan(selectedInsert = false, ctaText) {
       Object.freeze({ kind: 'editorial-cut', atFrame: 200, sourceStartSeconds: 8.666, sourceEndSeconds: 10.666, ruleIds: Object.freeze(['duration-two-days']) }),
     ]),
     protectedElements: Object.freeze([]), localeVariantRefs: Object.freeze([]), formatVariantRefs: Object.freeze([]),
-    lineageRefs: Object.freeze(['artifact-master-1']),
+    lineageRefs: Object.freeze(['artifact-source3']),
     editorial: Object.freeze({
       commandType: 'remove-spoken-content',
       exclusions: Object.freeze([
@@ -146,9 +181,11 @@ function compiledEditorialPlan(selectedInsert = false, ctaText) {
 
 class InMemoryDirectorRepository {
   constructor(options = {}) {
+    this.snapshotRows = new Map()
     this.projectObjective = options.projectObjective ?? 'discovery'
     this.latestDirectorObjective = options.latestDirectorObjective
     this.selectedInsert = options.selectedInsert ?? false
+    this.ocrEnvelope = options.ocrEnvelope
     this.ownerText = Object.hasOwn(options, 'ownerText')
       ? options.ownerText
       : 'Tom: direto, natural e sem efeitos gratuitos.'
@@ -163,18 +200,28 @@ class InMemoryDirectorRepository {
       state: 'present', snapshotId: 'rights-snapshot-master-1',
       snapshotHash: 'c'.repeat(64), status: 'approved', consentStatus: 'not-required',
     }
+    this.parent = options.head ?? head
     this.outputReferences = options.outputReferences ?? [
-      { artifactId: 'artifact-proxy-4', kind: 'proxy', sourceVersionId: 'project-version-4', variantId: '9:16' },
-      { artifactId: 'artifact-final-4', kind: 'final', sourceVersionId: 'project-version-4', variantId: '9:16' },
+      { artifactId: 'artifact-proxy-4', kind: 'proxy', sourceVersionId: 'project-version-4', variantId: variantIdsOf(this.parent)[0] },
+      { artifactId: 'artifact-final-4', kind: 'final', sourceVersionId: 'project-version-4', variantId: variantIdsOf(this.parent)[0] },
     ]
-    this.currentVersion = createProjectVersion({
-      id: 'project-version-4', workspaceId: 'workspace-1', projectId: 'project-1', sequence: 4,
-      parentVersionId: 'project-version-3',
-      snapshotRefs: { brief: 'snapshot-brief-1', editPlan: 'snapshot-edit-4', policies: 'snapshot-policy-1' },
-      baseHash, createdBy: 'client-1', createdAt: '2026-07-18T20:00:00.000Z',
-    })
+    this.offered = options.offered ?? []
+    this.transcript = options.transcript ?? {
+      id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'pt-BR',
+      provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64),
+    }
+    this.baseEditPlan = options.editPlan
+    this.requested = []
     this.records = new Map()
   }
+
+  /** The persisted receipts of the recordings the plan consumes and the head State does not observe. */
+  async readAdoptableObservations({ sourceArtifactIds }) {
+    this.requested.push([...sourceArtifactIds])
+    return this.offered.filter((offer) => sourceArtifactIds.includes(offer.normalization.document.source.artifactId))
+  }
+
+  get currentVersion() { return this.parent.version }
 
   async findIdempotentResult({ workspaceId, projectId, idempotencyKey, actorContextHash }) {
     const record = this.records.get(`${workspaceId}:${projectId}:${idempotencyKey}`) ?? null
@@ -188,11 +235,12 @@ class InMemoryDirectorRepository {
     if (workspaceId !== 'workspace-1' || projectId !== 'project-1') return null
     return {
       workspaceId,
-      project: { id: projectId, objective: this.projectObjective, format: '9:16', locale: 'pt-BR' },
+      project: { id: projectId, objective: this.projectObjective, locale: 'pt-BR' },
       ...(this.latestDirectorObjective
         ? { latestDirectorObjective: this.latestDirectorObjective }
         : {}),
-      currentVersion: this.currentVersion,
+      parent: this.parent,
+      currentVersion: this.parent.version,
       brief: {
         objective: this.projectObjective,
         desiredAction: createDesiredAction({
@@ -212,19 +260,44 @@ class InMemoryDirectorRepository {
         productionBrief: createProductionBrief({ ownerText: this.ownerText }),
       },
       policies: { automaticZoom: false, faceProtection: true, guardrails: this.guardrails },
-      editPlan: compiledEditorialPlan(this.selectedInsert, this.ctaText),
+      editPlan: this.baseEditPlan ?? compiledEditorialPlan(this.selectedInsert, this.ctaText),
       currentDurationFrames: 300,
-      proxyVariantId: '9:16',
+      variantIds: variantIdsOf(this.parent),
       sourceRights: this.sourceRights,
       outputReferences: this.outputReferences,
-      transcript: {
-        id: 'transcript-1', sourceArtifactId: 'artifact-master-1', language: 'pt-BR',
-        provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64),
-      },
+      transcript: this.transcript,
+      ...(this.ocrEnvelope ? { ocrEnvelope: this.ocrEnvelope } : {}),
     }
   }
 
-  async commitOrReplay(bundle) {
+  async commitWithCanonicalSnapshots(scope, prepare) {
+    // Controlled in-memory transaction: explicit canonical store, no PG claim.
+    const rows = new Map(this.snapshotRows)
+    const resolve = async (candidates) => {
+      this.resolvedCandidates = [...(this.resolvedCandidates ?? []), ...candidates]
+      return candidates.map((candidate) => {
+        assert.equal(candidate.workspaceId, scope.workspaceId)
+        assert.equal(candidate.projectId, scope.projectId)
+        const key = JSON.stringify([candidate.projectId, candidate.kind, candidate.contentHash])
+        const stored = rows.get(key)
+        if (stored) {
+          assertDirectorSnapshotContent(candidate, stored)
+          return stored
+        }
+        rows.set(key, candidate)
+        return candidate
+      })
+    }
+    const bundle = directorView(await prepare(resolve))
+    assert.equal(bundle.command.baseVersionId, scope.baseVersionId)
+    assert.equal(bundle.command.baseHash, scope.baseHash)
+    assert.equal(bundle.requestFingerprint, scope.requestFingerprint)
+    const result = await this.commitPreparedBundle(bundle)
+    this.snapshotRows = rows
+    return result
+  }
+
+  async commitPreparedBundle(bundle) {
     this.lastBundle = bundle
     const impact = parseDirectorRunImpact(bundle.command.payload.impact)
     const invalidations = createDirectorRunInvalidations({ impact, createdAt: bundle.command.createdAt })
@@ -234,7 +307,7 @@ class InMemoryDirectorRepository {
       authenticationAudit: bundle.authenticationAudit,
       result,
     })
-    this.currentVersion = bundle.version
+    this.parent = bundle.bundle
     this.outputReferences = this.outputReferences.map((reference) => ({
       ...reference,
       sourceVersionId: bundle.version.id,
@@ -287,6 +360,92 @@ function request(overrides = {}) {
     ...overrides,
   }
 }
+
+function controlledOcrEnvelope({ empty = false, regions = 1 } = {}) {
+  return createPerceptionProducerEnvelope({
+    id: 'ocr-envelope-controlled-1', workspaceId: 'workspace-1', projectId: 'project-1',
+    projectVersionId: 'project-version-4', operationId: 'ocr-operation-controlled-1',
+    operationAttempt: 1, operationFenceHash: '1'.repeat(64),
+    sourceArtifactId: 'artifact-source3', sourceSha256: '2'.repeat(64),
+    editPlanSnapshotId: 'snapshot-edit-4', editPlanSnapshotHash: '3'.repeat(64),
+    timelineDurationFrames: 300,
+    timeMap: compiledEditorialPlan().videoTracks[0].clips.map((clip) => ({
+      clipId: clip.id, sourceInFrame: clip.sourceInFrame, sourceOutFrame: clip.sourceOutFrame,
+      timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame, rate: clip.rate,
+    })),
+    sourceTimebase: { num: 1, den: 1000 }, sourceFps: { num: 30, den: 1 },
+    timelineFps: { num: 30, den: 1 }, sourcePtsStart: 0,
+    sourcePtsRounding: 'nearest', sourceClock: 'constant-frame-rate', modality: 'ocr',
+    producer: { name: 'tesseract', ffmpegSha256: '4'.repeat(64), ffprobeSha256: '5'.repeat(64),
+      executableSha256: '6'.repeat(64), executableVersion: 'controlled-unit-fixture',
+      traineddata: [{ language: 'por', sha256: '7'.repeat(64), licenseSha256: '8'.repeat(64) }] },
+    samplePolicy: { strategy: 'fixed-interval', intervalFrames: 1, maxSamples: 2 },
+    samples: [
+      { sourcePts: 0, sourcePtsEvidenceHash: '9'.repeat(64), sourceFrame: 0, timelineFrame: 0,
+        imageSha256: 'a'.repeat(64), ocr: empty ? [] : Array.from({ length: regions }, (_, index) =>
+          ({ text: `Texto observado ${index}`, language: 'por',
+            box: [0.1, 0.75, 0.3, 0.1], confidence: 0.76 })) },
+      { sourcePts: 5333, sourcePtsEvidenceHash: 'b'.repeat(64), sourceFrame: 160,
+        timelineFrame: 100, imageSha256: 'c'.repeat(64), ocr: [] },
+    ],
+    gaps: [
+      { startTimelineFrame: 1, endTimelineFrame: 100, reasonCode: 'NOT_SAMPLED' },
+      { startTimelineFrame: 101, endTimelineFrame: 300, reasonCode: 'NOT_SAMPLED' },
+    ],
+    createdAt: '2026-07-18T21:00:00.000Z',
+  })
+}
+
+test('Director binds controlled OCR samples to snapshot v2 while face safety remains unknown', async () => {
+  for (const empty of [false, true]) {
+    const envelope = controlledOcrEnvelope({ empty })
+    const { repository, service } = fixture({ ocrEnvelope: envelope })
+    const result = await service(request())
+    const snapshot = repository.lastBundle.snapshots.find((item) => item.kind === 'perception')
+    assert.equal(snapshot.contentSchemaVersion, 2)
+    assert.equal(result.run.plannerVersion, 'apollo-director-policy/v2')
+    assert.equal(result.run.perception.schemaVersion, 2)
+    assert.equal(result.run.perception.inputVersionId, 'project-version-4')
+    assert.equal(result.run.perception.ocrEvidence.envelopeId, envelope.id)
+    assert.deepEqual(result.run.perception.ocrEvidence.sampledTimelineFrames, [0, 100])
+    assert.deepEqual(result.run.perception.ocrEvidence.emptyTextTimelineFrames,
+      empty ? [0, 100] : [100])
+    assert.equal(result.run.perception.timeline.observations.filter((item) => item.kind === 'ocr').length,
+      empty ? 0 : 1)
+    assert.ok(result.run.perception.timeline.coverage.find((item) => item.kind === 'ocr').observedMs > 0)
+    assert.ok(result.run.decisions.some((decision) => decision.evidenceRefs.includes(envelope.id)))
+    assert.equal(result.run.perception.summary.confidence, 0.82)
+    assert.equal(result.run.qualityReport.status, 'review-required')
+    assert.equal(result.run.qualityReport.faceSafety.status, 'unknown')
+    assert.equal(result.run.qualityReport.hardChecks.subtitlesFaceSafe, false)
+    assert.equal(result.run.qualityReport.issues.some((issue) =>
+      issue.code === 'OCR_SOURCE_LOWER_REGION_REVIEW_REQUIRED'), !empty)
+  }
+})
+
+test('Director rejects OCR bound to a different version or source map before planning', async () => {
+  const envelope = controlledOcrEnvelope()
+  for (const tampered of [
+    { ...envelope, projectVersionId: 'project-version-other' },
+    { ...envelope, timeMap: [{ ...envelope.timeMap[0], sourceInFrame: 1 }, ...envelope.timeMap.slice(1)] },
+  ]) {
+    const { service } = fixture({ ocrEnvelope: tampered })
+    await assert.rejects(service(request()), (error) =>
+      error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT')
+  }
+})
+
+test('Director canonicalizes twelve OCR regions from one sampled frame without changing source authority', async () => {
+  const envelope = controlledOcrEnvelope({ regions: 12 })
+  const { service } = fixture({ ocrEnvelope: envelope })
+  const result = await service(request())
+  const ocr = result.run.perception.timeline.observations.filter((item) => item.kind === 'ocr')
+  assert.equal(ocr.length, 12)
+  assert.equal(ocr[2].id.includes('-10-'), true)
+  assert.equal(ocr.every((item) => item.provenance.source === envelope.id &&
+    item.provenance.version === envelope.envelopeHash), true)
+  assert.equal(result.run.qualityReport.faceSafety.status, 'unknown')
+})
 
 test('Director V2 persists perception, treatment, story, edit plan and critic as one immutable version', async () => {
   const { repository, service } = fixture()
@@ -353,8 +512,11 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
         : decision)),
     (error) => error.code === 'PERSISTENCE_CONFLICT',
   )
-  assert.equal(result.run.qualityReport.status, 'approved-with-warnings')
-  assert.equal(result.run.qualityReport.schemaVersion, 'director-quality-report/v2')
+  assert.equal(result.run.qualityReport.status, 'review-required')
+  assert.deepEqual(result.run.qualityReport.faceSafety, { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] })
+  assert.equal(result.run.qualityReport.hardChecks.subtitlesFaceSafe, false)
+  assert.ok(result.run.qualityReport.issues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED'))
+  assert.equal(result.run.qualityReport.schemaVersion, 'director-quality-report/v3')
   assert.equal(result.run.qualityReport.strategic.rubric.id, 'awareness-discovery')
   assert.equal(result.run.qualityReport.strategic.rubric.threshold, 68)
   assert.equal(result.run.qualityReport.strategic.rubric.purpose, 'editorial-quality-proxy')
@@ -362,13 +524,14 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.deepEqual(result.run.qualityReport.strategic.gateFailures, [])
   assert.equal(result.run.qualityReport.strategic.evidence.length, 6)
   assert.equal(result.run.qualityReport.score, result.run.qualityReport.strategic.score / 100)
-  assert.equal(Object.values(result.run.qualityReport.hardChecks).every(Boolean), true)
-  assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'quality-report').contentSchemaVersion, 2)
+  assert.equal(Object.entries(result.run.qualityReport.hardChecks).filter(([key]) => key !== 'subtitlesFaceSafe').every(([, value]) => value), true)
+  assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'quality-report').contentSchemaVersion, 3)
   assert.equal(repository.lastBundle.event.type, 'project.version.created')
   assert.deepEqual(result.impact.changeKinds, ['director-replan'])
   assert.deepEqual(result.impact.dependencyTypes, ['audio', 'content', 'policy', 'timing', 'visual'])
   assert.deepEqual(result.impact.affectedRanges, [{ startFrame: 0, endFrame: 300 }])
-  assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 300 }] }])
+  assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: variantIdsOf(head)[0], ranges: [{ startFrame: 0, endFrame: 300 }] }])
+  assert.deepEqual(result.impact.affectedVariantIds, [variantIdsOf(head)[0]])
   assert.deepEqual(result.impact.affectedArtifacts.map((item) => item.artifactId), ['artifact-final-4', 'artifact-proxy-4'])
   assert.equal(result.invalidations.length, 2)
   assert.equal(result.invalidations.every((item) => item.status === 'stale' && item.impactHash === result.impact.impactHash), true)
@@ -457,12 +620,11 @@ test('Director binds every strategic objective to its canonical rubric in runtim
   }
 })
 
-test('approved strategic objective change creates a new brief, version and superseding DirectorRun', async () => {
+test('an explicitly approved predecessor can be superseded by a new objective', async () => {
   const { repository, service } = fixture({ ctaText: 'Compre' })
-  const first = await service(request())
+  // Unit fixture models an already approved predecessor; this does not claim detector evidence.
+  repository.latestDirectorObjective = { runId: 'director-run-approved-0', objective: 'discovery', objectiveVersion: 1, rubricRef: 'awareness-discovery/v1', approved: true }
   const changed = await service(request({
-    baseVersionId: first.version.id,
-    baseHash: first.version.baseHash,
     objective: 'sale',
     desiredAction: {
       destination: { type: 'url', value: 'https://checkout.example/oferta' },
@@ -473,26 +635,20 @@ test('approved strategic objective change creates a new brief, version and super
     reason: 'A campanha aprovada agora precisa levar a uma oferta explícita.',
     idempotency: { key: 'director-objective-change-sale' },
   }))
-
   assert.equal(changed.run.objective, 'sale')
   assert.equal(changed.run.objectiveVersion, 2)
   assert.equal(changed.run.rubricRef, 'conversion-sale/v1')
-  assert.equal(changed.run.supersedesRunId, first.run.id)
+  assert.equal(changed.run.supersedesRunId, 'director-run-approved-0')
   assert.equal(changed.command.payload.previousObjective, 'discovery')
-  assert.equal(changed.command.payload.supersedesRunId, first.run.id)
-  assert.notEqual(
-    changed.command.payload.snapshotRefs.brief,
-    first.command.payload.snapshotRefs.brief,
-  )
-  assert.equal(changed.version.parentVersionId, first.version.id)
+  assert.equal(changed.command.payload.supersedesRunId, 'director-run-approved-0')
+  assert.notEqual(changed.command.payload.snapshotRefs.brief, 'snapshot-brief-1')
+  assert.equal(changed.version.parentVersionId, 'project-version-4')
   assert.equal(repository.projectObjective, 'sale')
-  const brief = JSON.parse(repository.lastBundle.snapshots.find(
-    (snapshot) => snapshot.kind === 'brief',
-  ).contentJson)
+  const brief = JSON.parse(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'brief').contentJson)
   assert.equal(brief.objective, 'sale')
   assert.equal(brief.desiredAction.kind, 'buy')
   assert.equal(brief.desiredAction.visualCta, 'Comprar agora')
-  assert.equal(brief.objectiveChange.supersedesRunId, first.run.id)
+  assert.equal(brief.objectiveChange.supersedesRunId, 'director-run-approved-0')
   const actionRef = changed.run.storyPlan.desiredActionRef
   assert.equal(actionRef.id, changed.run.editPlan.desiredActionRef.id)
   assert.equal(actionRef.id, changed.run.editPlan.subtitleTracks[0].desiredActionRef.id)
@@ -501,12 +657,10 @@ test('approved strategic objective change creates a new brief, version and super
   assert.equal(changed.run.editPlan.overlayTracks[0].text, 'Comprar agora')
 })
 
-test('approved Desired Action change supersedes the run without changing objective', async () => {
+test('an explicitly approved predecessor can be superseded by a new Desired Action', async () => {
   const { repository, service } = fixture({ projectObjective: 'sale', ctaText: 'Compre' })
-  const first = await service(request({ objective: 'sale' }))
+  repository.latestDirectorObjective = { runId: 'director-run-approved-0', objective: 'sale', objectiveVersion: 1, rubricRef: 'conversion-sale/v1', approved: true }
   const changed = await service(request({
-    baseVersionId: first.version.id,
-    baseHash: first.version.baseHash,
     objective: 'sale',
     desiredAction: {
       destination: { type: 'url', value: 'https://checkout.example/nova-oferta' },
@@ -518,13 +672,23 @@ test('approved Desired Action change supersedes the run without changing objecti
   }))
   assert.equal(changed.run.objective, 'sale')
   assert.equal(changed.run.objectiveVersion, 2)
-  assert.equal(changed.run.supersedesRunId, first.run.id)
-  assert.notEqual(changed.command.payload.snapshotRefs.brief, first.command.payload.snapshotRefs.brief)
-  const brief = JSON.parse(repository.lastBundle.snapshots.find(
-    (snapshot) => snapshot.kind === 'brief',
-  ).contentJson)
+  assert.equal(changed.run.supersedesRunId, 'director-run-approved-0')
+  assert.notEqual(changed.command.payload.snapshotRefs.brief, 'snapshot-brief-1')
+  const brief = JSON.parse(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'brief').contentJson)
   assert.equal(brief.desiredAction.destination.value, 'https://checkout.example/nova-oferta')
   assert.equal(brief.desiredAction.visualCta, 'Ver nova oferta')
+})
+
+test('unreviewed face safety cannot supersede a Director objective or Desired Action', async () => {
+  const firstFixture = fixture({ ctaText: 'Compre' })
+  const first = await firstFixture.service(request())
+  assert.equal(first.run.qualityReport.status, 'review-required')
+  await assert.rejects(() => firstFixture.service(request({
+    baseVersionId: first.version.id, baseHash: first.version.baseHash, objective: 'sale',
+    desiredAction: { destination: { type: 'url', value: 'https://checkout.example/oferta' } },
+    reason: 'Nova oferta.', idempotency: { key: 'unreviewed-objective-change' },
+  })), (error) => error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED')
+  assert.equal(firstFixture.repository.lastBundle.run.id, first.run.id)
 })
 
 test('objective change fails before persistence without reason or required destination', async () => {
@@ -626,18 +790,40 @@ test('Director V2 replays exactly and rejects payload or version drift', async (
   )
 })
 
-test('Director V2 preserves a selected B-roll insert with bound source audio and an explicit decision', async () => {
-  const { service } = fixture({ selectedInsert: true })
-  const result = await service(request())
-  const insertedClip = result.run.editPlan.videoTracks[0].clips[1]
-
+test('Director V2 plans a selected B-roll insert with bound source audio, but cannot seal it without an observed insert', async () => {
+  const { repository, service } = fixture({ selectedInsert: true })
+  // The planner still decides to use the insert, with its own audio kept and an explicit decision...
+  await assert.rejects(service(request()), (error) => error.code === 'PRECONDITION_REQUIRED' &&
+    error.details.sourceArtifactIds.length === 1 && error.details.sourceArtifactIds[0] === 'artifact-selected-insert-1')
+  const planned = JSON.parse(repository.resolvedCandidates.find((item) => item.kind === 'edit-plan').contentJson)
+  const treatment = JSON.parse(repository.resolvedCandidates.find((item) => item.kind === 'treatment').contentJson)
+  const insertedClip = planned.videoTracks[0].clips[1]
   assert.equal(insertedClip.sourceArtifactId, 'artifact-selected-insert-1')
-  assert.equal(insertedClip.audioSourceArtifactId, 'artifact-master-1')
-  assert.equal(result.run.treatmentPlan.mode, 'talking-head')
-  assert.equal(result.run.decisions.some((decision) =>
+  assert.equal(insertedClip.audioSourceArtifactId, 'artifact-source3')
+  assert.equal(treatment.mode, 'talking-head')
+  assert.equal(planned.director.decisions.some((decision) =>
     decision.category === 'insert' && decision.choice === 'use_selected_insert'), true)
-  assert.equal(result.run.assumptions.some((assumption) =>
+  assert.equal(planned.director.assumptions.some((assumption) =>
     assumption.includes('asset-selection') && assumption.includes('rights')), true)
+  // ...but a Version whose outputs could not be rendered is never sealed: the insert has no normalization authority yet.
+  assert.equal(repository.lastBundle, undefined)
+  assert.equal(repository.currentVersion.id, 'project-version-4')
+})
+
+test('Director V2 adopts the persisted receipt of a selected B-roll insert and seals the plan that uses it', async () => {
+  const { repository, service } = fixture({ selectedInsert: true, head: insertHead, offered: insertWorld.adoptable })
+  const result = await service(request({ baseHash: insertHead.version.baseHash }))
+  const sealed = repository.lastBundle.bundle
+  assert.deepEqual(repository.requested, [['artifact-selected-insert-1']], 'only the recording the head State does not observe is read')
+  assert.deepEqual(sealed.origin.adoptions.map((item) => item.sourceArtifactId), ['artifact-selected-insert-1'])
+  assert.deepEqual(sealed.state.document.entries[0].consumption.materialization.document.normalizations
+    .map((n) => n.document.source.artifactId).sort(), ['artifact-selected-insert-1', 'artifact-source3'])
+  assert.equal(sealed.state.document.parentStateHash, insertHead.state.stateHash)
+  assert.equal(result.run.editPlan.videoTracks[0].clips[1].sourceArtifactId, 'artifact-selected-insert-1')
+  // The same Command with no persisted receipt for the insert stays refused.
+  const refused = fixture({ selectedInsert: true, head: insertHead, offered: [] })
+  await assert.rejects(refused.service(request({ baseHash: insertHead.version.baseHash, idempotency: { key: 'director-insert-unoffered' } })),
+    (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.sourceArtifactIds[0] === 'artifact-selected-insert-1')
 })
 
 test('Director V2 persists an evidence-bound media-only treatment before proxy enqueue', async () => {
@@ -662,8 +848,60 @@ test('Director V2 still requests one full proxy without fabricating stale artifa
 
   assert.deepEqual(result.impact.affectedArtifacts, [])
   assert.deepEqual(result.impact.affectedVariantIds, [])
-  assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 300 }] }])
+  assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: variantIdsOf(head)[0], ranges: [{ startFrame: 0, endFrame: 300 }] }])
   assert.deepEqual(result.invalidations, [])
+})
+
+test('W66 multi-output: a Director re-run on a project with two outputs stales the renders of EVERY output and asks one minimal proxy render per output', async () => {
+  const variantIds = variantIdsOf(twoOutputHead)
+  assert.equal(variantIds.length, 2)
+  assert.equal(new Set(variantIds).size, 2)
+  const references = variantIds.flatMap((variantId, index) => [
+    { artifactId: `artifact-proxy-two-outputs-${index}`, kind: 'proxy', sourceVersionId: 'project-version-4', variantId },
+    { artifactId: `artifact-final-two-outputs-${index}`, kind: 'final', sourceVersionId: 'project-version-4', variantId },
+  ])
+  const { repository, service } = fixture({ head: twoOutputHead, outputReferences: references })
+  const input = request({ baseHash: twoOutputHead.version.baseHash })
+  // The Command names no output: a Director re-run replans the one EditPlan every output re-materializes from.
+  assert.equal('variantId' in input, false)
+  const result = await service(input)
+  const sorted = [...variantIds].sort()
+
+  // the child Version carries EVERY entry; each output keeps its own spec revision and spec hash
+  const entries = repository.lastBundle.bundle.state.document.entries
+  assert.deepEqual(entries.map((entry) => entry.variantId), variantIds)
+  for (const [index, entry] of entries.entries()) {
+    assert.equal(entry.outputSpecRevisionId, twoOutputHead.state.document.entries[index].outputSpecRevisionId)
+    assert.equal(entry.specHash, twoOutputHead.state.document.entries[index].specHash)
+  }
+  assert.deepEqual(result.impact.affectedVariantIds, sorted)
+  assert.deepEqual(result.impact.affectedArtifacts.map((item) => [item.kind, item.artifactId, item.variantId]).toSorted(),
+    references.map((item) => [item.kind, item.artifactId, item.variantId]).toSorted())
+  assert.deepEqual(result.impact.minimalRenders, sorted.map((variantId) => ({ kind: 'proxy', variantId, ranges: [{ startFrame: 0, endFrame: 300 }] })))
+  assert.equal(result.invalidations.length, 4)
+  assert.deepEqual([...new Set(result.invalidations.map((item) => item.variantId))].sort(), sorted)
+  assert.equal(repository.lastBundle.event.data.artifactInvalidationCount, 4)
+  assert.deepEqual(parseDirectorRunImpact(JSON.parse(stableSerialize(result.impact))), result.impact)
+  // a stored document that lists a render for one output only (or none) is not accepted back
+  const stored = JSON.parse(stableSerialize(result.impact))
+  assert.throws(() => parseDirectorRunImpact({ ...stored, minimalRenders: stored.minimalRenders.slice(0, 1) }), /not an output of the project/)
+  assert.throws(() => parseDirectorRunImpact({ ...stored, minimalRenders: [] }), /invalid/)
+  assert.throws(() => parseDirectorRunImpact({ ...stored, minimalRenders: [stored.minimalRenders[0], { ...stored.minimalRenders[1], ranges: [{ startFrame: 0, endFrame: 200 }] }] }), /invalid/)
+})
+
+test('W66 multi-output: the Director impact document refuses a render of a stranger and a project with no output', () => {
+  const base = {
+    commandId: 'command-director-two-outputs', baseVersionId: 'version-director-two-outputs-base', resultVersionId: 'version-director-two-outputs-result',
+    sourceTranscriptId: 'transcript-director-two-outputs', sourceTranscriptHash: 'a'.repeat(64),
+    plannerVersion: 'apollo-director-policy/v2', criticVersion: 'apollo-director-critic/v3', affectedEndFrame: 300, renderEndFrame: 280,
+  }
+  const reference = (variantId) => ({ artifactId: `artifact-${variantId}`, kind: 'proxy', sourceVersionId: base.baseVersionId, variantId })
+  const ok = createDirectorRunImpact({ ...base, variantIds: ['variant-wide', 'variant-vertical'], outputReferences: [reference('variant-wide')] })
+  assert.deepEqual(ok.minimalRenders.map((render) => [render.variantId, render.ranges[0].endFrame]), [['variant-vertical', 280], ['variant-wide', 280]])
+  assert.deepEqual(ok.affectedVariantIds, ['variant-wide'])
+  assert.throws(() => createDirectorRunImpact({ ...base, variantIds: ['variant-wide'], outputReferences: [reference('variant-vertical')] }), /not an output of the project/)
+  assert.throws(() => createDirectorRunImpact({ ...base, variantIds: [], outputReferences: [] }), /every output/)
+  assert.throws(() => createDirectorRunImpact({ ...base, variantIds: ['variant-wide', 'variant-wide'], outputReferences: [] }), /duplicated/)
 })
 
 test('Director enqueue allocates one immutable result version and replays before reading mutable project state', async () => {
@@ -816,8 +1054,8 @@ test('Director worker fences the atomic commit and settles the allocated version
     },
     async failOrRetry() { throw new Error('successful worker must not fail') },
   }
-  const originalCommit = directorRuns.commitOrReplay.bind(directorRuns)
-  directorRuns.commitOrReplay = async (bundle) => {
+  const originalCommit = directorRuns.commitPreparedBundle.bind(directorRuns)
+  directorRuns.commitPreparedBundle = async (bundle) => {
     assert.deepEqual(bundle.operationFence, {
       operationId: operation.id,
       leaseOwner: 'worker-director-1',
@@ -982,7 +1220,7 @@ test('Director worker retries a transient persistence outage and commits once af
   const harness = createResilientDirectorOperation()
   const directorRuns = new InMemoryDirectorRepository()
   const originalRead = directorRuns.readContext.bind(directorRuns)
-  const originalCommit = directorRuns.commitOrReplay.bind(directorRuns)
+  const originalCommit = directorRuns.commitPreparedBundle.bind(directorRuns)
   let contextReads = 0
   let commits = 0
   directorRuns.readContext = async (input) => {
@@ -992,7 +1230,7 @@ test('Director worker retries a transient persistence outage and commits once af
     }
     return originalRead(input)
   }
-  directorRuns.commitOrReplay = async (bundle) => {
+  directorRuns.commitPreparedBundle = async (bundle) => {
     commits += 1
     return harness.settle(bundle, originalCommit)
   }
@@ -1015,7 +1253,7 @@ test('Director worker retries a transient persistence outage and commits once af
 test('Director worker reclaims an expired running attempt without accepting its stale result', async () => {
   const harness = createResilientDirectorOperation()
   const directorRuns = new InMemoryDirectorRepository()
-  const originalCommit = directorRuns.commitOrReplay.bind(directorRuns)
+  const originalCommit = directorRuns.commitPreparedBundle.bind(directorRuns)
   const staleClaim = await harness.repository.claimNext({
     type: 'project-director-run',
     leaseOwner: 'director-worker-stale-1',
@@ -1023,7 +1261,7 @@ test('Director worker reclaims an expired running attempt without accepting its 
     leaseUntil: '2026-08-03T23:00:00.075Z',
   })
   harness.expireForReclaim()
-  directorRuns.commitOrReplay = (bundle) => harness.settle(bundle, originalCommit)
+  directorRuns.commitPreparedBundle = (bundle) => harness.settle(bundle, originalCommit)
   const runNext = resilientDirectorWorker(
     harness,
     directorRuns,
@@ -1049,7 +1287,7 @@ test('Director cancellation during planning revokes the fence and publishes no v
   const harness = createResilientDirectorOperation()
   const directorRuns = new InMemoryDirectorRepository()
   const originalVersionId = directorRuns.currentVersion.id
-  directorRuns.commitOrReplay = async (bundle) => {
+  directorRuns.commitPreparedBundle = async (bundle) => {
     harness.cancel('2026-08-03T23:00:00.450Z')
     return harness.settle(bundle, async () => {
       throw new Error('canceled Director must not commit')
@@ -1089,4 +1327,213 @@ test('Director transient retry is bounded and dead-letters without publishing a 
   assert.equal(harness.operation.deadLetteredAt, harness.operation.completedAt)
   assert.equal(directorRuns.currentVersion.id, originalVersionId)
   assert.equal(directorRuns.records.size, 0)
+})
+
+test('Director canonical snapshot binding preserves old row time and rejects incompatible resealed rows', () => {
+  const document = { schemaVersion: 1, ownerText: 'Controlled snapshot identity' }
+  const contentJson = stableSerialize(document)
+  const candidate = { schemaVersion: 1, id: 'snapshot-candidate', workspaceId: 'workspace-1', projectId: 'project-1',
+    kind: 'brief', contentSchemaVersion: 1, contentJson,
+    contentHash: createHash('sha256').update(contentJson, 'utf8').digest('hex'),
+    createdAt: '2026-10-12T12:00:00.000Z' }
+  const stored = { ...candidate, id: 'snapshot-canonical', createdAt: '2026-07-18T20:00:00.000Z' }
+  assert.deepEqual(bindDirectorSnapshotIdentities([candidate], [stored]), [stored])
+  for (const [label, mutate] of [
+    ['workspace', (row) => { row.workspaceId = 'workspace-sister' }],
+    ['project', (row) => { row.projectId = 'project-sister' }],
+    ['kind', (row) => { row.kind = 'policies' }],
+    ['content schema', (row) => { row.contentSchemaVersion = 2 }],
+    ['invalid content schema', (row) => { row.contentSchemaVersion = 0 }],
+    ['malformed JSON', (row) => { row.contentJson = '{' }],
+    ['JSON contradicts hash', (row) => { row.contentJson = stableSerialize({ schemaVersion: 1, ownerText: 'changed' }) }],
+    ['rehashed different content', (row) => { row.contentJson = stableSerialize({ schemaVersion: 1, ownerText: 'changed' })
+      row.contentHash = createHash('sha256').update(row.contentJson, 'utf8').digest('hex') }],
+    ['noncanonical raw JSON', (row) => { row.contentJson = JSON.stringify(document, null, 2)
+      assert.notEqual(row.contentJson, stableSerialize(JSON.parse(row.contentJson)), 'raw whitespace must differ from the canonical JSON bytes')
+      row.contentHash = createHash('sha256').update(row.contentJson, 'utf8').digest('hex') }],
+  ]) {
+    const row = structuredClone(stored); mutate(row)
+    assert.throws(() => bindDirectorSnapshotIdentities([candidate], [row]),
+      (error) => error.code === 'PERSISTENCE_CONFLICT', label)
+  }
+  assert.throws(() => bindDirectorSnapshotIdentities([candidate], []),
+    (error) => error.code === 'PERSISTENCE_CONFLICT', 'missing canonical identity')
+})
+
+test('Director pure recomposition preserves IDs/time and reuses planned critic with compiler called once', async () => {
+  const repository = new InMemoryDirectorRepository()
+  const compiled = createEvidenceBoundBriefCompiler()
+  const allocations = []
+  let compilerCalls = 0, clockCalls = 0, eventCalls = 0
+  let first, second, chosenBrief
+  repository.commitWithCanonicalSnapshots = async (scope, prepare) => {
+    const resolve = (reuse) => async (candidates) => candidates.map((candidate) => {
+      if (reuse && candidate.kind === 'brief') {
+        chosenBrief = { ...candidate, id: 'snapshot-canonical-before-owner', createdAt: '2026-07-18T20:00:00.000Z' }
+        return chosenBrief
+      }
+      return candidate
+    })
+    const beforeIds = [...allocations]
+    first = directorView(await prepare(resolve(false)))
+    second = directorView(await prepare(resolve(true)))
+    assert.deepEqual(allocations, beforeIds, 'retry callback cannot allocate an identity')
+    assert.equal(first.command.id, second.command.id)
+    assert.equal(first.version.id, second.version.id)
+    assert.equal(first.run.id, second.run.id)
+    assert.equal(first.event.id, second.event.id)
+    assert.equal(first.requestFingerprint, second.requestFingerprint)
+    assert.equal(first.command.createdAt, second.command.createdAt)
+    assert.equal(first.authenticationAudit.contextHash, scope.actorContextHash)
+    assert.equal(second.authenticationAudit.contextHash, scope.actorContextHash)
+    assert.equal(first.run.qualityReport, second.run.qualityReport, 'critic result is reused, not reassessed')
+    assert.match(first.version.baseHash, /^[a-f0-9]{64}$/)
+    assert.match(second.version.baseHash, /^[a-f0-9]{64}$/)
+    assert.notEqual(first.version.baseHash, second.version.baseHash, 'Version authority incorporates the rematerialized EditPlan hash')
+    assert.match(first.decisionLog.logHash, /^[a-f0-9]{64}$/)
+    assert.match(second.decisionLog.logHash, /^[a-f0-9]{64}$/)
+    assert.notEqual(first.decisionLog.logHash, second.decisionLog.logHash, 'decision evidence authority is resealed before persistence')
+    const firstEdit = first.snapshots.find((item) => item.kind === 'edit-plan')
+    const secondEdit = second.snapshots.find((item) => item.kind === 'edit-plan')
+    assert.notEqual(firstEdit.contentJson, secondEdit.contentJson)
+    assert.notEqual(firstEdit.contentHash, secondEdit.contentHash)
+    assert.equal(createHash('sha256').update(secondEdit.contentJson, 'utf8').digest('hex'), secondEdit.contentHash)
+    assert.deepEqual(JSON.parse(secondEdit.contentJson).director.decisions, second.run.decisions)
+    assert.equal(first.snapshots.find((item) => item.kind === 'quality-report').contentHash,
+      second.snapshots.find((item) => item.kind === 'quality-report').contentHash, 'critic evidence remains the original planned result')
+    assert.equal(second.command.payload.snapshotRefs.brief, chosenBrief.id)
+    assert.equal(second.version.snapshotRefs.brief, chosenBrief.id)
+    assert.equal(second.snapshots.find((item) => item.kind === 'brief').createdAt, chosenBrief.createdAt)
+    const oldBrief = first.command.payload.snapshotRefs.brief
+    assert.ok(second.run.decisions.some((decision) => decision.evidenceRefs.includes(chosenBrief.id)))
+    assert.equal(second.run.decisions.some((decision) => decision.evidenceRefs.includes(oldBrief)), false)
+    validateDirectorDecisions(second.run.decisions)
+    return repository.commitPreparedBundle(second)
+  }
+  const service = runProjectDirectorService({ repository,
+    clock: () => { clockCalls += 1; return new Date('2026-07-18T22:00:00.000Z') },
+    createId: (kind) => { const id = `${kind}-pure-${allocations.length + 1}`; allocations.push(id); return id },
+    createEventId: () => { eventCalls += 1; return '00000000-0000-4000-8000-000000000099' },
+    compileBrief: async (input) => { compilerCalls += 1; return compiled(input) },
+  })
+  const result = await service(request())
+  assert.equal(compilerCalls, 1)
+  assert.equal(clockCalls, 1)
+  assert.equal(eventCalls, 1)
+  assert.equal(result.run.qualityReport.status, 'review-required')
+  assert.equal(result.run.qualityReport.faceSafety.status, 'unknown')
+})
+
+test('Director snapshot owner retries only exact serialization codes and exhausts after three transactions', async () => {
+  const scope = { workspaceId: 'workspace-1', projectId: 'project-1', baseVersionId: 'project-version-4',
+    baseHash, resultVersionId: 'project-version-next', idempotencyKey: 'snapshot-owner',
+    requestFingerprint: 'b'.repeat(64), actorContextHash: 'c'.repeat(64) }
+  for (const [label, error, expectedCalls] of [
+    ['Prisma serialization', Object.assign(new Error('controlled'), { code: 'P2034' }), 3],
+    ['raw SQL serialization', Object.assign(new Error('controlled'), { code: 'P2010', meta: { code: '40001' } }), 3],
+    ['different SQLSTATE', Object.assign(new Error('controlled'), { code: 'P2010', meta: { code: '23505' } }), 1],
+    ['wrong serialization spelling', Object.assign(new Error('controlled'), { code: 'P2010', meta: { code: 40001 } }), 1],
+    ['message alone is not authority', Object.assign(new Error('serialization 40001'), { code: 'P2002' }), 1],
+  ]) {
+    let calls = 0, prepared = 0
+    const repository = new PrismaDirectorRunRepository({
+      async $transaction() { calls += 1; throw error },
+    })
+    await assert.rejects(repository.commitWithCanonicalSnapshots(scope, async () => { prepared += 1 }),
+      (caught) => caught === error, label)
+    assert.equal(calls, expectedCalls, label)
+    assert.equal(prepared, 0, label)
+  }
+})
+
+// ---- The Director names the transcript words of the captions it generates, so an editorial cut can end inside one ----
+async function directorCueWorld(transcriptWords) {
+  const { createMediaTranscript } = await import('../../src/v2/domain/media-transcript.ts')
+  const base = compiledEditorialPlan()
+  const words = transcriptWords ?? base.retimedTranscript.words.map((word) => ({ word: word.text, start: word.sourceStartSeconds, end: word.sourceEndSeconds }))
+  const transcript = createMediaTranscript({ language: 'pt-BR', text: words.map((word) => word.word).join(' '), words,
+    segments: [{ id: 0, start: words[0].start, end: words.at(-1).end, text: words.map((word) => word.word).join(' ') }], provider: 'groq', model: 'whisper-large-v3' })
+  const editPlan = Object.freeze({ ...base, retimedTranscript: Object.freeze({ ...base.retimedTranscript, sourceTranscriptHash: transcript.transcriptHash }) })
+  const { service } = fixture({ editPlan, transcript: { id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'pt-BR',
+    provider: 'groq', model: 'whisper-large-v3', transcriptHash: transcript.transcriptHash, words: transcript.words } })
+  return { transcript, result: await service(request()) }
+}
+
+test('the Director names the transcript words of every caption cue it generates, in the ingest cue track shape', async () => {
+  const { transcript, result } = await directorCueWorld()
+  const [track] = result.run.editPlan.subtitleTracks
+  assert.equal(track.schemaVersion, 'source-transcript-cue-track/v1')
+  assert.equal(track.sourceTranscriptId, 'transcript-1')
+  assert.equal(track.sourceTranscriptHash, transcript.transcriptHash)
+  assert.ok(track.cues.length > 1)
+  for (const cue of track.cues) {
+    assert.ok(Array.isArray(cue.sourceWordIndices) && cue.sourceWordIndices.length > 0, cue.id)
+    assert.equal(cue.sourceWordIndices.map((index) => transcript.words[index].word).join(' '), cue.text, 'the cue is exactly those words')
+  }
+  assert.equal(new Set(track.cues.flatMap((cue) => cue.sourceWordIndices)).size, track.cues.flatMap((cue) => cue.sourceWordIndices).length, 'no word twice')
+})
+
+test('without the observed transcript words, or with a word the transcript cannot name, no cue claims authority', async () => {
+  const plain = await fixture().service(request())
+  assert.equal(plain.run.editPlan.subtitleTracks[0].schemaVersion, undefined)
+  assert.ok(plain.run.editPlan.subtitleTracks[0].cues.every((cue) => cue.sourceWordIndices === undefined))
+  const base = compiledEditorialPlan()
+  const words = base.retimedTranscript.words.map((word) => ({ word: word.text, start: word.sourceStartSeconds, end: word.sourceEndSeconds }))
+  const missingOne = words.filter((_, index) => index !== 3)
+  const { result } = await directorCueWorld(missingOne)
+  const [track] = result.run.editPlan.subtitleTracks
+  assert.equal(track.schemaVersion, undefined, 'a track is trusted whole or not at all')
+  assert.ok(track.cues.every((cue) => cue.sourceWordIndices === undefined))
+})
+
+test('an editorial cut that ends inside a Director caption rebuilds the part that remains from the transcript words', async () => {
+  const { createEditorialSourceBindingV1 } = await import('../../src/v2/domain/output-materialization.ts')
+  const { materializeEditorialCutPlanV3 } = await import('../../src/v2/domain/editorial-cut-impact.ts')
+  const { transcript, result } = await directorCueWorld()
+  // The fixture's base plan declares retained ranges that do not match its clips; the cut then reads the ranges from the clips.
+  const before = structuredClone(result.run.editPlan)
+  delete before.editorial.retainedSourceRanges
+  const binding = createEditorialSourceBindingV1({ schemaVersion: 'editorial-source-binding/v1', canonicalPolicyVersion: 'output-canonical-json/v1',
+    id: 'binding-director-cut-1', workspaceId: 'workspace-1', projectId: 'project-1', parentVersionId: result.version.id, parentStateId: 'state-parent-1',
+    parentStateHash: 'd'.repeat(64), resultVersionId: 'version-director-cut-1',
+    authority: { kind: 'same-project-state3', sourceProjectId: 'project-1', sourceVersionId: result.version.id, sourceBaseHash: 'e'.repeat(64),
+      sourceStateId: 'state-source-1', sourceStateHash: 'f'.repeat(64), forkRootVersionId: null, forkRootStateId: null, forkRootStateHash: null,
+      derivationId: null, derivationHash: null },
+    transcript: { id: 'transcript-1', workspaceId: 'workspace-1', projectId: 'project-1', sourceArtifactId: 'artifact-source3',
+      sourceManifestId: 'manifest-source3', document: transcript, createdAt: '2026-07-18T20:00:00.000Z' },
+    normalizationRefs: [{ id: 'normalization-1', projectId: 'project-1', receiptHash: '1'.repeat(64) }],
+    inventory: [{ linkId: 'link-1', artifactId: 'artifact-source3', role: 'source-master', manifestId: 'manifest-1', manifestHash: '2'.repeat(64),
+      artifactSha256: '3'.repeat(64), rightsSnapshotId: null, rightsHash: null, rightsRevision: 0 }],
+    createdAt: '2026-07-18T22:30:00.000Z' })
+  // "Seja bem-vindo." is one cue: removing the first word leaves "bem-vindo." in the same cue.
+  const first = before.retimedTranscript.words[0]
+  const after = materializeEditorialCutPlanV3({ before, sourceBinding: binding, versionId: 'version-director-cut-1', planId: 'plan-director-cut-1',
+    commandId: 'command-director-cut-1', createdAt: binding.document.createdAt,
+    exclusions: [{ sourceStartSeconds: first.sourceStartSeconds, sourceEndSeconds: first.sourceEndSeconds, ruleIds: ['rule-first-word'] }] })
+  const cue = after.subtitleTracks[0].cues[0]
+  assert.equal(cue.text, 'bem-vindo.')
+  assert.deepEqual(cue.sourceWordIndices, [1])
+  assert.equal(after.subtitleTracks[0].schemaVersion, 'source-transcript-cue-track/v1')
+  // The same cut is refused for a Director plan that predates the authority: the refusal stays fail-closed.
+  const legacy = structuredClone(before)
+  delete legacy.subtitleTracks[0].schemaVersion
+  for (const legacyCue of legacy.subtitleTracks[0].cues) delete legacyCue.sourceWordIndices
+  assert.throws(() => materializeEditorialCutPlanV3({ before: legacy, sourceBinding: binding, versionId: 'version-director-cut-1', planId: 'plan-director-cut-1',
+    commandId: 'command-director-cut-1', createdAt: binding.document.createdAt,
+    exclusions: [{ sourceStartSeconds: first.sourceStartSeconds, sourceEndSeconds: first.sourceEndSeconds, ruleIds: ['rule-first-word'] }] }),
+  (error) => error.code === 'PRECONDITION_REQUIRED' && /Partially cut cue/.test(error.message))
+})
+
+test('a review patch that edits a caption drops the transcript words it no longer follows, and only on that cue', async () => {
+  const { materializePatchEditPlan } = await import('../../src/v2/domain/review-system.ts')
+  const { result } = await directorCueWorld()
+  const [first, second] = result.run.editPlan.subtitleTracks[0].cues
+  assert.ok(Array.isArray(first.sourceWordIndices) && Array.isArray(second.sourceWordIndices), 'both cues name their words before the patch')
+  const patched = materializePatchEditPlan({ editPlan: result.run.editPlan, newVersionId: 'version-patched-1', createdAt: '2026-07-18T23:00:00.000Z',
+    availableAssetIds: [], patch: { id: 'patch-1', baseVersionId: result.version.id, annotationIds: ['annotation-1'],
+      operations: [{ op: 'update-text', targetId: `subtitle:${first.id}`, value: { text: 'Texto revisado' } }] } })
+  const [editedCue, otherCue] = patched.subtitleTracks[0].cues
+  assert.equal(editedCue.text, 'Texto revisado')
+  assert.equal(editedCue.sourceWordIndices, undefined, 'the reviewer\'s text is not the transcript words\'')
+  assert.deepEqual(otherCue.sourceWordIndices, second.sourceWordIndices, 'an untouched cue keeps its words')
 })

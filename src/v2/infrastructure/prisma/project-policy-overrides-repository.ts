@@ -21,8 +21,13 @@ import {
   resolveProjectOverrides,
 } from '../../domain/project-overrides.ts'
 import { createProjectSnapshot } from '../../domain/project-snapshot.ts'
-import { createProjectVersion } from '../../domain/project-version.ts'
+import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { renderOutputReferences } from '../../domain/output-variant-references.ts'
+import { childCommandOf } from '../../domain/project-output-state-transition.ts'
+import { hydrateProjectVersionRow, hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import {
   editCommandExternalActorAuditData,
   hydrateEditCommandExternalActorAudit,
@@ -58,26 +63,7 @@ function parseArray(value: string, field: string): readonly unknown[] {
 }
 
 function hydrateVersion(row: V2ProjectVersion) {
-  return createProjectVersion({
-    id: row.id,
-    workspaceId: row.workspaceId,
-    projectId: row.projectId,
-    sequence: row.sequence,
-    ...(row.parentVersionId ? { parentVersionId: row.parentVersionId } : {}),
-    ...(row.forkedFromProjectId ? { forkedFromProjectId: row.forkedFromProjectId } : {}),
-    ...(row.forkedFromVersionId ? { forkedFromVersionId: row.forkedFromVersionId } : {}),
-    snapshotRefs: {
-      brief: row.briefSnapshotId,
-      ...(row.treatmentSnapshotId ? { treatment: row.treatmentSnapshotId } : {}),
-      ...(row.storySnapshotId ? { story: row.storySnapshotId } : {}),
-      editPlan: row.editPlanSnapshotId,
-      policies: row.policiesSnapshotId,
-    },
-    baseHash: row.baseHash,
-    createdBy: row.createdBy,
-    ...(row.commandId ? { commandId: row.commandId } : {}),
-    createdAt: row.createdAt.toISOString(),
-  })
+  return hydrateProjectVersionRowV3(row)
 }
 
 function policyState(content: Readonly<Record<string, unknown>>) {
@@ -197,6 +183,7 @@ function hydrateStoredCommand(row: StoredCommand, replayed: boolean): Readonly<P
   if (stableSerialize(expectedInvalidations) !== stableSerialize(invalidations)) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project policy invalidations are inconsistent')
   }
+  if (row.commandHash !== command.commandHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project policy command seal is invalid')
   const version = hydrateVersion(row.resultVersion)
   return Object.freeze({
     command,
@@ -226,7 +213,7 @@ function currentValue(row: {
   if (!row.currentVersion) return null
   const stored = hydratePolicySnapshot(row.currentVersion.policiesSnapshot)
   return Object.freeze({
-    version: hydrateVersion(row.currentVersion),
+    version: hydrateProjectVersionRow(row.currentVersion),
     policySnapshot: Object.freeze({
       id: stored.snapshot.id,
       contentSchemaVersion: stored.snapshot.contentSchemaVersion,
@@ -271,31 +258,36 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
   async readContext(input: { workspaceId: string; projectId: string }) {
     const project = await this.client.v2Project.findFirst({
       where: { id: input.projectId, workspaceId: input.workspaceId },
-      include: { currentVersion: { include: { policiesSnapshot: true, editPlanSnapshot: true } } },
+      include: { currentVersion: { include: { policiesSnapshot: true } } },
     })
     if (!project?.currentVersion) return null
-    const editPlan = parseRecord(project.currentVersion.editPlanSnapshot.contentJson, 'project policy EditPlan')
+    const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersion.id })
+    if (!parent) return null
+    const editPlan = parseRecord(operationalBundlePlanV3(parent).contentJson, 'project policy EditPlan')
     const currentDurationFrames = Number(editPlan.durationFrames)
-    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames < 0 || !project.format) {
+    // Policy overrides are project-wide: the impact covers EVERY output the sealed State carries, each render attributed to its own.
+    const variantIds = parent.state.document.entries.map((entry) => entry.variantId)
+    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames < 0 || variantIds.length === 0) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Project policy render context is incomplete')
     }
+    const currentVersionId = parent.version.id
     const [proxyOutputs, finalOutputs] = await Promise.all([
       this.client.v2ProjectProxyRenderOperation.findMany({
-        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true },
+        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+        select: { outputArtifactId: true, outputVariantId: true },
       }),
       this.client.v2ProjectFinalExportOperation.findMany({
-        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true, outputAspectRatio: true },
+        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+        select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
       }),
     ])
     if (currentDurationFrames === 0 && (proxyOutputs.length > 0 || finalOutputs.length > 0)) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Project outputs exist before a renderable timeline')
     }
     const policy = hydratePolicySnapshot(project.currentVersion.policiesSnapshot)
-    const currentVersion = hydrateVersion(project.currentVersion)
+    if (parent.version.snapshotRefs.policies !== policy.snapshot.id) throw new DomainError('PERSISTENCE_CONFLICT', 'Project policy snapshot differs from the sealed head')
     return Object.freeze({
-      currentVersion,
+      parent,
       currentPolicySnapshot: Object.freeze({
         id: policy.snapshot.id,
         contentSchemaVersion: policy.snapshot.contentSchemaVersion,
@@ -303,11 +295,8 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
         content: policy.content,
       }),
       currentDurationFrames,
-      proxyVariantId: project.format,
-      outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersion.id, variantId: project.format! })),
-        ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: currentVersion.id, variantId: output.outputAspectRatio })),
-      ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
+      variantIds: Object.freeze(variantIds),
+      outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: currentVersionId, proxies: proxyOutputs, finals: finalOutputs }),
     })
   }
 
@@ -319,8 +308,18 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
     return project ? currentValue(project) : null
   }
 
-  async commitOrReplay(bundle: Readonly<ProjectPolicyOverridesCommit>, serializationAttempt = 1): Promise<Readonly<ProjectPolicyOverridesResult>> {
-    editCommandExternalActorAuditData(bundle.authenticationAudit, bundle.command.workspaceId, bundle.command.author)
+  async commitOrReplay(input: Readonly<ProjectPolicyOverridesCommit>, serializationAttempt = 1): Promise<Readonly<ProjectPolicyOverridesResult>> {
+    const sealed = childCommandOf<ProjectPolicyOverridesPayloadV1>(input.bundle)
+    const authenticationAudit = sealed.audit
+    if (!authenticationAudit) throw new DomainError('AUTH_INVALID', 'Project policy overrides require an authenticated external actor')
+    editCommandExternalActorAuditData(authenticationAudit, sealed.command.workspaceId, sealed.command.author)
+    const bundle = { command: sealed.command, requestFingerprint: sealed.requestFingerprint, version: input.bundle.version, event: input.event, workspaceDefaults: input.workspaceDefaults }
+    const policySnapshot = input.bundle.snapshots.find((snapshot) => snapshot.id === bundle.version.snapshotRefs.policies)
+    if (
+      bundle.command.type !== 'set-project-policy-overrides' || !policySnapshot || policySnapshot.kind !== 'policies' ||
+      bundle.command.payload.policySnapshotId !== policySnapshot.id || bundle.command.payload.policySnapshotHash !== policySnapshot.contentHash ||
+      bundle.version.commandId !== bundle.command.id
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Project policy snapshot does not belong to the Command that produced its Version')
     try {
       return await this.client.$transaction(async (transaction) => {
         const existing = await transaction.v2EditCommand.findUnique({
@@ -335,20 +334,21 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
           if (
             existing.type !== 'set-project-policy-overrides' ||
             existing.requestFingerprint !== bundle.requestFingerprint ||
-            hydrateEditCommandExternalActorAudit(existing).contextHash !== bundle.authenticationAudit.contextHash
+            hydrateEditCommandExternalActorAudit(existing).contextHash !== authenticationAudit.contextHash
           ) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with different project overrides')
           return hydrateStoredCommand(existing, true)
         }
         const project = await transaction.v2Project.findFirst({
           where: { id: bundle.command.projectId, workspaceId: bundle.command.workspaceId },
-          include: { currentVersion: { include: { policiesSnapshot: true, editPlanSnapshot: true } } },
+          include: { currentVersion: { include: { policiesSnapshot: true } } },
         })
         if (
           !project?.currentVersion ||
           project.currentVersion.id !== bundle.command.baseVersionId ||
           project.currentVersion.baseHash !== bundle.command.baseHash ||
           bundle.version.parentVersionId !== project.currentVersion.id ||
-          bundle.version.sequence !== project.currentVersion.sequence + 1
+          bundle.version.sequence !== project.currentVersion.sequence + 1 ||
+          input.bundle.state.document.parentStateHash !== project.currentVersion.outputStateHash
         ) throw new DomainError('VERSION_CONFLICT', 'Project changed before policy override commit')
         const currentPolicy = hydratePolicySnapshot(project.currentVersion.policiesSnapshot)
         if (stableSerialize(currentPolicy.workspaceDefaults) !== stableSerialize(bundle.workspaceDefaults)) {
@@ -357,65 +357,19 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
         const [proxyOutputs, finalOutputs] = await Promise.all([
           transaction.v2ProjectProxyRenderOperation.findMany({
             where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-            select: { outputArtifactId: true },
+            select: { outputArtifactId: true, outputVariantId: true },
           }),
           transaction.v2ProjectFinalExportOperation.findMany({
             where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-            select: { outputArtifactId: true, outputAspectRatio: true },
+            select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
           }),
         ])
-        const outputs = [
-          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: project.format ?? '9:16' })),
-          ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
-        ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
+        const outputs = renderOutputReferences({ state: input.bundle.state, sourceVersionId: bundle.command.baseVersionId, proxies: proxyOutputs, finals: finalOutputs })
         const expectedAffectedOutputs = bundle.command.payload.impact.renderSemanticsChanged ? outputs : []
         if (stableSerialize(expectedAffectedOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) {
           throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before policy impact commit')
         }
-        await transaction.v2EditCommand.create({ data: {
-          id: bundle.command.id,
-          workspaceId: bundle.command.workspaceId,
-          projectId: bundle.command.projectId,
-          baseVersionId: bundle.command.baseVersionId,
-          baseHash: bundle.command.baseHash,
-          type: bundle.command.type,
-          scopeJson: stableSerialize(bundle.command.scope),
-          payloadJson: stableSerialize(bundle.command.payload),
-          reason: bundle.command.reason,
-          actorType: bundle.command.author.type,
-          actorId: bundle.command.author.id,
-          delegatedUserId: bundle.command.author.delegatedUserId,
-          ...editCommandExternalActorAuditData(bundle.authenticationAudit, bundle.command.workspaceId, bundle.command.author),
-          idempotencyKey: bundle.command.idempotencyKey,
-          requestFingerprint: bundle.requestFingerprint,
-          createdAt: new Date(bundle.command.createdAt),
-        } })
-        await transaction.v2ProjectSnapshot.create({ data: {
-          id: bundle.policySnapshot.id,
-          workspaceId: bundle.policySnapshot.workspaceId,
-          projectId: bundle.policySnapshot.projectId,
-          kind: bundle.policySnapshot.kind,
-          schemaVersion: bundle.policySnapshot.contentSchemaVersion,
-          contentJson: bundle.policySnapshot.contentJson,
-          contentHash: bundle.policySnapshot.contentHash,
-          createdAt: new Date(bundle.policySnapshot.createdAt),
-        } })
-        await transaction.v2ProjectVersion.create({ data: {
-          id: bundle.version.id,
-          workspaceId: bundle.version.workspaceId,
-          projectId: bundle.version.projectId,
-          sequence: bundle.version.sequence,
-          parentVersionId: bundle.version.parentVersionId,
-          briefSnapshotId: bundle.version.snapshotRefs.brief!,
-          treatmentSnapshotId: bundle.version.snapshotRefs.treatment,
-          storySnapshotId: bundle.version.snapshotRefs.story,
-          editPlanSnapshotId: bundle.version.snapshotRefs.editPlan,
-          policiesSnapshotId: bundle.version.snapshotRefs.policies,
-          baseHash: bundle.version.baseHash,
-          createdBy: bundle.version.createdBy,
-          commandId: bundle.command.id,
-          createdAt: new Date(bundle.version.createdAt),
-        } })
+        await commitProjectVersionWithOutputState(transaction, input.bundle)
         const invalidations = createProjectPolicyOverrideInvalidations({ impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt })
         if (invalidations.length > 0) await transaction.v2CommandArtifactInvalidation.createMany({ data: invalidations.map((item) => ({
           id: item.id,
@@ -451,22 +405,23 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
           resourceId: bundle.event.resource.id,
           dataJson: stableSerialize(bundle.event.data),
         } })
+        await settleDeferredOutputGuards(transaction)
         const stored = await transaction.v2EditCommand.findUniqueOrThrow({
           where: { id: bundle.command.id },
           include: storedCommandInclude,
         })
         return hydrateStoredCommand(stored, false)
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
-        return this.commitOrReplay(bundle, serializationAttempt + 1)
+        return this.commitOrReplay(input, serializationAttempt + 1)
       }
       if (isPrismaCode(error, 'P2002')) {
         const existing = await this.findIdempotent({
           workspaceId: bundle.command.workspaceId,
           projectId: bundle.command.projectId,
           idempotencyKey: bundle.command.idempotencyKey,
-          actorContextHash: bundle.authenticationAudit.contextHash,
+          actorContextHash: authenticationAudit.contextHash,
         })
         if (existing?.requestFingerprint === bundle.requestFingerprint) return existing.result
         if (existing) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with different project overrides')

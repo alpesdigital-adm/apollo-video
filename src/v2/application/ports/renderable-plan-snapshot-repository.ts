@@ -1,4 +1,6 @@
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
+import type { CommandActor } from '../../domain/edit-command.ts'
 import type { RenderablePlanOrigin } from '../renderable-edit-plan.ts'
 
 /**
@@ -51,25 +53,32 @@ export interface RenderablePlanSnapshotRepository {
   }): Promise<Readonly<StoredRenderablePlanSnapshot> | null>
 
   /**
-   * Store a compiled plan.
+   * Store a compiled plan, born with the Version that holds it.
    *
-   * The natural key is the derivation at its hash, the project version it is
-   * compiled into, and the frame rate it is delivered at. Compiling the same
-   * derivation twice the same way is a replay — the same source hash at the
-   * same rate produces the same cut — and returns the stored row without a
-   * second write. Asking for a different delivery rate is a different plan and
-   * gets a row of its own: `fps` is the timebase every clip is expressed in, so
-   * the two documents are not the same cut and neither one supersedes the
-   * other.
+   * A renderable plan is not stored beside a project Version that already exists: the database admits the row only when the sealed
+   * State of the Version it names binds it back, so storing a plan IS creating that Version. It is the child of `baseVersionId`
+   * (which must still be the project head), made by a `compile-renderable-plan` Command that changes no render and whose State
+   * holds this plan as its alternate plan. The plan document therefore carries the child's id, not the base's: the caller asks
+   * `renderableCompileVersionId` for it before assembling the plan. Nothing else writes this row.
    *
-   * The same key with a *different* plan is a conflict rather than an
-   * overwrite, and now means one thing only: something other than the request
-   * changed the cut. Silently replacing the plan someone already rendered would
-   * erase the evidence of what was rendered.
+   * The natural key is the derivation at its hash, the project version it is compiled into (the child, derived from the base)
+   * and the frame rate it is delivered at. Compiling the same derivation twice on the same base the same way is a replay — the
+   * same source hash at the same rate produces the same cut — and returns the stored row without a second Version, even after the
+   * first compile moved the head. Asking for a different delivery rate on the same base is a different plan, and the base is then
+   * no longer the head: it is answered VERSION_CONFLICT with the head, like every Command based on a Version that moved.
+   *
+   * The same key with a *different* plan is a conflict rather than an overwrite, and now means one thing only: something other
+   * than the request changed the cut. Silently replacing the plan someone already rendered would erase the evidence of what was
+   * rendered.
    */
   persist(input: {
     snapshot: Readonly<RenderablePlanSnapshot>
     createdAt: string
+    /** The project head the cut is compiled on. */
+    baseVersionId: string
+    /** Who compiled, and the credential audit of an external author (null for an internal one). */
+    author: Readonly<CommandActor>
+    audit: Readonly<ApiAccessAuditContext> | null
   }): Promise<Readonly<{ snapshot: Readonly<StoredRenderablePlanSnapshot>; replayed: boolean }>>
 
   /** The most recently compiled plan for one derivation, whatever its hash. */

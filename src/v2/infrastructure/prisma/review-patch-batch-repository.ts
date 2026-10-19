@@ -1,3 +1,5 @@
+import type { AdoptableObservationReader } from '../../application/ports/adoptable-observation-reader.ts'
+import { readAdoptableObservationsV3 } from './output-adoptable-observations.ts'
 import { randomUUID } from 'node:crypto'
 
 import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
@@ -17,21 +19,25 @@ import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
 import {
+  assertReviewFormatsAreOutputs,
   createCommandArtifactInvalidations,
   normalizeCommandImpactOutputReferences,
   parseCommandImpact,
 } from '../../domain/command-impact.ts'
+import { outputVariantsOf } from '../../domain/output-consumption.ts'
 import {
   hydrateInvalidation,
   hydrateReviewAnnotation,
   hydrateReviewPatchProposal,
   hydrateReviewPatchVersion,
 } from './review-patch-repository.ts'
+import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { childCommandOf } from '../../domain/project-output-state-transition.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
-import {
-  editCommandExternalActorAuditData,
-  hydrateEditCommandExternalActorAudit,
-} from './edit-command-actor-audit.ts'
+import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
+import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
+import { readVersionRenderReferences } from './version-render-references.ts'
 import {
   externalActorAuditData,
   hydrateExternalActorAudit,
@@ -109,6 +115,11 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
     this.createEventId = createEventId
   }
 
+  /** The persisted receipts of the recordings a new plan consumes and the head State does not observe (see adoptable-observations). */
+  async readAdoptableObservations(input: Parameters<AdoptableObservationReader['readAdoptableObservations']>[0]) {
+    return readAdoptableObservationsV3(this.client, input)
+  }
+
   private batchById(input: { workspaceId: string; projectId: string; batchId: string }) {
     return this.client.v2ReviewPatchBatch.findFirst({
       where: { id: input.batchId, workspaceId: input.workspaceId, projectId: input.projectId },
@@ -143,7 +154,7 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
       this.client.v2Project.findFirst({
         where: { id: input.projectId, workspaceId: input.workspaceId },
         include: {
-          currentVersion: { include: { editPlanSnapshot: true } },
+          currentVersion: true,
           mediaAssets: { where: { artifact: { status: 'available' } }, select: { artifactId: true } },
         },
       }),
@@ -154,6 +165,9 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
     ])
     const version = project?.currentVersion
     if (!project || !version || rows.length !== input.proposalIds.length) return null
+    const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: version.id })
+    if (!parent) return null
+    const editPlanSnapshot = operationalBundlePlanV3(parent)
     const byId = new Map(rows.map((row) => [row.id, row]))
     const entries = input.proposalIds.map((proposalId) => {
       const row = byId.get(proposalId)!
@@ -162,56 +176,22 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
         proposal: hydrateReviewPatchProposal(row),
       })
     })
-    const renderVariantIds = Object.freeze([
-      ...new Set([
-        project.format ?? '9:16',
-        ...entries.flatMap((entry) => entry.annotation.applicationScope.formatIds),
-      ]),
-    ].toSorted())
-    const [proxyOutputs, finalOutputs] = await Promise.all([
-      this.client.v2ProjectProxyRenderOperation.findMany({
-        where: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          projectVersionId: version.id,
-          operation: { status: 'succeeded', phase: 'completed' },
-        },
-        select: { outputArtifactId: true },
-      }),
-      this.client.v2ProjectFinalExportOperation.findMany({
-        where: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          projectVersionId: version.id,
-          operation: { status: 'succeeded', phase: 'completed' },
-        },
-        select: { outputArtifactId: true, outputAspectRatio: true },
-      }),
-    ])
+    // A batch edits the shared plan: its impact is every output's renders. The formats its annotations name must be outputs of the
+    // State the batch is applied to, and never narrow that impact.
+    assertReviewFormatsAreOutputs(
+      outputVariantsOf(parent.state).map((output) => output.variantId),
+      entries.flatMap((entry) => entry.annotation.applicationScope.formatIds),
+    )
+    const outputReferences = await readVersionRenderReferences(this.client, {
+      workspaceId: input.workspaceId, projectId: input.projectId, versionId: version.id, state: parent.state,
+    })
     return Object.freeze({
-      currentVersion: hydrateReviewPatchVersion(version),
-      editPlan: Object.freeze(parseJson<Record<string, unknown>>(version.editPlanSnapshot.contentJson, 'batch review EditPlan')),
-      editPlanHash: version.editPlanSnapshot.contentHash,
+      parent,
+      currentVersion: parent.version,
+      editPlan: Object.freeze(parseJson<Record<string, unknown>>(editPlanSnapshot.contentJson, 'batch review EditPlan')),
+      editPlanHash: editPlanSnapshot.contentHash,
       availableAssetIds: Object.freeze([...new Set(project.mediaAssets.map((asset) => asset.artifactId))]),
-      renderVariantIds,
-      outputReferences: normalizeCommandImpactOutputReferences([
-        ...(renderVariantIds.includes(project.format ?? '9:16')
-          ? proxyOutputs.map((output) => ({
-              artifactId: output.outputArtifactId,
-              kind: 'proxy' as const,
-              sourceVersionId: version.id,
-              variantId: project.format ?? '9:16',
-            }))
-          : []),
-        ...finalOutputs
-          .filter((output) => renderVariantIds.includes(output.outputAspectRatio))
-          .map((output) => ({
-            artifactId: output.outputArtifactId,
-            kind: 'final' as const,
-            sourceVersionId: version.id,
-            variantId: output.outputAspectRatio,
-          })),
-      ]),
+      outputReferences: normalizeCommandImpactOutputReferences(outputReferences),
       entries: Object.freeze(entries),
     })
   }
@@ -331,6 +311,7 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
       idempotencyKey: commandRow.idempotencyKey,
       createdAt: commandRow.createdAt.toISOString(),
     })
+    if (commandRow.commandHash !== command.commandHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored batch review command seal is invalid')
     return Object.freeze({
       batch: hydrateBatch(row),
       command,
@@ -343,7 +324,17 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
     })
   }
 
-  async commitOrReplay(bundle: ReviewPatchBatchCommit, serializationAttempt = 1): Promise<Readonly<ReviewPatchBatchApplyResult>> {
+  async commitOrReplay(input: ReviewPatchBatchCommit, serializationAttempt = 1): Promise<Readonly<ReviewPatchBatchApplyResult>> {
+    const sealed = childCommandOf(input.bundle)
+    if (!sealed.audit) throw new DomainError('AUTH_INVALID', 'Review batch application requires an authenticated external actor')
+    // Local view with the names the transaction below was written against.
+    const bundle = {
+      batchId: input.batchId, applyIdempotencyKey: input.applyIdempotencyKey, applyRequestFingerprint: input.applyRequestFingerprint,
+      command: sealed.command, authenticationAudit: sealed.audit, version: input.bundle.version, event: input.event, comparison: input.comparison, impact: input.impact,
+    }
+    if (bundle.command.type !== 'apply-review-patch-batch' || bundle.version.commandId !== bundle.command.id || bundle.version.parentVersionId !== bundle.command.baseVersionId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Review batch Version does not belong to its Command')
+    }
     const replay = await this.readAppliedResult({
       workspaceId: bundle.version.workspaceId,
       projectId: bundle.version.projectId,
@@ -372,7 +363,7 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
         }
         if (!['ready', 'partial'].includes(batch.status) || (batch.status === 'partial' && batch.mode !== 'partial-retry') ||
           project.currentVersion.id !== batch.baseVersionId || bundle.version.parentVersionId !== project.currentVersion.id ||
-          bundle.version.sequence !== project.currentVersion.sequence + 1) {
+          bundle.version.sequence !== project.currentVersion.sequence + 1 || input.bundle.state.document.parentStateHash !== project.currentVersion.outputStateHash) {
           throw new DomainError('VERSION_CONFLICT', 'Project version changed before batch patch commit', { currentVersionId: project.currentVersion.id })
         }
         const included = batch.items.filter((item) => item.status === 'included')
@@ -383,56 +374,15 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
           !persistedImpact || persistedImpact.commandType !== 'apply-review-patch-batch' ||
           persistedImpact.impactHash !== bundle.impact.impactHash
         ) throw new DomainError('PERSISTENCE_CONFLICT', 'Batch review command and impact payload are inconsistent')
-        const [proxyOutputs, finalOutputs] = await Promise.all([
-          transaction.v2ProjectProxyRenderOperation.findMany({
-            where: {
-              workspaceId: bundle.command.workspaceId,
-              projectId: bundle.command.projectId,
-              projectVersionId: bundle.command.baseVersionId,
-              operation: { status: 'succeeded', phase: 'completed' },
-            },
-            select: { outputArtifactId: true },
-          }),
-          transaction.v2ProjectFinalExportOperation.findMany({
-            where: {
-              workspaceId: bundle.command.workspaceId,
-              projectId: bundle.command.projectId,
-              projectVersionId: bundle.command.baseVersionId,
-              operation: { status: 'succeeded', phase: 'completed' },
-            },
-            select: { outputArtifactId: true, outputAspectRatio: true },
-          }),
-        ])
-        const projectVariantId = project.format ?? '9:16'
-        const currentAffectedArtifacts = normalizeCommandImpactOutputReferences([
-          ...(bundle.impact.affectedVariantIds.includes(projectVariantId)
-            ? proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: projectVariantId }))
-            : []),
-          ...finalOutputs
-            .filter((output) => bundle.impact.affectedVariantIds.includes(output.outputAspectRatio))
-            .map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
-        ])
+        // The child carries the very outputs of its parent, so its State attributes the base Version's renders (every output's).
+        const currentAffectedArtifacts = normalizeCommandImpactOutputReferences(await readVersionRenderReferences(transaction, {
+          workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
+          versionId: bundle.command.baseVersionId, state: input.bundle.state,
+        }))
         if (stableSerialize(currentAffectedArtifacts) !== stableSerialize(bundle.impact.affectedArtifacts)) {
           throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before batch review impact commit')
         }
-        await transaction.v2EditCommand.create({ data: {
-          id: bundle.command.id, workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
-          baseVersionId: bundle.command.baseVersionId, baseHash: bundle.command.baseHash, type: bundle.command.type,
-          scopeJson: stableSerialize(bundle.command.scope), payloadJson: stableSerialize(bundle.command.payload), reason: bundle.command.reason,
-          actorType: bundle.command.author.type, actorId: bundle.command.author.id, delegatedUserId: bundle.command.author.delegatedUserId,
-          ...editCommandExternalActorAuditData(bundle.authenticationAudit, bundle.command.workspaceId, bundle.command.author),
-          idempotencyKey: bundle.command.idempotencyKey, requestFingerprint: bundle.applyRequestFingerprint, createdAt: new Date(bundle.command.createdAt),
-        } })
-        await transaction.v2ProjectSnapshot.create({ data: {
-          id: bundle.snapshot.id, workspaceId: bundle.snapshot.workspaceId, projectId: bundle.snapshot.projectId, kind: bundle.snapshot.kind,
-          schemaVersion: bundle.snapshot.contentSchemaVersion, contentJson: bundle.snapshot.contentJson, contentHash: bundle.snapshot.contentHash, createdAt: new Date(bundle.snapshot.createdAt),
-        } })
-        await transaction.v2ProjectVersion.create({ data: {
-          id: bundle.version.id, workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId, sequence: bundle.version.sequence,
-          parentVersionId: bundle.version.parentVersionId, briefSnapshotId: bundle.version.snapshotRefs.brief!, treatmentSnapshotId: bundle.version.snapshotRefs.treatment,
-          storySnapshotId: bundle.version.snapshotRefs.story, editPlanSnapshotId: bundle.version.snapshotRefs.editPlan, policiesSnapshotId: bundle.version.snapshotRefs.policies,
-          baseHash: bundle.version.baseHash, createdBy: bundle.version.createdBy, commandId: bundle.command.id, createdAt: new Date(bundle.version.createdAt),
-        } })
+        await commitProjectVersionWithOutputState(transaction, input.bundle)
         const invalidations = createCommandArtifactInvalidations({ impact: bundle.impact, createdAt: bundle.command.createdAt })
         if (invalidations.length > 0) {
           await transaction.v2CommandArtifactInvalidation.createMany({ data: invalidations.map((invalidation) => ({
@@ -499,9 +449,10 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
             },
           })),
         ])
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+        await settleDeferredOutputGuards(transaction)
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
-      if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(bundle, serializationAttempt + 1)
+      if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(input, serializationAttempt + 1)
       if (!isPrismaCode(error, 'P2002')) throw error
     }
     const result = await this.readAppliedResult({

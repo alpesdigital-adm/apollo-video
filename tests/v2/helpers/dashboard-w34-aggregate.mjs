@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises'
 
 import {
   advanceVersionThroughApi, archiveThroughApi, createRealProject, readAggregateOracle,
-  seedAnnotations, seedFinalExportChain, seedOperation, setProjectStatus,
+  seedAnnotations, seedDirectedProject, seedFinalExportChain, seedOperation, setProjectStatus, proveRejectedProgressWithoutTotal,
 } from './dashboard-w34-35-fixtures.mjs'
 import {
   assertCard, awaitProjectList, closeBrowser, evidenceDirectory, expectedCard,
@@ -13,11 +13,11 @@ import {
 } from './dashboard-w34-35-browser.mjs'
 
 export const W34_PREFIX = 'w34-'
-export const W34_SCHEMA = 'w34-dashboard-aggregate/v1'
+export const W34_SCHEMA = 'w34-dashboard-aggregate/v2'
 export const W34_MANIFEST = 'w34-manifest.json'
 export const W34_SCREENSHOTS = ['w34-desktop-aggregate.png', 'w34-mobile-aggregate.png']
 // The fixture names are fixed so the guard can pin the expected aggregate.
-export const W34_FIXTURES = ['w34-bare', 'w34-versioned', 'w34-complete', 'w34-failed-op', 'w34-unmeasured', 'w34-archived']
+export const W34_FIXTURES = ['w34-bare', 'w34-versioned', 'w34-complete', 'w34-failed-op', 'w34-archived']
 
 async function databaseCounts(client, workspaceId) {
   const where = { workspaceId }
@@ -42,7 +42,7 @@ const origin = (kind, detail) => ({ origin: kind, detail })
  */
 export async function proveDashboardAggregate({
   baseUrl, client, workspaceId, apiClientId, authorization, credentialId,
-  sessionCookieName, sessionCookieValue, username, sourceArtifactId, sourceManifestId,
+  sessionCookieName, sessionCookieValue, username, sourceArtifactId,
 }) {
   const evidenceDir = evidenceDirectory('APOLLO_W34_EVIDENCE_DIR', 'w34')
   await mkdir(evidenceDir, { recursive: true })
@@ -118,7 +118,7 @@ export async function proveDashboardAggregate({
       projectId: versioned.project.id,
       origins: {
         project: origin('real-api', 'POST /v1/projects'),
-        currentVersion: origin('real-api', 'POST /v1/projects/{id}/lut-selection mode none (sequence 2)'),
+        currentVersion: origin('real-api', 'POST /v1/projects/{id}/output-variants 9:16 (sequence 2)'),
         latestOperation: origin('controlled-pg-seed', 'two project-proxy-render rows; the newer running one must win'),
         openReviewIssues: origin('controlled-pg-seed', '2 open + 1 applied + 1 dismissed on v2; 1 open on superseded v1'),
         outputs: origin('absent', 'no final export exists'),
@@ -130,21 +130,27 @@ export async function proveDashboardAggregate({
     // 3. complete: outputs only from succeeded exports of the current version.
     const complete = await make('w34-complete')
     const chainBase = {
-      workspaceId, clientId: apiClientId, projectId: complete.project.id,
-      sourceArtifactId, sourceManifestId, audit,
+      workspaceId, clientId: apiClientId, projectId: complete.project.id, audit,
     }
-    // The product refuses a version change while outputs exist on an empty
-    // timeline, so the real version advance comes before any export is seeded.
-    const completeV2 = await advanceVersionThroughApi({
+    // 6.0.0: the head that carries outputs needs a REAL Director run, and a Version is born only with its sealed State. Every
+    // Version change therefore comes before any export is seeded: creation Version (API), output variant (API, sequence 2), the
+    // observed source adopted by a child Command (3), the neutral project LUT selection (4) and the Director's Version (5, head).
+    await advanceVersionThroughApi({
       baseUrl, authorization, projectId: complete.project.id, version: complete.version,
-      key: 'w34-complete-lut-none',
+      key: 'w34-complete-variant',
     })
+    const completeWorld = await seedDirectedProject(client, {
+      workspaceId, clientId: apiClientId, credentialId, projectId: complete.project.id, suffix: 'w34-complete',
+    })
+    const completeV2 = { id: completeWorld.versions.directed, sequence: completeWorld.versions.directedSequence }
+    assert.equal(completeV2.sequence, 5)
+    // The superseded export hangs off the Version before the Director's (the LUT selection), behind the same Director run.
     await seedFinalExportChain(client, {
-      ...chainBase, versionId: complete.version.id, suffix: 'w34-complete-v1',
+      ...chainBase, versionId: completeWorld.versions.lut, directed: completeWorld, suffix: 'w34-complete-v1',
       aspectRatio: '9:16', exports: [{ status: 'succeeded' }],
     })
     const chainV2 = await seedFinalExportChain(client, {
-      ...chainBase, versionId: completeV2.id, suffix: 'w34-complete-v2',
+      ...chainBase, versionId: completeV2.id, directed: completeWorld, suffix: 'w34-complete-v2',
       aspectRatio: '16:9',
       exports: [
         { status: 'succeeded', aspectRatio: '16:9' },
@@ -162,13 +168,14 @@ export async function proveDashboardAggregate({
       projectId: complete.project.id,
       origins: {
         project: origin('real-api', 'POST /v1/projects'),
-        currentVersion: origin('real-api', 'POST /v1/projects/{id}/lut-selection mode none (sequence 2)'),
-        latestOperation: origin('controlled-pg-seed', 'newest project-final-export of v2'),
+        currentVersion: origin('real-service', 'POST /v1/projects + /output-variants 9:16 (sequence 2), then the observed-source child (3), the LUT selection (4) and runProjectDirectorService (5, head)'),
+        latestOperation: origin('controlled-pg-seed', 'newest project-final-export of v5'),
         openReviewIssues: origin('controlled-pg-seed', 'only an applied annotation: zero open'),
-        outputs: origin('controlled-pg-seed', 'v1 export excluded as superseded; v2: succeeded 16:9, failed 1:1 (excluded), succeeded 9:16'),
+        outputs: origin('controlled-pg-seed', 'export on v4 excluded as superseded; v5: succeeded 16:9, failed 1:1 (excluded), succeeded 9:16; all behind the real Director run'),
         administration: origin('real-api', 'default revision 1'),
         status: origin('controlled-pg-seed', 'completed'),
       },
+      director: { origin: origin('real-service', 'runProjectDirectorService over the adopted observed source'), ...completeWorld.director },
       expectedOutputArtifacts: chainV2.outputs.filter((item) => item.status === 'succeeded')
         .map((item) => ({ artifactId: item.artifactId, aspectRatio: item.aspectRatio })),
     }
@@ -195,38 +202,18 @@ export async function proveDashboardAggregate({
       },
     }
 
-    // 5. unmeasured: PostgreSQL accepts an operation with a counter but no
-    //    total (its progress CHECK is NULL-permissive); product code never
-    //    writes one, so this is a seed and not a runtime transition.
-    const unmeasured = await make('w34-unmeasured')
-    await client.v2PublicOperation.create({ data: {
-      id: 'w34-unmeasured-op', workspaceId, projectId: unmeasured.project.id,
-      clientId: apiClientId, type: 'project-proxy-render', status: 'running',
-      phase: 'rendering', targetType: 'media-artifact', targetId: sourceArtifactId,
-      progressCompleted: 1, progressTotal: null, progressUnit: null,
-      cancelable: true, retryable: false, attempt: 1, maxAttempts: 3,
-      idempotencyKey: 'w34-unmeasured-op-key', requestFingerprint: 'e'.repeat(64),
-      actorCredentialId: audit.credentialId, actorEnvironment: 'production',
-      actorAuthenticationKind: 'bearer', actorContextHash: audit.contextHash,
-      createdAt: at(20), updatedAt: at(10), startedAt: at(19),
-      leaseOwner: 'w34-controlled-seed', heartbeatAt: at(10),
-      leaseExpiresAt: new Date(now + 300_000),
-    } })
-    await setProjectStatus(client, unmeasured.project.id, 'rendering-proxy')
-    fixtures['w34-unmeasured'] = {
-      projectId: unmeasured.project.id,
-      origins: {
-        project: origin('real-api', 'POST /v1/projects'),
-        currentVersion: origin('real-api', 'POST /v1/projects (sequence 1)'),
-        latestOperation: origin('controlled-pg-seed', 'running project-proxy-render with progressCompleted 1 and NULL total/unit; shape accepted by PostgreSQL, never written by product code'),
-        openReviewIssues: origin('absent', 'no annotation exists'),
-        outputs: origin('absent', 'no final export exists'),
-        administration: origin('real-api', 'default revision 1'),
-        status: origin('controlled-pg-seed', 'rendering-proxy'),
-      },
+    // A partial counter is forbidden in PostgreSQL. Test the exact rejection
+    // against the existing canonical positive operation; do not invent a total.
+    evidence.progressConstraint = await proveRejectedProgressWithoutTotal(client, {
+      workspaceId, projectId: versioned.project.id, operationId: 'w34-versioned-op-new',
+    })
+    evidence.partialProgressCoverage = {
+      origin: 'synthetic-unit-only', source: 'tests/v2/project-dashboard.test.mjs',
+      test: 'W34 synthetic port progress without a total never gains a percentage',
+      postgresAccepted: false, browserObserved: false,
     }
 
-    // 6. archived: the administrative fence is produced by the real API.
+    // 5. archived: the administrative fence is produced by the real API.
     const archivedProject = await make('w34-archived')
     const archivedResult = await archiveThroughApi({
       baseUrl, authorization, projectId: archivedProject.project.id,
@@ -270,7 +257,6 @@ export async function proveDashboardAggregate({
     assert.equal(pinned('w34-complete').latestOperation.id, 'w34-complete-v2-final-operation-3')
     assert.equal(pinned('w34-complete').latestOperation.status, 'succeeded')
     assert.deepEqual(pinned('w34-failed-op').latestOperation.error, { code: 'render-failed', retryable: true })
-    assert.deepEqual(pinned('w34-unmeasured').latestOperation.progress, { completed: 1 })
     assert.equal(pinned('w34-archived').administrationRevision, 2)
     assert.equal(pinned('w34-archived').archivedFromStatus, 'draft')
     const projectRows = await client.v2Project.findMany({
@@ -374,6 +360,7 @@ export async function proveDashboardAggregate({
       assert.deepEqual(after.expected, oracles[name].expected, `${name}: persisted aggregate drifted during the read-only window`)
       evidence.fixtures.push({
         name, projectId: fixtures[name].projectId, origins: fixtures[name].origins,
+        ...(fixtures[name].director ? { director: fixtures[name].director } : {}),
         persisted: oracles[name].expected, project: oracles[name].project,
         api: apiById.get(fixtures[name].projectId).dashboard,
         card: { desktop: observed.desktop.cards.find((card) => card.id === fixtures[name].projectId),

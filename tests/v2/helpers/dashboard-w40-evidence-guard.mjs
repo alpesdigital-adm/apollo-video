@@ -9,8 +9,8 @@ const proofSource = resolve(dirname(fileURLToPath(import.meta.url)), 'dashboard-
 
 const SIBLING_SCHEMAS = Object.freeze({
   29: 'w29-lut-browser-proof/v1', 30: 'w30-dashboard-browser-proof/v1', 31: 'w31-dashboard-combined-filters/v1',
-  32: 'w32-dashboard-pagination/v1', 33: 'w33-dashboard-workspace-isolation/v1', 34: 'w34-dashboard-aggregate/v1',
-  35: 'w35-dashboard-states/v1', 36: 'w36-dashboard-events/v1', 37: 'w37-rename-from-card/v1',
+  32: 'w32-dashboard-pagination/v1', 33: 'w33-dashboard-workspace-isolation/v1', 34: 'w34-dashboard-aggregate/v2',
+  35: 'w35-dashboard-states/v2', 36: 'w36-dashboard-events/v1', 37: 'w37-rename-from-card/v1',
   38: 'w38-archive-restore/v1', 39: 'w39-duplicate-copy-on-write/v1',
 })
 const PHASES = [
@@ -30,7 +30,7 @@ const REFUSALS = Object.freeze({
   'foreign-credential-rename-404': [404, 'PROJECT_NOT_FOUND'], 'foreign-credential-archive-404': [404, 'PROJECT_NOT_FOUND'],
   'foreign-credential-duplicate-404': [404, 'PROJECT_NOT_FOUND'], 'foreign-human-session-rename-404': [404, 'PROJECT_NOT_FOUND'],
   'nonexistent-project-404': [404, 'PROJECT_NOT_FOUND'], 'workspace-switched-in-another-tab-404': [404, 'PROJECT_NOT_FOUND'],
-  'stale-rename-409': [409, 'VERSION_CONFLICT'], 'stale-archive-409': [409, 'VERSION_CONFLICT'], 'stale-duplicate-409': [409, 'VERSION_CONFLICT'],
+  'stale-rename-409': [409, 'VERSION_CONFLICT'], 'stale-archive-409': [409, 'VERSION_CONFLICT'], 'stale-duplicate-409': [409, 'VERSION_CONFLICT'], 'command-on-copy-refused-fork-root': [428, 'PRECONDITION_REQUIRED'],
   'stale-rename-api-409': [409, 'VERSION_CONFLICT'], 'stale-archive-api-409': [409, 'VERSION_CONFLICT'],
 })
 const CONTROLLED = ['transport-failure-before-send', 'transport-response-lost-after-commit']
@@ -218,9 +218,21 @@ export function verifyW40Evidence(directory, context, { siblings, source = readF
   assert.equal(duplicate.destination.urlPath, `/projects/${duplicate.copy.projectId}`)
   assert.equal(duplicate.destination.workspaceStatus, 200)
   assert.deepEqual(duplicate.destination.mediaArtifactIds, [manifest.fixtures.dup.artifactId])
-  assert.equal(duplicate.commandOnCopy.copyEditCommands, 1)
-  assert.equal(duplicate.commandOnCopy.sourceEditCommands, 0)
-  assert.deepEqual(duplicate.commandOnCopy.cards, { source: 'v1', copy: 'v2' })
+  // 6.0.0: a copy of a project with content is a fork root that only an editorial cut may move, so the Command is refused on the
+  // copy (428, nothing changes) and moves the original, which owns the one Command that gave it an output plus this one.
+  assert.equal(duplicate.commands.type, 'create-output-variant')
+  assert.deepEqual([duplicate.commands.onCopy.status, duplicate.commands.onCopy.code], [428, 'PRECONDITION_REQUIRED'])
+  assert.equal(duplicate.commands.onCopy.copyUnchanged, true)
+  assert.equal(duplicate.commands.onCopy.originalUnchanged, true)
+  assert.equal(duplicate.commands.onOriginal.status, 201)
+  assert.equal(duplicate.commands.onOriginal.editCommandsBefore, 1)
+  assert.equal(duplicate.commands.onOriginal.editCommandsAfter, 2)
+  assert.equal(duplicate.commands.onOriginal.versionSequenceAfter, 3)
+  assert.equal(duplicate.commands.onOriginal.earlierVersionsUnchanged, true)
+  assert.equal(duplicate.commands.onOriginal.earlierSnapshotsUnchanged, true)
+  assert.equal(duplicate.commands.onOriginal.copyUnchanged, true)
+  assert.equal(duplicate.commands.onOriginal.copyEditCommands, 0)
+  assert.deepEqual(duplicate.commands.cards, { source: 'v3', copy: 'v1' })
   assert.equal(duplicate.sourceUnchanged, true)
 
   // cases: every refusal binds request, response, card and persisted state; 401/403/404/409 are never interchangeable
@@ -291,8 +303,11 @@ export function verifyW40Evidence(directory, context, { siblings, source = readF
   assert.deepEqual(finalCommands('copy'), [])
   assert.equal(manifest.final.projects.review.project.status, 'reviewing-proxy')
   assert.equal(manifest.final.projects.archive.project.status, 'completed')
-  assert.equal(manifest.final.projects.copy.versions, 2)
-  assert.equal(manifest.final.projects.copy.editCommands, 1)
+  // The copy stays at its fork root; the original has creation + two output variants and their two Commands.
+  assert.equal(manifest.final.projects.copy.versions, 1)
+  assert.equal(manifest.final.projects.copy.editCommands, 0)
+  assert.equal(manifest.final.projects.dup.versions, 3)
+  assert.equal(manifest.final.projects.dup.editCommands, 2)
 
   assert.deepEqual(manifest.screenshots?.map((item) => item.name), SCREENSHOTS)
   for (const shot of manifest.screenshots) {

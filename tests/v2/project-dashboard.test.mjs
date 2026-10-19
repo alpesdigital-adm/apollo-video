@@ -184,6 +184,99 @@ test('F1.001 Prisma query aggregates the current version, latest real job, issue
   assert.equal(record.dashboard.lastActivityAt, '2026-08-06T12:04:00.000Z')
 })
 
+// W66 / apollo.projects.list 6.1.0: a project born under 6.0.0 has no `projects.format`; its outputs are explicit variants carried by
+// the State of its head Version. The `format` facet therefore matches the project's own stored format (a pre-6.0.0 row or a fork
+// that inherited one) OR any output of the head State whose aspect ratio is the requested one; it never looks at older Versions.
+// The repository answers it with one correlated SQL query that picks the page (ordered, keyset-bound, LIMITed) and then reads the
+// page by id with the same includes as every other list. These tests pin the query's inputs; the PostgreSQL proofs run it.
+const FORMAT_FACET_WORKSPACE = 'workspace-format-facet-1'
+const FORMAT_FACET_ROWS = []
+function formatFacetClient(pageIds) {
+  const sql = []
+  const findMany = []
+  const client = {
+    async $queryRaw(statement) { sql.push(statement); return pageIds.map((id) => ({ id })) },
+    v2Project: { async findMany(query) { findMany.push(query); return FORMAT_FACET_ROWS } },
+  }
+  return { client, sql, findMany }
+}
+
+test('W66 the format facet picks the page by id in one correlated query and reads that page like any other list', async () => {
+  const cursor = { createdAt: '2026-08-06T12:00:00.000Z', id: 'project-format-facet-9' }
+  const alone = formatFacetClient(['project-b', 'project-a'])
+  await new PrismaProjectQueryRepository(alone.client).listByWorkspace({
+    workspaceId: FORMAT_FACET_WORKSPACE, limit: 21, filters: { format: '9:16' },
+  })
+  assert.equal(alone.sql.length, 1)
+  assert.deepEqual(alone.sql[0].values, [FORMAT_FACET_WORKSPACE, '9:16', FORMAT_FACET_WORKSPACE, '9:16', 21])
+  // The page: workspace first, the stored format OR a correlated EXISTS over the head Version's State, newest first, LIMIT.
+  const text = alone.sql[0].text.replace(/\s+/g, ' ')
+  assert.match(text, /WHERE p\."workspaceId" = \$1 AND \(p\."format" = \$2 OR EXISTS \( SELECT 1 FROM "projects" AS h JOIN "project_versions" AS v ON v\."id" = h\."currentVersionId" AND v\."projectId" = h\."id" AND v\."workspaceId" = h\."workspaceId" JOIN "project_output_state_entries" AS e ON e\."stateId" = v\."outputStateId" /)
+  assert.match(text, / JOIN "output_spec_revisions" AS r ON r\."id" = e\."outputSpecRevisionId" AND r\."variantId" = e\."variantId" /)
+  assert.match(text, / WHERE h\."id" = p\."id" AND h\."workspaceId" = \$3 AND \(r\."specJson"::jsonb #>> '\{output,aspectRatio\}'\) = \$4\)\) ORDER BY p\."createdAt" DESC, p\."id" DESC LIMIT \$5$/)
+  // Only the head: the sub-select follows the project's own currentVersionId and never lists its versions.
+  assert.equal(/"sequence"|"parentVersionId"/.test(text), false)
+  // The page is then read by id, with the includes and the order of every other list, and nothing about format.
+  assert.equal(alone.findMany.length, 1)
+  assert.deepEqual(alone.findMany[0].where, { workspaceId: FORMAT_FACET_WORKSPACE, id: { in: ['project-b', 'project-a'] } })
+  assert.deepEqual(alone.findMany[0].orderBy, [{ createdAt: 'desc' }, { id: 'desc' }])
+  assert.ok(alone.findMany[0].include.currentVersion && alone.findMany[0].include.publicOperations)
+
+  // Every other facet and the keyset cursor are part of the same page query, in the same terms as the Prisma query.
+  const combined = formatFacetClient(['project-a'])
+  await new PrismaProjectQueryRepository(combined.client).listByWorkspace({
+    workspaceId: FORMAT_FACET_WORKSPACE, limit: 3, after: cursor,
+    filters: {
+      format: '16:9', text: 'campanha', status: 'draft', objective: 'sale', locale: 'pt-BR', ownerId: 'owner-1',
+      createdFrom: '2026-08-01T00:00:00.000Z', createdTo: '2026-08-31T23:59:59.999Z',
+    },
+  })
+  assert.deepEqual(combined.sql[0].values, [
+    FORMAT_FACET_WORKSPACE, '%campanha%', 'draft', 'sale', 'pt-BR', 'owner-1',
+    '2026-08-01T00:00:00.000Z', '2026-08-31T23:59:59.999Z', cursor.createdAt, cursor.createdAt, cursor.id,
+    '16:9', FORMAT_FACET_WORKSPACE, '16:9', 3,
+  ])
+  const combinedText = combined.sql[0].text.replace(/\s+/g, ' ')
+  assert.match(combinedText, /p\."name" ILIKE \$2 AND p\."status" = \$3 AND p\."objective" = \$4 AND p\."locale" = \$5 AND p\."ownerId" = \$6 AND p\."createdAt" >= \$7::timestamptz AND p\."createdAt" <= \$8::timestamptz AND \(p\."createdAt" < \$9::timestamptz OR \(p\."createdAt" = \$10::timestamptz AND p\."id" < \$11\)\) AND \(p\."format" = \$12 OR EXISTS/)
+})
+
+test('W66 a format facet with no match returns an empty page without reading projects, and no facet never uses the page query', async () => {
+  const none = formatFacetClient([])
+  assert.deepEqual(await new PrismaProjectQueryRepository(none.client).listByWorkspace({
+    workspaceId: FORMAT_FACET_WORKSPACE, limit: 21, filters: { format: '1:1' },
+  }), [])
+  assert.equal(none.sql.length, 1)
+  assert.equal(none.findMany.length, 0)
+
+  // Without the facet the repository is exactly the Prisma query it always was (the client has no $queryRaw to fall back on).
+  const queries = []
+  const plain = new PrismaProjectQueryRepository({ v2Project: { async findMany(query) { queries.push(query); return [] } } })
+  await plain.listByWorkspace({ workspaceId: FORMAT_FACET_WORKSPACE, limit: 21, filters: { text: 'campanha', status: 'draft' } })
+  assert.deepEqual(queries[0].where, {
+    workspaceId: FORMAT_FACET_WORKSPACE, name: { contains: 'campanha', mode: 'insensitive' }, status: 'draft',
+  })
+})
+
+test('W66 the aspect ratio the format facet reads is where the sealed spec revision keeps the output ratio, for every ratio', async () => {
+  const { serializeOutputCanonicalJson } = await import('../../src/v2/domain/output-canonical-policy.ts')
+  const { OUTPUT_ASPECT_RATIOS } = await import('../../src/v2/domain/output-spec.ts')
+  const { outputWorld, creationRequest } = await import('./helpers/output-world.mjs')
+  const { variantBodyFor } = await import('./helpers/explicit-project-http.mjs')
+  for (const ratio of OUTPUT_ASPECT_RATIOS) {
+    const world = outputWorld()
+    const root = await world.create(creationRequest(world))
+    const child = await world.variant({
+      ...variantBodyFor({ aspectRatio: ratio }), workspaceId: world.actor.workspaceId, projectId: root.bundle.version.projectId,
+      baseVersionId: root.bundle.version.id, baseHash: root.bundle.version.baseHash, actor: world.actor, idempotencyKey: `format-facet-${ratio}`,
+    })
+    // output_spec_revisions."specJson" is exactly this serialization (output-version-bundle-persistence.ts); the facet reads
+    // specJson::jsonb #>> '{output,aspectRatio}' from it.
+    const specJson = serializeOutputCanonicalJson(child.bundle.origin.result.command.payload.revision)
+    assert.equal(JSON.parse(specJson).output.aspectRatio, ratio)
+    assert.equal(child.bundle.state.document.entries.at(-1).spec.output.aspectRatio, ratio)
+  }
+})
+
 test('F1.003 public project-list v6 validates administration evidence and rejects fabricated progress', () => {
   const record = createProjectDashboardRecord({
     project: project(),
@@ -402,10 +495,11 @@ test('W34 one inconsistent row rejects the whole page so no partial or invented 
   )
 })
 
-test('W34 operation progress without a total stays a contract shape and never gains a percentage', async () => {
-  // PostgreSQL canonical progress CHECK makes every persisted operation
-  // measured (proved by the W35 E2E). The Prisma port is still the boundary
-  // that must not invent a total or a percentage when a row would lack one.
+test('W34 synthetic port progress without a total never gains a percentage', async () => {
+  // Synthetic Prisma-port/domain/contract defense only: these injected partial
+  // rows cannot satisfy the canonical PostgreSQL CHECK. This is not a PG/API
+  // journey or an observed browser proof; the source guard separately pins UI
+  // no-percent/no-progressbar handling. No persisted no-total state is claimed.
   const [record] = await w34List([w34Row({
     status: 'rendering-proxy',
     publicOperations: [w34Operation({

@@ -10,7 +10,7 @@ import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { proveWorkspaceLutBrowser } from './helpers/workspace-lut-browser-proof.mjs'
 import { proveProjectDashboardBrowser } from './helpers/project-dashboard-browser-proof.mjs'
-import { cleanupDashboardFixtures } from './helpers/dashboard-w34-35-fixtures.mjs'
+import { variantBodyFor } from './helpers/explicit-project-http.mjs'
 import { proveDashboardAggregate } from './helpers/dashboard-w34-aggregate.mjs'
 import { proveDashboardStates } from './helpers/dashboard-w35-states.mjs'
 import { proveDashboardEventFeedBrowser } from './helpers/dashboard-w36-events-proof.mjs'
@@ -183,120 +183,12 @@ test('authenticated public API manages projects, clients and artifact inspection
   let serverDiagnostics = ''
   let primaryFailure
 
-  const cleanup = async () => {
-    // W34/W35 fixtures hold RESTRICT foreign keys; they leave first.
-    // W40 seeds an awaiting-review project (operation + annotation) that also holds RESTRICT foreign keys.
-    await cleanupDashboardFixtures(client, { workspaceId, prefixes: ['w34-', 'w35-', 'w40-'] })
-    await client.v2UiSession.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2UiLoginAttempt.deleteMany({ where: { keyHash: uiThrottleKey } })
-    await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: uiThrottleKey } })
-    await client.v2WebhookDeliveryAttempt.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2WebhookDelivery.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2WebhookAdministrationCommand.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2WebhookSubscription.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2WebhookSigningSecretRotation.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2WebhookSigningSecretPayload.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2WebhookSigningSecret.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2WebhookEndpoint.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2ArtifactRenderOperation.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2PublicOperation.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2AssetUseDecision.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2MaterializationAuthorization.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2ColorPipelineCompilation.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2ProjectLutSelectionHead.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2ProjectLutSelection.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceLutDefault.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceLutDefaultVersion.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceLutStatusCommand.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceLut.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceLutVersion.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2ProjectMediaAsset.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2MediaArtifactLineage.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2MediaColorProbe.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2MediaArtifactManifest.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2MediaArtifact.updateMany({
-      where: { workspaceId: { in: workspaceIds } },
-      data: { currentRightsSnapshotId: null },
-    })
-    await client.v2AssetRightsChange.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2AssetRightsSnapshot.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2MediaArtifact.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2RenderInputPayload.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2RecipeParameterPayload.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2ProjectAdministrationCommand.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2PublicEventOutbox.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2IdempotencyRecord.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2ApiAccessCommand.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2ProjectCreationCommand.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    // W39: a duplicated project's first version forks from its source (restrictive FK), so duplicates go first.
-    await client.v2Project.deleteMany({ where: { workspaceId: { in: workspaceIds }, duplicatedFromProjectId: { not: null } } })
-    await client.v2Project.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceMember.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2ApiAdministrationCommand.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2GovernancePolicyCommand.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2ApiCredential.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2HumanIdentity.deleteMany({ where: { issuer: 'urn:apollo:bootstrap', subjectHash: uiSessionSubjectHash(uiUsername, uiEnvironment) } })
-    await client.v2Workspace.deleteMany({ where: { id: { in: workspaceIds } } })
-  }
-
   try {
-    await cleanup()
+    // This proof names its identities (workspace, client, artifacts, webhook rows) and sealed rows are append-only, so it cannot
+    // clean up after itself: it is single-use per database, exactly as its workflow gives it a fresh one. Say so instead of failing
+    // later on a unique constraint.
+    assert.equal(await client.v2Workspace.count({ where: { id: { in: workspaceIds } } }), 0,
+      'this proof needs a fresh database: its named workspaces already exist and sealed rows are never deleted')
 
     const workspaces = new PrismaWorkspaceRepository(client)
     await workspaces.create(
@@ -828,7 +720,6 @@ test('authenticated public API manages projects, clients and artifact inspection
       body: JSON.stringify({
         name: 'UI delegated audit project',
         objective: 'discovery',
-        format: '9:16',
         locale: 'pt-BR',
       }),
     })
@@ -838,7 +729,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       where: {
         workspaceId,
         resourceId: {
-          in: [uiProjectCreated.data.project.id, uiProjectCreated.data.version.id],
+          in: [uiProjectCreated.data.projectAtCreation.id, uiProjectCreated.data.creationVersion.id],
         },
       },
     })
@@ -3541,6 +3432,8 @@ test('authenticated public API manages projects, clients and artifact inspection
         },
       }), 2)
     } finally {
+      // The anomaly evidence is this proof's own step, not leftover data: the governance block it caused must lift for the
+      // requests that follow. These are artifact-render operations (not sealed ingest rows), so the delete is allowed.
       await client.v2PublicOperation.deleteMany({
         where: { id: { in: anomalyOperationIds } },
       })
@@ -5218,25 +5111,51 @@ test('authenticated public API manages projects, clients and artifact inspection
         body: JSON.stringify({
           name: 'Projeto criado externamente',
           objective: 'discovery',
-          format: '9:16',
           locale: 'pt-BR',
           briefing: 'Público: gestores. Oferta: conteúdo. Tom: direto e natural.',
         }),
       })
     const createdResponse = await createRequest()
-    const created = await createdResponse.json()
-    assert.equal(createdResponse.status, 201)
-    assert.equal(created.data.replayed, false)
-    assert.equal(created.data.project.name, 'Projeto criado externamente')
-    assert.equal(created.data.project.objective, 'discovery')
-    assert.equal(created.data.project.format, '9:16')
-    assert.equal(created.data.project.locale, 'pt-BR')
-    assert.ok(created.data.version.snapshotRefs.brief)
-    assert.equal(created.data.version.sequence, 1)
+    const createdEnvelope = await createdResponse.json()
+    assert.equal(createdResponse.status, 201, JSON.stringify(createdEnvelope))
+    assert.equal(createdEnvelope.data.replayed, false)
+    assert.equal(createdEnvelope.data.projectAtCreation.name, 'Projeto criado externamente')
+    assert.equal(createdEnvelope.data.projectAtCreation.objective, 'discovery')
+    assert.equal(createdEnvelope.data.projectAtCreation.format ?? null, null, 'a 6.0.0 project has no format of its own')
+    assert.equal(createdEnvelope.data.projectAtCreation.locale, 'pt-BR')
+    assert.ok(createdEnvelope.data.creationVersion.snapshotRefs.brief)
+    assert.equal(createdEnvelope.data.creationVersion.sequence, 1)
+    // The 9:16 output this proof edits is an explicit variant built on the creation Version.
+    const variantResponse = await fetch(`${baseUrl}/v1/projects/${createdEnvelope.data.projectAtCreation.id}/output-variants`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-create-project-1-variant' },
+      body: JSON.stringify({ ...variantBodyFor({ aspectRatio: '9:16' }),
+        baseVersionId: createdEnvelope.data.creationVersion.id, baseHash: createdEnvelope.data.creationVersion.baseHash }),
+    })
+    const variantEnvelope = await variantResponse.json()
+    assert.equal(variantResponse.status, 201, JSON.stringify(variantEnvelope))
+    assert.equal(variantEnvelope.data.version.sequence, 2)
+    // `created` keeps the shape the rest of this proof reads: the project and the Version it edits from here on (the variant).
+    const created = { data: { replayed: false, project: createdEnvelope.data.projectAtCreation, version: variantEnvelope.data.version } }
 
     {
+      // The transfer proof creates projects of its own, and sealed Versions are never deleted: it runs in a workspace of its own
+      // (unique to this run) instead of leaving projects in the one whose dashboard counts the rest of this proof asserts.
+      const w51Workspace = `w51-transfer-workspace-${Date.now().toString(36)}`
+      await workspaces.create(createWorkspace({
+        id: w51Workspace, slug: w51Workspace, name: 'W51 transfer workspace', status: 'active', createdAt: '2026-07-12T16:00:00.000Z',
+      }))
+      const w51Issued = await createApiClientService({
+        repository: new PrismaApiClientRepository(client),
+        credentialCrypto: nodeApiCredentialCrypto,
+        clock: () => new Date('2026-07-12T16:01:00.000Z'),
+      })({
+        id: `${w51Workspace}-client`, credentialId: `${w51Workspace}-credential`, workspaceId: w51Workspace,
+        name: 'W51 transfer client', environment: apiEnvironment,
+        scopes: ['artifacts:read', 'artifacts:render', 'artifacts:rights', 'media:write', 'operations:cancel', 'operations:read', 'operations:retry', 'projects:read', 'projects:write'],
+      })
       const transfer = await proveMediaTransferHttp({
-        baseUrl, client, authorization, workspaceId, projectId: created.data.project.id,
+        baseUrl, client, authorization: `Bearer ${w51Issued.token}`, workspaceId: w51Workspace, projectId: created.data.project.id,
         artifactRoot: w39ArtifactRoot, createMediaArtifactManifest,
       })
       assert.equal(transfer.outcome, 'passed')
@@ -5246,7 +5165,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     const replay = await replayResponse.json()
     assert.equal(replayResponse.status, 200)
     assert.equal(replay.data.replayed, true)
-    assert.equal(replay.data.project.id, created.data.project.id)
+    assert.equal(replay.data.projectAtCreation.id, created.data.project.id)
 
     const reactivateLutResponse = await fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts/${lutBody.lutId}/status`, {
       method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-lut-status-reactivate' }, body: JSON.stringify({ baseRevision: 2, status: 'active' }),
@@ -5270,7 +5189,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(projectLut.data.selection.resolved.lut.version, 2)
     assert.equal(projectLut.data.selection.workspaceDefaultRevision, 3)
     assert.equal(projectLut.data.selection.intensity, 0.8)
-    assert.equal(projectLut.data.version.sequence, 2)
+    assert.equal(projectLut.data.version.sequence, 3)
     assert.equal(projectLut.data.impact.schemaVersion, 'project-lut-selection-impact/v1')
     assert.equal(projectLut.data.impact.renderDeferredUntilTimeline, true)
     assert.deepEqual(projectLut.data.impact.affectedRanges, [])
@@ -5298,7 +5217,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(JSON.parse(storedProjectLut.command.payloadJson).schemaVersion, 2)
     assert.equal(JSON.parse(storedProjectLut.command.payloadJson).impact.impactHash, projectLut.data.impact.impactHash)
     assert.equal(storedProjectLut.command.artifactInvalidations.length, 0)
-    assert.equal(storedProjectLut.resultVersion.sequence, 2)
+    assert.equal(storedProjectLut.resultVersion.sequence, 3)
     assert.equal(storedProjectLut.resolvedLutVersion.version, 2)
     assert.equal((await client.v2Project.findUnique({ where: { id: created.data.project.id } })).currentVersionId, projectLut.data.version.id)
     const readProjectLutResponse = await fetch(`${baseUrl}/v1/projects/${created.data.project.id}/lut-selection`, { headers: { authorization } })
@@ -5315,7 +5234,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     const noneProjectLut = await noneProjectLutResponse.json()
     assert.equal(noneProjectLutResponse.status, 201)
     assert.equal(noneProjectLut.data.selection.resolved.mode, 'none')
-    assert.equal(noneProjectLut.data.version.sequence, 3)
+    assert.equal(noneProjectLut.data.version.sequence, 4)
     assert.equal(noneProjectLut.data.impact.renderDeferredUntilTimeline, true)
     assert.deepEqual(noneProjectLut.data.invalidations, [])
     assert.equal('operation' in noneProjectLut.data, false)
@@ -5459,7 +5378,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(list.data.projects.length, 2)
     assert.deepEqual(
       new Set(list.data.projects.map((project) => project.id)),
-      new Set([created.data.project.id, uiProjectCreated.data.project.id]),
+      new Set([created.data.project.id, uiProjectCreated.data.projectAtCreation.id]),
     )
     const dashboardProject = list.data.projects.find((project) =>
       project.id === created.data.project.id)
@@ -5510,7 +5429,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         firstProjectPage.data.projects[0].id,
         secondProjectPage.data.projects[0].id,
       ]),
-      new Set([created.data.project.id, uiProjectCreated.data.project.id]),
+      new Set([created.data.project.id, uiProjectCreated.data.projectAtCreation.id]),
     )
 
     const createdDay = created.data.project.createdAt.slice(0, 10)
@@ -5519,7 +5438,6 @@ test('authenticated public API manages projects, clients and artifact inspection
       text: 'criado externamente',
       status: 'draft',
       objective: 'discovery',
-      format: '9:16',
       locale: 'pt-BR',
       createdFrom: `${createdDay}T00:00:00.000Z`,
       createdTo: `${createdDay}T23:59:59.999Z`,
@@ -5535,6 +5453,26 @@ test('authenticated public API manages projects, clients and artifact inspection
       exactProject.data.projects.map((project) => project.id),
       [created.data.project.id],
     )
+    // apollo.projects.list 6.1.0. A project born under 6.0.0 has no format of its own (its outputs are explicit variants), so the
+    // `format` facet matches the aspect ratio of the outputs in the State of the project's current Version. `created` has the 9:16
+    // variant this proof made (its head has moved since: the State of the head still carries it); the UI-created project has only
+    // its creation Version, which carries no output, so no ratio matches it.
+    const formatFacetIds = async (parameters) => {
+      const response = await fetch(`${baseUrl}/v1/projects?${new URLSearchParams(parameters)}`, { headers: { authorization } })
+      const body = await response.json()
+      assert.equal(response.status, 200, JSON.stringify(body))
+      return body.data.projects.map((project) => project.id)
+    }
+    assert.deepEqual(await formatFacetIds({ text: 'criado externamente', format: '9:16' }), [created.data.project.id])
+    assert.deepEqual(await formatFacetIds({ format: '9:16' }), [created.data.project.id],
+      'the facet finds the project with a 9:16 output and not the one whose Version has no output')
+    assert.deepEqual(await formatFacetIds({ ...Object.fromEntries(exactProjectFilters), format: '9:16' }), [created.data.project.id],
+      'format joins the other seven facets in one conjunction')
+    for (const otherRatio of ['16:9', '4:5', '1:1', '21:9']) {
+      assert.deepEqual(await formatFacetIds({ format: otherRatio }), [], `no project of this workspace has a ${otherRatio} output`)
+      assert.deepEqual(await formatFacetIds({ ...Object.fromEntries(exactProjectFilters), format: otherRatio }), [])
+    }
+    assert.deepEqual(await formatFacetIds({ limit: '1', format: '9:16' }), [created.data.project.id])
     const zeroProjectResponse = await fetch(
       `${baseUrl}/v1/projects?text=${encodeURIComponent('não existe')}`,
       { headers: { authorization } },
@@ -5654,7 +5592,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     // public-API and W29 baselines, before terminal credential expiry.
     const w30 = await proveProjectDashboardBrowser({
       baseUrl, client, workspaceId,
-      projectIds: [created.data.project.id, uiProjectCreated.data.project.id],
+      projectIds: [created.data.project.id, uiProjectCreated.data.projectAtCreation.id],
       sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
       username: uiUsername,
     })
@@ -5729,7 +5667,6 @@ test('authenticated public API manages projects, clients and artifact inspection
       credentialId: issued.credential.id,
       sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
       username: uiUsername, sourceArtifactId,
-      sourceManifestId: 'public-api-source-manifest-v2',
     })
     assert.equal(w34.outcome, 'passed')
 
@@ -5739,7 +5676,6 @@ test('authenticated public API manages projects, clients and artifact inspection
       credentialId: issued.credential.id,
       sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
       username: uiUsername, password: uiPassword, uiThrottleKey, sourceArtifactId,
-      sourceManifestId: 'public-api-source-manifest-v2',
     })
     assert.equal(w35.outcome, 'passed')
 
@@ -5905,9 +5841,6 @@ test('authenticated public API manages projects, clients and artifact inspection
   } finally {
     const postflightErrors = []
     try { await stopOwnedServer(server) } catch (error) { postflightErrors.push(error) }
-    if (postflightErrors.length === 0) {
-      try { await cleanup() } catch (error) { postflightErrors.push(error) }
-    }
     try { await client.$disconnect() } catch (error) { postflightErrors.push(error) }
     if (postflightErrors.length) throw new AggregateError(
       primaryFailure ? [primaryFailure, ...postflightErrors] : postflightErrors,

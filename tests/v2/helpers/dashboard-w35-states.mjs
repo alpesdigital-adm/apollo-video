@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 
 import {
-  W35_EMPTY_WORKSPACE_ID, archiveThroughApi, createRealProject, readAggregateOracle,
-  seedAnnotations, seedFinalExportChain, seedOperation, setProjectStatus,
+  W35_EMPTY_WORKSPACE_ID, advanceVersionThroughApi, archiveThroughApi, createRealProject, readAggregateOracle,
+  seedAnnotations, seedDirectedProject, seedFinalExportChain, seedOperation, setProjectStatus, proveRejectedProgressWithoutTotal,
 } from './dashboard-w34-35-fixtures.mjs'
 import {
   ARCHIVABLE, assertCard, awaitProjectList, closeBrowser, evidenceDirectory,
@@ -19,14 +19,14 @@ const { PrismaWorkspaceRepository } = await import('../../../src/v2/infrastructu
 const { createWorkspace } = await import('../../../src/v2/domain/workspace.ts')
 
 export const W35_PREFIX = 'w35-'
-export const W35_SCHEMA = 'w35-dashboard-states/v1'
+export const W35_SCHEMA = 'w35-dashboard-states/v2'
 export const W35_MANIFEST = 'w35-manifest.json'
 export const W35_SCREENSHOTS = [
   'w35-desktop-states.png', 'w35-mobile-states.png',
   'w35-desktop-empty.png', 'w35-mobile-empty.png',
 ]
 export const W35_FIXTURES = [
-  'w35-draft', 'w35-queued', 'w35-processing-25', 'w35-processing-75', 'w35-unmeasured',
+  'w35-draft', 'w35-queued', 'w35-processing-25', 'w35-processing-75',
   'w35-review', 'w35-failed', 'w35-completed', 'w35-archived',
 ]
 
@@ -120,7 +120,7 @@ async function enterEmptyWorkspace({
 export async function proveDashboardStates({
   baseUrl, client, workspaceId, apiClientId, authorization, credentialId,
   sessionCookieName, sessionCookieValue, username, password, uiThrottleKey,
-  sourceArtifactId, sourceManifestId,
+  sourceArtifactId,
 }) {
   const evidenceDir = evidenceDirectory('APOLLO_W35_EVIDENCE_DIR', 'w35')
   await mkdir(evidenceDir, { recursive: true })
@@ -187,24 +187,14 @@ export async function proveDashboardStates({
     await setProjectStatus(client, processing75.project.id, 'rendering-final')
     record('w35-processing-75', processing75, SEED_STATUS('rendering-final'), origin('controlled-pg-seed', 'running project-final-export 3/4'))
 
-    // processing, unmeasured: counter without a total (PostgreSQL accepts the
-    // shape; product code never writes it).
-    const unmeasured = await make('w35-unmeasured')
-    await client.v2PublicOperation.create({ data: {
-      id: 'w35-unmeasured-op', workspaceId, projectId: unmeasured.project.id, clientId: apiClientId,
-      type: 'project-proxy-render', status: 'running', phase: 'rendering',
-      targetType: 'media-artifact', targetId: sourceArtifactId,
-      progressCompleted: 1, progressTotal: null, progressUnit: null,
-      cancelable: true, retryable: false, attempt: 1, maxAttempts: 3,
-      idempotencyKey: 'w35-unmeasured-op-key', requestFingerprint: 'f'.repeat(64),
-      actorCredentialId: audit.credentialId, actorEnvironment: 'production',
-      actorAuthenticationKind: 'bearer', actorContextHash: audit.contextHash,
-      createdAt: at(60), updatedAt: at(30), startedAt: at(59),
-      leaseOwner: 'w35-controlled-seed', heartbeatAt: at(30), leaseExpiresAt: new Date(now + 300_000),
-    } })
-    await setProjectStatus(client, unmeasured.project.id, 'rendering-proxy')
-    record('w35-unmeasured', unmeasured, SEED_STATUS('rendering-proxy'),
-      origin('controlled-pg-seed', 'running project-proxy-render, counter 1, NULL total and unit; shape accepted by PostgreSQL, never written by product code'))
+    evidence.progressConstraint = await proveRejectedProgressWithoutTotal(client, {
+      workspaceId, projectId: processing25.project.id, operationId: 'w35-processing-25-op',
+    })
+    evidence.partialProgressCoverage = {
+      origin: 'synthetic-unit-only', source: 'tests/v2/project-dashboard.test.mjs',
+      test: 'W34 synthetic port progress without a total never gains a percentage',
+      postgresAccepted: false, browserObserved: false,
+    }
 
     // awaiting review: a finished proxy and one open annotation.
     const review = await make('w35-review')
@@ -227,15 +217,26 @@ export async function proveDashboardStates({
 
     // completed: a succeeded final export is the output.
     const completed = await make('w35-completed')
+    // 6.0.0: output hangs off a REAL Director run, which needs the explicit output variant (API) and an observed source.
+    await advanceVersionThroughApi({
+      baseUrl, authorization, projectId: completed.project.id, version: completed.version,
+      key: 'w35-completed-variant',
+    })
+    const completedWorld = await seedDirectedProject(client, {
+      workspaceId, clientId: apiClientId, credentialId, projectId: completed.project.id, suffix: 'w35-completed',
+    })
     const chain = await seedFinalExportChain(client, {
       workspaceId, clientId: apiClientId, projectId: completed.project.id,
-      versionId: completed.version.id, sourceArtifactId, sourceManifestId, audit,
+      versionId: completedWorld.versions.directed, directed: completedWorld, audit,
       suffix: 'w35-completed', aspectRatio: '9:16', exports: [{ status: 'succeeded' }],
     })
     await setProjectStatus(client, completed.project.id, 'completed')
     record('w35-completed', completed, SEED_STATUS('completed'),
-      origin('controlled-pg-seed', 'succeeded project-final-export 4/4 behind a proxy review and director run'),
-      { outputOperationId: chain.outputs[0].operationId })
+      origin('controlled-pg-seed', 'succeeded project-final-export 4/4 behind a proxy review and a real Director run'),
+      {
+        outputOperationId: chain.outputs[0].operationId,
+        director: { origin: origin('real-service', 'runProjectDirectorService over an observed source (creation, variant, adopted-source child, LUT selection, Director: sequence 5)'), ...completedWorld.director },
+      })
 
     // archived: produced by the real archive API as the journey API client.
     const archivedProject = await make('w35-archived')
@@ -254,7 +255,7 @@ export async function proveDashboardStates({
     }
     const statusByName = {
       'w35-draft': 'draft', 'w35-queued': 'rendering-proxy', 'w35-processing-25': 'rendering-proxy',
-      'w35-processing-75': 'rendering-final', 'w35-unmeasured': 'rendering-proxy',
+      'w35-processing-75': 'rendering-final',
       'w35-review': 'reviewing-proxy', 'w35-failed': 'failed', 'w35-completed': 'completed',
       'w35-archived': 'archived',
     }
@@ -264,7 +265,6 @@ export async function proveDashboardStates({
     assert.deepEqual(progressOf('w35-queued'), { completed: 0, total: 4, unit: 'render' })
     assert.deepEqual(progressOf('w35-processing-25'), { completed: 1, total: 4, unit: 'render' })
     assert.deepEqual(progressOf('w35-processing-75'), { completed: 3, total: 4, unit: 'render' })
-    assert.deepEqual(progressOf('w35-unmeasured'), { completed: 1 })
     assert.deepEqual(progressOf('w35-review'), { completed: 4, total: 4, unit: 'render' })
     assert.deepEqual(progressOf('w35-failed'), { completed: 2, total: 4, unit: 'render' })
     assert.deepEqual(oracles['w35-failed'].expected.latestOperation.error, { code: 'render-failed', retryable: true })
@@ -346,17 +346,9 @@ export async function proveDashboardStates({
         assert.equal(button('Restaurar').disabled,
           !(project.status === 'archived' && oracles[name].expected.archivedFromStatus), `${name}: Restaurar`)
       }
-      // "sem total medido" appears exactly where the persisted counter has no total.
-      for (const card of cards) {
-        const name = W35_FIXTURES.find((item) => fixtures[item].projectId === card.id)
-        const unmeasuredHere = name === 'w35-unmeasured'
-        assert.equal(card.measure === 'sem total medido', unmeasuredHere, `${name}: sem total medido`)
-        if (unmeasuredHere) {
-          assert.equal(card.bar, null)
-          assert.deepEqual(card.percentTexts, [])
-          assert.equal(card.phase, 'Renderizando')
-        }
-      }
+      // Every persisted public operation is measured; no partial PG row is
+      // manufactured to exercise the separate synthetic defensive contract.
+      assert.ok(cards.every((card) => card.measure !== 'sem total medido'))
       const tiles = await readTiles(page)
       const bucketCounts = { draft: 0, processing: 0, review: 0, completed: 0 }
       for (const want of wants.values()) if (want.bucket in bucketCounts) bucketCounts[want.bucket] += 1
@@ -412,7 +404,9 @@ export async function proveDashboardStates({
       assert.deepEqual(after, oracles[name], `${name}: persisted state drifted during the read-only window`)
       evidence.states.push({
         name, projectId: fixtures[name].projectId, status: statusByName[name],
-        origins: fixtures[name].origins, persisted: oracles[name].expected,
+        origins: fixtures[name].origins,
+        ...(fixtures[name].director ? { director: fixtures[name].director } : {}),
+        persisted: oracles[name].expected,
         api: apiById.get(fixtures[name].projectId).dashboard,
         visibleState: apiById.get(fixtures[name].projectId).visibleState,
         expectedCard: wants.get(name), destination: destinations[name],
@@ -472,7 +466,7 @@ export async function proveDashboardStates({
     evidence.browser.mutatingRequests = allMutating.length
     evidence.gaps = [
       'No state came from a real worker or provider: operation and status rows are controlled PostgreSQL seeds, so state TRANSITIONS are not proven here.',
-      'The unmeasured progress shape (counter without total) is accepted by PostgreSQL but never written by product code; it is a seed.',
+      'A counter without total/unit is rejected by the PostgreSQL CHECK with zero effects; partial-progress defense is synthetic port/contract/source-UI coverage only, not a PG/browser state.',
     ]
     evidence.outcome = 'passed'
     return evidence

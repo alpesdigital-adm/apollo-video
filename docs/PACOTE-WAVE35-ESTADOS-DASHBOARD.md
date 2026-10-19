@@ -1,5 +1,13 @@
 # Wave 35 — estados, ação recomendada e progresso medido
 
+## Recorte atual v2 — prova isolada e pendências
+
+Validação isolada local de 13/10: três suítes (dashboard-w34-w35-evidence-guard, dashboard-w40-evidence-guard e project-dashboard), 22/22 PASS, zero skips; receipt 4b90081fd2b4c44db9505f49e2f6a2a696eeb82ea9806752d7f872aab542df7b. Onze pins pré/pós exatos, fingerprint d21fd33efc5839d3fd5e614034a99d2e31e7b8fa04bd1db4c21e1b5f7818e89f igual, noDB, três identidades conhecidas terminais e cleanup limpo. Confere guards W34/W35 v2, propagação estrita no W40 e defesa sintética; não executa a negativa SQL nem os novos casos PG/browser. FAIL835 e histórico9f preservados; nenhuma promoção de estado, TODO, implantação ou aceite.
+
+A constraint canônica não permite completed informado com total/unit NULL. A alegação histórica abaixo de que NULL era aceito não vale para o schema atual: CI835 rejeitou essa fixture com 23514. A fonte v2 retira somente o caso impossível, prepara rejeição SQL/rollback/readback e zero efeitos, e mantém oito estados persistíveis. W40 exige schemas W34/W35 v2 sem alias v1; sua própria versão permanece v1. A nova prova PG/API/browser e o CI desta fonte continuam pendentes.
+
+Evidência: `C:/Users/leand/Documents/Apollo/w61-70-20261008/w34-w35-w40-progress-pure-v1-ed434615/result.json`. Os checkpoints abaixo ficam preservados como histórico, incluindo resultados e lacunas anteriores; não comprovam os novos seeds.
+
 **Planejamento original, preservado como histórico.** Base `main` `1b05a65654fc53c1ee13ffa3ab6deb36c6026455`, CI `37167702546` verde; depende da W34. F1.001 / FR-002, subescopos das caixas `bff460a9298a-1`, `0944e64350b1-1` e `ba0e03c8f7d9-1`. Estimativa original **3–4 h de desenvolvimento**, CI/revisão fora. Estado atual: [PROJECT-STATUS.md](PROJECT-STATUS.md).
 
 Os cards já recebem projeção pública de estados e ações; barra/percentual só aparecem quando a operação fornece `completed` e `total`. Falta E2E visual/browser dos estados vazio, processando, aguardando revisão, falho, concluído e arquivado e da ação recomendada correta em cada um.

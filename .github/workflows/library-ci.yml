@@ -48,11 +48,17 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - name: Install real OCR and PostgreSQL tools
+      - name: Install real OCR, media probe and PostgreSQL tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-por postgresql-client
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-por postgresql-client ffmpeg
           tesseract --list-langs
+          # The observed-frame probe of the ingest (`stream_side_data` in its -show_entries) needs an ffprobe newer than the 4.0.2 that
+          # `ffprobe-static` bundles on every platform ("No match for section 'stream_side_data'"); the deployment image uses the distribution's
+          # /usr/bin/ffprobe for the same reason. ffmpeg itself stays the pinned ffmpeg-static.
+          test -x /usr/bin/ffprobe
+          echo "FFPROBE_PATH=/usr/bin/ffprobe" >> "$GITHUB_ENV"
+          /usr/bin/ffprobe -version | head -1
           mkdir -p "$APOLLO_LIBRARY_EVIDENCE_ROOT" "$APOLLO_V2_ARTIFACT_ROOT"
           PGPASSWORD=library-ci psql -h 127.0.0.1 -U apollo_admin -d apollo_v2_e2e_library -v ON_ERROR_STOP=1 -c "CREATE ROLE apollo LOGIN PASSWORD 'library-ci' CONNECTION LIMIT 5; ALTER DATABASE apollo_v2_e2e_library OWNER TO apollo; CREATE EXTENSION IF NOT EXISTS vector; ALTER ROLE apollo SET idle_in_transaction_session_timeout='30s'; ALTER ROLE apollo SET statement_timeout='120s';"
       - run: npm ci
@@ -69,7 +75,17 @@ jobs:
       - name: Verify no orphan database clients
         if: always()
         run: |
-          count=$(PGPASSWORD=library-ci psql -h 127.0.0.1 -U apollo -d apollo_v2_e2e_library -Atc "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()")
+          # Still exactly zero. A client process that has just exited is gone from pg_stat_activity a few milliseconds later, so the
+          # check settles for up to ten seconds (the Compose job does the same) and names what is left if anything is.
+          query="SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            count=$(PGPASSWORD=library-ci psql -h 127.0.0.1 -U apollo -d apollo_v2_e2e_library -Atc "$query")
+            if test "$count" = 0; then break; fi
+            sleep 1
+          done
+          if test "$count" != 0; then
+            PGPASSWORD=library-ci psql -h 127.0.0.1 -U apollo -d apollo_v2_e2e_library -c "SELECT pid, application_name, state, left(query, 120) AS query FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()"
+          fi
           test "$count" = 0
       - name: Publish version-bound media evidence
         if: always()

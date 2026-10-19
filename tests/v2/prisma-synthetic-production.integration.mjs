@@ -1,17 +1,20 @@
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
-const workspaceId = 'synthetic-production-integration-workspace'
+// Sealed rows are append-only and nothing here deletes them: every identity carries this invocation's RUN, so the suite
+// can run again, or beside other suites, in one database.
+const RUN = randomUUID().replaceAll('-', '').slice(0, 10)
+const unique = (name) => `${name}-${RUN}`
+const workspaceId = unique('synthetic-production-integration-workspace')
 const now = '2029-01-01T00:00:00.000Z'
 const hash = (character) => character.repeat(64)
 
 test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in PostgreSQL', {
   skip: !process.env.V2_DATABASE_URL && 'V2_DATABASE_URL is required',
 }, async () => {
-  const { createProjectService } = await import('../../src/v2/application/create-project.ts')
   const { createStoryPlanService, readStoryPlanService } = await import('../../src/v2/application/story-plans.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const {
@@ -42,6 +45,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     '../../src/v2/domain/avatar-output-speech-evidence.ts'
   )
   const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
+  const { seedSealedProject } = await import('./helpers/pg-output-world.mjs')
   const { createProviderJob, transitionProviderJob } = await import('../../src/v2/domain/provider-job.ts')
   const { PrismaApiClientRepository } = await import(
     '../../src/v2/infrastructure/prisma/api-client-repository.ts'
@@ -51,9 +55,6 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   )
   const { PrismaMediaArtifactRepository } = await import(
     '../../src/v2/infrastructure/prisma/media-artifact-repository.ts'
-  )
-  const { PrismaProjectCreationRepository } = await import(
-    '../../src/v2/infrastructure/prisma/project-creation-repository.ts'
   )
   const { PrismaProjectWorkspaceQueryRepository } = await import(
     '../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts'
@@ -90,46 +91,10 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   )
 
   const client = new PrismaClient()
-  const clientId = 'synthetic-production-integration-client'
-  const credentialId = 'synthetic-production-integration-credential'
-  let primaryError
-
-  const cleanup = async () => {
-    await client.v2SyntheticCriticReport.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-    await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticMasterConsumption.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticProductionAsset.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticProductionRun.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.updateMany({
-      where: { workspaceId },
-      data: { currentRightsSnapshotId: null, rightsRevision: 0 },
-    })
-    await client.v2AssetRightsChange.deleteMany({ where: { workspaceId } })
-    await client.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2StoryPlan.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
+  const clientId = unique('synthetic-production-integration-client')
+  const credentialId = unique('synthetic-production-integration-credential')
 
   try {
-    await cleanup()
     await new PrismaWorkspaceRepository(client).create(createWorkspace({
       id: workspaceId,
       slug: workspaceId,
@@ -165,21 +130,21 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       workspaceAccessStatus: 'active',
       auditContext,
     })
-    let entity = 0
-    let event = 0
-    const project = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client),
-      clock: () => new Date(now),
-      createId: (kind) => `${kind}-synthetic-integration-${++entity}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}`,
-    })({
+    // The run persists an edit-plan snapshot of its own, which the Version guards only admit on a project whose head is an
+    // explicit output variant: on a creation-only project the deferred membership check refuses it at COMMIT (and Prisma 5.22
+    // resolves the transaction regardless). The project is therefore born the way the product makes one, creation Command
+    // plus one explicit variant, and every Version below is the variant head.
+    let sealedTick = 0
+    const sealed = await seedSealedProject(client, {
       workspaceId,
+      actor,
+      prefix: 'synthetic-integration',
       name: 'Apresentador sintético sem pessoa real',
       objective: 'awareness',
-      format: '9:16',
-      actor,
-      idempotency: { clientId, key: 'synthetic-integration-create-project' },
+      at: () => new Date(Date.parse(now) - 10_000 + (sealedTick += 1) * 1_000),
     })
+    const projectId = sealed.projectId
+    const projectVersionId = sealed.head.version.id
 
     const baseStory = STORY_GOLDEN_FIXTURES.linear
     const sourceKinds = ['real', 'synthetic', 'proof', 'voiceover']
@@ -213,12 +178,12 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     const storyRepository = new PrismaStoryPlanRepository(client)
     const hybridStory = await createStoryPlanService({
       repository: storyRepository,
-      createId: () => 'hybrid-story-plan-integration',
+      createId: () => unique('hybrid-story-plan-integration'),
       clock: () => new Date(now),
     })({
       workspaceId,
-      projectId: project.project.id,
-      projectVersionId: project.version.id,
+      projectId: projectId,
+      projectVersionId: projectVersionId,
       plan: hybridStoryInput,
       actor,
       idempotencyKey: 'hybrid-story-plan-integration-key',
@@ -226,17 +191,17 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     assert.equal(hybridStory.value.plan.schemaVersion, 4)
     assert.equal(hybridStory.value.plan.productionMode, 'hybrid')
     assert.equal((await client.v2StoryPlan.findUniqueOrThrow({ where: { id: hybridStory.value.plan.id } })).schemaVersion, 4)
-    const readHybrid = await readStoryPlanService({ repository: storyRepository })({ workspaceId, projectId: project.project.id, storyPlanId: hybridStory.value.plan.id })
+    const readHybrid = await readStoryPlanService({ repository: storyRepository })({ workspaceId, projectId: projectId, storyPlanId: hybridStory.value.plan.id })
     assert.equal(readHybrid.plan.storyHash, hybridStory.value.plan.storyHash)
 
     const artifacts = [
-      ['synthetic-consent-evidence', 'data', 'json', 'a'],
-      ['synthetic-audio-master', 'audio', 'wav', 'b'],
-      ['synthetic-audio-alignment', 'data', 'json', '6'],
-      ['synthetic-avatar-block-one', 'video', 'mp4', 'c'],
-      ['synthetic-avatar-block-two', 'video', 'mp4', 'd'],
-      ['synthetic-speech-evidence-one', 'data', 'json', '7'],
-      ['synthetic-speech-evidence-two', 'data', 'json', '8'],
+      [unique('synthetic-consent-evidence'), 'data', 'json', 'a'],
+      [unique('synthetic-audio-master'), 'audio', 'wav', 'b'],
+      [unique('synthetic-audio-alignment'), 'data', 'json', '6'],
+      [unique('synthetic-avatar-block-one'), 'video', 'mp4', 'c'],
+      [unique('synthetic-avatar-block-two'), 'video', 'mp4', 'd'],
+      [unique('synthetic-speech-evidence-one'), 'data', 'json', '7'],
+      [unique('synthetic-speech-evidence-two'), 'data', 'json', '8'],
     ]
     for (const [id, mediaType, container, digest] of artifacts) {
       await client.v2MediaArtifact.create({
@@ -262,7 +227,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       clock: () => new Date(now),
     })({
       workspaceId,
-      profileId: 'synthetic-presenter-integration',
+      profileId: unique('synthetic-presenter-integration'),
       version: 1,
       actorIdentityId: 'synthetic-identity-integration',
       avatar: {
@@ -280,8 +245,8 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       status: 'active',
       disclosure: 'Conteúdo gerado com IA',
       consent: {
-        id: 'synthetic-consent-integration',
-        evidenceArtifactId: 'synthetic-consent-evidence',
+        id: unique('synthetic-consent-integration'),
+        evidenceArtifactId: unique('synthetic-consent-evidence'),
         granted: true,
         allowedUses: ['ads'],
         allowedMarkets: ['BRA'],
@@ -293,24 +258,24 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       idempotencyKey: 'synthetic-integration-profile-key',
     })
     assert.equal(registered.profile.snapshot.consent.evidenceSha256, hash('a'))
-    assert.equal(registered.profile.profileSnapshotId, 'synthetic-presenter-integration:v1')
+    assert.equal(registered.profile.profileSnapshotId, `${unique('synthetic-presenter-integration')}:v1`)
     assert.equal(
       (await client.v2SyntheticPresenterProfile.findUniqueOrThrow({
         where: { id: registered.profile.profileSnapshotId },
       })).id,
-      'synthetic-presenter-integration:v1',
+      `${unique('synthetic-presenter-integration')}:v1`,
     )
 
     const rightsRepository = new PrismaAssetRightsRepository(client)
     const currentRights = new Map()
     for (const [index, artifactId] of [
-      'synthetic-audio-master',
-      'synthetic-audio-alignment',
-      'synthetic-avatar-block-one',
-      'synthetic-avatar-block-two',
+      unique('synthetic-audio-master'),
+      unique('synthetic-audio-alignment'),
+      unique('synthetic-avatar-block-one'),
+      unique('synthetic-avatar-block-two'),
     ].entries()) {
       const snapshot = createAssetRightsSnapshot({
-        id: `synthetic-rights-${index + 1}`,
+        id: `synthetic-rights-${RUN}-${index + 1}`,
         workspaceId,
         artifactId,
         sequence: 1,
@@ -349,10 +314,10 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       profiles: syntheticRepository,
       clock: () => new Date(now),
       createId: (kind) => kind === 'script-block'
-        ? `synthetic-block-${++scriptBlockOrdinal}`
-        : `${kind}-synthetic-production-integration`,
+        ? `synthetic-block-${RUN}-${++scriptBlockOrdinal}`
+        : `${kind}-synthetic-production-integration-${RUN}`,
     })({
-      workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+      workspaceId, projectId: projectId, projectVersionId: projectVersionId,
       profileSnapshotId: registered.profile.profileSnapshotId, locale: 'pt-BR',
       scriptText: 'Olá. Mundo.', actor, idempotencyKey: 'synthetic-production-script-plan',
     })
@@ -364,12 +329,12 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     let providerTransition = 0
     const blockInputs = scriptPlan.plan.blocks.map((block, index) => ({
       id: block.id, text: block.exactText,
-      artifactId: index === 0 ? 'synthetic-avatar-block-one' : 'synthetic-avatar-block-two',
+      artifactId: index === 0 ? unique('synthetic-avatar-block-one') : unique('synthetic-avatar-block-two'),
       artifactSha256: index === 0 ? hash('c') : hash('d'),
-      speechEvidenceArtifactId: index === 0 ? 'synthetic-speech-evidence-one' : 'synthetic-speech-evidence-two',
-      reportId: index === 0 ? 'synthetic-critic-one' : 'synthetic-critic-two',
+      speechEvidenceArtifactId: index === 0 ? unique('synthetic-speech-evidence-one') : unique('synthetic-speech-evidence-two'),
+      reportId: index === 0 ? unique('synthetic-critic-one') : unique('synthetic-critic-two'),
       rangeMs: index === 0 ? [0, 1_000] : [1_000, 2_000],
-      jobId: index === 0 ? 'synthetic-provider-job-one' : 'synthetic-provider-job-two',
+      jobId: index === 0 ? unique('synthetic-provider-job-one') : unique('synthetic-provider-job-two'),
     }))
     const canonicalWords = blockInputs.map((block) => ({
       word: block.text,
@@ -389,15 +354,15 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       rights: rightsRepository,
       criticReports,
       clock: () => new Date(now),
-      createId: () => 'synthetic-approved-audio-master-integration',
+      createId: () => unique('synthetic-approved-audio-master-integration'),
     })({
       workspaceId,
-      projectId: project.project.id,
-      projectVersionId: project.version.id,
+      projectId: projectId,
+      projectVersionId: projectVersionId,
       profileSnapshotId: registered.profile.profileSnapshotId,
       source: { kind: 'uploaded' },
-      audioArtifactId: 'synthetic-audio-master',
-      alignmentEvidenceArtifactId: 'synthetic-audio-alignment',
+      audioArtifactId: unique('synthetic-audio-master'),
+      alignmentEvidenceArtifactId: unique('synthetic-audio-alignment'),
       durationMs: 2_000,
       locale: 'pt-BR',
       words: canonicalWords,
@@ -414,12 +379,12 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     const persistedMasterRow = await client.v2SyntheticAudioMaster.findUniqueOrThrow({
       where: { id: audioMasterResult.value.master.id },
     })
-    assert.equal(persistedMasterRow.profileSnapshotId, 'synthetic-presenter-integration:v1')
+    assert.equal(persistedMasterRow.profileSnapshotId, `${unique('synthetic-presenter-integration')}:v1`)
     assert.equal(await client.v2SyntheticAudioMaster.count({ where: { workspaceId } }), 1)
     assert.equal(
       (await audioMasterRepository.read({
         workspaceId,
-        projectId: project.project.id,
+        projectId: projectId,
         audioMasterId: audioMasterResult.value.master.id,
       }))?.master.masterHash,
       audioMasterResult.value.master.masterHash,
@@ -429,14 +394,14 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     const persistedReports = []
     for (const [index, block] of blockInputs.entries()) {
       const scriptHash = createHash('sha256').update(block.text, 'utf8').digest('hex')
-      const audioRights = currentRights.get('synthetic-audio-master')
+      const audioRights = currentRights.get(unique('synthetic-audio-master'))
       assert.ok(audioRights)
       const authorizationBody = {
         id: `synthetic-provider-authorization-${index + 1}`,
         profileSnapshotId: registered.profile.profileSnapshotId,
         profileSnapshotHash: registered.profile.snapshot.snapshotHash,
         artifactDecisions: [{
-          artifactId: 'synthetic-audio-master',
+          artifactId: unique('synthetic-audio-master'),
           rightsSnapshotId: audioRights.id,
           rightsSnapshotHash: audioRights.snapshotHash,
           validUntil: audioRights.expiresAt,
@@ -451,14 +416,14 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       const planned = createProviderJob({
         id: block.jobId,
         workspaceId,
-        projectId: project.project.id,
-        originProjectVersionId: project.version.id,
+        projectId: projectId,
+        originProjectVersionId: projectVersionId,
         operation: 'audio-avatar',
         adapterId: 'controlled-avatar',
         adapterVersion: 'version-1',
         providerInput: {
           audioMasterId: audioMasterResult.value.master.id,
-          audioArtifactId: 'synthetic-audio-master',
+          audioArtifactId: unique('synthetic-audio-master'),
           audioRange: { startMs: block.rangeMs[0], endMs: block.rangeMs[1] },
           criticBinding: {
             blockId: block.id,
@@ -480,13 +445,13 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
         job: planned,
         requestFingerprint: calculateCanonicalHash({ jobId: block.jobId, controlledFixture: true }),
         authenticationAudit: materializeActorAuditContext(actor),
-        transitionId: `synthetic-provider-seed-${++providerTransition}`,
+        transitionId: `synthetic-provider-seed-${RUN}-${++providerTransition}`,
       })
       const outputSpeechEvidence = createAvatarOutputSpeechEvidence({
         jobId: block.jobId,
         videoArtifactId: block.artifactId,
         videoArtifactSha256: block.artifactSha256,
-        sourceAudioArtifactId: 'synthetic-audio-master',
+        sourceAudioArtifactId: unique('synthetic-audio-master'),
         sourceAudioRangeHash: calculateCanonicalHash({ startMs: block.rangeMs[0], endMs: block.rangeMs[1] }),
         policyVersion: AVATAR_AUDIO_COMPARISON_POLICY_VERSION,
         sourcePcmSha256: hash('4'),
@@ -516,7 +481,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
         },
       })
       const report = createSyntheticCriticReport({
-        id: block.reportId, workspaceId, projectId: project.project.id, providerJobId: block.jobId, blockId: block.id,
+        id: block.reportId, workspaceId, projectId: projectId, providerJobId: block.jobId, blockId: block.id,
         capability: 'audio-avatar', adapterId: 'controlled-avatar', adapterVersion: 'version-1',
         artifactId: block.artifactId, artifactSha256: block.artifactSha256,
         audioArtifactId: null, alignmentArtifactId: null, scriptHash,
@@ -555,14 +520,14 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
           occurredAt: now,
           estimate: { currency: 'USD', costMinorUnits: 0, estimatedLatencyMs: 1 },
         }),
-        transitionId: `synthetic-provider-seed-${++providerTransition}`,
+        transitionId: `synthetic-provider-seed-${RUN}-${++providerTransition}`,
         occurredAt: new Date(now),
       })
       const estimatedClaim = await claim('estimated')
       const submittingClaim = await providerRepository.beginSubmission({
         current: estimatedClaim,
         next: transitionProviderJob(estimatedClaim.job, { status: 'submitting', occurredAt: now }),
-        transitionId: `synthetic-provider-seed-${++providerTransition}`,
+        transitionId: `synthetic-provider-seed-${RUN}-${++providerTransition}`,
         occurredAt: new Date(now),
       })
       await providerRepository.advance({
@@ -573,14 +538,14 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
           providerJobId: `controlled-avatar-ref-${index + 1}`,
           providerStatus: 'completed',
         }),
-        transitionId: `synthetic-provider-seed-${++providerTransition}`,
+        transitionId: `synthetic-provider-seed-${RUN}-${++providerTransition}`,
         occurredAt: new Date(now),
       })
       const submittedClaim = await claim('submitted')
       await providerRepository.advance({
         current: submittedClaim,
         next: transitionProviderJob(submittedClaim.job, { status: 'retrieving', occurredAt: now }),
-        transitionId: `synthetic-provider-seed-${++providerTransition}`,
+        transitionId: `synthetic-provider-seed-${RUN}-${++providerTransition}`,
         occurredAt: new Date(now),
       })
       const retrievingClaim = await claim('retrieving')
@@ -596,7 +561,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
             byteSize: 4_096,
           },
         }),
-        transitionId: `synthetic-provider-seed-${++providerTransition}`,
+        transitionId: `synthetic-provider-seed-${RUN}-${++providerTransition}`,
         occurredAt: new Date(now),
       })
       const evaluatingClaim = await claim('evaluating')
@@ -607,7 +572,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
           occurredAt: now,
           criticResultHash: report.reportHash,
         }),
-        transitionId: `synthetic-provider-seed-${++providerTransition}`,
+        transitionId: `synthetic-provider-seed-${RUN}-${++providerTransition}`,
         occurredAt: new Date(now),
       })
     }
@@ -622,24 +587,24 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       scriptPlans: new PrismaSyntheticScriptPlanRepository(client),
       prepareCanonicalReuse: async () => null,
       clock: () => new Date(now),
-      createRunId: () => 'synthetic-run-integration',
-      createSnapshotId: () => 'synthetic-edit-plan-snapshot-integration',
+      createRunId: () => unique('synthetic-run-integration'),
+      createSnapshotId: () => unique('synthetic-edit-plan-snapshot-integration'),
     })
     const request = {
       workspaceId,
-      projectId: project.project.id,
-      projectVersionId: project.version.id,
+      projectId: projectId,
+      projectVersionId: projectVersionId,
       profileSnapshotId: registered.profile.profileSnapshotId,
       audio: {
-        artifactId: 'synthetic-audio-master',
+        artifactId: unique('synthetic-audio-master'),
         durationMs: 2_000,
         locale: 'pt-BR',
         scriptHash: canonicalAudioScriptHash,
         alignment: canonicalWords.map(({ word, startMs, endMs }) => ({ text: word, startMs, endMs })),
       },
       blocks: [
-        { id: blockInputs[0].id, text: blockInputs[0].text, rangeMs: [0, 1_000], cacheKey: hash('f'), providerJobId: 'synthetic-provider-job-one', audioSha256: hash('b'), artifactId: 'synthetic-avatar-block-one', critic: { id: 'synthetic-critic-one', resultHash: persistedReports[0].reportHash, status: 'approved' } },
-        { id: blockInputs[1].id, text: blockInputs[1].text, rangeMs: [1_000, 2_000], cacheKey: hash('2'), providerJobId: 'synthetic-provider-job-two', audioSha256: hash('b'), artifactId: 'synthetic-avatar-block-two', critic: { id: 'synthetic-critic-two', resultHash: persistedReports[1].reportHash, status: 'approved' } },
+        { id: blockInputs[0].id, text: blockInputs[0].text, rangeMs: [0, 1_000], cacheKey: hash('f'), providerJobId: unique('synthetic-provider-job-one'), audioSha256: hash('b'), artifactId: unique('synthetic-avatar-block-one'), critic: { id: unique('synthetic-critic-one'), resultHash: persistedReports[0].reportHash, status: 'approved' } },
+        { id: blockInputs[1].id, text: blockInputs[1].text, rangeMs: [1_000, 2_000], cacheKey: hash('2'), providerJobId: unique('synthetic-provider-job-two'), audioSha256: hash('b'), artifactId: unique('synthetic-avatar-block-two'), critic: { id: unique('synthetic-critic-two'), resultHash: persistedReports[1].reportHash, status: 'approved' } },
       ],
       captions: true,
       use: 'ads',
@@ -648,6 +613,11 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       idempotencyKey: 'synthetic-integration-run-key',
     }
     const created = await execute(request)
+    // Prisma 5.22 resolves an interactive transaction even when COMMIT is refused by a deferred guard, so a run that
+    // the database rejected at COMMIT still comes back from the writer as `replayed: false`. The row count is the
+    // durable proof, and it is asserted before the replay so a refused COMMIT is named instead of surfacing as a
+    // second `replayed: false`.
+    assert.equal(await client.v2SyntheticProductionRun.count({ where: { workspaceId } }), 1, 'the production run must be durable after COMMIT')
     const replay = await execute(request)
     assert.equal(created.replayed, false)
     assert.equal(replay.replayed, true)
@@ -657,7 +627,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     assert.equal(await client.v2SyntheticProductionRun.count({ where: { workspaceId } }), 1)
     assert.equal(await client.v2SyntheticProductionAsset.count({ where: { workspaceId } }), 3)
     assert.equal(await client.v2ProjectSnapshot.count({
-      where: { workspaceId, kind: 'edit-plan', id: 'synthetic-edit-plan-snapshot-integration' },
+      where: { workspaceId, kind: 'edit-plan', id: unique('synthetic-edit-plan-snapshot-integration') },
     }), 1)
 
     const enqueued = await enqueueProviderJobService({
@@ -669,8 +639,8 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       artifacts: artifactRepository,
       rights: rightsRepository,
       clock: () => new Date(now),
-      createJobId: () => 'synthetic-provider-job-integration',
-      createTransitionId: () => `synthetic-provider-transition-${++providerTransition}`,
+      createJobId: () => unique('synthetic-provider-job-integration'),
+      createTransitionId: () => `synthetic-provider-transition-${RUN}-${++providerTransition}`,
       resolveAvatarCriticBinding: async ({ profileSnapshotId, audioRange, use, market, locale }) => ({
         blockId: blockInputs[0].id, scriptText: blockInputs[0].text,
         scriptHash: createHash('sha256').update(blockInputs[0].text, 'utf8').digest('hex'),
@@ -679,14 +649,14 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       }),
     })({
       workspaceId,
-      projectId: project.project.id,
-      projectVersionId: project.version.id,
+      projectId: projectId,
+      projectVersionId: projectVersionId,
       profileSnapshotId: registered.profile.profileSnapshotId,
       operation: 'audio-avatar',
       adapterId: 'controlled-avatar',
       adapterVersion: 'version-1',
       providerInput: { aspectRatio: '9:16' },
-      sourceArtifactIds: ['synthetic-audio-master'],
+      sourceArtifactIds: [unique('synthetic-audio-master')],
       audioMasterId: audioMasterResult.value.master.id,
       audioRange: { startWordIndex: 0, endWordIndex: 2 },
       use: 'ads',
@@ -725,14 +695,14 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
         async ingest({ job }) {
           await client.v2MediaArtifact.create({
             data: {
-              id: 'synthetic-provider-output', workspaceId,
+              id: unique('synthetic-provider-output'), workspaceId,
               artifactKey: 'synthetic-integration/provider-output.mp4', sha256: hash('8'), byteSize: 8_192n,
               mediaType: 'video', container: 'mp4', status: 'available', createdAt: new Date(now),
             },
           })
           const ledgerBase = {
             workspaceId,
-            projectId: project.project.id,
+            projectId: projectId,
             jobId: job.id,
             schemaVersion: 'provider-result-artifact/v1',
             providerJobRef: job.providerJobId,
@@ -745,28 +715,28 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
             createdAt: now,
           }
           ledgerRecords = [
-            { ...ledgerBase, id: 'provider-result-ledger-video', role: 'primary-video', artifactId: 'synthetic-provider-output', artifactSha256: hash('8'), byteSize: 8_192, mediaType: 'video', container: 'mp4', observedCost: { currency: 'USD', costMinorUnits: 12 } },
-            { ...ledgerBase, id: 'provider-result-ledger-alignment', role: 'alignment-evidence', artifactId: 'synthetic-audio-alignment', artifactSha256: hash('6'), byteSize: 512, mediaType: 'data', container: 'json' },
+            { ...ledgerBase, id: unique('provider-result-ledger-video'), role: 'primary-video', artifactId: unique('synthetic-provider-output'), artifactSha256: hash('8'), byteSize: 8_192, mediaType: 'video', container: 'mp4', observedCost: { currency: 'USD', costMinorUnits: 12 } },
+            { ...ledgerBase, id: unique('provider-result-ledger-alignment'), role: 'alignment-evidence', artifactId: unique('synthetic-audio-alignment'), artifactSha256: hash('6'), byteSize: 512, mediaType: 'data', container: 'json' },
           ]
           ledgerFirst = await resultArtifactRepository.persistOrReplay({ records: ledgerRecords })
-          return { artifactId: 'synthetic-provider-output', artifactSha256: hash('8'), mediaType: 'video', byteSize: 8_192 }
+          return { artifactId: unique('synthetic-provider-output'), artifactSha256: hash('8'), mediaType: 'video', byteSize: 8_192 }
         },
       },
       critic: { async evaluate() { return { approved: true, resultHash: hash('7') } } },
       clock: () => new Date(Date.parse(now) + (++providerTick * 1_000)),
       createLeaseToken: () => `synthetic-provider-lease-${providerTick}`,
-      createTransitionId: () => `synthetic-provider-transition-${++providerTransition}`,
+      createTransitionId: () => `synthetic-provider-transition-${RUN}-${++providerTransition}`,
     })
     for (let stage = 0; stage < 8; stage += 1) await runProviderOnce('synthetic-provider-worker')
     const completedProvider = await providerRepository.read({
-      workspaceId, projectId: project.project.id, jobId: enqueued.persisted.job.id,
+      workspaceId, projectId: projectId, jobId: enqueued.persisted.job.id,
     })
     assert.equal(
       completedProvider?.job.status,
       'approved',
       `provider job failed: ${JSON.stringify(completedProvider?.job.normalizedError ?? null)}`,
     )
-    assert.equal(completedProvider?.job.resultArtifact?.artifactId, 'synthetic-provider-output')
+    assert.equal(completedProvider?.job.resultArtifact?.artifactId, unique('synthetic-provider-output'))
     assert.equal(await client.v2ProviderJobTransition.count({
       where: { workspaceId, jobId: enqueued.persisted.job.id },
     }), 10)
@@ -785,7 +755,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       }),
       (error) => error.code === 'PERSISTENCE_CONFLICT',
     )
-    const ledgerRows = await resultArtifactRepository.listByJob({ workspaceId, projectId: project.project.id, jobId: enqueued.persisted.job.id })
+    const ledgerRows = await resultArtifactRepository.listByJob({ workspaceId, projectId: projectId, jobId: enqueued.persisted.job.id })
     assert.deepEqual(ledgerRows.map(({ role }) => role), ['alignment-evidence', 'primary-video'])
     assert.equal(ledgerRows[1].observedCost.costMinorUnits, 12)
     assert.equal(ledgerRows[1].providerJobRef, completedProvider.job.providerJobId)
@@ -801,7 +771,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     await assert.rejects(
       syntheticRepository.readRun({
         workspaceId,
-        projectId: project.project.id,
+        projectId: projectId,
         runId: created.run.plan.id,
       }),
       /failed integrity validation/,
@@ -810,21 +780,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       where: { id: created.run.plan.id },
       data: { planHash: original.planHash },
     })
-  } catch (error) {
-    primaryError = error
-    throw error
   } finally {
-    let cleanupError
-    try {
-      await cleanup()
-    } catch (error) {
-      cleanupError = error
-    }
-    try {
-      await client.$disconnect()
-    } catch (error) {
-      cleanupError ??= error
-    }
-    if (!primaryError && cleanupError) throw cleanupError
+    await client.$disconnect()
   }
 })

@@ -7,7 +7,7 @@ import type {
 import { createEditCommand } from '../domain/edit-command.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
+import { transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import {
   createSourceTranscriptReplacementImpact,
@@ -28,7 +28,7 @@ function identity(value: string, field: string): string {
 export function replaceSourceTranscriptService(dependencies: {
   repository: SourceTranscriptReplacementRepository
   clock: () => Date
-  createId: (kind: 'edit-command' | 'project-version' | 'project-snapshot') => string
+  createId: (kind: 'edit-command' | 'project-version' | 'project-snapshot' | 'project-output-state' | 'output-materialization') => string
   createEventId: () => string
 }) {
   return async function execute(request: {
@@ -72,10 +72,12 @@ export function replaceSourceTranscriptService(dependencies: {
     }
     const context = await dependencies.repository.readContext({ workspaceId, projectId, replacementTranscriptId })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Project or replacement transcript was not found')
-    if (context.currentVersion.id !== baseVersionId || context.currentVersion.baseHash !== request.baseHash) {
+    const parent = context.parent
+    const currentVersion = parent.version
+    if (currentVersion.id !== baseVersionId || currentVersion.baseHash !== request.baseHash) {
       throw new DomainError('VERSION_CONFLICT', 'Source transcript replacement base version is stale', {
-        currentVersionId: context.currentVersion.id,
-        currentBaseHash: context.currentVersion.baseHash,
+        currentVersionId: currentVersion.id,
+        currentBaseHash: currentVersion.baseHash,
       })
     }
     assertDomain(
@@ -92,6 +94,7 @@ export function replaceSourceTranscriptService(dependencies: {
     const commandId = dependencies.createId('edit-command')
     const versionId = dependencies.createId('project-version')
     const snapshotId = dependencies.createId('project-snapshot')
+    const stateId = dependencies.createId('project-output-state')
     const editPlan = materializeSourceTranscriptReplacement({
       editPlan: context.editPlan,
       replacement: {
@@ -141,17 +144,17 @@ export function replaceSourceTranscriptService(dependencies: {
       id: snapshotId, workspaceId, projectId, kind: 'edit-plan', contentSchemaVersion: 2,
       contentJson: editPlanJson, contentHash: editPlanHash, createdAt,
     })
-    const version = createProjectVersion({
-      id: versionId, workspaceId, projectId, sequence: context.currentVersion.sequence + 1,
-      parentVersionId: context.currentVersion.id,
-      snapshotRefs: { ...context.currentVersion.snapshotRefs, editPlan: snapshotId },
-      baseHash: calculateVersionHash({
-        projectId, sequence: context.currentVersion.sequence + 1,
-        parentVersionId: context.currentVersion.id, previousBaseHash: context.currentVersion.baseHash,
-        commandId, editPlanHash, replacementTranscriptId, replacementTranscriptHash: expectedTranscriptHash,
-      }),
-      createdBy: authenticationAudit.clientId, commandId, createdAt,
+    // The retimed EditPlan is this Command's own; every output member re-materializes from it and from the
+    // parent's exact normalization observations.
+    const bundle = transitionProjectOutputState({
+      parent, command, audit: authenticationAudit, requestFingerprint, editPlanSnapshot: snapshot,
+      allocation: {
+        workspaceId, projectId, resultVersionId: versionId, stateId, parentVersionId: currentVersion.id,
+        sequence: currentVersion.sequence + 1, createdBy: authenticationAudit.clientId, createdAt,
+      },
+      createMaterializationId: () => dependencies.createId('output-materialization'),
     })
+    const version = bundle.version
     const event = createPublicEvent({
       id: dependencies.createEventId(), type: 'project.version.created', version: '1.0.0',
       workspaceId, occurredAt: createdAt, sequence: version.sequence,
@@ -172,7 +175,7 @@ export function replaceSourceTranscriptService(dependencies: {
       },
     })
     return dependencies.repository.commitOrReplay({
-      command, authenticationAudit, requestFingerprint, snapshot, version, event,
+      bundle, event,
       sourceEvidence: {
         currentTranscriptId: context.currentTranscript.id,
         currentTranscriptHash: context.currentTranscript.transcriptHash,

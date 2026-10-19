@@ -940,6 +940,138 @@ O security E2E também deve provar em HTTP/PostgreSQL que reviewer não herda sc
 
 ## 30. Critérios de aceite
 
+### W66 — Pedido de plano sem observações do caller
+
+`apollo.projects.reframe-plans.create` passa a 2.0.0 no mesmo endpoint. O
+request `reframe-plan-request/v2` contém apenas `baseVersionId` e `format`;
+`observationSet` e `overrides` enviados pelo cliente são rejeitados. A versão
+anterior calculava um hash sobre caixas fornecidas pelo próprio cliente, que
+não autenticava detector, fonte ou coverage. A ruptura é deliberada e está no
+baseline; os schemas v1 permanecem somente como histórico.
+
+O resultado `reframe-plan-request-result/v2` informa `review-required`,
+`plan=null` e `FACE_PERCEPTION_UNAVAILABLE` depois de conferir projeto, versão,
+fonte única vinculada ao transcript no EditPlan e direitos atuais. Múltiplas
+fontes ainda recebem precondição explícita. Isso é o resultado da solicitação, não um
+crop aprovado. A geometria automática exige evidência facial server-owned com
+escopo e aptidão comprovados; o overlay manual por variante continua separado
+da percepção. Persistência, RenderInput por variante e prova do MP4 seguem
+pendentes no slice W66.
+
+### W61 — Status explícito de segurança facial
+
+As capabilities de leitura `apollo.projects.director-runs.quality.read` (2.0.0),
+`apollo.projects.workspace.read` (12.0.0) e
+`apollo.projects.workspace.current.read` (11.0.0) passam a expor os schemas
+`director-quality-report-read/v2` e `project-workspace/v12`. A mudança é
+deliberadamente breaking e está registrada no baseline público; os schemas
+anteriores permanecem imutáveis como histórico, sem adaptador runtime.
+
+Sem percepção facial verificada, o Diretor persiste `review-required`,
+`faceSafety.status=unknown`, razão explícita e lista vazia de evidence refs.
+`subtitlesFaceSafe=false` nesse caso; posição `bottom` e flag de proteção são
+somente intenção de layout. A métrica estratégica de legibilidade cobre
+limites textuais, não ausência de colisão facial. A UI e API mostram a revisão.
+O repositório de exportação final admite esse relatório (`review-required`,
+`faceSafety=unknown`) somente quando a incerteza facial é a única ressalva: gate
+estratégico aprovado, todos os hard checks (exceto `subtitlesFaceSafe`) verdadeiros e
+nenhuma issue `hard`. A segurança facial **continua desconhecida**; o que o final
+garante é por legenda queimada: banda `free-certified` no canvas final (evidência
+confiável ou geometria) confirmada pelo crítico de pixels C1 sobre o MP4 entregue. A
+legenda que não puder ser certificada é omitida (não queimada) e listada como item de
+revisão no recibo e no registro da tentativa. A política é `final-caption-certification/v1`,
+fixada por digest na identidade pré-render (veja
+`docs/quality/w65b-final-caption-certification.md`). Um relatório que declare
+`faceSafety.status=verified` mantém o requisito anterior de evidência de percepção
+facial. Um proxy pode servir à revisão, sem promover o resultado a aprovado. Snapshots
+antigos sem esse campo não são prova de segurança para nova exportação.
+As capabilities `apollo.projects.perception.read` e `.put` passam a 2.0.0,
+com respostas `perception-range-response/v2` e
+`perception-timeline-put-response/v2`. O `PUT` recebe somente observações
+manuais/controladas; o servidor grava `origin.kind=manual-controlled`,
+`trust=unverified` e o client autenticado no hash do registro. O `GET` e o
+`PUT` devolvem essa origem. Proveniência e confidence alegadas por observação
+permanecem dados do caller; não autorizam consumo automático como detector.
+
+`POST /v1/projects/{projectId}/perception-producer-operations` exige
+`projects:write`, `Idempotency-Key` e corpo limitado a `projectVersionId`,
+`sourceArtifactId` e `sampleIntervalFrames` opcional (1–300; padrão 30).
+O servidor resolve e vincula workspace, ProjectVersion corrente, hash da versão,
+EditPlan imutável, source-master disponível, SHA da mídia e direitos atuais.
+O caller não informa autoridade, confiança, modelo, observações ou status facial.
+Replays da mesma identidade/corpo retornam a operação anterior; payload diferente
+com a mesma chave falha. O worker produz somente envelope OCR, com fonte única,
+vídeo CFR e fps da fonte igual ao EditPlan; vídeo com fps divergente, direitos
+revogados, source alterado, versão obsoleta e lease perdido falham fechados.
+`GET /v1/projects/{projectId}/perception-producer-operations/{operationId}`
+exige `projects:read` e isola workspace/projeto/tipo; só expõe o envelope selado
+após `succeeded`. A operação mantém fases e tentativa duráveis, mas OCR não é
+evidência de rosto nem aprova safe-area facial.
+
+`POST /v1/projects/{projectId}/face-producer-operations` recebe apenas
+`projectVersionId`, `sourceArtifactId` e `sampleIntervalFrames` opcional
+(1–300; padrão 30), com `projects:write` e `Idempotency-Key`. O servidor vincula
+workspace, versão corrente, EditPlan imutável, source-master, SHA e direitos;
+replay com outra carga sob a mesma chave falha. Não aceita boxes, autoridade,
+confiança ou modelo do caller. O worker exige um único clip unit-rate de até
+300 frames, vídeo CFR, orientação neutra e fps iguais; amostra no máximo 30
+frames com detector YuNet CPU 640/score 0,50/NMS 0,30, cujo gate V5 falhou.
+`GET /v1/projects/{projectId}/face-producer-operations/{operationId}` exige
+`projects:read`, isola workspace/projeto/tipo e só retorna envelope selado após
+`succeeded`, revalidando source, versão, direitos e integridade. Sucesso da
+operação comprova persistência de candidatos amostrados; o envelope conserva
+`faceSafety=unknown`, `identity=not-performed`, lacunas de cobertura e avaliação
+`failed-gate`. Não aprova rosto humano, legenda, crop, Diretor ou exportação.
+
+`POST /v1/projects/{projectId}/face-window-operations` é o recurso do detector V9 aceito pelo proprietário
+(OpenVINO `face-detection-0204`, escopo: rostos em primeiro plano e orador). Recebe apenas `projectVersionId`,
+`sourceArtifactId` e `window` (`startTimelineFrame`, `endTimelineFrame`; no máximo 300 quadros), com
+`projects:write` e `Idempotency-Key`. Cadência (6 Hz), limiares, perfil e produtor são do servidor; o caller não
+informa nenhum deles nem autoridade. O servidor exige um único clip unit-rate que cobre a timeline, vídeo CFR,
+orientação neutra e fps iguais, e recusa janela fora da timeline, maior que a política ou sem quadro amostrado.
+`GET /v1/projects/{projectId}/face-window-operations/{operationId}` exige `projects:read`, isola
+workspace/projeto/perfil e só retorna o envelope `face-producer-envelope/v2` após `succeeded`, revalidando
+source, versão, direitos, integridade e as saídas brutas do detector (5600 bytes por amostra), e devolve ao lado
+dele `producerAuthentication`: o veredito do registro de produtores, recalculado na leitura. Um produtor em
+plataforma sem recibo de paridade (hoje, Linux) é válido como envelope mas não autenticado, e evidência não
+autenticada nunca libera a área de legenda. O aceite do proprietário não é qualificação: o envelope conserva
+`faceSafety=unknown`, `identity=not-performed` e avaliação `owner-accepted-scoped`. Detalhes, limites e
+bloqueios de implantação: `docs/quality/w62-v9-runtime.md`.
+
+`POST /v1/projects/{projectId}/face-source-windows` (W65b) é o mesmo detector V9, mas com a evidência ligada
+aos bytes da FONTE e não a uma edição. Recebe apenas `sourceArtifactId` e `window` (`startSourceFrame`,
+`endSourceFrame`, quadros da própria linha do tempo da fonte; no máximo 300), com `projects:write` e
+`Idempotency-Key`; não há Version, intervalo de timeline, cadência ou limiar no pedido. O projeto só diz quem
+pergunta: precisa tocar a fonte (EditPlan atual a referencia), tê-la anexada como `source-master`, e a fonte deve
+estar disponível, ser vídeo com fps inteiro e ter direitos de análise para o locale do projeto. A janela precisa
+terminar na duração da fonte e conter ao menos um quadro amostrado. O envelope `face-producer-envelope/v3`
+(sem projeto, versão, EditPlan ou mapa de tempo; `sourceFps` inteiro) é reutilizável por toda Version e todo
+projeto do workspace que tenha a fonte anexada: a cada uso a identidade da fonte (artefato e SHA-256), os
+direitos do projeto que consome e o veredito do registro do produtor são reavaliados.
+`GET /v1/projects/{projectId}/face-source-windows/{operationId}` exige `projects:read`, isola
+workspace/projeto/perfil `openvino-face0204-v9-source` e só devolve o envelope após `succeeded`, junto de
+`producerAuthentication`. O envelope conserva `faceSafety=unknown` e `identity=not-performed`; a certificação
+de legenda é por cue, depois da projeção da evidência pelos clips da edição (taxa diferente de 1 ou mapa
+inconsistente: `unknown`). Detalhes: `docs/quality/w65b-source-keyed-face-evidence.md`.
+
+`GET /v1/operations/{operationId}/final-export-attempts` passa a capability
+2.0.0 e schema `project-final-export-attempt-history/v2`: tentativas falhas
+novas podem incluir `error.stage` sanitizado, além de código e mensagem seguros.
+Estágios legados podem estar ausentes; nenhuma stack, caminho local ou segredo
+integra a resposta. A observabilidade da tentativa termina no registro
+imutável de promoção; falhas posteriores continuam na PublicOperation.
+
+`POST /v1/projects/{projectId}/subtitle-sidecars` com `projectVersionId` de uma versão
+histórica deriva o sidecar somente do render dessa versão (variante, RenderInput, snapshot de
+EditPlan e cue map próprios) e responde `projectVersion.current=false`; resolução que não seja
+o render nomeado, artefato, manifesto, RenderInput ou cue map divergentes, e render bloqueado
+ou sem revisão são recusados com `SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH` antes de qualquer
+escrita. `POST /v1/projects/{projectId}/output-variants` recusa, com `INVALID_OUTPUT_SPEC`
+e razão tipada `SUBTITLE_BURN_IN_FPS_UNSUPPORTED`, perfil de entrega com legenda queimada
+(`subtitles.mode=burn-in`) acima de 90 fps, antes de qualquer leitura ou renderização;
+saídas sem legenda queimada mantêm 1–120 fps. Detalhes e evidência em
+`docs/quality/w69-materialized-subtitle-clock-v2.md`.
+
 1. Os dez FRs 240–249 possuem endpoints/contracts e testes correspondentes.
 2. Capability registry cobre todas as ações operáveis da UI.
 3. OpenAPI e JSON Schemas são publicados e validados no CI.

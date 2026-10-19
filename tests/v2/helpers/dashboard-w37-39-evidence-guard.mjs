@@ -223,18 +223,28 @@ export function verifyW39Evidence(directory, context) {
   assert.equal(dup.destination.urlPath, `/projects/${dup.copy.projectId}`)
   assert.equal(dup.destination.workspaceStatus, 200)
   assert.deepEqual(dup.destination.mediaArtifactIds, [before.master.artifactId])
-  assert.equal(manifest.command.type, 'set-project-lut-selection')
-  assert.equal(manifest.command.copyEditCommands, 1)
-  assert.equal(manifest.command.copyVersionSequenceAfter, 2)
-  assert.equal(manifest.command.sourceEditCommands, 0)
+  assert.equal(manifest.command.type, 'create-output-variant')
+  // 6.0.0: a copy of a project with content is a fork root that only an editorial cut may move, so the Command is refused on the
+  // copy (428, nothing changes) and moves the original, which owns the one Command that gave it an output plus this one.
+  assert.deepEqual([manifest.command.onCopy.status, manifest.command.onCopy.code], [428, 'PRECONDITION_REQUIRED'])
+  assert.equal(manifest.command.onCopy.copyUnchanged, true)
+  assert.equal(manifest.command.onCopy.originalUnchanged, true)
+  assert.equal(manifest.command.onOriginal.status, 201)
+  assert.equal(manifest.command.onOriginal.editCommandsBefore, 1)
+  assert.equal(manifest.command.onOriginal.editCommandsAfter, 2)
+  assert.equal(manifest.command.onOriginal.versionSequenceAfter, 3)
+  assert.notEqual(manifest.command.onOriginal.versionId, before.source.versionId)
+  assert.equal(manifest.command.onOriginal.earlierVersionsUnchanged, true)
+  assert.equal(manifest.command.onOriginal.earlierSnapshotsUnchanged, true)
+  assert.equal(manifest.command.onOriginal.copyUnchanged, true)
+  assert.equal(manifest.command.onOriginal.copyEditCommands, 0)
   assert.equal(manifest.command.sourceVersionId, before.source.versionId)
-  assert.equal(manifest.command.sourceVersionBaseHashBefore, manifest.command.sourceVersionBaseHashAfter)
-  assert.equal(manifest.command.sourceSnapshotHashesUnchanged, true)
-  assert.equal(manifest.command.cards.source, 'v1')
-  assert.equal(manifest.command.cards.copy, `v${manifest.command.copyVersionSequenceAfter}`)
+  assert.equal(manifest.command.copyVersionId, dup.copy.versionId)
+  assert.equal(manifest.command.cards.source, 'v3', 'the original moved from its output variant (v2) to the second one (v3)')
+  assert.equal(manifest.command.cards.copy, 'v1', 'the copy stays at its fork root')
   assert.equal('knownDefects' in manifest, false, 'W39 must not carry known defects')
   verifyCases(manifest, [
-    'idempotent-replay', 'idempotent-replay-after-copy-command', 'idempotency-payload-mismatch', 'stale-version-hash', 'stale-version-after-command-on-copy',
+    'idempotent-replay', 'command-on-copy-refused-fork-root', 'idempotent-replay-after-original-command', 'idempotency-payload-mismatch', 'stale-version-hash', 'stale-version-after-command-on-original',
     'injected-payload', 'foreign-workspace', 'insufficient-scope-read-only', 'anonymous', 'session-without-origin',
     'foreign-workspace-cannot-read-shared-master',
   ])

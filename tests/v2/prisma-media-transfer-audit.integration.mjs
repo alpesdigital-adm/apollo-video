@@ -40,14 +40,8 @@ test('media upload mutations persist an actor-bound immutable audit ledger', asy
   })
   let now = new Date('2026-08-04T18:00:00.000Z')
   const clock = () => now
-  const cleanup = async () => {
-    await client.v2MediaUpload.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     await client.v2Workspace.create({ data: {
       id: workspaceId, slug: `media-transfer-${suffix}`, name: 'Media transfer audit integration',
     } })
@@ -144,7 +138,6 @@ test('media upload mutations persist an actor-bound immutable audit ledger', asy
       (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
     )
   } finally {
-    await cleanup()
     await client.$disconnect()
   }
 })

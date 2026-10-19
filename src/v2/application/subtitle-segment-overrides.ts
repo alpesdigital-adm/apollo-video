@@ -2,7 +2,9 @@ import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { createSubtitleSegmentOverrideCommandImpact } from '../domain/command-impact.ts'
 import { createEditCommand, type CommandActor } from '../domain/edit-command.ts'
 import { DomainError } from '../domain/errors.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
+import { requireOutputVariant } from '../domain/output-consumption.ts'
+import { referencesOfVariant } from '../domain/output-variant-references.ts'
+import { reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import {
   createSubtitleSegmentOverride,
   normalizeSubtitleSegmentOverrideDimensions,
@@ -36,7 +38,7 @@ const id = (value: unknown, field: string) => {
  */
 export function applySubtitleSegmentOverrideService(dependencies: {
   repository: SubtitleSegmentOverrideRepository
-  createId: (kind: 'command' | 'version' | 'override') => string
+  createId: (kind: 'command' | 'version' | 'override' | 'edit-plan-snapshot' | 'state' | 'materialization') => string
   clock?: () => Date
 }) {
   return async (request: {
@@ -106,15 +108,15 @@ export function applySubtitleSegmentOverrideService(dependencies: {
 
     const context = await dependencies.repository.readContext({ workspaceId, projectId, variantId, segmentId })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Subtitle segment override context was not found')
-    if (context.currentVersion.id !== baseVersionId || context.currentVersion.baseHash !== request.baseHash) {
+    const parent = context.parent
+    const currentVersion = parent.version
+    if (currentVersion.id !== baseVersionId || currentVersion.baseHash !== request.baseHash) {
       throw new DomainError('VERSION_CONFLICT', 'Subtitle segment override base version is stale')
     }
-    // Fail-closed scope, both halves. A variant the EditPlan does not compile and a
-    // segment that does not exist in it are refused; neither is ever reinterpreted
-    // as "apply everywhere".
-    if (!context.variantIds.includes(variantId)) {
-      throw new DomainError('INVALID_ARGUMENT', 'Subtitle segment override names a variant this project version does not compile')
-    }
+    // Fail-closed scope, both halves. A variant the State of the base Version does not carry (`output-variant-unknown`, or two
+    // outputs of one aspect ratio: `output-variant-ambiguous`) and a segment that does not exist in it are refused; neither is
+    // ever reinterpreted as "apply everywhere". `variantId` is the stable variant of the State.
+    requireOutputVariant(parent.state, variantId)
     const segment = context.segments.find((item) => item.id === segmentId)
     if (!segment) {
       throw new DomainError('INVALID_ARGUMENT', 'Subtitle segment override names a segment this variant does not compile')
@@ -130,6 +132,8 @@ export function applySubtitleSegmentOverrideService(dependencies: {
     const createdAt = (dependencies.clock ?? (() => new Date()))().toISOString()
     const commandId = id(dependencies.createId('command'), 'commandId')
     const versionId = id(dependencies.createId('version'), 'versionId')
+    const editPlanSnapshotId = id(dependencies.createId('edit-plan-snapshot'), 'editPlanSnapshotId')
+    const stateId = id(dependencies.createId('state'), 'stateId')
     // The range is taken from the compiled segment, never from the caller: an
     // exception cannot claim frames the EditPlan does not give that segment.
     const range = Object.freeze({ startFrame: segment.startFrame, endFrame: segment.endFrame })
@@ -149,7 +153,7 @@ export function applySubtitleSegmentOverrideService(dependencies: {
       range,
       dimensionKinds: subtitleOverride.dimensions.map((dimension) => dimension.kind),
       durationFrames: context.durationFrames,
-      outputReferences: context.outputReferences,
+      outputReferences: referencesOfVariant(context.outputReferences, variantId),
     })
     const author: Readonly<CommandActor> = Object.freeze({
       type: 'api-client',
@@ -161,7 +165,7 @@ export function applySubtitleSegmentOverrideService(dependencies: {
       type: 'apply-subtitle-segment-override',
       // The scope names the variant and the frames, so an operator auditing the log
       // sees the blast radius without opening the impact.
-      scope: { outputSpecIds: [variantId], frameRange: { startFrame: range.startFrame, endFrame: range.endFrame } },
+      scope: { outputVariantIds: [variantId], frameRange: { startFrame: range.startFrame, endFrame: range.endFrame } },
       payload: Object.freeze({
         schemaVersion: 1 as const,
         variantId, segmentId, range,
@@ -173,23 +177,18 @@ export function applySubtitleSegmentOverrideService(dependencies: {
       ...(request.reason?.trim() ? { reason: request.reason.trim() } : {}),
       idempotencyKey, createdAt,
     })
-    const version = createProjectVersion({
-      id: versionId, workspaceId, projectId,
-      sequence: context.currentVersion.sequence + 1,
-      parentVersionId: baseVersionId,
-      snapshotRefs: context.currentVersion.snapshotRefs,
-      baseHash: calculateCanonicalHash({
-        schemaVersion: 'project-version-subtitle-segment-override/v1',
-        previousBaseHash: request.baseHash,
-        commandId,
-        overrideHash: subtitleOverride.overrideHash,
-        impactHash: impact.impactHash,
-      }),
-      createdBy: audit.clientId, commandId, createdAt,
+    // The override lives in its own domain row and is applied when subtitles compile; the EditPlan is the
+    // parent's under the new Version's identity.
+    const bundle = transitionProjectOutputState({
+      parent, command, audit, requestFingerprint,
+      allocation: {
+        workspaceId, projectId, resultVersionId: versionId, stateId, parentVersionId: currentVersion.id,
+        sequence: currentVersion.sequence + 1, createdBy: audit.clientId, createdAt,
+      },
+      editPlanSnapshot: reidentifiedEditPlanSnapshot(parent, { snapshotId: editPlanSnapshotId, versionId, createdAt }),
+      createMaterializationId: () => id(dependencies.createId('materialization'), 'materializationId'),
     })
-    return dependencies.repository.commitOrReplay({
-      requestFingerprint, authenticationAudit: audit, command, version, subtitleOverride, impact,
-    })
+    return dependencies.repository.commitOrReplay({ bundle, subtitleOverride, impact })
   }
 }
 

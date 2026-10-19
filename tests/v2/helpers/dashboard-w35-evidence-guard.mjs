@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const SCREENSHOTS = ['w35-desktop-states.png', 'w35-mobile-states.png', 'w35-desktop-empty.png', 'w35-mobile-empty.png']
-const ORIGINS = new Set(['real-api', 'controlled-pg-seed', 'absent'])
+const ORIGINS = new Set(['real-api', 'real-service', 'controlled-pg-seed', 'absent'])
 
 // Pinned independently of the component: label, tone, primary action, button text.
 const PINNED = {
@@ -14,7 +14,6 @@ const PINNED = {
   'w35-queued': { status: 'rendering-proxy', badge: 'Renderizando proxy', tone: 'info', action: 'view-progress', button: 'Acompanhar →', statusOrigin: 'controlled-pg-seed', operation: { phase: 'Na fila', percent: 0 } },
   'w35-processing-25': { status: 'rendering-proxy', badge: 'Renderizando proxy', tone: 'info', action: 'view-progress', button: 'Acompanhar →', statusOrigin: 'controlled-pg-seed', operation: { phase: 'Renderizando', percent: 25 } },
   'w35-processing-75': { status: 'rendering-final', badge: 'Exportando final', tone: 'info', action: 'view-progress', button: 'Acompanhar →', statusOrigin: 'controlled-pg-seed', operation: { phase: 'Salvando resultado', percent: 75 } },
-  'w35-unmeasured': { status: 'rendering-proxy', badge: 'Renderizando proxy', tone: 'info', action: 'view-progress', button: 'Acompanhar →', statusOrigin: 'controlled-pg-seed', operation: { phase: 'Renderizando', percent: null } },
   'w35-review': { status: 'reviewing-proxy', badge: 'Revisar proxy', tone: 'warning', action: 'review-output', button: 'Revisar agora →', statusOrigin: 'controlled-pg-seed', operation: { phase: 'Etapa concluída', percent: 100 } },
   'w35-failed': { status: 'failed', badge: 'Requer atenção', tone: 'danger', action: 'inspect-error', button: 'Ver erro →', statusOrigin: 'controlled-pg-seed', operation: { phase: 'Etapa com falha', percent: 50 } },
   'w35-completed': { status: 'completed', badge: 'Concluído', tone: 'success', action: 'open-result', button: 'Abrir workspace →', statusOrigin: 'controlled-pg-seed', operation: { phase: 'Etapa concluída', percent: 100 } },
@@ -26,7 +25,7 @@ export function verifyW35Evidence(directory, { sourceCommit, ciRunId, applicatio
   assert.match(ciRunId, /^\d+$/)
   assert.match(applicationName, /^apollo-video-e2e-[A-Za-z0-9-]+$/)
   const manifest = JSON.parse(readFileSync(join(directory, 'w35-manifest.json'), 'utf8'))
-  assert.equal(manifest.schemaVersion, 'w35-dashboard-states/v1')
+  assert.equal(manifest.schemaVersion, 'w35-dashboard-states/v2')
   assert.equal(manifest.outcome, 'passed')
   assert.equal(manifest.sourceCommit, sourceCommit)
   assert.equal(manifest.ciRunId, ciRunId)
@@ -46,7 +45,7 @@ export function verifyW35Evidence(directory, { sourceCommit, ciRunId, applicatio
   assert.deepEqual(manifest.counts?.after, manifest.counts?.before)
   assert.ok(Array.isArray(manifest.gaps) && manifest.gaps.length >= 1, 'the manifest must keep its documented gaps')
   assert.deepEqual(manifest.states?.map((item) => item.name).sort(), Object.keys(PINNED).sort())
-  assert.deepEqual(manifest.tiles?.map((tile) => tile.value), [1, 4, 1, 1])
+  assert.deepEqual(manifest.tiles?.map((tile) => tile.value), [1, 3, 1, 1])
   assert.deepEqual(manifest.tiles.map((tile) => tile.label), ['Em configuração', 'Em produção', 'Aguardando revisão', 'Concluídos'])
   assert.deepEqual(manifest.expectedOrder?.slice().sort(), manifest.states.map((item) => item.projectId).sort())
 
@@ -55,6 +54,11 @@ export function verifyW35Evidence(directory, { sourceCommit, ciRunId, applicatio
     const pinned = PINNED[state.name]
     assert.equal(state.status, pinned.status)
     assert.deepEqual(state.api, state.persisted, `${state.name}: API projection must equal the PostgreSQL rows`)
+    if (state.persisted.latestOperation) {
+      const progress = state.persisted.latestOperation.progress
+      assert.ok(progress && Number.isInteger(progress.completed) && progress.completed >= 0 && progress.completed <= 4)
+      assert.equal(progress.total, 4); assert.equal(progress.unit, 'render')
+    }
     assert.equal(state.visibleState.schemaVersion, 'visible-state/v1')
     assert.equal(state.visibleState.tone, pinned.tone)
     assert.equal(state.visibleState.primaryAction, pinned.action)
@@ -99,9 +103,24 @@ export function verifyW35Evidence(directory, { sourceCommit, ciRunId, applicatio
   assert.deepEqual(byName['w35-failed'].persisted.latestOperation.error, { code: 'render-failed', retryable: true })
   assert.equal(byName['w35-failed'].card.desktop.error, 'render-failed · recuperável')
   assert.equal(byName['w35-completed'].persisted.outputCount, 1)
+  // 6.0.0: the completed project's output hangs off a Director run the application wrote (a sealed row cannot be invented).
+  assert.equal(byName['w35-completed'].director?.origin?.origin, 'real-service')
+  assert.ok(typeof byName['w35-completed'].director.runId === 'string' && byName['w35-completed'].director.runId.length > 0)
+  assert.match(byName['w35-completed'].director.qualitySnapshotHash, /^[a-f0-9]{64}$/)
   assert.equal(byName['w35-archived'].persisted.archivedFromStatus, 'draft')
   assert.equal(byName['w35-archived'].persisted.administrationRevision, 2)
-  assert.deepEqual(byName['w35-unmeasured'].persisted.latestOperation.progress, { completed: 1 })
+  const rejection = manifest.progressConstraint
+  assert.equal(rejection?.origin, 'raw-postgresql-check-rejection')
+  assert.equal(rejection.sqlstate, '23514'); assert.equal(rejection.constraint, 'public_operations_progress_check')
+  assert.deepEqual(rejection.attemptedProgress, { completed: 1, total: null, unit: null })
+  assert.deepEqual(rejection.persistedProgressBefore, { completed: 1, total: 4, unit: 'render' })
+  assert.deepEqual(rejection.persistedProgressAfter, rejection.persistedProgressBefore)
+  assert.equal(rejection.rowUnchanged, true); assert.equal(rejection.statementRollbackReadback, true)
+  assert.ok(Number.isInteger(rejection.countBefore) && rejection.countBefore > 0); assert.equal(rejection.countAfter, rejection.countBefore)
+  assert.deepEqual(manifest.partialProgressCoverage, { origin: 'synthetic-unit-only', source: 'tests/v2/project-dashboard.test.mjs',
+    test: 'W34 synthetic port progress without a total never gains a percentage', postgresAccepted: false, browserObserved: false })
+  assert.equal(rejection.operationId, 'w35-processing-25-op')
+  assert.equal(rejection.projectId, byName['w35-processing-25'].projectId)
   assert.deepEqual(byName['w35-processing-25'].persisted.latestOperation.progress, { completed: 1, total: 4, unit: 'render' })
   assert.deepEqual(byName['w35-processing-75'].persisted.latestOperation.progress, { completed: 3, total: 4, unit: 'render' })
 

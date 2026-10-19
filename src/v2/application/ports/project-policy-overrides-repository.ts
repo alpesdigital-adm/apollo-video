@@ -1,10 +1,10 @@
-import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
 import type { EditCommand } from '../../domain/edit-command.ts'
+import type { OperationalOutputParentV3, OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
 import type { ProjectPolicyOverridesImpactV1 } from '../../domain/project-policy-overrides-impact.ts'
 import type { ProjectOverrides, ResolvedProjectOverrides, WorkspaceProjectPolicyValues } from '../../domain/project-overrides.ts'
 import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
-import type { ProjectVersion } from '../../domain/project-version.ts'
+import type { ProjectVersionV2, ProjectVersionV3 } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 
 export interface ProjectPolicyOverridesPayloadV1 {
@@ -17,7 +17,8 @@ export interface ProjectPolicyOverridesPayloadV1 {
 }
 
 export interface ProjectPolicyOverridesContext {
-  currentVersion: Readonly<ProjectVersion>
+  /** The sealed output bundle of the current head: the exact parent the Command's Version is born from. */
+  parent: OperationalOutputParentV3
   currentPolicySnapshot: Readonly<{
     id: string
     contentSchemaVersion: number
@@ -25,13 +26,15 @@ export interface ProjectPolicyOverridesContext {
     content: Readonly<Record<string, unknown>>
   }>
   currentDurationFrames: number
-  proxyVariantId: string
+  /** Every output of the project: the stable variant ids of the sealed State the Command's child Version carries. */
+  variantIds: readonly string[]
+  /** The renders of the head Version, each attributed to its own output. */
   outputReferences: readonly Readonly<CommandImpactOutputReference>[]
 }
 
 export interface ProjectPolicyOverridesResult {
   command: Readonly<EditCommand<ProjectPolicyOverridesPayloadV1>>
-  version: Readonly<ProjectVersion>
+  version: Readonly<ProjectVersionV3>
   policySnapshot: Readonly<ProjectSnapshot>
   workspaceDefaults: Readonly<WorkspaceProjectPolicyValues>
   overrides: Readonly<ProjectOverrides>
@@ -42,7 +45,7 @@ export interface ProjectPolicyOverridesResult {
 }
 
 export interface CurrentProjectPolicyOverrides {
-  version: Readonly<ProjectVersion>
+  version: Readonly<ProjectVersionV2 | ProjectVersionV3>
   policySnapshot: Readonly<{ id: string; contentSchemaVersion: number; contentHash: string }>
   workspaceDefaults: Readonly<WorkspaceProjectPolicyValues>
   overrides: Readonly<ProjectOverrides>
@@ -50,14 +53,11 @@ export interface CurrentProjectPolicyOverrides {
 }
 
 export interface ProjectPolicyOverridesCommit {
-  command: Readonly<EditCommand<ProjectPolicyOverridesPayloadV1>>
-  authenticationAudit: Readonly<ApiAccessAuditContext>
-  version: Readonly<ProjectVersion>
-  policySnapshot: Readonly<ProjectSnapshot>
+  /** Version, State, the unchanged EditPlan, the new Policy Snapshot, Command and credential audit, sealed together. */
+  bundle: Readonly<OperationalOutputVersionBundleV3>
   workspaceDefaults: Readonly<WorkspaceProjectPolicyValues>
   overrides: Readonly<ProjectOverrides>
   resolved: Readonly<ResolvedProjectOverrides>
-  requestFingerprint: string
   event: Readonly<PublicEvent>
 }
 

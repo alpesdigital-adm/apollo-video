@@ -348,6 +348,24 @@ test('version conflicts expose only the bounded semantic diff', async () => {
   assert.deepEqual(errorSchema, { $ref: '#/components/schemas/ErrorEnvelopeV4' })
 })
 
+test('a precondition refusal publishes only its closed, actionable reason', () => {
+  const copy = presentPublicDomainError(
+    new DomainError('PRECONDITION_REQUIRED', 'internal diagnostic must-not-leak', {
+      reason: 'copy-requires-editorial-cut', projectVersionId: 'version-internal', internal: 'must-not-leak',
+    }),
+    'request-copy-reason-1',
+  )
+  assert.equal(copy.error.code, 'PRECONDITION_REQUIRED')
+  assert.deepEqual(copy.error.details, { reason: 'copy-requires-editorial-cut' })
+  assert.equal(JSON.stringify(copy).includes('must-not-leak'), false)
+  assert.equal(JSON.stringify(copy).includes('version-internal'), false)
+  const unknown = presentPublicDomainError(
+    new DomainError('PRECONDITION_REQUIRED', 'x', { reason: 'some-internal-reason' }),
+    'request-copy-reason-2',
+  )
+  assert.equal(Object.hasOwn(unknown.error, 'details'), false, 'an unpublished reason stays internal')
+})
+
 test('public errors never expose a domain diagnostic through the client message', () => {
   const secret = 'provider-secret-and-private-diagnostic'
   const body = presentPublicDomainError(
@@ -480,6 +498,29 @@ test('mutable agent tools have exhaustive trusted safety gates', () => {
     }),
     (error) => error instanceof DomainError && error.code === 'INVALID_CAPABILITY',
   )
+})
+
+test('diagnostic face tool keeps scope, idempotency and explicit bounded safety', () => {
+  const create = FOUNDATION_CAPABILITIES.find((capability) =>
+    capability.id === 'apollo.projects.face-producer-operations.create')
+  const read = FOUNDATION_CAPABILITIES.find((capability) =>
+    capability.id === 'apollo.projects.face-producer-operations.read')
+  assert.ok(create && read)
+  assert.deepEqual(create.requiredScopes, ['projects:write'])
+  assert.deepEqual(read.requiredScopes, ['projects:read'])
+  assert.equal(create.idempotency, 'required')
+  assert.equal(create.costClass, 'low')
+  assert.deepEqual(FOUNDATION_AGENT_TOOL_SAFETY[create.id] && {
+    impact: FOUNDATION_AGENT_TOOL_SAFETY[create.id].impact,
+    confirmation: FOUNDATION_AGENT_TOOL_SAFETY[create.id].confirmation,
+  }, { impact: 'bounded', confirmation: 'none' })
+  assert.match(FOUNDATION_AGENT_TOOL_SAFETY[create.id].reason, /rights-approved/i)
+  assert.match(FOUNDATION_AGENT_TOOL_SAFETY[create.id].reason, /failed quality gates/i)
+  const request = getPublicSchema(create.inputSchemaRef).schema
+  assert.equal(request.additionalProperties, false)
+  assert.deepEqual(request.required, ['projectVersionId', 'sourceArtifactId'])
+  assert.deepEqual(agentToolsForCapabilities([create, read]).map((tool) => tool.name),
+    [create.toolName, read.toolName])
 })
 
 test('agent gate rejects model-supplied absence, mismatch and expired evidence', () => {

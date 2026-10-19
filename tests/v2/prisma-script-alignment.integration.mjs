@@ -8,6 +8,7 @@ import {
   Prisma,
   PrismaClient,
 } from '../../generated/prisma-v2/index.js'
+import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 
 async function freePort() {
   return await new Promise((resolve, reject) => {
@@ -126,9 +127,7 @@ test('T-FR-081 imports, aligns and reviews grouped recordings through PostgreSQL
   let serverLogs = ''
 
   try {
-    await client.$executeRawUnsafe(
-      'TRUNCATE TABLE "workspaces" CASCADE',
-    )
+    await resetDisposableDatabase(client)
     await client.v2Workspace.create({
       data: {
         id: workspaceId,

@@ -315,6 +315,7 @@ test('T-F4.016 the service stores one snapshot per cut and replays a recompile',
     synthesisId: 'synthesis-1',
     projectVersionId: 'version-1',
     objective: 'discovery',
+    actor: { kind: 'human', id: 'operator-1' },
     ...overrides,
   })
 
@@ -363,6 +364,7 @@ test('T-F4.016 the service refuses a master the project cannot render from, and 
     synthesisId: 'synthesis-1',
     projectVersionId: 'version-1',
     objective: 'discovery',
+    actor: { kind: 'human', id: 'operator-1' },
     // Named on purpose: an input the service does not read. Under the old
     // signature these three fields were the only measurements it had.
     sources: [{ artifactId: 'artifact-master', sha256: MASTER_SHA, durationSeconds: 7_200 }],

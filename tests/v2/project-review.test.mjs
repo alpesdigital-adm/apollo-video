@@ -28,6 +28,8 @@ const context = Object.freeze({
   durationFrames: 2400,
   stale: false,
   formatId: '9:16',
+  variantId: 'variant-review-vertical',
+  variantIds: Object.freeze(['variant-review-vertical', 'variant-review-wide']),
   localeId: 'pt-BR',
   recipeIds: Object.freeze(['review-proxy']),
   availableScopeCounts: Object.freeze({ frame: 2400, region: 1, clip: 1, scene: 1, range: 1, project: 1, formats: 1, locales: 1, recipes: 1 }),
@@ -121,9 +123,9 @@ test('T-FR-236 version state is derived from current identity and preview availa
   assert.throws(() => result.versions[1].visibleState.availableActions.push('open-result'))
 
   const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.annotations.list')
-  assert.equal(capability.version, '3.0.0')
-  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-review/v3')
-  assert.equal(getPublicSchema('apollo://schemas/project-review/v2').ref, 'apollo://schemas/project-review/v2')
+  assert.equal(capability.version, '3.1.0')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-review/v4')
+  assert.equal(getPublicSchema('apollo://schemas/project-review/v3').ref, 'apollo://schemas/project-review/v3')
   const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
     .compile(getPublicSchema(capability.outputSchemaRef).schema)
   const body = { data: result, meta: { apiVersion: 'v1' } }
@@ -164,7 +166,7 @@ test('F1-040 persists a bounded regional annotation independently and replays id
   assert.equal(first.annotation.text, 'Mover a legenda para baixo.')
   assert.deepEqual(first.annotation.region, request.region)
   assert.equal(first.annotation.applicationScope.kind, 'scene')
-  assert.deepEqual(first.annotation.applicationScope.formatIds, ['9:16'])
+  assert.deepEqual(first.annotation.applicationScope.formatIds, ['variant-review-vertical'], 'a format scope names the stable State variant, not the ratio')
   assert.deepEqual(first.annotation.applicationScope.localeIds, ['pt-BR'])
   assert.equal(first.annotation.affectedCount, 1)
   assert.equal(repository.annotations.length, 1)
@@ -274,4 +276,73 @@ test('F1-041 rejects unconfirmed global scope and persists its deterministic aff
   assert.equal(result.annotation.applicationScope.global, true)
   assert.equal(result.annotation.affectedCount, 5)
   assert.equal(repository.annotations.length, 1)
+})
+
+// ===== multi-output (W66 S3): the review is about ONE output, named by its stable State variant =====
+const annotationRequest = (extra = {}) => ({
+  workspaceId: 'workspace-review-1', projectId: 'project-review-1',
+  projectVersionId: context.projectVersionId, proxyArtifactId: context.proxyArtifactId, proxyHash: context.proxyHash,
+  frame: 315, timeRangeMs: [10500, 10500], scope: 'point', targetIds: [], screenshotRef,
+  text: 'Reposicionar a legenda.', actor: reviewActor, idempotencyKey: 'review-multi-output-1', ...extra,
+})
+
+test('S3 the review read forwards the output it is about and publishes the stable variants a scope may name', async () => {
+  let query
+  const repository = repositoryFixture({ async readPreviewContext(input) { query = input; return context } })
+  const result = await readProjectReviewService({ repository })({
+    workspaceId: 'workspace-review-1', projectId: 'project-review-1', variantId: ' variant-review-wide ',
+  })
+  assert.equal(query.variantId, 'variant-review-wide')
+  assert.equal(result.scopeContext.formatId, '9:16', 'the ratio stays a display fact of the reviewed output')
+  assert.equal(result.scopeContext.variantId, 'variant-review-vertical')
+  assert.deepEqual(result.scopeContext.variantIds, ['variant-review-vertical', 'variant-review-wide'])
+  await readProjectReviewService({ repository })({ workspaceId: 'workspace-review-1', projectId: 'project-review-1' })
+  assert.equal('variantId' in query, false, 'a single-output review names no output')
+  await assert.rejects(() => readProjectReviewService({ repository })({ workspaceId: 'workspace-review-1', projectId: 'project-review-1', variantId: 'x' }),
+    (error) => error?.code === 'INVALID_ARGUMENT')
+})
+
+test('S3 an annotation critiques the output it names: its context, scope and persistence all carry the stable variant', async () => {
+  const reads = []
+  let persisted
+  const repository = repositoryFixture({
+    async readPreviewContext(input) { reads.push(input); return context },
+    async create(input) { persisted = input; return input.annotation },
+  })
+  const create = createProjectReviewAnnotationService({ repository, clock: () => new Date('2026-07-19T14:10:00.000Z'), createId: () => '00000000-0000-4000-8000-000000000004' })
+  const result = await create(annotationRequest({ variantId: 'variant-review-vertical' }))
+  assert.equal(reads[0].variantId, 'variant-review-vertical')
+  assert.equal(persisted.variantId, 'variant-review-vertical', 'the persisted gate re-checks the same output')
+  assert.deepEqual(result.annotation.applicationScope.formatIds, ['variant-review-vertical'])
+  assert.equal(result.annotation.applicationScope.global, false)
+  // A format scope without a global flag is the reviewed output alone; a global one may name any member of the State.
+  const formats = await create(annotationRequest({ idempotencyKey: 'review-multi-output-2', variantId: 'variant-review-vertical',
+    applicationScope: { kind: 'formats', global: true, formatIds: ['variant-review-vertical', 'variant-review-wide'] }, confirmedGlobal: true }))
+  assert.deepEqual(formats.annotation.applicationScope.formatIds, ['variant-review-vertical', 'variant-review-wide'])
+  assert.equal(formats.annotation.applicationScope.kind, 'formats')
+  await assert.rejects(() => create(annotationRequest({ idempotencyKey: 'review-multi-output-3', variantId: 'variant-review-vertical',
+    applicationScope: { kind: 'formats', global: true, formatIds: ['9:16'] }, confirmedGlobal: true })),
+  (error) => error?.code === 'INVALID_SCOPE', 'an aspect ratio is not a member of the State')
+  await assert.rejects(() => create(annotationRequest({ idempotencyKey: 'review-multi-output-4', variantId: 'variant-review-vertical',
+    applicationScope: { kind: 'formats', global: true, formatIds: ['variant-review-vertical', 'variant-of-another-project'] }, confirmedGlobal: true })),
+  (error) => error?.code === 'INVALID_SCOPE')
+})
+
+test('S3 the review request schema names the output and the scope in stable variant ids', () => {
+  const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
+  assert.equal(capabilities.get('apollo.projects.annotations.create').version, '3.0.0')
+  assert.equal(capabilities.get('apollo.projects.annotations.create').inputSchemaRef, 'apollo://schemas/create-review-annotation-request/v3')
+  assert.equal(capabilities.get('apollo.projects.annotations.list').version, '3.1.0')
+  assert.equal(capabilities.get('apollo.projects.annotations.list').outputSchemaRef, 'apollo://schemas/project-review/v4')
+  assert.ok(capabilities.get('apollo.projects.annotations.list').queryParameters.some((parameter) => parameter.name === 'variantId' && parameter.required === false))
+  const ajv = addFormats(new Ajv2020({ strict: false, allErrors: true }))
+  const validate = ajv.compile(getPublicSchema('apollo://schemas/create-review-annotation-request/v3').schema)
+  const body = { projectVersionId: 'project-version-review-1', variantId: 'variant-review-vertical', proxyArtifactId: 'artifact-review-proxy-1', proxyHash: 'a'.repeat(64),
+    frame: 3, timeRangeMs: [100, 100], scope: 'point', targetIds: [], screenshotRef, text: 'ok',
+    applicationScope: { kind: 'formats', global: true, formatIds: ['variant-review-vertical'] }, confirmedGlobal: true }
+  assert.equal(validate(body), true, JSON.stringify(validate.errors))
+  assert.equal(validate({ ...body, variantId: undefined }), true, 'variantId is optional (a single-output version names none)')
+  assert.equal(validate({ ...body, unknown: 1 }), false)
+  const review = ajv.compile(getPublicSchema('apollo://schemas/project-review/v4').schema)
+  assert.equal(review({ data: { scopeContext: {} }, meta: { apiVersion: 'v1' } }), false)
 })

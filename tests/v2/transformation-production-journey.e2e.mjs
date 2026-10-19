@@ -64,55 +64,9 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
   let server = null
   let browser = null
   let serverLogs = ''
-  const cleanup = async () => {
-    const identityIds = (await client.v2WorkspaceMember.findMany({ where: { workspaceId }, select: { identityId: true } })).map((row) => row.identityId)
-    await client.v2TransformationCriticIssue.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationCriticMeasurement.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationCriticReport.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationFallbackAttempt.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationFallbackLedger.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
-    await client.v2ReviewCleanupMask.deleteMany({ where: { workspaceId } })
-    await client.v2ReviewAnnotation.deleteMany({ where: { workspaceId } })
-    await client.v2NoveltyBudgetDecisionLine.deleteMany({ where: { workspaceId } })
-    await client.v2NoveltyBudgetDecision.deleteMany({ where: { workspaceId } })
-    await client.v2NoveltyBudgetPolicy.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationProviderSelection.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationBrief.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationProviderHealth.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationProviderCapability.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationProviderDefinition.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
-    await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.updateMany({ where: { workspaceId }, data: { currentRightsSnapshotId: null, rightsRevision: 0 } })
-    await client.v2AssetRightsChange.deleteMany({ where: { workspaceId } })
-    await client.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactLineage.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2UiSession.deleteMany({ where: { workspaceId } })
-    const { uiLoginThrottleKey, uiSessionSubjectHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
-    const sessionEnvironment = { APOLLO_UI_SESSION_SECRET: uiSessionSecret }
-    await client.v2UiLoginAttempt.deleteMany({ where: { subjectHash: uiSessionSubjectHash(uiUsername, sessionEnvironment) } })
-    await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: uiLoginThrottleKey('direct', uiUsername, sessionEnvironment) } })
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } })
-    await client.v2WorkspaceMember.deleteMany({ where: { workspaceId } })
-    if (identityIds.length > 0) await client.v2HumanIdentity.deleteMany({ where: { id: { in: identityIds } } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
   try {
-    await cleanup()
-    const { createProjectService } = await import('../../src/v2/application/create-project.ts')
+    const { createProjectService, createProjectOutputVariantService } = await import('../../src/v2/application/create-project.ts')
+    const { variantBody } = await import('./helpers/output-world.mjs')
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
     const { requestTransformationJobService } = await import('../../src/v2/application/transformation-jobs.ts')
@@ -131,7 +85,7 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
     const { PrismaMediaArtifactRepository } = await import('../../src/v2/infrastructure/prisma/media-artifact-repository.ts')
     const { PrismaNoveltyBudgetRepository } = await import('../../src/v2/infrastructure/prisma/novelty-budget-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2, PrismaOperationalOutputBundleRepositoryV3 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
     const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
     const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
     const { PrismaProviderJobRepository } = await import('../../src/v2/infrastructure/prisma/provider-job-repository.ts')
@@ -169,9 +123,20 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     const auditContext = createExternalAuditContext({ clientId, credentialId: issued.credential.id, workspaceId, environment: 'production' })
     const actor = Object.freeze({ ...auditContext, scopes: new Set(['projects:read', 'projects:write']), authenticationKind: 'bearer', clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext })
     let entity = 0
-    const created = await createProjectService({ repository: new PrismaProjectCreationRepository(client), clock: () => at(0), createId: (kind) => `${kind}-transformation-e2e-${++entity}`, createEventId: randomUUID })({ workspaceId, name: 'Advanced cleanup production journey', objective: 'awareness', format: '16:9', actor, idempotency: { clientId, key: 'transformation-production-project' } })
-    const projectId = created.project.id
-    const projectVersionId = created.version.id
+    const created = await createProjectService({ repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => at(0), createId: (kind) => `${kind}-transformation-e2e-${++entity}`, createEventId: randomUUID })({ workspaceId, name: 'Advanced cleanup production journey', objective: 'awareness', actor, idempotencyKey: 'transformation-production-project' })
+    const projectId = created.projectAtCreation.id
+    // The journey cleans a 16:9 source. A project no longer carries a canvas, so the 16:9 output is created explicitly:
+    // the root is followed by an output variant, and that Version (not the empty root) is the head the journey works on.
+    const variant = await createProjectOutputVariantService({ repository: new PrismaOperationalOutputBundleRepositoryV3(client), clock: () => at(0), createId: (kind) => `${kind}-transformation-e2e-${++entity}`, createEventId: randomUUID })({ ...variantBody(), workspaceId, projectId, baseVersionId: created.creationVersion.id, baseHash: created.creationVersion.baseHash, actor, idempotencyKey: 'transformation-production-variant' })
+    assert.equal(variant.bundle.state.document.entries.some((entry) => entry.spec.output.aspectRatio === '16:9'), true)
+    // A review annotation and the cleanup mask over it consume the head's output ('critic'): an empty variant head has nothing to review, so
+    // the head is a child Version that adopts one observed recording and plays it (the transformed source below is a separate artifact).
+    const { commitSealedChild, persistRecording, planPlayingRecordings } = await import('./helpers/pg-output-world.mjs')
+    const headRecording = await persistRecording(client, { workspaceId, projectId, actor, slug: 'transformation-e2e-head' })
+    const headBundle = await commitSealedChild(client, { workspaceId, projectId, actor, suffix: 'transformation-e2e-head',
+      mutatePlan: planPlayingRecordings([headRecording]), adopt: [headRecording.names.sourceArtifactId] })
+    const headVersion = headBundle.version
+    const projectVersionId = headVersion.id
 
     const storage = new LocalMediaUploadStorage(artifactRoot)
     const artifacts = new PrismaMediaArtifactRepository(client)
@@ -200,7 +165,7 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
       sourceArtifactId,
       sourceManifestId,
     }]
-    await client.v2ProjectProxyRenderOperation.create({ data: { operationId: proxyOperationId, workspaceId, projectId, projectVersionId, editPlanSnapshotId: created.version.snapshotRefs.editPlan, sourceArtifactId, sourceManifestId, colorPipelineBindingsJson: stableSerialize(proxyColorBindings), inputHash: createHash('sha256').update('proxy-input').digest('hex'), outputArtifactId: sourceArtifactId, outputManifestId: sourceManifestId, originalFileName: 'source.mp4', createdAt: at(1) } })
+    await client.v2ProjectProxyRenderOperation.create({ data: { operationId: proxyOperationId, workspaceId, projectId, projectVersionId, editPlanSnapshotId: headVersion.snapshotRefs.editPlan, sourceArtifactId, sourceManifestId, colorPipelineBindingsJson: stableSerialize(proxyColorBindings), inputHash: createHash('sha256').update('proxy-input').digest('hex'), outputArtifactId: sourceArtifactId, outputManifestId: sourceManifestId, originalFileName: 'source.mp4', createdAt: at(1) } })
     const seededProxyOperation = await new PrismaPublicOperationRepository(client).findById(workspaceId, proxyOperationId)
     assert.equal(seededProxyOperation?.operation.result?.resource.manifestId, sourceManifestId)
 
@@ -413,7 +378,6 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
         server.kill('SIGTERM')
       })
     }
-    await cleanup().catch(() => undefined)
     await client.$disconnect()
     await rm(root, { recursive: true, force: true })
     if (process.env.APOLLO_TRANSFORMATION_E2E_DEBUG === '1') console.error(serverLogs.slice(-4_000))

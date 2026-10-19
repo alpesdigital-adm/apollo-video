@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import { DomainError, assertDomain } from './errors.ts'
-import { subtitleAnchorDecisionFor, type SubtitleAnchorPlanV1 } from './subtitle-anchor-plan.ts'
+import { subtitleAnchorDecisionFor, type SubtitleAnchorPlan } from './subtitle-anchor-plan.ts'
 
 export interface PreviewSession {
   projectVersionId: string
@@ -270,7 +270,7 @@ export function buildRenderElementMap(input: {
    * rectangle the pixels occupy instead of a second, independent guess. Suppressed cues produce no
    * element, because no cue was drawn.
    */
-  subtitleAnchorPlan?: Readonly<SubtitleAnchorPlanV1> | null
+  subtitleAnchorPlan?: Readonly<SubtitleAnchorPlan> | null
 }): Readonly<RenderElementMap> {
   assertDomain(
     Number.isFinite(input.fps) && input.fps > 0 &&
@@ -796,6 +796,8 @@ export function materializePatchEditPlan(input: {
       if (value.text !== undefined) {
         assertDomain(Boolean(match!.cue), 'INVALID_ARGUMENT', 'Subtitle text patch must target one cue')
         match!.cue!.text = String(value.text).trim()
+        // The text is the reviewer's now, not the transcript words': an editorial cut must never rebuild it from them.
+        delete match!.cue!.sourceWordIndices
       }
       if (value.anchor !== undefined) {
         if (match!.cue) match!.cue.anchor = value.anchor

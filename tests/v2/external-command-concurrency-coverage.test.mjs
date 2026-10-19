@@ -90,11 +90,11 @@ const coverage = Object.freeze({
   },
   'apollo.projects.capture-sessions.playback-map.plan.compile': {
     mode: 'durable-covered',
-    evidence: 'Wave20 fences the compile on the map version and hash the caller read and writes the plan under the unique key (workspace, origin, sourceId, sourceHash, projectVersionId) in prisma/renderable-plan-snapshot-repository.ts:139-176, so two operators compiling the same map land on one row: the same cut replays, and a different cut under the same key is refused as PERSISTENCE_CONFLICT rather than overwriting the plan somebody already rendered',
+    evidence: 'Wave20 fences the compile on the map version and hash the caller read and writes the plan as a child Version of the head the caller names (a compile-renderable-plan Command committed with its snapshot row, prisma/renderable-plan-version-commit.ts), so two operators compiling the same map on the same head land on one row: the same cut replays, a head that has moved is refused VERSION_CONFLICT, and a different cut under the same key is refused as PERSISTENCE_CONFLICT rather than overwriting the plan somebody already rendered',
   },
   'apollo.projects.editorial-syntheses.render-plan.compile': {
     mode: 'durable-covered',
-    evidence: 'Wave20 writes the plan under the same unique key as the react compile, and the source half of that key is the immutable synthesis hash, so a recompile converges on one row while a plan compiled from a synthesis whose master bytes changed is refused before the write rather than stored beside the first',
+    evidence: 'Wave20 writes the plan as a child Version of the named head under the same unique key as the react compile, and the source half of that key is the immutable synthesis hash, so a recompile on the same head converges on one row and a head that has moved is refused VERSION_CONFLICT while a plan compiled from a synthesis whose master bytes changed is refused before the write rather than stored beside the first',
   },
   'apollo.projects.multicam-longform-gate.evaluate': {
     mode: 'durable-covered',
@@ -248,6 +248,9 @@ const coverage = Object.freeze({
   },
   'apollo.projects.duplicates.create': {
     mode: 'durable-covered', evidence: 'F1-051 serializable source-version binding, shared immutable artifacts and idempotent public API E2E',
+  },
+  'apollo.projects.output-variants.create': {
+    mode: 'durable-covered', evidence: 'W66 serializable operational bundle transaction locks the project, moves currentVersionId only from the exact base and replays one actor-bound idempotent key (project-output-commands.pg.integration.mjs, project-output-command-contract.test.mjs)',
   },
   'apollo.projects.rename': {
     mode: 'durable-covered', evidence: 'F1.003 serializable administration revision CAS, actor-bound idempotency and immutable command plus public-event audit',
@@ -407,6 +410,21 @@ const coverage = Object.freeze({
   },
   'apollo.projects.perception.put': {
     mode: 'durable-covered', evidence: 'F1.016 actor-bound idempotency plus serializable baseRevision CAS over the latest immutable PerceptionTimeline',
+  },
+  'apollo.projects.perception-producer-operations.create': {
+    mode: 'idempotent-create', evidence: 'W61 request fingerprint binds actor/key, current ProjectVersion, source SHA, edit-plan snapshot and sample interval; PostgreSQL concurrency proof remains pending',
+  },
+  'apollo.projects.temporal-producer-operations.create': {
+    mode: 'idempotent-create', evidence: 'W63 actor/key request fingerprint binds current ProjectVersion, source SHA and edit-plan snapshot; PostgreSQL operation admission and fenced claim are exercised',
+  },
+  'apollo.projects.face-producer-operations.create': {
+    mode: 'idempotent-create', evidence: 'W61 actor/key request fingerprint binds current ProjectVersion, source SHA, edit-plan snapshot and sample interval; serializable admission and fenced claim are exercised in PostgreSQL, while HTTP concurrency remains pending',
+  },
+  'apollo.projects.face-window-operations.create': {
+    mode: 'idempotent-create', evidence: 'W62 actor/key request fingerprint binds current ProjectVersion, source SHA, edit-plan snapshot, window and the pinned evidence policy; serializable admission, profile-scoped claim and fenced publish are written for PostgreSQL (suite not yet run)',
+  },
+  'apollo.projects.face-source-windows.create': {
+    mode: 'idempotent-create', evidence: 'W65b actor/key request fingerprint binds the project, the source artifact, the SOURCE-frame window, the pinned evidence policy and the profile (never a Version); serializable admission, profile-scoped claim and fenced publish (lease, rights, source bytes and attachment; not the head Version) are exercised in PostgreSQL by tests/v2/prisma-face-source-window.integration.mjs',
   },
   'apollo.media.segments.create': {
     mode: 'durable-covered', evidence: 'F1.013 serializable source/parent recheck, immutable content hash, database range constraints and natural replay identity',
@@ -597,7 +615,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    181,
+    182,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

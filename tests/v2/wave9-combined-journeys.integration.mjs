@@ -4,27 +4,24 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { copyFile, mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import test from 'node:test'
 
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
 import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
+import { fakeOutputWorld, withConsumption } from './helpers/output-consumption-fakes.mjs'
+import { TWO_OUTPUT_SPECS } from './helpers/m1b-two-output-world.mjs'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 import { setProjectSubtitleConfigurationService } from '../../src/v2/application/project-subtitle-configurations.ts'
-import { replaceSourceTranscriptService } from '../../src/v2/application/replace-source-transcript.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
-import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
-import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 import { critiqueOutputFormat, selectExportableVariants } from '../../src/v2/domain/format-quality-critic.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { readOutputFormatPreset } from '../../src/v2/domain/output-format-registry.ts'
-import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
-import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import {
   advancePublicOperationPhase,
   retryOrFailPublicOperation,
@@ -32,14 +29,14 @@ import {
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
 import { createRenderReframePlan } from '../../src/v2/domain/render-reframe-plan.ts'
-import { createSourceTranscriptArtifactInvalidations } from '../../src/v2/domain/source-transcript-replacement.ts'
 import { materializeSubtitlePresetSnapshot, SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
-import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
+import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from '../../src/v2/infrastructure/media/ffmpeg-binary.ts'
 import {
   LocalArtifactSourceMaterializer,
   LocalMediaUploadStorage,
 } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
+import { replaceThenDirect, sealedMasterHead } from './helpers/retimed-journey-world.mjs'
 
 // ---------------------------------------------------------------------------
 // Wave 9 phase E — combined journeys.
@@ -53,11 +50,19 @@ import {
 // Only persistence is in-memory. No `EditorialRenderInput` is hand-built: the
 // worker derives it, decides the OutputSpec/placement geometry per variant, and
 // hands the rendered element map to the real format critic.
+// These controlled ports prove mechanics, not PostgreSQL publication or final
+// approval. Facial coverage stays unknown; enabled cues are suppressed. Positive
+// caption/face acceptance remains pending independent authoritative evidence.
 // ---------------------------------------------------------------------------
 
 const require = createRequire(import.meta.url)
-const ffmpegPath = require('ffmpeg-static')
-const ffprobePath = require('ffprobe-static').path
+const ffmpegPath = resolveFfmpegBinary(process.env.FFMPEG_BIN)
+const ffprobePath = resolveFfprobeBinaryPath(require('ffprobe-static').path, process.env.FFPROBE_BIN, process.env, undefined, null)
+assert.ok(isAbsolute(ffmpegPath) && isAbsolute(ffprobePath), 'Controlled render proof requires explicit resolved media binaries')
+console.info(JSON.stringify({ schemaVersion: 'wave9-render-binaries/v1',
+  ffmpeg: { path: ffmpegPath, sha256: createHash('sha256').update(await readFile(ffmpegPath)).digest('hex') },
+  ffprobe: { path: ffprobePath, sha256: createHash('sha256').update(await readFile(ffprobePath)).digest('hex') },
+}))
 
 const FPS = 30
 const WORKSPACE_ID = 'workspace-wave9-combined'
@@ -113,7 +118,7 @@ const EXPECTED_CUES = Object.freeze([
  * variant's canvas. The same two subjects therefore carry different rectangles
  * in 9:16 and 16:9 — that is the whole point of the per-variant evidence.
  *
- * 9:16 (540x960): `subject-lower` sits on the burned caption band and
+ * 9:16 (540x960): `subject-lower` sits on the reserved caption band and
  * `subject-face` sits in the top strip the pillarboxed presenter never covers
  * (presenter = y 328..632 of 960).
  * 16:9 (960x540): the presenter fills the canvas and both subjects sit far above
@@ -185,15 +190,6 @@ function transcriptFromSourceFrames(entries) {
 const currentTranscript = transcriptFromSourceFrames([['rascunho', 6, 15]])
 const replacementTranscript = transcriptFromSourceFrames(WORD_SOURCE_FRAMES)
 
-function baseVersion() {
-  return createProjectVersion({
-    id: 'version-base', workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
-    sequence: 4, parentVersionId: 'version-parent',
-    snapshotRefs: { brief: 'snapshot-brief', editPlan: 'snapshot-edit-plan', policies: 'snapshot-policies' },
-    baseHash: 'a'.repeat(64), createdBy: 'client-wave9', createdAt: CREATED_AT,
-  })
-}
-
 function compiledEditPlan() {
   return {
     schemaVersion: 2, state: 'compiled', id: 'edit-plan-base', projectVersionId: 'version-base',
@@ -215,151 +211,46 @@ function compiledEditPlan() {
 }
 
 // --------------------------------------------------------------------------
-// In-memory persistence for the replacement + Director half (identical in shape
-// to the goldens that already ship: only persistence is faked).
+// Replacement + Director half on a sealed world: the parent is a real ProjectVersion3/State3 (the pure W66 builder), the
+// recording is this suite's master, and only persistence is replaced (see helpers/retimed-journey-world.mjs).
 // --------------------------------------------------------------------------
 
-class ReplacementRepository {
-  committed
-  async findIdempotentResult() { return this.committed ?? null }
-  async readContext() {
-    return {
-      currentVersion: baseVersion(), editPlan: compiledEditPlan(), editPlanHash: 'b'.repeat(64),
-      currentTranscript: {
-        id: 'transcript-current', transcriptHash: currentTranscript.transcriptHash,
-        sourceArtifactId: MASTER_ARTIFACT_ID,
-      },
-      replacementTranscript: {
-        id: 'transcript-replacement', transcriptHash: replacementTranscript.transcriptHash,
-        sourceArtifactId: MASTER_ARTIFACT_ID, transcript: replacementTranscript,
-      },
-      outputReferences: [
-        { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: 'version-base', variantId: '9:16' },
-        { artifactId: 'proxy-16x9', kind: 'proxy', sourceVersionId: 'version-base', variantId: '16:9' },
-      ],
-    }
-  }
-
-  async commitOrReplay(bundle) {
-    const result = {
-      command: bundle.command, version: bundle.version,
-      editPlan: JSON.parse(bundle.snapshot.contentJson), impact: bundle.command.payload.impact,
-      invalidations: createSourceTranscriptArtifactInvalidations({
-        impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt,
-      }),
-      replayed: false, snapshot: bundle.snapshot,
-    }
-    this.committed = { requestFingerprint: bundle.requestFingerprint, result }
-    return result
-  }
-}
-
-class DirectorRepository {
-  constructor(editPlan, currentVersion) {
-    this.editPlan = editPlan
-    this.currentVersion = currentVersion
-    this.records = new Map()
-  }
-
-  async findIdempotentResult({ workspaceId, projectId, idempotencyKey }) {
-    return this.records.get(`${workspaceId}:${projectId}:${idempotencyKey}`) ?? null
-  }
-
-  async readContext({ workspaceId, projectId }) {
-    if (workspaceId !== WORKSPACE_ID || projectId !== PROJECT_ID) return null
-    return {
-      workspaceId,
-      project: { id: projectId, objective: 'discovery', format: '9:16', locale: 'pt-BR' },
-      currentVersion: this.currentVersion,
-      brief: {
-        objective: 'discovery',
-        desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
-        productionBrief: createProductionBrief({ ownerText: 'Tom: direto, natural e sem efeitos gratuitos.' }),
-      },
-      policies: { automaticZoom: false, faceProtection: true, guardrails: [] },
-      editPlan: this.editPlan,
-      currentDurationFrames: this.editPlan.durationFrames,
-      proxyVariantId: '9:16',
-      sourceRights: {
-        state: 'present', snapshotId: 'rights-wave9-master',
-        snapshotHash: 'e'.repeat(64), status: 'approved', consentStatus: 'not-required',
-      },
-      outputReferences: [
-        { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: this.currentVersion.id, variantId: '9:16' },
-        { artifactId: 'proxy-16x9', kind: 'proxy', sourceVersionId: this.currentVersion.id, variantId: '16:9' },
-      ],
-      transcript: {
-        id: 'transcript-replacement', sourceArtifactId: MASTER_ARTIFACT_ID, language: 'pt-BR',
-        provider: 'groq', model: 'whisper-large-v3',
-        transcriptHash: this.editPlan.retimedTranscript.sourceTranscriptHash,
-      },
-    }
-  }
-
-  async commitOrReplay(bundle) {
-    const impact = parseDirectorRunImpact(bundle.command.payload.impact)
-    const result = Object.freeze({
-      run: bundle.run, command: bundle.command, version: bundle.version, impact,
-      invalidations: createDirectorRunInvalidations({ impact, createdAt: bundle.command.createdAt }),
-      snapshots: bundle.snapshots, replayed: false,
-    })
-    this.records.set(`${bundle.command.workspaceId}:${bundle.command.projectId}:${bundle.command.idempotencyKey}`, {
-      requestFingerprint: bundle.requestFingerprint, result,
-    })
-    return result
-  }
-}
+const OUTPUT_REFERENCES = (versionId) => [
+  { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: versionId, variantId: '9:16' },
+  { artifactId: 'proxy-16x9', kind: 'proxy', sourceVersionId: versionId, variantId: '16:9' },
+]
 
 /**
- * Runs replacement -> Director ONCE. Both variants render this single persisted
- * snapshot, which is what makes journey 1 ("same StoryPlan/transcript") literal.
+ * Runs replacement -> Director ONCE per master. Both variants render this single persisted
+ * snapshot, which is what makes journey 1 ("same StoryPlan/transcript") literal. The sealed recording carries the real
+ * master's digest and size, so the cache is keyed by that digest (the master is regenerated by every test).
  */
-let directedOnce
-async function directOnce() {
-  if (directedOnce) return directedOnce
-  const replacementRepository = new ReplacementRepository()
-  let replacementIds = 0
-  const replace = replaceSourceTranscriptService({
-    repository: replacementRepository,
-    clock: () => new Date('2026-08-14T09:10:00.000Z'),
-    createId: () => ['edit-command-replace', 'version-retimed', 'snapshot-retimed'][replacementIds++],
-    createEventId: () => '123e4567-e89b-42d3-a456-426614174020',
+const directedByMaster = new Map()
+async function directOnce(masterPath) {
+  const masterBytes = await readFile(masterPath)
+  const masterSha256 = createHash('sha256').update(masterBytes).digest('hex')
+  if (directedByMaster.has(masterSha256)) return directedByMaster.get(masterSha256)
+  const { actor, head } = await sealedMasterHead({
+    workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, clientId: 'client-wave9', credentialId: 'credential-wave9',
+    master: { artifactId: MASTER_ARTIFACT_ID, durationSeconds: 6, sourceKey: MASTER_ARTIFACT_KEY,
+      sourceSha256: masterSha256, sourceByteSize: masterBytes.byteLength },
+    plan: compiledEditPlan(), suffix: 'wave9-base', twoOutputs: true,
   })
-  const replacement = await replace({
-    workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
-    baseVersionId: 'version-base', baseHash: 'a'.repeat(64),
-    replacementTranscriptId: 'transcript-replacement',
-    expectedTranscriptHash: replacementTranscript.transcriptHash,
-    actor: proxyActor(),
-    idempotencyKey: 'wave9-combined-transcript-replacement',
-  })
-  const persisted = JSON.parse(replacement.snapshot.contentJson)
-  const directorRepository = new DirectorRepository(persisted, replacement.version)
-  const counters = new Map()
-  let event = 0
-  const runDirector = runProjectDirectorService({
-    repository: directorRepository,
-    clock: () => new Date('2026-08-14T09:20:00.000Z'),
-    createId: (kind) => {
-      const next = (counters.get(kind) ?? 0) + 1
-      counters.set(kind, next)
-      return `${kind}-${next}`
-    },
-    createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}`,
-    compileBrief: createEvidenceBoundBriefCompiler(),
-  })
-  const directed = await runDirector({
-    workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
-    baseVersionId: replacement.version.id, baseHash: replacement.version.baseHash,
-    actor: proxyActor(),
-    idempotency: { key: 'wave9-combined-director-run' },
+  const journey = await replaceThenDirect({
+    head, actor,
+    currentTranscript: { id: 'transcript-current', transcriptHash: currentTranscript.transcriptHash, sourceArtifactId: MASTER_ARTIFACT_ID },
+    replacement: { id: 'transcript-replacement', sourceArtifactId: MASTER_ARTIFACT_ID, transcript: replacementTranscript },
+    outputReferences: OUTPUT_REFERENCES,
+    sourceRights: { snapshotId: 'rights-wave9-master', snapshotHash: 'e'.repeat(64) },
+    replaceClock: () => new Date('2026-10-17T09:10:00.000Z'),
+    directorClock: () => new Date('2026-10-17T09:20:00.000Z'),
+    replaceIds: (kind, ordinal) => `${kind}-wave9-retimed-${ordinal}`,
+    directorIdSuffix: '-wave9-director',
+    idempotency: { replace: 'wave9-combined-transcript-replacement', director: 'wave9-combined-director-run' },
     reason: 'Dirigir uma composicao unica para duas variantes de formato.',
   })
-  const editPlanSnapshot = directed.snapshots.find((item) => item.kind === 'edit-plan')
-  const directedPlan = JSON.parse(editPlanSnapshot.contentJson)
-  assert.equal(editPlanSnapshot.contentHash, calculateVersionHash(directedPlan))
-  directedOnce = { replacement, persisted, directed, directedPlan, editPlanSnapshot }
-  return directedOnce
+  directedByMaster.set(masterSha256, journey)
+  return journey
 }
 
 // --------------------------------------------------------------------------
@@ -469,23 +360,35 @@ const subtitleResolutionFor = (presetId) => presetId === null
 // --------------------------------------------------------------------------
 
 /**
- * Builds the immutable render source a repository would persist for ONE variant.
- * The subtitle policy is materialized with the production domain function, so a
- * disabled resolution really removes the cues instead of the test pretending to.
+ * Controlled materialization of ONE variant's effective subtitle configuration.
+ * This is a fixture snapshot, not proof of the Prisma adapter's materialization.
+ * The original directed document is retained; each track keeps its own cues.
  */
+// S3: a render consumes ONE persisted verdict (`render`) of the output it is made for and seals it into its input hash. The renderer-side
+// world is a controlled one with the two outputs this suite renders: the stable variant of each format.
+const RENDER_VARIANT = Object.freeze(Object.fromEntries(TWO_OUTPUT_SPECS.map((spec) => [spec.aspectRatio, spec.variantId])))
+const renderConsumption = (versionId, format) => fakeOutputWorld({
+  workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, versionId,
+  entries: TWO_OUTPUT_SPECS.map((spec) => ({ variantId: spec.variantId, aspectRatio: spec.aspectRatio })),
+}).consumption('render', RENDER_VARIANT[format])
+
 function renderSourceFor(input) {
   const resolution = input.subtitleResolution
-  const cues = input.directedPlan.subtitleTracks.flatMap((track) => track.cues ?? [])
-  const materialized = resolution.enabled ? cues : []
   const editPlan = {
     ...input.directedPlan,
-    subtitleTracks: input.directedPlan.subtitleTracks.map((track) => ({ ...track, cues: materialized })),
+    subtitleTracks: input.directedPlan.subtitleTracks.map((track) => ({
+      ...track,
+      ...(resolution.enabled ? { presetId: resolution.presetId } : {}),
+      cues: resolution.enabled ? (track.cues ?? []).map((cue) => ({ ...cue })) : [],
+    })),
   }
-  return Object.freeze({
+  const editPlanHash = calculateVersionHash(editPlan)
+  const snapshotSeal = calculateCanonicalHash({ editPlanHash, subtitleResolution: resolution })
+  return withConsumption(Object.freeze({
     projectId: PROJECT_ID,
     projectVersionId: input.projectVersionId,
-    editPlanSnapshotId: input.editPlanSnapshotId,
-    editPlanHash: input.editPlanHash,
+    editPlanSnapshotId: `wave9-materialized-plan-${snapshotSeal}`,
+    editPlanHash,
     editPlan,
     format: input.format,
     sourceArtifactId: MASTER_ARTIFACT_ID,
@@ -503,7 +406,7 @@ function renderSourceFor(input) {
     subtitleResolution: resolution,
     reframePlan: input.reframePlan,
     formatSubjects: SUBJECTS[input.format],
-  })
+  }), renderConsumption(input.projectVersionId, input.format))
 }
 
 /**
@@ -562,12 +465,7 @@ async function renderThroughRealWorker(input) {
       phases.push(command.phase)
       return true
     },
-    async succeed(command) {
-      if (!matches(command)) return null
-      operation = succeedPublicOperation(operation, command.now)
-      lease = undefined
-      return record()
-    },
+    async succeed() { assert.fail('Proxy completion must atomically publish review and success through the project port') },
     async failOrRetry(command) {
       if (!matches(command)) return null
       failure = command.error
@@ -600,8 +498,19 @@ async function renderThroughRealWorker(input) {
   const workRoot = join(input.root, `work-${input.suffix}`)
   const renderer = new FfmpegEditorialProxyRenderer({ workRoot, ffmpegPath })
   const realStorage = new LocalMediaUploadStorage(artifactRoot)
-  const captured = { lutCleaned: 0, rendererCleaned: 0, renderCalls: 0 }
+  const captured = { lutCleaned: 0, rendererCleaned: 0, renderCalls: 0, atomicCompletions: 0 }
   const deps = {
+    onFailureDiagnostic({ operationId, error }) {
+      const message = String(error?.message ?? '')
+      const portable = (value) => typeof value === 'string' && /^[A-Za-z0-9_]{1,80}$/.test(value) ? value : null
+      captured.originalFailureDiagnostic = {
+        operationId, phase: phases.at(-1) ?? null,
+        name: portable(error?.name), code: portable(error?.code),
+        expectedType: typeof error?.expected, actualType: typeof error?.actual,
+        messageSha256: createHash('sha256').update(message).digest('hex'),
+        messageBytes: Buffer.byteLength(message, 'utf8'),
+      }
+    },
     async catalogOutput() {},
     operations,
     colorPipelines,
@@ -620,7 +529,38 @@ async function renderThroughRealWorker(input) {
         assert.equal(query.editPlanSnapshotId, source.editPlanSnapshotId)
         return immutableSource
       },
-      async attachCompletedOutput(attached) { captured.attached = attached },
+      async attachCompletedOutput(attached) {
+        // Controlled persistence semantics only; no PostgreSQL publication claim.
+        assert.equal(operation.status, 'running')
+        assert.ok(matches({ leaseOwner: attached.lease.owner, attempt: attached.lease.attempt, now: attached.lease.now }))
+        assert.equal(attached.workspaceId, WORKSPACE_ID)
+        assert.equal(attached.operationId, operation.id)
+        assert.equal(attached.projectId, context.projectId)
+        assert.equal(attached.projectVersionId, context.projectVersionId)
+        assert.equal(attached.variantId, RENDER_VARIANT[source.format], 'the render is attributed to the stable variant of its output')
+        assert.equal(attached.format, source.format)
+        assert.equal(attached.originalFileName, context.originalFileName)
+        assert.equal(attached.createdAt, attached.review.renderCompletedAt)
+        assert.equal(attached.outputArtifactId, context.outputArtifactId)
+        assert.equal(attached.outputManifestId, context.outputManifestId)
+        assert.equal(attached.review.projectVersionId, context.projectVersionId)
+        assert.equal(attached.review.proxyArtifactId, context.outputArtifactId)
+        assert.equal(attached.review.proxyManifestId, context.outputManifestId)
+        assert.equal(attached.review.inputHash, context.inputHash)
+        assert.equal(attached.recipeParameters.inputHash, context.inputHash)
+        assert.equal(captured.manifest.recipe.parametersHash, calculateCanonicalHash(attached.recipeParameters))
+        assert.equal(captured.elementMap.proxyHash, captured.stored.sha256)
+        assert.equal(captured.manifest.artifact.sha256, captured.stored.sha256)
+        const { reviewHash, ...reviewDocument } = attached.review
+        assert.equal(reviewHash, calculateCanonicalHash(reviewDocument))
+        assert.equal(attached.ocrReceipt, null)
+        const completed = succeedPublicOperation(operation, attached.lease.now)
+        captured.attached = attached
+        captured.review = attached.review
+        captured.atomicCompletions += 1
+        operation = completed
+        lease = undefined
+      },
     },
     artifacts: {
       async persistOrReplay(persist) {
@@ -639,27 +579,26 @@ async function renderThroughRealWorker(input) {
       async render(renderInput) {
         captured.renderCalls += 1
         captured.renderInput = renderInput
-        return renderer.render(renderInput)
+        const previousProbePath = process.env.APOLLO_V2_FFPROBE_PATH
+        process.env.APOLLO_V2_FFPROBE_PATH = ffprobePath
+        try { return await renderer.render(renderInput) }
+        finally {
+          if (previousProbePath === undefined) delete process.env.APOLLO_V2_FFPROBE_PATH
+          else process.env.APOLLO_V2_FFPROBE_PATH = previousProbePath
+        }
       },
       async cleanup(operationId) {
         captured.rendererCleaned += 1
         return renderer.cleanup(operationId)
       },
     },
-    // No perception persisted for these journeys: the F1.036 anchor then has nothing to consult and
-    // the cues keep the reserved bottom band.
+    // This caller-controlled perception port cannot authorize facial coverage.
     perceptionTimelines: { async findLatest() { return null } },
     renderElementMaps: {
       async persistOrReplay(persist) {
         captured.elementMap = persist.map
         captured.elementMapTarget = persist
         return { record: {}, replayed: false }
-      },
-    },
-    proxyReviews: {
-      async persistGenerated(persist) {
-        captured.review = persist.review
-        return { ...persist.review, id: persist.id }
       },
     },
     sources: new LocalArtifactSourceMaterializer(artifactRoot),
@@ -671,7 +610,7 @@ async function renderThroughRealWorker(input) {
   const outcome = await runNextProjectProxyRenderOperationService(deps)(`worker-${input.suffix}`)
   return {
     ...captured, outcome, phases, failure, source, compilation, artifactRoot, workRoot,
-    enqueuedContext: enqueued.context, operation, renderer,
+    enqueuedContext: enqueued.context, operation, lease, renderer,
     expectedInputHash: projectProxyRenderInputHash({
       source,
       colorPipelineBindings: [{
@@ -686,8 +625,35 @@ async function renderThroughRealWorker(input) {
 /** Everything a variant render must satisfy regardless of its format verdict. */
 function assertRenderedVariant(rendered, expected) {
   const canvas = CANVAS[expected.format]
-  assert.deepEqual(rendered.outcome, { operationId: expected.operationId, status: 'succeeded' })
+  const failureMessage = String(rendered.failure?.message ?? '')
+  const failureDiagnostic = {
+    operationId: expected.operationId, outcome: rendered.outcome, phases: rendered.phases,
+    originalFailureDiagnostic: rendered.originalFailureDiagnostic ?? null,
+    failure: rendered.failure ? {
+      code: rendered.failure.code ?? null, retryable: rendered.failure.retryable ?? null,
+      messageSha256: createHash('sha256').update(failureMessage).digest('hex'),
+      messageBytes: Buffer.byteLength(failureMessage, 'utf8'),
+    } : null,
+  }
+  assert.deepEqual(rendered.outcome, { operationId: expected.operationId, status: 'succeeded' },
+    JSON.stringify(failureDiagnostic))
   assert.equal(rendered.operation.status, 'succeeded')
+  assert.equal(rendered.atomicCompletions, 1)
+  assert.equal(rendered.lease, undefined)
+  if (rendered.renderInput.subtitleCues.length) {
+    const anchor = rendered.renderInput.placementPlan.subtitleAnchorPlan
+    // No source dimensions and no face window reach this worker: the projection is unavailable and every band is unknown.
+    assert.equal(anchor.schemaVersion, 'subtitle-anchor-plan/v3')
+    assert.equal(anchor.faceClearance.faceSafety, 'unknown')
+    assert.equal(anchor.faceClearance.projectionHash, null)
+    assert.deepEqual(anchor.decisions.map((item) => [item.cueId, item.startFrame, item.endFrame, item.anchor, item.bounds, item.suppressed]),
+      rendered.renderInput.subtitleCues.map((cue) => [cue.id, cue.startFrame, cue.endFrame, null, null, true]))
+    // W65b: the proxy plans under the final's rule, so an uncertifiable cue is a listed warning ('warning-ack-required'); only a hard
+    // issue of the variant itself (a protected subject that is not visible) keeps it 'blocked'. Either way the final stays closed.
+    assert.equal(rendered.review.status, expected.reviewStatus ?? 'warning-ack-required')
+    assert.equal(rendered.review.finalAllowed, false)
+    assert.equal(rendered.elementMap.elements.some((element) => element.type === 'subtitle'), false)
+  }
   assert.deepEqual(rendered.phases, ['rendering', 'verifying', 'persisting'])
   assert.equal(rendered.enqueuedContext.inputHash, rendered.expectedInputHash)
   assert.equal(rendered.renderInput.format, expected.format)
@@ -706,19 +672,27 @@ function assertRenderedVariant(rendered, expected) {
 
 /** Renders one variant of the single directed snapshot. */
 async function renderVariant(options) {
-  const journey = await directOnce()
+  const journey = await directOnce(options.masterPath)
+  const directedBefore = structuredClone(journey.directedPlan)
+  const snapshotBefore = structuredClone(journey.editPlanSnapshot)
+  assert.equal(journey.directed.run.qualityReport.status, 'review-required')
+  assert.equal(journey.directed.run.qualityReport.faceSafety.status, 'unknown')
   const masterBytes = await readFile(options.masterPath)
   const source = renderSourceFor({
     format: options.format,
     directedPlan: journey.directedPlan,
     projectVersionId: journey.directed.version.id,
-    editPlanSnapshotId: journey.editPlanSnapshot.id,
-    editPlanHash: journey.editPlanSnapshot.contentHash,
     masterSha256: createHash('sha256').update(masterBytes).digest('hex'),
     masterByteSize: masterBytes.byteLength,
     subtitleResolution: options.subtitleResolution ?? subtitleResolutionFor('clean-color'),
     reframePlan: reframePlanFor(options.format),
   })
+  assert.deepEqual(journey.directedPlan, directedBefore, 'fixture materialization must not mutate the Director document')
+  assert.deepEqual(journey.editPlanSnapshot, snapshotBefore, 'the original persisted Director snapshot remains unchanged')
+  assert.equal(source.editPlanHash, calculateVersionHash(source.editPlan))
+  assert.notEqual(source.editPlanSnapshotId, journey.editPlanSnapshot.id)
+  assert.deepEqual(source.editPlan.subtitleTracks.map((track) => track.cues.map((cue) => cue.id)),
+    journey.directedPlan.subtitleTracks.map((track) => source.subtitleResolution.enabled ? track.cues.map((cue) => cue.id) : []))
   return renderThroughRealWorker({
     root: options.root, masterPath: options.masterPath, suffix: options.suffix,
     source, ...(options.tamper ? { tamper: options.tamper } : {}),
@@ -732,11 +706,14 @@ async function renderVariant(options) {
  * `revert` has something to return to.
  */
 class SubtitleConfigurationRepository {
-  constructor(version) {
-    this.version = version
+  /** @param parent the sealed bundle the chain starts from; every commit becomes the sealed parent of the next one */
+  constructor(parent) {
+    this.current = parent
     this.history = []
     this.idempotent = new Map()
   }
+
+  get version() { return this.current.version }
 
   async findIdempotent({ workspaceId, projectId, idempotencyKey }) {
     return this.idempotent.get(`${workspaceId}:${projectId}:${idempotencyKey}`) ?? null
@@ -746,7 +723,7 @@ class SubtitleConfigurationRepository {
     if (workspaceId !== WORKSPACE_ID || projectId !== PROJECT_ID) return null
     const forVariant = this.history.filter((item) => item.variantId === variantId)
     return {
-      currentVersion: this.version,
+      parent: this.current,
       transcript: replacementTranscript,
       directorPresetId: 'clean-color',
       durationFrames: DURATION_FRAMES,
@@ -758,16 +735,15 @@ class SubtitleConfigurationRepository {
     }
   }
 
-  async commitOrReplay(bundle) {
-    this.version = bundle.version
-    this.history.push(bundle.configuration)
+  async commitOrReplay(input) {
+    const { command, requestFingerprint } = input.bundle.origin
+    this.current = input.bundle
+    this.history.push(input.configuration)
     const result = Object.freeze({
-      command: bundle.command, version: bundle.version,
-      configuration: bundle.configuration, impact: bundle.impact, replayed: false,
+      command, version: input.bundle.version,
+      configuration: input.configuration, impact: input.impact, replayed: false,
     })
-    this.idempotent.set(`${bundle.command.workspaceId}:${bundle.command.projectId}:${bundle.command.idempotencyKey}`, {
-      requestFingerprint: bundle.requestFingerprint, result,
-    })
+    this.idempotent.set(`${command.workspaceId}:${command.projectId}:${command.idempotencyKey}`, { requestFingerprint, result })
     return result
   }
 
@@ -784,14 +760,14 @@ const resolutionOf = (configuration) => Object.freeze(configuration.resolved.ena
   : { presetId: 'clean-color', presetHash: subtitlePresetHash('clean-color'), registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: false })
 
 // ---------------------------------------------------------------------------
-// Journeys 1-5: one StoryPlan, two variants, one blocked and one exportable.
+// Journeys 1-5: one StoryPlan, two variants, unknown coverage blocks enabled cues.
 // ---------------------------------------------------------------------------
-test('T-WAVE9-E 9:16 and 16:9 share one StoryPlan, own their geometry, and only 9:16 is blocked', { timeout: 15 * 60_000 }, async () => {
+test('T-WAVE9-E variants share one StoryPlan and own geometry; unknown face coverage blocks enabled captions', { timeout: 15 * 60_000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'apollo-wave9-variants-'))
   const masterPath = join(root, 'wave9-master.mp4')
   try {
     await writeColourMaster(masterPath)
-    const journey = await directOnce()
+    const journey = await directOnce(masterPath)
 
     // --- Journey 1: both variants start from the SAME StoryPlan/transcript ---
     const cues = journey.directedPlan.subtitleTracks.flatMap((track) => track.cues)
@@ -805,13 +781,14 @@ test('T-WAVE9-E 9:16 and 16:9 share one StoryPlan, own their geometry, and only 
     const portrait = await renderVariant({ root, masterPath, suffix: 'portrait', format: '9:16' })
     const landscape = await renderVariant({ root, masterPath, suffix: 'landscape', format: '16:9' })
 
-    // Same snapshot identity, same transcript identity, same source master.
+    // Same effective fixture snapshot, same transcript identity and source master.
     for (const rendered of [portrait, landscape]) {
-      assert.equal(rendered.source.editPlanSnapshotId, journey.editPlanSnapshot.id)
-      assert.equal(rendered.source.editPlanHash, journey.editPlanSnapshot.contentHash)
+      assert.notEqual(rendered.source.editPlanSnapshotId, journey.editPlanSnapshot.id)
+      assert.equal(rendered.source.editPlanHash, calculateVersionHash(rendered.source.editPlan))
       assert.equal(rendered.source.editPlan.retimedTranscript.sourceTranscriptHash, replacementTranscript.transcriptHash)
       assert.equal(rendered.source.sourceArtifactId, MASTER_ARTIFACT_ID)
     }
+    assert.equal(portrait.source.editPlanSnapshotId, landscape.source.editPlanSnapshotId)
     assert.equal(portrait.source.editPlanHash, landscape.source.editPlanHash)
     assert.equal(portrait.renderInput.audioTimelineHash, landscape.renderInput.audioTimelineHash)
     assert.deepEqual(
@@ -844,26 +821,21 @@ test('T-WAVE9-E 9:16 and 16:9 share one StoryPlan, own their geometry, and only 
     )
     console.log(`journey 2 placementPlanHash 9:16=${portraitPlacement.placementPlanHash.slice(0, 12)} 16:9=${landscapePlacement.placementPlanHash.slice(0, 12)}; reframePlanHash 9:16=${portraitReframe.reframePlanHash.slice(0, 12)} 16:9=${landscapeReframe.reframePlanHash.slice(0, 12)}`)
 
-    assertRenderedVariant(portrait, { operationId: 'operation-portrait', format: '9:16' })
+    assertRenderedVariant(portrait, { operationId: 'operation-portrait', format: '9:16', reviewStatus: 'blocked' })
     assertRenderedVariant(landscape, { operationId: 'operation-landscape', format: '16:9' })
 
     // --- Journey 3: the 9:16 blocker is localized ---------------------------
     const portraitIssues = portrait.review.criticIssues
     console.log(`journey 3 9:16 reason codes: ${JSON.stringify(portraitIssues.map((issue) => [issue.code, issue.severity, issue.evidenceRange?.startFrame ?? null, issue.evidenceRange?.endFrame ?? null]))}`)
     console.log(`journey 3 16:9 reason codes: ${JSON.stringify(landscape.review.criticIssues.map((issue) => [issue.code, issue.severity]))}`)
-    const collision = portraitIssues.find((issue) => issue.code === 'SUBTITLE_SUBJECT_COLLISION')
-    assert.ok(collision, 'the 9:16 subtitle band overlaps subject-lower and must raise a hard reason code')
-    assert.equal(collision.severity, 'hard')
-    assert.equal(collision.outputSpecId, portraitPreset.spec.id)
-    assert.equal(collision.outputPresetHash, portraitPreset.presetHash)
-    assert.equal(collision.placementPlanHash, portraitPlacement.placementPlanHash)
-    assert.equal(collision.reframePlanHash, portraitReframe.reframePlanHash)
-    assert.equal(collision.format, '9:16')
-    // Half-open evidence range, exactly the frames the first cue occupies.
-    assert.deepEqual({ ...collision.evidenceRange }, { startFrame: 6, endFrame: 40 })
-    assert.deepEqual([...collision.rangeMs], [200, 1_333])
-    assert.deepEqual([...collision.elementIds], ['subtitle:subtitle-cue-1'])
-    assert.ok(collision.evidenceIds.includes('subject-lower'))
+    assert.equal(portraitIssues.some((issue) => issue.code === 'SUBTITLE_SUBJECT_COLLISION'), false,
+      'Suppressed captions cannot claim a measured glyph collision')
+    const unavailable = portraitIssues.filter((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE')
+    assert.deepEqual(unavailable.map((issue) => [issue.severity, issue.outputSpecId, issue.placementPlanHash,
+      issue.reframePlanHash, issue.format, issue.evidenceRange.startFrame, issue.evidenceRange.endFrame, issue.elementIds[0]]),
+    EXPECTED_CUES.map(([id, startFrame, endFrame]) => ['warning', portraitPreset.spec.id, portraitPlacement.placementPlanHash,
+      portraitReframe.reframePlanHash, '9:16', startFrame, endFrame, `subtitle:${id}`]))
+    assert.deepEqual([...unavailable[0].rangeMs], [200, 1_333])
     const notVisible = portraitIssues.find((issue) => issue.code === 'SUBJECT_NOT_VISIBLE')
     assert.ok(notVisible, 'the pillarboxed 9:16 presenter never covers subject-face')
     assert.equal(notVisible.severity, 'hard')
@@ -875,17 +847,19 @@ test('T-WAVE9-E 9:16 and 16:9 share one StoryPlan, own their geometry, and only 
     assert.equal(portrait.review.formatQuality.exportAllowed, false)
     assert.equal(portrait.review.status, 'blocked')
     assert.equal(portrait.review.finalAllowed, false)
-    assert.equal(landscape.review.formatQuality.status, 'passed')
+    // The 16:9 output has no hard issue of its own: its withheld cues are listed warnings, so the format is exportable with warnings
+    // and the review waits for their acknowledgement. The 9:16 output keeps its hard subject-visibility stop.
+    assert.equal(landscape.review.formatQuality.status, 'warning')
     assert.equal(landscape.review.formatQuality.exportAllowed, true)
-    assert.deepEqual(landscape.review.criticIssues, [])
-    assert.equal(landscape.review.status, 'ready-for-final')
-    assert.equal(landscape.review.finalAllowed, true)
-    // Both operations succeeded: a blocked format is an editorial verdict on one
-    // variant, never a worker failure that would take the sibling down with it.
+    assert.ok(landscape.review.criticIssues.every((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'))
+    assert.equal(landscape.review.status, 'warning-ack-required')
+    assert.equal(landscape.review.finalAllowed, false)
+    // Both renders succeed while each output keeps its own editorial verdict (9:16 blocked, 16:9 waiting for the listed warnings to be
+    // acknowledged). Technical execution does not establish final approval.
     assert.equal(portrait.operation.status, 'succeeded')
     assert.equal(landscape.operation.status, 'succeeded')
 
-    // --- Journey 5: the 16:9 variant is a real, exportable MP4 --------------
+    // --- Journey 5: real decodable proxy; editorial export remains blocked --
     const landscapePath = landscape.stored.path
     const landscapeBytes = await readFile(landscapePath)
     assert.equal(createHash('sha256').update(landscapeBytes).digest('hex'), landscape.manifest.artifact.sha256)
@@ -921,6 +895,7 @@ test('T-WAVE9-E 9:16 and 16:9 share one StoryPlan, own their geometry, and only 
       placementPlanHash: rendered.renderInput.placementPlan.placementPlanHash,
       reframePlanHash: rendered.renderInput.reframePlan.reframePlanHash,
       subjects: SUBJECTS[rendered.renderInput.format],
+      subtitleAnchorPlan: rendered.renderInput.placementPlan.subtitleAnchorPlan,
     }))
     assert.equal(reports[0].reportHash, portrait.review.formatQuality.reportHash)
     assert.equal(reports[1].reportHash, landscape.review.formatQuality.reportHash)
@@ -928,14 +903,16 @@ test('T-WAVE9-E 9:16 and 16:9 share one StoryPlan, own their geometry, and only 
     assert.deepEqual([...decision.approvedOutputSpecIds], [landscapePreset.spec.id])
     assert.deepEqual([...decision.blockedOutputSpecIds], [portraitPreset.spec.id])
     assert.deepEqual(
-      decision.decisions.map((item) => [item.format, item.status, item.exportAllowed, [...item.blockingCodes]]),
+      decision.decisions.map((item) => [item.format, item.status, item.exportAllowed, [...item.blockingCodes], [...item.warningCodes]]),
       // `selectExportableVariants` returns decisions in canonical outputSpecId
       // order, so 16:9 precedes 9:16 regardless of the input order.
       [
-        ['16:9', 'passed', true, []],
-        ['9:16', 'blocked', false, ['SUBJECT_NOT_VISIBLE', 'SUBTITLE_SUBJECT_COLLISION']],
+        ['16:9', 'warning', true, [], ['FACE_PERCEPTION_UNAVAILABLE']],
+        ['9:16', 'blocked', false, ['SUBJECT_NOT_VISIBLE'], ['FACE_PERCEPTION_UNAVAILABLE']],
       ],
     )
+    t.diagnostic(JSON.stringify({ proofScope: 'controlled-worker-render-mechanics', faceSafety: 'unknown',
+      editorialAcceptance: false, pending: ['authoritative face/caption evidence', 'positive final admission'] }))
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -949,22 +926,25 @@ test('T-WAVE9-E the subtitle configuration chain changes only the preset, never 
   const masterPath = join(root, 'wave9-master.mp4')
   try {
     await writeColourMaster(masterPath)
-    const journey = await directOnce()
+    const journey = await directOnce(masterPath)
 
     // --- The chain: clean-color -> kinetic -> none -> revert ---------------
-    const repository = new SubtitleConfigurationRepository(journey.directed.version)
+    const repository = new SubtitleConfigurationRepository(journey.directed.bundle)
     let counter = 0
+    let materializations = 0
     const setSubtitles = setProjectSubtitleConfigurationService({
       repository,
-      clock: () => new Date(`2026-08-14T10:0${counter}:00.000Z`),
-      createId: (kind) => `${kind}-subtitle-${counter}`,
+      clock: () => new Date(`2026-10-17T10:0${counter}:00.000Z`),
+      // every output of the State re-materializes from the new plan, each under its own materialization id
+      createId: (kind) => kind === 'materialization' ? `${kind}-subtitle-${counter}-${++materializations}` : `${kind}-subtitle-${counter}`,
     })
     const step = async (label, request) => {
       counter += 1
       return setSubtitles({
         workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
         baseVersionId: repository.version.id, baseHash: repository.version.baseHash,
-        variantId: '16:9', actor: proxyActor(),
+        // the stable variant of the 16:9 output the configuration is for
+        variantId: RENDER_VARIANT['16:9'], actor: proxyActor(),
         idempotencyKey: `wave9-subtitle-${label}`, ...request,
       })
     }
@@ -1022,7 +1002,10 @@ test('T-WAVE9-E the subtitle configuration chain changes only the preset, never 
       withCleanColor.source.editPlan.retimedTranscript.sourceTranscriptHash,
       withKinetic.source.editPlan.retimedTranscript.sourceTranscriptHash,
     )
-    assert.equal(withCleanColor.expectedInputHash, withKinetic.expectedInputHash)
+    assert.notEqual(withCleanColor.expectedInputHash, withKinetic.expectedInputHash,
+      'effective track preset and snapshot identity must participate in the input hash')
+    assert.notEqual(withCleanColor.source.editPlanSnapshotId, withKinetic.source.editPlanSnapshotId)
+    assert.notEqual(withCleanColor.source.editPlanHash, withKinetic.source.editPlanHash)
     assert.equal(withCleanColor.renderInput.audioTimelineHash, withKinetic.renderInput.audioTimelineHash)
     assert.deepEqual(
       withCleanColor.renderInput.subtitleCues.map((cue) => [cue.id, cue.startFrame, cue.endFrame, cue.text]),
@@ -1073,12 +1056,12 @@ test('T-WAVE9-E the subtitle configuration chain changes only the preset, never 
     assert.ok(peaks.length >= 1, 'a soundless file would produce no true-peak summary')
     assert.ok(Number(peaks.at(-1)[1]) > -70, `the sine bed must still be audible, true peak ${peaks.at(-1)?.[1]}`)
     assert.ok(Number(peaks.at(-1)[1]) <= -1, `rendered audio true peak must stay at or below -1 dBTP: ${peaks.at(-1)[1]}`)
-    // Zero ink where the cues used to burn, measured against a drawn baseline.
+    // Both enabled-but-unknown and explicitly disabled captions emit zero ink.
     for (const [second, cueId] of [[0.5, 'subtitle-cue-1'], [2.7, 'subtitle-cue-2'], [4.7, 'subtitle-cue-3']]) {
       const drawn = captionBandWhitePixels(withKinetic.stored.path, second, '16:9')
       const suppressed = captionBandWhitePixels(nonePath, second, '16:9')
       console.log(`journey 7 caption band at ${second}s (${cueId}): kinetic=${drawn} none=${suppressed}`)
-      assert.ok(drawn > 100, `${cueId} must be burned when subtitles are enabled, counted ${drawn}`)
+      assert.equal(drawn, 0, `${cueId} must be suppressed with unknown facial coverage, counted ${drawn}`)
       assert.equal(suppressed, 0, `${cueId} must leave zero ink when resolved to none, counted ${suppressed}`)
     }
 
@@ -1088,6 +1071,9 @@ test('T-WAVE9-E the subtitle configuration chain changes only the preset, never 
       subtitleResolution: resolutionOf(chain[3]),
     })
     assertRenderedVariant(afterRevert, { operationId: 'operation-revert', format: '16:9' })
+    assert.equal(afterRevert.source.editPlanSnapshotId, withKinetic.source.editPlanSnapshotId)
+    assert.equal(afterRevert.source.editPlanHash, withKinetic.source.editPlanHash)
+    assert.equal(afterRevert.expectedInputHash, withKinetic.expectedInputHash)
     assert.equal(afterRevert.manifest.recipe.parametersHash, withKinetic.manifest.recipe.parametersHash)
     assert.equal(
       afterRevert.renderInput.placementPlan.placementPlanHash,
@@ -1153,6 +1139,35 @@ test('T-WAVE9-E tampered hashes never reach the renderer and a clean rerun repro
       )
     }
     console.log(`journey 10 rerun: inputHash=${first.expectedInputHash.slice(0, 12)}, parametersHash=${first.manifest.recipe.parametersHash.slice(0, 12)}, ${firstFrames} frames both runs, byte-identical MP4=${second.stored.sha256 === first.stored.sha256}`)
+
+    // Seal the contradictory fixture BEFORE enqueue. Otherwise a stale input
+    // hash could reject it before the persisted track/resolution check is reached.
+    const mismatchedPlan = {
+      ...first.source.editPlan,
+      subtitleTracks: first.source.editPlan.subtitleTracks.map((track) => ({ ...track, presetId: 'kinetic' })),
+    }
+    assert.ok(mismatchedPlan.subtitleTracks.some((track) => track.cues.length > 0))
+    const mismatchedPlanHash = calculateVersionHash(mismatchedPlan)
+    const mismatchedSeal = calculateCanonicalHash({ editPlanHash: mismatchedPlanHash,
+      subtitleResolution: first.source.subtitleResolution })
+    const mismatched = await renderThroughRealWorker({ root, masterPath, suffix: 'track-resolution-mismatch',
+      source: { ...first.source, editPlan: mismatchedPlan, editPlanHash: mismatchedPlanHash,
+        editPlanSnapshotId: `wave9-materialized-plan-${mismatchedSeal}` },
+    })
+    assert.deepEqual(mismatched.outcome, { operationId: 'operation-track-resolution-mismatch', status: 'failed' })
+    assert.equal(mismatched.operation.status, 'failed')
+    assert.deepEqual(mismatched.failure, {
+      code: 'invalid_render_input', message: 'Project proxy render could not be completed', retryable: false,
+    })
+    assert.equal(mismatched.originalFailureDiagnostic.code, 'INVALID_RENDER_INPUT')
+    assert.equal(mismatched.originalFailureDiagnostic.messageSha256,
+      createHash('sha256').update('Subtitle cues require one consistent persisted preset').digest('hex'))
+    assert.deepEqual(mismatched.phases, [])
+    assert.equal(mismatched.renderCalls, 0)
+    assert.equal(mismatched.atomicCompletions, 0)
+    assert.equal(mismatched.stored, undefined)
+    assert.equal(mismatched.manifest, undefined)
+    assert.equal(mismatched.review, undefined)
 
     // --- Journey 9: four tampered hashes, four closed doors ----------------
     // Each run differs from the clean `repro-a` run above by EXACTLY one field,

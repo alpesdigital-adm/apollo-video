@@ -30,16 +30,20 @@ export function readProxyReviewService(dependencies: {
     workspaceId: string
     projectId: string
     projectVersionId?: string
+    /** The stable State variant whose review is asked for; omitted ONLY for a Version with exactly one output. */
+    variantId?: string
   }) {
     const workspaceId = validateId(request.workspaceId, 'workspaceId')
     const projectId = validateId(request.projectId, 'projectId')
     const projectVersionId = request.projectVersionId
       ? validateId(request.projectVersionId, 'projectVersionId')
       : undefined
+    const variantId = request.variantId === undefined ? undefined : validateId(request.variantId, 'variantId')
     const review = await dependencies.repository.findCurrent({
       workspaceId,
       projectId,
       ...(projectVersionId ? { projectVersionId } : {}),
+      ...(variantId ? { variantId } : {}),
     })
     if (!review) throw new DomainError('PROJECT_NOT_FOUND', 'A rendered proxy review was not found for this project version')
     return review

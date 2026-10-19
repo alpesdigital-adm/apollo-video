@@ -154,6 +154,31 @@ export async function proveW31CombinedFilters({
         evidence.apiCases.push({ id, query: sanitizeQuery(new URLSearchParams(params)), status, ids: expectedIds, oracleIds: expectedIds, total: expectedRows.length })
       }
 
+      // apollo.projects.list 6.1.0: the `format` facet also finds a project that stores no format but has an output with that aspect
+      // ratio in the State of its head Version (every project created under 6.0.0). The fixtures above are raw rows that store their
+      // format, so this runs against the real 6.0.0 project(s) the surrounding proof made: the 9:16 answer must hold both kinds and
+      // the API must equal both oracles. (The individual-format case above, 16:9, is a ratio no real project has an output for: it
+      // still answers only the fixture that stores it.)
+      {
+        const outputsFacets = facets({ format: '9:16' })
+        const expectedRows = await oracleProjects(client, workspaceId, outputsFacets)
+        const storedFormatIds = expectedRows.filter((row) => row.format === '9:16').map((row) => row.id)
+        const outputOnlyIds = expectedRows.filter((row) => row.format === null).map((row) => row.id)
+        assert.ok(outputOnlyIds.length >= 1, 'a 9:16 project that stores no format must be found by its outputs')
+        assert.ok(W31_FIXTURES.filter((item) => item.format === '9:16').every((item) => storedFormatIds.includes(item.id)),
+          'the fixtures that store 9:16 stay in the answer')
+        assert.ok(expectedRows.length <= PAGE_LIMIT, 'the 9:16 answer must fit one page')
+        const params = facetsApiParams(outputsFacets)
+        const { status, body } = await sessionProjects(session, params)
+        assert.equal(status, 200, 'format outputs: API status')
+        const expectedIds = expectedRows.map((row) => row.id)
+        assert.deepEqual(body.data.projects.map((project) => project.id), expectedIds, 'format outputs: API ids differ from PostgreSQL')
+        for (const id of outputOnlyIds) {
+          assert.equal(body.data.projects.find((project) => project.id === id).format ?? null, null, 'a project found by its outputs stores no format')
+        }
+        evidence.formatOutputsCase = { query: sanitizeQuery(new URLSearchParams(params)), status, ids: expectedIds, outputOnlyIds }
+      }
+
       // Inclusive UTC boundaries, asserted against the API with the exact
       // millisecond limits the codec produces.
       const boundary = async (id, extra, expectedIds) => {

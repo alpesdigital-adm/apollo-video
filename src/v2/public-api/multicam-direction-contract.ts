@@ -238,8 +238,11 @@ export function presentShotDecisionListing(listing: Readonly<MulticamShotDecisio
  */
 type PresentableDirectedSession = Pick<
   DirectMulticamSessionServiceResult,
-  'direction' | 'directionVersion' | 'version' | 'command' | 'impact' | 'evidenceReplayed'
->
+  'direction' | 'directionVersion' | 'command' | 'impact' | 'evidenceReplayed'
+> & {
+  /** The response projects five facts of the sealed Version, so that is all the presenter may ask of it. */
+  readonly version: Pick<DirectMulticamSessionServiceResult['version'], 'id' | 'sequence' | 'parentVersionId' | 'baseHash' | 'createdAt'>
+}
 
 export function presentDirectedSession(result: Readonly<PresentableDirectedSession>) {
   return Object.freeze({

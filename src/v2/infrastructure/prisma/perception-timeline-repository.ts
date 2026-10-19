@@ -31,11 +31,12 @@ function hydrate(row: V2PerceptionTimeline): Readonly<PersistedPerceptionTimelin
   }
   const authenticationAudit = hydrateExternalActorAudit(row, row.createdByClientId)
   const content = Object.freeze({
-    schemaVersion: 'persisted-perception-timeline/v1' as const,
+    schemaVersion: 'persisted-perception-timeline/v2' as const,
     id: row.id,
     workspaceId: row.workspaceId,
     projectId: row.projectId,
     projectVersionId: row.projectVersionId,
+    origin: Object.freeze({ kind: 'manual-controlled' as const, trust: 'unverified' as const, suppliedByClientId: row.createdByClientId }),
     baseRevision: row.baseRevision,
     timeline,
     requestFingerprint: row.requestFingerprint,

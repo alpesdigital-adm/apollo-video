@@ -6,11 +6,11 @@ import { basename, join, relative, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
 
-import { calculateVersionHash } from '../../../src/v2/application/version-hash.ts'
+import { variantBodyFor } from './explicit-project-http.mjs'
 import { calculateCanonicalHash, stableSerialize } from '../../../src/v2/domain/canonical-hash.ts'
 import {
   apiCall, assertRefusal, cardIds, cardSnapshot, createProjectViaApi, dashboardUrl,
-  listPathMatches, plain, projectOracle, projectRowSummary, pushCase, recordApplicationName,
+  grantMasterRights, listPathMatches, plain, projectOracle, projectRowSummary, pushCase, recordApplicationName,
   runWaveProof, sanitizedRequest, screenshot, sha256, trackBrowserTraffic, waitForCardName,
   waitForCardSet, waitForSettled,
 } from './dashboard-w37-39-shared.mjs'
@@ -99,10 +99,20 @@ export async function proveW39DuplicateCopyOnWrite({
         })
         const created = await createProjectViaApi({ baseUrl, authorization, name: names.source, key: `${prefix}-create` })
         const sourceId = created.project.id
+        // 6.0.0: a project that links media is no longer "an actual empty project" (the database refuses the link next to the empty
+        // creation Version alone), so the source gets its first output through the public API before the master is linked.
+        const sourceVariant = await apiCall(baseUrl, {
+          method: 'POST', path: `/v1/projects/${sourceId}/output-variants`, authorization,
+          headers: { 'idempotency-key': `${prefix}-source-variant` },
+          body: { ...variantBodyFor({ aspectRatio: '9:16' }), baseVersionId: created.version.id, baseHash: created.version.baseHash },
+        })
+        assert.equal(sourceVariant.status, 201, sourceVariant.text)
+        assert.equal(sourceVariant.json.data.version.sequence, 2)
         await artifacts.persistOrReplay({
           workspaceId, artifactId, manifestId: `${prefix}-master-manifest`, lineageIds: [], manifest,
           createdAt: new Date().toISOString(),
         })
+        await grantMasterRights(client, { workspaceId, artifactId, clientId: apiClientId, id: `${prefix}-master-rights` })
         const sourceAssetId = randomUUID()
         await client.v2ProjectMediaAsset.create({ data: {
           id: sourceAssetId, workspaceId, projectId: sourceId, artifactId, role: 'source-master', originalFileName: 'master-original.mp4',
@@ -124,11 +134,14 @@ export async function proveW39DuplicateCopyOnWrite({
         assert.deepEqual(refsBefore.map((row) => row.projectId), [sourceId])
         const manifestsBefore = await client.v2MediaArtifactManifest.count({ where: { artifactId } })
         const sourceBefore = await projectOracle(client, workspaceId, sourceId)
-        assert.equal(sourceBefore.versions.length, 1)
-        assert.equal(sourceBefore.project.currentVersionId, sourceBefore.versions[0].id)
-        assert.equal(sourceBefore.editCommandCount, 0)
+        assert.equal(sourceBefore.versions.length, 2, 'creation Version + the explicit output variant')
+        const sourceVersion = sourceBefore.versions.at(-1)
+        assert.equal(sourceVersion.id, sourceVariant.json.data.version.id)
+        assert.equal(sourceBefore.project.currentVersionId, sourceVersion.id)
+        // The one Command the source ever had is the create-output-variant that gave it an output.
+        const sourceCommandCount = sourceBefore.editCommandCount
+        assert.equal(sourceCommandCount, 1)
         assert.ok(sourceBefore.snapshots.length >= 3)
-        const sourceVersion = sourceBefore.versions[0]
         evidence.before = {
           master: { artifactId, artifactKey, bytes: masterBytes.length, sha256: masterSha256, servedSha256: sha256(served.bytes) },
           storage: storageBefore.map(({ key, bytes, sha256: hash }) => ({ key, bytes, sha256: hash })),
@@ -156,7 +169,7 @@ export async function proveW39DuplicateCopyOnWrite({
         const duplicateResponse = page.waitForResponse((response) => response.url().endsWith(`/v1/projects/${sourceId}/duplicates`) && response.request().method() === 'POST')
         await page.locator(`article[data-project-id="${sourceId}"]`).getByRole('button', { name: 'Duplicar', exact: true }).click()
         const duplicated = await duplicateResponse
-        assert.equal(duplicated.status(), 201)
+        assert.equal(duplicated.status(), 201, (await duplicated.text()).slice(0, 1500))
         const duplicatedBody = await duplicated.json()
         const copyId = duplicatedBody.data.project.id
         const copyVersionId = duplicatedBody.data.version.id
@@ -206,7 +219,7 @@ export async function proveW39DuplicateCopyOnWrite({
         assert.deepEqual(sourceAfter.versions, sourceBefore.versions)
         assert.deepEqual(sourceAfter.snapshots, sourceBefore.snapshots)
         assert.deepEqual(sourceAfter.mediaAssets, sourceBefore.mediaAssets)
-        assert.equal(sourceAfter.editCommandCount, 0)
+        assert.equal(sourceAfter.editCommandCount, sourceCommandCount)
         assert.equal(copyAfter.project.name, names.copy)
         assert.equal(copyAfter.project.status, 'draft')
         assert.equal(copyAfter.project.duplicatedFromProjectId, sourceId)
@@ -221,18 +234,21 @@ export async function proveW39DuplicateCopyOnWrite({
         assert.equal(copyVersion.parentVersionId, null)
         assert.equal(copyVersion.forkedFromProjectId, sourceId)
         assert.equal(copyVersion.forkedFromVersionId, sourceVersion.id)
-        const sourceRefs = {
-          brief: sourceVersion.briefSnapshotId,
-          ...(sourceVersion.treatmentSnapshotId ? { treatment: sourceVersion.treatmentSnapshotId } : {}),
-          ...(sourceVersion.storySnapshotId ? { story: sourceVersion.storySnapshotId } : {}),
-          editPlan: sourceVersion.editPlanSnapshotId, policies: sourceVersion.policiesSnapshotId,
-        }
         // Contract rule: the version hash binds project/version identity, so it MUST differ; the
         // snapshot content hashes are content-addressed, so they MUST be equal.
         assert.notEqual(copyVersion.baseHash, sourceVersion.baseHash, 'the copy version binds its own identity')
-        assert.equal(copyVersion.baseHash, calculateVersionHash({
-          projectId: copyId, sequence: 1, forkedFromProjectId: sourceId, forkedFromVersionId: sourceVersion.id, snapshotRefs: sourceRefs,
-        }), 'baseHash follows the existing duplication contract formula')
+        // 6.0.0: the retired duplication formula (a hash over the snapshot refs) is replaced by the output-bound Version hash: the
+        // stored hash is the digest of the stored canonical body, and that body names the copy's own identity and its own State.
+        const copyHashBody = JSON.parse(copyVersion.outputBaseHashJson)
+        assert.equal(sha256(copyVersion.outputBaseHashJson), copyVersion.baseHash, 'baseHash is the digest of its stored canonical body')
+        assert.equal(copyHashBody.schemaVersion, 'project-output-bound-version-hash/v2')
+        assert.equal(copyHashBody.projectId, copyId)
+        assert.equal(copyHashBody.resultVersionId, copyVersionId)
+        assert.equal(copyHashBody.parentVersionId, null)
+        assert.equal(copyHashBody.previousBaseHash, null)
+        assert.equal(copyHashBody.outputStateId, copyVersion.outputStateId)
+        assert.equal(copyHashBody.outputStateHash, copyVersion.outputStateHash)
+        assert.notEqual(copyVersion.outputStateId, sourceVersion.outputStateId, 'the copy owns its State')
         const referenced = new Set([sourceVersion.briefSnapshotId, sourceVersion.treatmentSnapshotId, sourceVersion.storySnapshotId, sourceVersion.editPlanSnapshotId, sourceVersion.policiesSnapshotId].filter(Boolean))
         const sourceSnapshots = sourceBefore.snapshots.filter((row) => referenced.has(row.id))
         assert.equal(copyAfter.snapshots.length, sourceSnapshots.length)
@@ -339,33 +355,52 @@ export async function proveW39DuplicateCopyOnWrite({
         assert.equal((await cardSnapshot(page, copyId)).name, names.copy)
         evidence.screenshots.push(await screenshot(page, evidenceDir, 'w39-desktop-source-and-copy.png'))
 
-        // --- mutate the copy by Command; the original must not move -----------------------
-        // set-project-lut-selection re-reads the copied EditPlan and requires it to name the copy version.
-        const mutate = await apiCall(baseUrl, {
-          method: 'POST', path: `/v1/projects/${copyId}/lut-selection`, authorization,
-          headers: { 'idempotency-key': `${prefix}-copy-lut-none` },
-          body: { baseVersionId: copyVersionId, baseHash: copyVersion.baseHash, selection: { mode: 'none' } },
+        // --- a Command moves only the project it is addressed to ---------------------------------------------------------
+        // 6.0.0: a copy made from a project WITH content is a fork root that still "requires target transcript/perception/geometry
+        // authority before child3" (output-version-bundle.ts, buildOperationalOutputVersionBundleV3: only an editorial cut may be its
+        // first child). The Command that used to move the copy (set-project-lut-selection, now create-output-variant) is therefore
+        // refused on the copy with PRECONDITION_REQUIRED and changes nothing, while the same Command moves the original, an
+        // ordinary operational head, and leaves the copy where it was. Both directions are proven; "the copy moved to v2" is not
+        // reachable (the product forbids it), so the stale base below is taken on the original, which is what moves.
+        const copyBeforeCommands = await projectOracle(client, workspaceId, copyId)
+        const refusedOnCopy = await apiCall(baseUrl, {
+          method: 'POST', path: `/v1/projects/${copyId}/output-variants`, authorization,
+          headers: { 'idempotency-key': `${prefix}-copy-variant` },
+          body: { ...variantBodyFor({ aspectRatio: '16:9' }), baseVersionId: copyVersionId, baseHash: copyVersion.baseHash },
         })
-        assert.equal(mutate.status, 201, mutate.text)
-        const copySequenceAfter = 2
-        assert.equal(mutate.json.data.version.sequence, copySequenceAfter)
-        const copyMutated = await projectOracle(client, workspaceId, copyId)
-        const sourceMutated = await projectOracle(client, workspaceId, sourceId)
-        assert.equal(copyMutated.versions.length, copySequenceAfter)
-        assert.equal(copyMutated.editCommandCount, 1)
-        assert.equal(copyMutated.project.currentVersionId, mutate.json.data.version.id)
-        assert.equal(copyMutated.versions.at(-1).parentVersionId, copyVersionId)
-        assert.deepEqual(copyMutated.versions[0], copyAfter.versions[0], 'the copy first version is itself immutable')
-        assert.deepEqual(sourceMutated.project, sourceBefore.project, 'original project row unchanged')
-        assert.deepEqual(sourceMutated.versions, sourceBefore.versions, 'original versions and hashes unchanged')
-        assert.deepEqual(sourceMutated.snapshots, sourceBefore.snapshots, 'original snapshots and content hashes unchanged')
-        assert.deepEqual(sourceMutated.mediaAssets, sourceBefore.mediaAssets)
-        assert.equal(sourceMutated.editCommandCount, 0)
-        assert.deepEqual((await inventory(root)).filter((file) => file.key.startsWith(`w39/${tag}/`)), storageBefore, 'a Command on the copy never touches the master')
+        const refusedOnCopyObserved = assertRefusal(refusedOnCopy, { status: 428, code: 'PRECONDITION_REQUIRED', category: 'policy' })
+        assert.deepEqual(await projectOracle(client, workspaceId, copyId), copyBeforeCommands, 'the refused Command left the copy untouched')
+        assert.deepEqual(await projectOracle(client, workspaceId, sourceId), sourceBefore, 'and the original')
+        pushCase(evidence, {
+          id: 'command-on-copy-refused-fork-root', request: { method: 'POST', path: '/v1/projects/{copyId}/output-variants', auth: 'bearer projects:write' },
+          expected: { status: 428, code: 'PRECONDITION_REQUIRED' }, observed: refusedOnCopyObserved, persistedUnchanged: true,
+        })
+        const moveOriginal = await apiCall(baseUrl, {
+          method: 'POST', path: `/v1/projects/${sourceId}/output-variants`, authorization,
+          headers: { 'idempotency-key': `${prefix}-source-second-variant` },
+          body: { ...variantBodyFor({ aspectRatio: '16:9' }), baseVersionId: sourceVersion.id, baseHash: sourceVersion.baseHash },
+        })
+        assert.equal(moveOriginal.status, 201, moveOriginal.text)
+        const sourceSequenceAfter = sourceVersion.sequence + 1
+        assert.equal(moveOriginal.json.data.version.sequence, sourceSequenceAfter)
+        const sourceMoved = await projectOracle(client, workspaceId, sourceId)
+        const copyUntouched = await projectOracle(client, workspaceId, copyId)
+        assert.equal(sourceMoved.versions.length, sourceSequenceAfter)
+        assert.equal(sourceMoved.editCommandCount, sourceCommandCount + 1)
+        assert.equal(sourceMoved.project.currentVersionId, moveOriginal.json.data.version.id)
+        assert.equal(sourceMoved.versions.at(-1).parentVersionId, sourceVersion.id)
+        assert.deepEqual(sourceMoved.versions.slice(0, sourceBefore.versions.length), sourceBefore.versions, 'the original earlier versions and hashes are immutable')
+        for (const snapshot of sourceBefore.snapshots) assert.deepEqual(sourceMoved.snapshots.find((row) => row.id === snapshot.id), snapshot, 'every original snapshot keeps its content and hash')
+        assert.deepEqual(sourceMoved.mediaAssets, sourceBefore.mediaAssets)
+        assert.deepEqual(copyUntouched, copyBeforeCommands, 'a Command on the original never moves the copy')
+        assert.deepEqual((await inventory(root)).filter((file) => file.key.startsWith(`w39/${tag}/`)), storageBefore, 'a Command never touches the master')
         const sourceWorkspace = await apiCall(baseUrl, { path: `/v1/projects/${sourceId}/workspace`, authorization })
         assert.equal(sourceWorkspace.status, 200)
-        assert.equal(sourceWorkspace.json.data.version.id, sourceVersion.id)
-        assert.equal(sourceWorkspace.json.data.version.baseHash, sourceVersion.baseHash)
+        assert.equal(sourceWorkspace.json.data.version.id, moveOriginal.json.data.version.id)
+        const copyWorkspace = await apiCall(baseUrl, { path: `/v1/projects/${copyId}/workspace`, authorization })
+        assert.equal(copyWorkspace.status, 200)
+        assert.equal(copyWorkspace.json.data.version.id, copyVersionId)
+        assert.equal(copyWorkspace.json.data.version.baseHash, copyVersion.baseHash)
         const reload = page.waitForResponse((response) => listPathMatches(response, prefix))
         await page.reload({ waitUntil: 'domcontentloaded' })
         await reload
@@ -373,8 +408,8 @@ export async function proveW39DuplicateCopyOnWrite({
         await waitForSettled(page)
         const sourceCardAfter = await cardSnapshot(page, sourceId)
         const copyCardAfter = await cardSnapshot(page, copyId)
-        assert.equal(sourceCardAfter.version, 'v1')
-        assert.equal(copyCardAfter.version, `v${copySequenceAfter}`)
+        assert.equal(sourceCardAfter.version, `v${sourceSequenceAfter}`)
+        assert.equal(copyCardAfter.version, `v${copyVersion.sequence}`)
         evidence.screenshots.push(await screenshot(page, evidenceDir, 'w39-desktop-after-command.png'))
         await page.setViewportSize({ width: 390, height: 844 })
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
@@ -382,9 +417,14 @@ export async function proveW39DuplicateCopyOnWrite({
         assert.ok(overflow <= 1, `W39 mobile dashboard overflows by ${overflow}px`)
         evidence.screenshots.push(await screenshot(page, evidenceDir, 'w39-mobile-source-and-copy.png'))
         evidence.command = {
-          type: 'set-project-lut-selection', copyVersionSequenceAfter: copySequenceAfter, copyEditCommands: copyMutated.editCommandCount,
-          sourceVersionId: sourceVersion.id, sourceVersionBaseHashBefore: sourceVersion.baseHash, sourceVersionBaseHashAfter: sourceMutated.versions[0].baseHash,
-          sourceSnapshotHashesUnchanged: true, sourceEditCommands: sourceMutated.editCommandCount, cards: { source: sourceCardAfter.version, copy: copyCardAfter.version },
+          type: 'create-output-variant',
+          onCopy: { status: refusedOnCopy.status, code: refusedOnCopy.json.error.code, copyUnchanged: true, originalUnchanged: true },
+          onOriginal: {
+            status: moveOriginal.status, versionSequenceAfter: sourceSequenceAfter, versionId: moveOriginal.json.data.version.id,
+            editCommandsBefore: sourceCommandCount, editCommandsAfter: sourceMoved.editCommandCount,
+            earlierVersionsUnchanged: true, earlierSnapshotsUnchanged: true, copyUnchanged: true, copyEditCommands: copyUntouched.editCommandCount,
+          },
+          sourceVersionId: sourceVersion.id, copyVersionId, cards: { source: sourceCardAfter.version, copy: copyCardAfter.version },
         }
         evidence.browser.mutatingRequests = traffic.mutating().length
         evidence.browser.requests = traffic.mutating().map(sanitizedRequest)
@@ -407,8 +447,8 @@ export async function proveW39DuplicateCopyOnWrite({
         assert.equal(replayAfter.json.data.copiedBytes, 0)
         assert.equal(replayAfter.json.data.version.baseHash, copyVersion.baseHash)
         pushCase(evidence, {
-          id: 'idempotent-replay-after-copy-command', expected: { status: 200, replayed: true, sameProjectId: true, sameVersionId: true },
-          observed: { status: replayAfter.status, replayed: true, sameProjectId: true, sameVersionId: true, versionSequence: 1, copyCurrentSequence: copySequenceAfter, copies: baseline.projects - workspaceProjectsBefore },
+          id: 'idempotent-replay-after-original-command', expected: { status: 200, replayed: true, sameProjectId: true, sameVersionId: true },
+          observed: { status: replayAfter.status, replayed: true, sameProjectId: true, sameVersionId: true, versionSequence: 1, originalCurrentSequence: sourceSequenceAfter, copies: baseline.projects - workspaceProjectsBefore },
         })
         const refusal = async (id, request, expect, call) => {
           const result = await apiCall(baseUrl, { method: 'POST', path: route, ...call })
@@ -423,16 +463,16 @@ export async function proveW39DuplicateCopyOnWrite({
           { status: 409, code: 'VERSION_CONFLICT', category: 'conflict' },
           { authorization, headers: { 'idempotency-key': `${prefix}-stale-hash` }, body: { ...body, expectedVersionHash: '0'.repeat(64) } })
         {
-          // A true stale base: the copy moved to version 2 through the Command above.
+          // A true stale base: the original moved on through the Command above, so its previous exact (id, hash) pair is stale.
           const stale = await apiCall(baseUrl, {
-            method: 'POST', path: `/v1/projects/${copyId}/duplicates`, authorization,
-            headers: { 'idempotency-key': `${prefix}-stale-copy-v1` },
-            body: { expectedVersionId: copyVersionId, expectedVersionHash: copyVersion.baseHash, name: names.other },
+            method: 'POST', path: route, authorization,
+            headers: { 'idempotency-key': `${prefix}-stale-source-v${sourceVersion.sequence}` },
+            body: { expectedVersionId: sourceVersion.id, expectedVersionHash: sourceVersion.baseHash, name: names.other },
           })
           const observed = assertRefusal(stale, { status: 409, code: 'VERSION_CONFLICT', category: 'conflict' })
-          assert.equal(stale.json.error.details?.currentVersionId, mutate.json.data.version.id, 'the refusal carries the version that is current')
+          assert.equal(stale.json.error.details?.currentVersionId, moveOriginal.json.data.version.id, 'the refusal carries the version that is current')
           assert.deepEqual(await scopeState(), baseline)
-          pushCase(evidence, { id: 'stale-version-after-command-on-copy', request: { method: 'POST', path: '/v1/projects/{copyId}/duplicates', auth: 'bearer projects:write' }, expected: { status: 409, code: 'VERSION_CONFLICT' }, observed: { ...observed, currentVersionCarried: true }, persistedUnchanged: true })
+          pushCase(evidence, { id: 'stale-version-after-command-on-original', request: { method: 'POST', path: '/v1/projects/{projectId}/duplicates', auth: 'bearer projects:write' }, expected: { status: 409, code: 'VERSION_CONFLICT' }, observed: { ...observed, currentVersionCarried: true }, persistedUnchanged: true })
         }
         await refusal('injected-payload', { method: 'POST', path: '/v1/projects/{projectId}/duplicates', auth: 'bearer projects:write', extraFields: ['copiedBytes', 'sharedArtifactIds'] },
           { status: 422, code: 'INVALID_ARGUMENT' },

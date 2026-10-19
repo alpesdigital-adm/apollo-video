@@ -4,7 +4,7 @@ import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts';
 import { compileColorPlanTargets, createColorPlan, createExportMatrix, createMediaColorProbe, OUTPUT_FORMATS, parseCube, preflightExports, renderExportCell, resolveColorPlan, SDR_COLOR_FIXTURES, selectWorkspaceLut } from '../../src/v2/domain/color-and-export.ts';
 import { createProjectColorPlan, parseProjectColorPlan } from '../../src/v2/domain/project-color-plan.ts';
 import { createProjectColorPlanImpact, createProjectColorPlanInvalidations, parseProjectColorPlanImpact } from '../../src/v2/domain/project-color-plan-impact.ts';
-import { createProjectVersion } from '../../src/v2/domain/project-version.ts';
+import { ingestedWorld } from './helpers/output-world.mjs';
 import { setProjectColorPlanService } from '../../src/v2/application/project-color-plans.ts';
 import { parseSetProjectColorPlanBody } from '../../src/v2/public-api/project-color-plan-contract.ts';
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts';
@@ -293,7 +293,7 @@ test('T-FR-182 binds ColorPlan, target manifest and full-timeline invalidation t
     colorPlanHash: colorPlan.plan.planHash,
     compiledManifestHash: colorPlan.compiled.manifestHash,
     durationFrames: 300,
-    proxyVariantId: '9:16',
+    variantIds: ['9:16', '16:9'],
     outputReferences: [
       { artifactId: 'artifact-proxy-color-1', kind: 'proxy', sourceVersionId: colorPlan.baseVersionId, variantId: '9:16' },
       { artifactId: 'artifact-final-color-1', kind: 'final', sourceVersionId: colorPlan.baseVersionId, variantId: '16:9' },
@@ -302,6 +302,20 @@ test('T-FR-182 binds ColorPlan, target manifest and full-timeline invalidation t
   assert.equal(parseProjectColorPlanImpact(JSON.parse(JSON.stringify(impact))).impactHash, impact.impactHash);
   assert.deepEqual(impact.affectedRanges, [{ startFrame: 0, endFrame: 300 }]);
   assert.deepEqual(impact.affectedVariantIds, ['16:9', '9:16']);
+  // one minimal proxy render per output of the project, each over the whole timeline
+  assert.deepEqual(impact.minimalRenders, [
+    { kind: 'proxy', variantId: '16:9', ranges: [{ startFrame: 0, endFrame: 300 }] },
+    { kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 300 }] },
+  ]);
+  assert.throws(() => createProjectColorPlanImpact({
+    commandId: colorPlan.commandId, baseVersionId: colorPlan.baseVersionId, resultVersionId: colorPlan.resultVersionId, colorPlanId: colorPlan.id,
+    colorPlanHash: colorPlan.plan.planHash, compiledManifestHash: colorPlan.compiled.manifestHash, durationFrames: 300, variantIds: ['9:16'],
+    outputReferences: [{ artifactId: 'artifact-final-color-1', kind: 'final', sourceVersionId: colorPlan.baseVersionId, variantId: '16:9' }],
+  }), /not an output of the project/);
+  assert.throws(() => createProjectColorPlanImpact({
+    commandId: colorPlan.commandId, baseVersionId: colorPlan.baseVersionId, resultVersionId: colorPlan.resultVersionId, colorPlanId: colorPlan.id,
+    colorPlanHash: colorPlan.plan.planHash, compiledManifestHash: colorPlan.compiled.manifestHash, durationFrames: 300, variantIds: [], outputReferences: [],
+  }), /every output/);
   assert.equal(createProjectColorPlanInvalidations({ impact, createdAt: colorPlan.createdAt }).length, 2);
 
   const tampered = JSON.parse(JSON.stringify(colorPlan));
@@ -310,34 +324,24 @@ test('T-FR-182 binds ColorPlan, target manifest and full-timeline invalidation t
 });
 
 test('T-FR-182 applies ColorPlan through the shared Command and immutable ProjectVersion model', async () => {
-  const currentVersion = createProjectVersion({
-    id: 'project-version-color-service-1',
-    workspaceId: 'workspace-color-service',
-    projectId: 'project-color-service',
-    sequence: 1,
-    snapshotRefs: {
-      brief: 'snapshot-brief-color-service',
-      editPlan: 'snapshot-edit-color-service',
-      policies: 'snapshot-policy-color-service',
-    },
-    baseHash: '1'.repeat(64),
-    createdBy: 'system-color-service',
-    createdAt: '2026-08-24T11:00:00.000Z',
-  });
+  // The parent is a real sealed Version3/State3; the ColorPlan Command inherits its output members.
+  const { parent } = await ingestedWorld();
+  const currentVersion = parent.version;
+  const variantIds = parent.state.document.entries.map((entry) => entry.variantId);
   const outputs = [{
     artifactId: 'artifact-color-service-proxy',
     kind: 'proxy',
     sourceVersionId: currentVersion.id,
-    variantId: '9:16',
+    variantId: variantIds[0],
   }];
-  let stored = null;
+  let stored = null, committed = null;
   const repository = {
     async findIdempotent() {
       return stored ? { requestFingerprint: stored.requestFingerprint, result: stored.result } : null;
     },
     async readContext() {
       return {
-        currentVersion,
+        parent,
         targets: [
           { sourceId: 'source-a', segmentId: 'clip-a' },
           { sourceId: 'source-b', cameraId: 'camera-b', segmentId: 'clip-b' },
@@ -347,20 +351,22 @@ test('T-FR-182 applies ColorPlan through the shared Command and immutable Projec
           'source-b': sourceColor,
         },
         currentDurationFrames: 180,
-        proxyVariantId: '9:16',
+        variantIds,
         outputReferences: outputs,
       };
     },
     async commitOrReplay(commit) {
+      const { command, requestFingerprint } = commit.bundle.origin;
+      committed = commit;
       const result = Object.freeze({
-        command: commit.command,
-        version: commit.version,
+        command,
+        version: commit.bundle.version,
         colorPlan: commit.colorPlan,
-        impact: commit.command.payload.impact,
-        invalidations: createProjectColorPlanInvalidations({ impact: commit.command.payload.impact, createdAt: commit.command.createdAt }),
+        impact: command.payload.impact,
+        invalidations: createProjectColorPlanInvalidations({ impact: command.payload.impact, createdAt: command.createdAt }),
         replayed: false,
       });
-      stored = { requestFingerprint: commit.requestFingerprint, result };
+      stored = { requestFingerprint, result };
       return result;
     },
   };
@@ -368,7 +374,10 @@ test('T-FR-182 applies ColorPlan through the shared Command and immutable Projec
     command: 'command-color-service-1',
     version: 'project-version-color-service-2',
     'color-plan': 'project-color-plan-service-1',
+    'edit-plan-snapshot': 'snapshot-edit-color-service-2',
+    state: 'state-color-service-2',
   };
+  let materializations = 0;
   const service = setProjectColorPlanService({
     repository,
     luts: {
@@ -380,7 +389,7 @@ test('T-FR-182 applies ColorPlan through the shared Command and immutable Projec
         return ['lut-film-look-head', 'lut-clip-b-head'].includes(lutId) ? { status: 'active' } : null;
       },
     },
-    createId: (kind) => ids[kind],
+    createId: (kind) => (kind === 'materialization' ? `materialization-color-service-${++materializations}` : ids[kind]),
     createEventId: () => '20000000-0000-4000-8000-000000000001',
     clock: () => new Date('2026-08-24T12:00:00.000Z'),
   });
@@ -409,9 +418,15 @@ test('T-FR-182 applies ColorPlan through the shared Command and immutable Projec
   const applied = await service(request);
   assert.equal(applied.command.type, 'set-project-color-plan');
   assert.equal(applied.version.parentVersionId, currentVersion.id);
+  assert.equal(applied.version.outputContractVersion, 3);
+  assert.equal(committed.bundle.state.document.transition, 'inherit');
+  assert.equal(committed.bundle.state.document.parentStateHash, parent.state.stateHash);
+  assert.deepEqual(committed.bundle.state.document.entries.map((entry) => entry.variantId), parent.state.document.entries.map((entry) => entry.variantId));
+  assert.equal(committed.bundle.origin.audit, null);
   assert.equal(applied.colorPlan.compiled.targets.length, 2);
   assert.deepEqual(applied.impact.affectedRanges, [{ startFrame: 0, endFrame: 180 }]);
   assert.equal(applied.invalidations.length, 1);
+  assert.deepEqual(applied.impact.minimalRenders.map((render) => render.variantId), variantIds);
   assert.equal(applied.replayed, false);
   assert.equal((await service(request)).colorPlan.recordHash, applied.colorPlan.recordHash);
 
@@ -424,6 +439,75 @@ test('T-FR-182 applies ColorPlan through the shared Command and immutable Projec
   };
   stored = null;
   await assert.rejects(() => service(unknownTarget), /outside the current EditPlan/);
+});
+
+test('W66 multi-output: a ColorPlan on a project with two outputs stales the renders of EVERY output and asks one minimal proxy render per output', async () => {
+  // The parent carries TWO State entries over one EditPlan; the Command names no output (it is project-wide).
+  const { parent } = await ingestedWorld({ sibling: true });
+  const currentVersion = parent.version;
+  const variantIds = parent.state.document.entries.map((entry) => entry.variantId);
+  assert.equal(variantIds.length, 2);
+  const outputs = variantIds.map((variantId, index) => ({
+    artifactId: `artifact-color-two-outputs-proxy-${index}`, kind: 'proxy', sourceVersionId: currentVersion.id, variantId,
+  }));
+  let committed = null;
+  const repository = {
+    async findIdempotent() { return null; },
+    async readContext() {
+      return {
+        parent,
+        targets: [{ sourceId: 'source-a', segmentId: 'clip-a' }],
+        trustedSourceMetadata: { 'source-a': sourceColor },
+        currentDurationFrames: 180,
+        variantIds,
+        outputReferences: outputs,
+      };
+    },
+    async commitOrReplay(commit) {
+      const { command } = commit.bundle.origin;
+      committed = commit;
+      return Object.freeze({
+        command, version: commit.bundle.version, colorPlan: commit.colorPlan, impact: command.payload.impact,
+        invalidations: createProjectColorPlanInvalidations({ impact: command.payload.impact, createdAt: command.createdAt }), replayed: false,
+      });
+    },
+  };
+  const ids = { command: 'command-color-two-outputs-1', version: 'project-version-color-two-outputs-2', 'color-plan': 'project-color-plan-two-outputs-1',
+    'edit-plan-snapshot': 'snapshot-edit-color-two-outputs-2', state: 'state-color-two-outputs-2' };
+  let materializations = 0;
+  const service = setProjectColorPlanService({
+    repository,
+    luts: {
+      async readVersionById({ versionId }) { return versionId === 'lut-film-look' ? { id: versionId, lutId: 'lut-film-look-head', cube: { contentHash: 'a'.repeat(64) }, license: { policy: 'owned' } } : null; },
+      async read({ lutId }) { return lutId === 'lut-film-look-head' ? { status: 'active' } : null; },
+    },
+    createId: (kind) => (kind === 'materialization' ? `materialization-color-two-outputs-${++materializations}` : ids[kind]),
+    createEventId: () => '20000000-0000-4000-8000-000000000002',
+    clock: () => new Date('2026-10-17T12:00:00.000Z'),
+  });
+  const plan = basePlan();
+  plan.sourceMetadata = { 'source-a': sourceColor };
+  const request = {
+    workspaceId: currentVersion.workspaceId, projectId: currentVersion.projectId, baseVersionId: currentVersion.id, baseHash: currentVersion.baseHash,
+    plan, actor: { type: 'system', id: 'system-color-two-outputs' }, idempotencyKey: 'color-plan-two-outputs-001',
+  };
+  assert.equal('variantId' in request, false);
+  const applied = await service(request);
+  const sorted = [...variantIds].sort();
+  // the child Version carries every entry; each output keeps its own spec revision and spec hash
+  const entries = committed.bundle.state.document.entries;
+  assert.deepEqual(entries.map((entry) => entry.variantId), variantIds);
+  for (const [index, entry] of entries.entries()) {
+    assert.equal(entry.outputSpecRevisionId, parent.state.document.entries[index].outputSpecRevisionId);
+    assert.equal(entry.specHash, parent.state.document.entries[index].specHash);
+  }
+  assert.deepEqual(applied.impact.affectedVariantIds, sorted);
+  assert.deepEqual(applied.impact.affectedArtifacts.map((artifact) => [artifact.artifactId, artifact.variantId]).toSorted(),
+    outputs.map((output) => [output.artifactId, output.variantId]).toSorted());
+  assert.deepEqual(applied.impact.minimalRenders, sorted.map((variantId) => ({ kind: 'proxy', variantId, ranges: [{ startFrame: 0, endFrame: 180 }] })));
+  assert.equal(applied.invalidations.length, 2);
+  assert.deepEqual(applied.invalidations.map((invalidation) => invalidation.variantId).toSorted(), sorted);
+  assert.equal(parseProjectColorPlanImpact(JSON.parse(JSON.stringify(applied.impact))).impactHash, applied.impact.impactHash);
 });
 
 test('T-FR-180 rejects duplicate stages, broken color chains and LUT reuse outside its stage', () => {

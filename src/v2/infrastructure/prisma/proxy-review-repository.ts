@@ -17,6 +17,8 @@ import {
   type ProxyOutputFormat,
 } from '../../application/render-workflow.ts'
 import { OUTPUT_ASPECT_RATIOS } from '../../domain/output-spec.ts'
+import { outputVariantsOf } from '../../domain/output-consumption.ts'
+import { readStoredOutputStateV3 } from './output-state-consumption.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { projectStatusTransitionSources } from '../../domain/project.ts'
@@ -202,6 +204,41 @@ function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
 }
 
+export async function readCurrentProxyReview(
+  client: Pick<Prisma.TransactionClient, 'v2ProxyReview' | 'v2Project' | '$queryRawUnsafe'>,
+  input: Parameters<ProxyReviewRepository['findCurrent']>[0],
+): Promise<Readonly<PersistedProxyReview> | null> {
+  // The Version, then its sealed State: which output's review is asked for is decided by the State, never by recency.
+  const versionId = input.projectVersionId ?? (await client.v2Project.findFirst({
+    where: { id: input.projectId, workspaceId: input.workspaceId }, select: { currentVersionId: true },
+  }))?.currentVersionId ?? undefined
+  if (!versionId) return null
+  const stored = await readStoredOutputStateV3(client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId })
+  if (!stored) return null
+  const variants = outputVariantsOf(stored.state)
+  if (variants.length === 0) return null
+  if (input.variantId === undefined && variants.length > 1) {
+    throw new DomainError('PRECONDITION_REQUIRED', 'The Version has several outputs and the request names none', { reason: 'output-variant-required' })
+  }
+  if (input.variantId !== undefined && !variants.some((variant) => variant.variantId === input.variantId)) {
+    throw new DomainError('PRECONDITION_REQUIRED', 'Requested stable variant is not an exact State member', { reason: 'output-variant-unknown' })
+  }
+  const variantId = input.variantId ?? variants[0]!.variantId
+  const row = await client.v2ProxyReview.findFirst({
+    where: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      projectVersionId: versionId,
+      // A review belongs to the output of the render that produced it; an unattributed (legacy) one only to a sole output.
+      operation: variants.length === 1
+        ? { OR: [{ outputVariantId: variantId }, { outputVariantId: null }] }
+        : { outputVariantId: variantId },
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+  })
+  return row ? hydrateProxyReview(row) : null
+}
+
 export class PrismaProxyReviewRepository implements ProxyReviewRepository {
   private readonly client: PrismaClient
 
@@ -210,7 +247,47 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
   }
 
   async persistGenerated(input: Parameters<ProxyReviewRepository['persistGenerated']>[0]) {
-    return this.client.$transaction(async (transaction) => {
+    return this.client.$transaction(
+      (transaction) => this.persistGeneratedInTransaction(transaction, input),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    )
+  }
+
+  async persistGeneratedInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: Parameters<ProxyReviewRepository['persistGenerated']>[0],
+  ): Promise<Readonly<PersistedProxyReview>> {
+    return this.persistGeneratedScopedInTransaction(transaction, input, null)
+  }
+
+  async persistRenderableSnapshotInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: Parameters<ProxyReviewRepository['persistGenerated']>[0],
+    binding: Readonly<{ planId: string; planHash: string }>,
+  ): Promise<Readonly<PersistedProxyReview>> {
+    const detail = await transaction.v2ProjectProxyRenderOperation.findUnique({
+      where: { operationId: input.operationId },
+    })
+    const snapshot = await transaction.v2RenderablePlanSnapshot.findFirst({
+      where: { workspaceId: input.workspaceId, projectId: input.projectId,
+        projectVersionId: input.review.projectVersionId,
+        planId: binding.planId, planHash: binding.planHash },
+    })
+    if (!detail || !snapshot || detail.workspaceId !== input.workspaceId ||
+        detail.projectId !== input.projectId ||
+        detail.projectVersionId !== input.review.projectVersionId ||
+        detail.renderablePlanId !== binding.planId ||
+        detail.renderablePlanHash !== binding.planHash) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot review binding is invalid')
+    }
+    return this.persistGeneratedScopedInTransaction(transaction, input, binding)
+  }
+
+  private async persistGeneratedScopedInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: Parameters<ProxyReviewRepository['persistGenerated']>[0],
+    renderableSnapshot: Readonly<{ planId: string; planHash: string }> | null,
+  ): Promise<Readonly<PersistedProxyReview>> {
       const existing = await transaction.v2ProxyReview.findUnique({
         where: { operationId: input.operationId },
       })
@@ -283,14 +360,19 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
           updatedAt: createdAt,
         },
       })
-      const project = await transaction.v2Project.updateMany({
+      const project = renderableSnapshot ? { count: await transaction.v2Project.count({
+        where: { id: input.projectId, workspaceId: input.workspaceId },
+      }) } : await transaction.v2Project.updateMany({
         where: {
           id: input.projectId,
           workspaceId: input.workspaceId,
           currentVersionId: input.review.projectVersionId,
           publicOperations: { none: {
             type: 'project-proxy-render',
-            projectProxyRender: { is: { projectVersionId: input.review.projectVersionId } },
+            // A newer render supersedes this review only when it is for the SAME output: the other outputs' renders of one Version
+            // are siblings (a legacy operation, made for no stated output, is superseded by any newer render of the Version).
+            projectProxyRender: { is: { projectVersionId: input.review.projectVersionId,
+              ...(operation.projectProxyRender?.outputVariantId ? { outputVariantId: operation.projectProxyRender.outputVariantId } : {}) } },
             OR: [{ createdAt: { gt: operation.createdAt } }, { createdAt: operation.createdAt, id: { gt: operation.id } }],
           } },
           status: {
@@ -328,21 +410,10 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
         },
       })
       return hydrateProxyReview(row)
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
   }
 
   async findCurrent(input: Parameters<ProxyReviewRepository['findCurrent']>[0]) {
-    const row = await this.client.v2ProxyReview.findFirst({
-      where: {
-        workspaceId: input.workspaceId,
-        projectId: input.projectId,
-        ...(input.projectVersionId
-          ? { projectVersionId: input.projectVersionId }
-          : { projectVersion: { currentForProjects: { some: { id: input.projectId, workspaceId: input.workspaceId } } } }),
-      },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    })
-    return row ? hydrateProxyReview(row) : null
+    return readCurrentProxyReview(this.client, input)
   }
 
   private async findDecisionReplay(input: {

@@ -5,19 +5,23 @@ import { promisify } from 'node:util'
 
 import type { EditorialProxyRenderer } from '../../application/ports/editorial-proxy-renderer.ts'
 import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy-render-repository.ts'
+import { createCaptionProjection } from '../../domain/caption-canvas-projection.ts'
 import { assertClipRate, timelineSpanForRate } from '../../domain/clip-timing.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { assertAssCueText, assertAssFrameInterval, assFrameClockBinder, type AssBoundaryBinder } from '../../domain/ass-emission-policy.ts'
 import { OUTPUT_FORMAT_REGISTRY } from '../../domain/output-format-registry.ts'
-import { validateRenderPlacementPlan, type RenderPlacementPlanV1 } from '../../domain/render-placement-plan.ts'
+import { validateRenderPlacementPlan } from '../../domain/render-placement-plan.ts'
 import { validateRenderReframePlan, type RenderReframeRangeV1 } from '../../domain/render-reframe-plan.ts'
 import { createEditorialAudioTimelineHash } from '../../domain/production-modes.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { parseProjectColorPlan } from '../../domain/project-color-plan.ts'
 import { buildRenderElementMap } from '../../domain/review-system.ts'
-import { subtitleAnchorDecisionFor, type SubtitleAnchorPlanV1 } from '../../domain/subtitle-anchor-plan.ts'
+import { subtitleAnchorDecisionFor, type SubtitleAnchorPlan } from '../../domain/subtitle-anchor-plan.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
 import { FfmpegColorPipelineProcessor } from './ffmpeg-color-pipeline-processor.ts'
+import { buildEditorialCompositionPrefix, buildPreLibassClockStage } from './ffmpeg-editorial-composition-graph.ts'
+export { buildReframeCropFilter, buildPlacementOverlayFilters, atempoFactors } from './ffmpeg-editorial-composition-graph.ts'
 import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
 const execFileAsync = promisify(execFile)
@@ -34,19 +38,11 @@ function assertContained(root: string, candidate: string): void {
   if (rel.startsWith('..') || isAbsolute(rel)) throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial render work path escaped its root')
 }
 
-function assTimestamp(frame: number, fps: number): string {
-  const centiseconds = Math.max(0, Math.round(frame / fps * 100))
-  const hours = Math.floor(centiseconds / 360_000)
-  const minutes = Math.floor(centiseconds % 360_000 / 6_000)
-  const seconds = Math.floor(centiseconds % 6_000 / 100)
-  const fraction = centiseconds % 100
-  return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(fraction).padStart(2, '0')}`
-}
-
 function wrapAssText(value: string, maxCharacters = 20): string {
+  assertAssCueText(value)
   const lines: string[] = []
   let line = ''
-  for (const word of value.replace(/[{}\\]/g, '').split(/\s+/).filter(Boolean)) {
+  for (const word of value.normalize('NFC').replace(/[{}\\]/g, '').split(/\s+/).filter(Boolean)) {
     const candidate = line ? `${line} ${word}` : word
     if (line && candidate.length > maxCharacters && lines.length === 0) {
       lines.push(line)
@@ -57,19 +53,16 @@ function wrapAssText(value: string, maxCharacters = 20): string {
   return lines.slice(0, 2).join('\\N')
 }
 
-function buildAssSubtitles(input: {
+export function buildAssSubtitles(input: {
   width: number
   height: number
   fps: number
+  /** Frames of the fragment these cues are local to; the clock restarts at 0 for each fragment. */
+  durationFrames: number
   cues: NonNullable<Parameters<EditorialProxyRenderer['render']>[0]['subtitleCues']>
   ctaOverlays?: NonNullable<Parameters<EditorialProxyRenderer['render']>[0]['ctaOverlays']>
-  /**
-   * F1.036 decision. When present it wins over `cue.anchor`: the Director's anchor is only the
-   * face-safe fallback, while this plan is the one that actually consulted the perception
-   * evidence. Positions come from the decided band, not from a constant written here, so the
-   * pixels and the plan cannot disagree.
-   */
-  anchorPlan?: Readonly<SubtitleAnchorPlanV1> | null
+  /** Runtime cues require a v2 review decision. The old `cue.anchor` is never a fallback. */
+  anchorPlan?: Readonly<SubtitleAnchorPlan> | null
 }): string {
   const fontSize = Math.max(
     32,
@@ -80,26 +73,29 @@ function buildAssSubtitles(input: {
   )
   const marginHorizontal = Math.round(input.width * 0.07)
   const marginVertical = Math.round(input.height * 0.075)
+  let binder: AssBoundaryBinder | undefined
+  const stamps = (start: number, end: number) => (binder ??= assFrameClockBinder(input.fps, input.durationFrames)).timestamps(start, end)
   const events = input.cues.flatMap((cue) => {
+    assertAssCueText(cue.text)
     const decision = input.anchorPlan ? subtitleAnchorDecisionFor(input.anchorPlan, cue.id) : null
-    // A cue with nowhere safe to go is not drawn. Covering a face is never the cheaper option.
+    if (!decision || !(input.anchorPlan?.schemaVersion === 'subtitle-anchor-plan/v2' || input.anchorPlan?.schemaVersion === 'subtitle-anchor-plan/v3')) {
+      throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle cue has no runtime facial review decision')
+    }
+    // A cue whose band could not be certified (unknown facial coverage) or whose bands are all taken is not drawn.
     if (decision?.suppressed) return []
     if (decision?.bounds) {
       // `\an5` centres the box on the point, so the point is the centre of the decided band.
       const centreX = Math.round((decision.bounds.x + decision.bounds.width / 2) * input.width)
       const centreY = Math.round((decision.bounds.y + decision.bounds.height / 2) * input.height)
-      return [`Dialogue: 0,${assTimestamp(cue.startFrame, input.fps)},${assTimestamp(cue.endFrame, input.fps)},Default,,0,0,0,,{\\an5\\pos(${centreX},${centreY})}${wrapAssText(cue.text)}`]
+      const time = stamps(cue.startFrame, cue.endFrame)
+      return [`Dialogue: 0,${time.start},${time.end},Default,,0,0,0,,{\\an5\\pos(${centreX},${centreY})}${wrapAssText(cue.text)}`]
     }
-    const anchor = cue.anchor ?? 'bottom'
-    const override = anchor === 'bottom' ? ''
-      : anchor === 'lower-third' ? `{\\an2\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.76)})}`
-        : anchor === 'center' ? `{\\an5\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.5)})}`
-          : anchor === 'upper-third' ? `{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.3)})}`
-            : `{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.08)})}`
-    return [`Dialogue: 0,${assTimestamp(cue.startFrame, input.fps)},${assTimestamp(cue.endFrame, input.fps)},Default,,0,0,0,,${override}${wrapAssText(cue.text)}`]
+    throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle cue review decision has no drawable bounds')
   })
-  const ctaEvents = (input.ctaOverlays ?? []).map((overlay) =>
-    `Dialogue: 1,${assTimestamp(overlay.startFrame, input.fps)},${assTimestamp(overlay.endFrame, input.fps)},CTA,,0,0,0,,{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.1)})}${wrapAssText(overlay.text, 28)}`)
+  const ctaEvents = (input.ctaOverlays ?? []).map((overlay) => {
+    const time = stamps(overlay.startFrame, overlay.endFrame)
+    return `Dialogue: 1,${time.start},${time.end},CTA,,0,0,0,,{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.1)})}${wrapAssText(overlay.text, 28)}`
+  })
   return [
     '[Script Info]',
     'ScriptType: v4.00+',
@@ -127,122 +123,49 @@ function escapeSubtitleFilterPath(value: string): string {
 
 type EditorialRenderInput = Parameters<EditorialProxyRenderer['render']>[0]
 
-function normalizedCropFilter(
-  crop: NonNullable<EditorialRenderInput['clips'][number]['crop']>,
-  source: { width: number; height: number },
-): string {
-  const values = [crop.x, crop.y, crop.width, crop.height]
-  if (
-    values.some((value) => !Number.isFinite(value)) ||
-    crop.x < 0 || crop.y < 0 || crop.width <= 0 || crop.height <= 0 ||
-    crop.width > 1 || crop.height > 1 ||
-    crop.x + crop.width > 1 || crop.y + crop.height > 1
-  ) throw new DomainError('INVALID_RENDER_INPUT', 'Editorial clip crop is invalid')
-  const availableWidth = source.width - source.width % 2
-  const availableHeight = source.height - source.height % 2
-  const x = Math.floor(crop.x * source.width / 2) * 2
-  const y = Math.floor(crop.y * source.height / 2) * 2
-  const right = Math.min(
-    availableWidth,
-    Math.ceil((crop.x + crop.width) * source.width / 2) * 2,
-  )
-  const bottom = Math.min(
-    availableHeight,
-    Math.ceil((crop.y + crop.height) * source.height / 2) * 2,
-  )
-  const width = right - x
-  const height = bottom - y
-  if (width < 2 || height < 2) {
-    throw new DomainError('INVALID_RENDER_INPUT', 'Editorial clip crop has no encodable pixels')
+/** Validate both global and actually emitted local clocks before any I/O. */
+export function assertEditorialAssEmission(input: Pick<EditorialRenderInput,
+  'fps' | 'subtitleCues' | 'ctaOverlays' | 'placementPlan'> & { durationFrames: number }): void {
+  for (const cue of input.subtitleCues ?? []) {
+    assertAssCueText(cue.text)
+    const plan = input.placementPlan?.subtitleAnchorPlan
+    const decision = plan ? subtitleAnchorDecisionFor(plan, cue.id) : null
+    if (decision?.suppressed) continue
+    if (!wrapAssText(cue.text)) throw new DomainError('INVALID_RENDER_INPUT', 'Drawable ASS text is empty')
+    assertAssFrameInterval(cue.startFrame, cue.endFrame, input.fps, input.durationFrames)
   }
-  return `crop=${width}:${height}:${x}:${y},`
+  for (const overlay of input.ctaOverlays ?? []) {
+    assertAssCueText(overlay.text)
+    if (!wrapAssText(overlay.text, 28)) throw new DomainError('INVALID_RENDER_INPUT', 'Drawable ASS text is empty')
+    assertAssFrameInterval(overlay.startFrame, overlay.endFrame, input.fps, input.durationFrames)
+  }
 }
 
-const evenFloor = (value: number, maximum: number): number =>
-  Math.max(0, Math.min(maximum, Math.floor(value / 2) * 2))
-
 /**
- * Deterministic crop for one reframe range.
- *
- * A single keyframe collapses to the constant `crop=w:h:x:y` the renderer already emitted. Two or
- * more keyframes become an FFmpeg expression on `n` — the crop filter re-evaluates `x`/`y` for
- * every frame, so the trajectory is computed by the filter itself instead of being approximated by
- * a stack of trimmed segments. Frame indices are integers and the piecewise slopes are fixed at
- * build time, so two runs of the same plan emit byte-identical filter strings.
- *
- * Crop *size* is constant by construction (the plan rejects a changing one), because a stream
- * whose frame size changes mid-clip cannot be encoded deterministically.
+ * Admission gate for burned-in captions. A render that carries cues must carry the complete
+ * review plan (v2 unknown-face, or the v3 plan that certifies bands on the variant's canvas) for exactly
+ * this timeline, format and clock, and that plan must have decided every cue. The gate runs before any I/O and is not relaxable by the caller: a worker that
+ * cannot hand the plan over gets `INVALID_RENDER_INPUT`, never a render without its captions.
  */
-export function buildReframeCropFilter(input: Readonly<{
-  range: Readonly<RenderReframeRangeV1>
-  source: Readonly<{ width: number; height: number }>
-}>): string {
-  const { range, source } = input
-  const first = range.keyframes[0]!
-  const availableWidth = source.width - source.width % 2
-  const availableHeight = source.height - source.height % 2
-  const width = Math.min(availableWidth, Math.floor(first.crop.width * source.width / 2) * 2)
-  const height = Math.min(availableHeight, Math.floor(first.crop.height * source.height / 2) * 2)
-  if (width < 2 || height < 2) throw new DomainError('INVALID_RENDER_INPUT', 'Reframe crop has no encodable pixels')
-  const maxX = availableWidth - width
-  const maxY = availableHeight - height
-  if (range.keyframes.length === 1) {
-    return `crop=${width}:${height}:${evenFloor(first.crop.x * source.width, maxX)}:${evenFloor(first.crop.y * source.height, maxY)},`
+export function assertRenderedSubtitleCuesAreReviewed(
+  input: Pick<EditorialRenderInput, 'subtitleCues' | 'placementPlan' | 'format' | 'fps'>,
+  fullExpectedFrames: number,
+): void {
+  if (!input.subtitleCues?.length) return
+  const placement = input.placementPlan
+  const anchorPlan = placement?.subtitleAnchorPlan
+  if (!placement || !(anchorPlan?.schemaVersion === 'subtitle-anchor-plan/v2' || anchorPlan?.schemaVersion === 'subtitle-anchor-plan/v3') ||
+      placement.format !== input.format ||
+      placement.durationFrames !== fullExpectedFrames ||
+      Math.abs(anchorPlan.fps - input.fps) > 0.01) {
+    throw new DomainError('INVALID_RENDER_INPUT', 'Rendered subtitle cues require a complete unknown-face review plan')
   }
-  const axis = (key: 'x' | 'y', scale: number, limit: number): string => {
-    const points = range.keyframes.map((keyframe) => Object.freeze({
-      frame: keyframe.frame - range.startFrame,
-      value: Math.max(0, Math.min(limit, keyframe.crop[key] * scale)),
-    }))
-    let expression = points.at(-1)!.value.toFixed(4)
-    for (let index = points.length - 2; index >= 0; index -= 1) {
-      const from = points[index]!
-      const to = points[index + 1]!
-      const slope = (to.value - from.value) / (to.frame - from.frame)
-      const segment = range.interpolation === 'hold'
-        ? from.value.toFixed(4)
-        : `${from.value.toFixed(4)}+(${slope.toFixed(6)})*(n-${from.frame})`
-      expression = `if(lt(n,${to.frame}),${segment},${expression})`
+  for (const cue of input.subtitleCues) {
+    const decision = subtitleAnchorDecisionFor(anchorPlan, cue.id)
+    if (!decision || decision.startFrame !== cue.startFrame || decision.endFrame !== cue.endFrame) {
+      throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle anchor plan does not cover every cue of this render')
     }
-    return `2*floor(min(max(${expression},0),${limit})/2)`
   }
-  // Single quotes keep the commas of the expression inside one filter argument.
-  return `crop=${width}:${height}:'${axis('x', source.width, maxX)}':'${axis('y', source.height, maxY)}',`
-}
-
-/**
- * Painter-ordered overlay chain for the drawable placements of a plan. Each asset is scaled to the
- * pixel box its normalized bounds describe and gated by `enable='between(n,start,end-1)'` — the
- * half-open `[startFrame, endFrame)` interval of the plan, expressed in FFmpeg's inclusive form.
- */
-export function buildPlacementOverlayFilters(input: Readonly<{
-  plan: Readonly<RenderPlacementPlanV1>
-  assetInputIndexByElementId: Readonly<Record<string, number>>
-  inputLabel: string
-  outputLabel: string
-}>): readonly string[] {
-  const drawable = input.plan.placements.filter((placement) => placement.assetArtifactId !== null)
-  if (!drawable.length) return Object.freeze([`[${input.inputLabel}]null[${input.outputLabel}]`])
-  const { width, height } = input.plan.canvas
-  const filters: string[] = []
-  let current = input.inputLabel
-  drawable.forEach((placement, index) => {
-    const inputIndex = input.assetInputIndexByElementId[placement.elementId]
-    if (inputIndex === undefined) throw new DomainError('INVALID_RENDER_INPUT', 'Placement asset input is missing')
-    const boxWidth = Math.max(2, Math.round(placement.bounds.width * width / 2) * 2)
-    const boxHeight = Math.max(2, Math.round(placement.bounds.height * height / 2) * 2)
-    const x = Math.max(0, Math.min(width - boxWidth, Math.round(placement.bounds.x * width)))
-    const y = Math.max(0, Math.min(height - boxHeight, Math.round(placement.bounds.y * height)))
-    const next = index === drawable.length - 1 ? input.outputLabel : `geo${index + 1}`
-    filters.push(`[${inputIndex}:v]scale=${boxWidth}:${boxHeight},format=rgba,setsar=1[plc${index}]`)
-    filters.push(
-      `[${current}][plc${index}]overlay=${x}:${y}:` +
-      `enable='between(n,${placement.timeRange.startFrame},${placement.timeRange.endFrame - 1})':` +
-      `eof_action=repeat[${next}]`,
-    )
-    current = next
-  })
-  return Object.freeze(filters)
 }
 
 type PartialRange = Readonly<{ startFrame: number; endFrame: number }>
@@ -253,21 +176,6 @@ export { assertClipRate }
  * `atempo` only accepts factors in [0.5, 2.0], so a rate outside that window is
  * expressed as a chain (rate 4 becomes 2.0 x 2.0, rate 0.25 becomes 0.5 x 0.5).
  */
-export function atempoFactors(rate: number): readonly number[] {
-  const factors: number[] = []
-  let remaining = rate
-  while (remaining > 2) {
-    factors.push(2)
-    remaining /= 2
-  }
-  while (remaining < 0.5) {
-    factors.push(0.5)
-    remaining *= 2
-  }
-  factors.push(remaining)
-  return Object.freeze(factors)
-}
-
 function assertClipTimeline(clip: EditorialRenderInput['clips'][number]): void {
   const rate = assertClipRate(clip.rate)
   const sourceSpan = clip.sourceOutFrame - clip.sourceInFrame
@@ -364,7 +272,7 @@ function assertPartialRanges(
     Object.freeze({ startFrame: range.startFrame, endFrame: range.endFrame })))
 }
 
-function sliceRenderRange(input: EditorialRenderInput, range: {
+export function sliceRenderRange(input: EditorialRenderInput, range: {
   startFrame: number
   endFrame: number
 }) {
@@ -488,6 +396,11 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       ? assertPartialRanges(rangeReuse.ranges, fullExpectedFrames)
       : []
     const slices = ranges.map((range) => sliceRenderRange(input, range))
+    assertEditorialAssEmission({ ...input, durationFrames: fullExpectedFrames })
+    for (const slice of slices) assertEditorialAssEmission({
+      ...slice, fps: input.fps, placementPlan: input.placementPlan,
+      durationFrames: slice.clips.reduce((total, clip) => total + clip.timelineOutFrame - clip.timelineInFrame, 0),
+    })
     for (const slice of slices) for (const clip of slice.clips) assertClipTimeline(clip)
     const renderClips = rangeReuse ? slices.flatMap((slice) => slice.clips) : input.clips
     // Structural and content-address checks on the materialized geometry run
@@ -497,6 +410,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     // depend on probes and canvas dimensions stay where they are.
     if (input.reframePlan) validateRenderReframePlan(input.reframePlan)
     if (input.placementPlan) validateRenderPlacementPlan(input.placementPlan)
+    assertRenderedSubtitleCuesAreReviewed(input, fullExpectedFrames)
     const directory = this.directory(input.operationId)
     await mkdir(directory, { recursive: true })
     const colorPlan = input.colorPlan ? parseProjectColorPlan(input.colorPlan) : null
@@ -655,6 +569,31 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         reframeRangeByClipId.set(clip.id, range)
       }
     }
+    // W65. A caption that was PLACED was placed on a projection of the sources onto this canvas. The renderer rebuilds that
+    // projection from the sources it actually probed, its clips, crops/reframe and composition, and refuses a plan decided on
+    // anything else: dimensions, staging frame, crop or layout that differ would put the caption somewhere the plan did not
+    // measure. A plan that draws nothing needs no projection, so only a plan with a drawn cue is held to it.
+    const anchorForProjection = input.placementPlan?.subtitleAnchorPlan
+    if (anchorForProjection?.schemaVersion === 'subtitle-anchor-plan/v3' && anchorForProjection.faceClearance.projectionHash !== null &&
+        anchorForProjection.decisions.some((decision) => decision.anchor !== null)) {
+      let rebuilt: string | null = null
+      try {
+        rebuilt = createCaptionProjection({
+          layout: { canvas: { width, height }, composition: input.composition ?? null },
+          sources: videoProbes.map(({ artifactId, probe }) => ({ artifactId, width: probe.width, height: probe.height })),
+          clips: input.clips.map((clip) => ({
+            id: clip.id, sourceArtifactId: clip.sourceArtifactId,
+            timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame,
+            sourceInFrame: clip.sourceInFrame, sourceOutFrame: clip.sourceOutFrame, rate: clip.rate,
+            ...(clip.crop ? { crop: clip.crop } : {}),
+            ...(reframeRangeByClipId.has(clip.id) ? { reframe: reframeRangeByClipId.get(clip.id)! } : {}),
+          })),
+        }).projectionHash
+      } catch { rebuilt = null }
+      if (rebuilt !== anchorForProjection.faceClearance.projectionHash) {
+        throw new DomainError('INVALID_RENDER_INPUT', 'The caption projection of the placement plan does not describe the sources of this render')
+      }
+    }
     const backgroundMusic = input.backgroundMusic
     if (backgroundMusic) {
       const source = renderSources[sourceIndex.get(backgroundMusic.artifactId) ?? -1]
@@ -678,21 +617,6 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         placementPlan.canvas.width !== width || placementPlan.canvas.height !== height ||
         placementPlan.durationFrames !== fullExpectedFrames
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Placement plan does not describe this render canvas')
-      const anchorPlan = placementPlan.subtitleAnchorPlan
-      if (anchorPlan) {
-        // Fail closed: a decision that does not describe *these* cues would silently fall back to
-        // the Director anchor for the cues it forgot, which is exactly the silent face-covering
-        // this feature exists to prevent.
-        if (Math.abs(anchorPlan.fps - outputFps) > 0.01) {
-          throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle anchor plan was decided at another frame rate')
-        }
-        for (const cue of input.subtitleCues ?? []) {
-          const decision = subtitleAnchorDecisionFor(anchorPlan, cue.id)
-          if (!decision || decision.startFrame !== cue.startFrame || decision.endFrame !== cue.endFrame) {
-            throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle anchor plan does not cover every cue of this render')
-          }
-        }
-      }
       const drawable = placementPlan.placements.filter((placement) => placement.assetArtifactId !== null)
       if (drawable.length && rangeReuse) {
         throw new DomainError('INVALID_RENDER_INPUT', 'Drawable placements cannot be combined with partial range reuse')
@@ -756,102 +680,14 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
      * sample-accurate while a seek can only land on a packet boundary, and the
      * whole point of this change is that the file it writes does not move.
      */
-    const clipVideoInputs = (composition: typeof compositions[number]) =>
-      composition.clips.map((clip) => {
-        const source = renderSources[clipVideoIndex.get(clip.id)!]!
-        return Object.freeze({
-          path: source.path,
-          // Half a frame early on purpose: `-ss` keeps the frames at or after
-          // the instant it names, so a frame period that does not divide into
-          // microseconds can never round past the clip's own first frame.
-          ss: Math.max(0, (clip.sourceInFrame - 0.5) / input.fps).toFixed(6),
-          // One frame of slack for the same reason; `trim` below cuts the span
-          // exactly, so the extra frame is decoded and dropped, never encoded.
-          t: ((clip.sourceOutFrame - clip.sourceInFrame + 1) / input.fps).toFixed(6),
-        })
-      })
     const buildCompositionFilters = async (composition: typeof compositions[number]) => {
-      const videoInputs = clipVideoInputs(composition)
-      const filters: string[] = []
-      composition.clips.forEach((clip, index) => {
-        const videoIndex = renderSources.length + index
-        const audioIndex = sourceIndex.get(
-          clip.audioSourceArtifactId ?? clip.sourceArtifactId,
-        )!
-        const audioInFrame = clip.audioSourceInFrame ?? clip.sourceInFrame
-        const audioOutFrame = clip.audioSourceOutFrame ?? clip.sourceOutFrame
-        const audioStart = audioInFrame / input.fps
-        const audioEnd = audioOutFrame / input.fps
-        const rate = clip.rate
-        const timelineSpan = clip.timelineOutFrame - clip.timelineInFrame
-        const sourceProbe = videoProbeByArtifactId.get(clip.sourceArtifactId)!
-        const reframeRange = reframeRangeByClipId.get(clip.id)
-        const cropFilter = reframeRange
-          ? buildReframeCropFilter({ range: reframeRange, source: { width: sourceProbe.width, height: sourceProbe.height } })
-          : clip.crop
-            ? normalizedCropFilter(clip.crop, sourceProbe)
-            : ''
-        // Real-time clips keep the historical filtergraph verbatim. Retimed clips
-        // rescale PTS, then re-sample to the output fps and hard-trim to the exact
-        // timeline span so rounding never accumulates across the concat.
-        filters.push(
-          `[${videoIndex}:v:0]trim=start_frame=0:end_frame=${clip.sourceOutFrame - clip.sourceInFrame},` +
-          (rate === 1
-            ? `setpts=PTS-STARTPTS,${cropFilter}`
-            : `setpts=(PTS-STARTPTS)/${rate.toFixed(6)},${cropFilter}`) +
-          `scale=${stagingWidth}:${stagingHeight}:force_original_aspect_ratio=decrease,` +
-          `pad=${stagingWidth}:${stagingHeight}:(ow-iw)/2:(oh-ih)/2:color=black,` +
-          `fps=${outputFps},` +
-          (rate === 1 ? '' : `trim=start_frame=0:end_frame=${timelineSpan},setpts=PTS-STARTPTS,`) +
-          `setsar=1,format=yuv420p[v${index}]`,
-        )
-        const duration = (audioEnd - audioStart) / rate
-        const before = composition.transitions?.find((transition) => transition.toClipId === clip.id)
-        const after = composition.transitions?.find((transition) => transition.fromClipId === clip.id)
-        const fadeIn = before ? Math.min(duration / 4, before.audioFadeMs / 1000) : 0
-        const fadeOut = after ? Math.min(duration / 4, after.audioFadeMs / 1000) : 0
-        const audioFilters = [`atrim=start=${audioStart.toFixed(6)}:end=${audioEnd.toFixed(6)}`, 'asetpts=PTS-STARTPTS']
-        if (rate !== 1) {
-          for (const factor of atempoFactors(rate)) audioFilters.push(`atempo=${factor.toFixed(6)}`)
-          audioFilters.push(`atrim=start=0:end=${duration.toFixed(6)}`, 'asetpts=PTS-STARTPTS')
-        }
-        if (fadeIn > 0) audioFilters.push(`afade=t=in:st=0:d=${fadeIn.toFixed(6)}`)
-        if (fadeOut > 0) audioFilters.push(`afade=t=out:st=${Math.max(0, duration - fadeOut).toFixed(6)}:d=${fadeOut.toFixed(6)}`)
-        filters.push(`[${audioIndex}:a:0]${audioFilters.join(',')}[a${index}]`)
-      })
-      const concatInputs = composition.clips.map((_, index) => `[v${index}][a${index}]`).join('')
-      filters.push(`${concatInputs}concat=n=${composition.clips.length}:v=1:a=1[joinedv][joineda]`)
-      if (backgroundMusic) {
-        const musicIndex = sourceIndex.get(backgroundMusic.artifactId)!
-        const musicStart = backgroundMusic.sourceInFrame / input.fps
-        const musicEnd = backgroundMusic.sourceOutFrame / input.fps
-        const fadeIn = backgroundMusic.fadeInFrames / input.fps
-        const fadeOut = backgroundMusic.fadeOutFrames / input.fps
-        const duration = backgroundMusic.timelineOutFrame / input.fps
-        const musicFilters = [`atrim=start=${musicStart.toFixed(6)}:end=${musicEnd.toFixed(6)}`, 'asetpts=PTS-STARTPTS', `atrim=start=0:end=${duration.toFixed(6)}`, `volume=${backgroundMusic.gainDb.toFixed(2)}dB`]
-        if (fadeIn > 0) musicFilters.push(`afade=t=in:st=0:d=${fadeIn.toFixed(6)}`)
-        if (fadeOut > 0) musicFilters.push(`afade=t=out:st=${Math.max(0, duration - fadeOut).toFixed(6)}:d=${fadeOut.toFixed(6)}`)
-        filters.push(`[${musicIndex}:a:0]${musicFilters.join(',')}[musicbed]`)
-        filters.push('[joineda][musicbed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixeda]')
-        filters.push('[mixeda]alimiter=limit=0.794328:attack=5:release=50:level=false:latency=true[outa]')
-      } else filters.push('[joineda]alimiter=limit=0.794328:attack=5:release=50:level=false:latency=true[outa]')
-      filters.push(`[joinedv]split=2[background0][foreground0]`)
-      filters.push(`[background0]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=28[background]`)
-      const foregroundScale = input.composition?.foregroundScale ?? 1
-      const verticalPosition = input.composition?.verticalPosition ?? 0.5
-      filters.push(`[foreground0]scale=${width}:${height}:force_original_aspect_ratio=decrease,scale=iw*${foregroundScale.toFixed(4)}:ih*${foregroundScale.toFixed(4)}[foreground]`)
-      filters.push(`[background][foreground]overlay=(W-w)/2:max(0\\,min(H-h\\,H*${verticalPosition.toFixed(4)}-h/2)):shortest=1,format=yuv420p[composed]`)
-      // Placement overlays land on the composed frame, under the caption layer: a logo or insert
-      // never hides a subtitle the Director already positioned.
-      const composedLabel = placementPlan && placementInputs.length ? 'placed' : 'composed'
-      if (placementPlan && placementInputs.length) {
-        filters.push(...buildPlacementOverlayFilters({
-          plan: placementPlan,
-          assetInputIndexByElementId,
-          inputLabel: 'composed',
-          outputLabel: 'placed',
-        }))
-      }
+      const prefix = buildEditorialCompositionPrefix({ clips: composition.clips, transitions: composition.transitions ?? [],
+        fps: input.fps, outputFps, width, height, stagingWidth, stagingHeight, renderSources,
+        sourceIndex: Object.fromEntries(sourceIndex), clipVideoIndex: Object.fromEntries(clipVideoIndex),
+        videoProbeByArtifactId: Object.fromEntries(videoProbeByArtifactId), reframeRangeByClipId: Object.fromEntries(reframeRangeByClipId),
+        backgroundMusic: backgroundMusic ?? null, compositionLayout: input.composition ?? null,
+        placementPlan: placementPlan ?? null, placementInputs, assetInputIndexByElementId })
+      const filters = [...prefix.filters], videoInputs = prefix.videoInputs, composedLabel = prefix.videoLabel
       if (composition.subtitleCues?.length || composition.ctaOverlays?.length) {
         await writeFile(
           composition.subtitlePath,
@@ -859,24 +695,26 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
             width,
             height,
             fps: outputFps,
+            durationFrames: composition.clips.reduce((total, clip) => total + clip.timelineOutFrame - clip.timelineInFrame, 0),
             cues: composition.subtitleCues ?? [],
             ctaOverlays: composition.ctaOverlays,
             anchorPlan: input.placementPlan?.subtitleAnchorPlan ?? null,
           }),
           'utf8',
         )
-        filters.push(`[${composedLabel}]subtitles=filename='${escapeSubtitleFilterPath(composition.subtitlePath)}'[outv]`)
+        // The last stage before libass (settb + setpts=N) numbers the frames in the inverse of the rate, so the clock the
+        // ASS boundaries were bound to is the clock the subtitles filter sees (ass-frame-clock/v3).
+        const clock = buildPreLibassClockStage({ inputLabel: composedLabel, outputFps })
+        filters.push(...clock.filters, `[${clock.outputLabel}]subtitles=filename='${escapeSubtitleFilterPath(composition.subtitlePath)}'[outv]`)
       } else filters.push(`[${composedLabel}]null[outv]`)
-      return { filters, videoInputs }
+      return { filters, videoInputs, inputArgs: prefix.inputArgs }
     }
     try {
       for (const composition of compositions) {
-        const { filters, videoInputs } = await buildCompositionFilters(composition)
+        const { filters, inputArgs } = await buildCompositionFilters(composition)
         await execFileAsync(this.ffmpegPath, [
           '-hide_banner', '-loglevel', 'error', '-y',
-          ...renderSources.flatMap((source) => ['-i', source.path]),
-          ...videoInputs.flatMap((clipInput) => ['-ss', clipInput.ss, '-t', clipInput.t, '-i', clipInput.path]),
-          ...placementInputs.flatMap((asset) => ['-i', asset.path]),
+          ...inputArgs,
           '-filter_complex', filters.join(';'), '-map', '[outv]', '-map', '[outa]',
           '-r', String(outputFps), '-c:v', 'libx264', '-preset', input.renderKind === 'final' ? 'medium' : 'veryfast', '-crf', input.renderKind === 'final' ? '18' : '23',
           '-c:a', 'aac', '-b:a', input.renderKind === 'final' ? '192k' : '160k', '-ar', '48000', '-movflags', '+faststart', composition.outputPath,

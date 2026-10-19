@@ -1,5 +1,9 @@
+import type { OutputConsumptionSealV3 } from '../../domain/output-consumption.ts'
 import type { RenderElementMap } from '../../domain/review-system.ts'
 import type { SubtitleSidecarFormat } from '../../domain/subtitle-sidecar.ts'
+
+/** One admission of the Version's output by the persisted consumption reader: the seal and its hash. */
+export type SidecarOutputConsumptionSeal = Readonly<{ seal: Readonly<OutputConsumptionSealV3>; sealHash: string }>
 
 /**
  * Everything the sidecar pipeline is allowed to read, assembled from the
@@ -29,6 +33,17 @@ export interface RenderedSubtitleAlignmentSource {
   renderElementMapHash: string
   map: Readonly<RenderElementMap>
   cueTexts: Readonly<Record<string, string>>
+  /**
+   * The exact Version, State, variant revision and materialization the alignment was admitted from: always the `render`
+   * admission, and the `final` one too when the evidence is a final export. `variantId` above is that entry's stable State variant.
+   */
+  outputConsumption?: Readonly<{ render: SidecarOutputConsumptionSeal; final?: SidecarOutputConsumptionSeal }>
+  /**
+   * Verdict of the review that judged this exact render (the proxy review of the operation, or the one a
+   * final export was approved from). `null` means no verdict exists. A blocked or unjudged render is not a
+   * deliverable, so no sidecar is published for it.
+   */
+  review: Readonly<{ status: 'blocked' | 'warning-ack-required' | 'ready-for-final'; finalAllowed: boolean; reviewHash: string }> | null
 }
 
 export interface PersistedSubtitleSidecar {
@@ -59,9 +74,10 @@ export interface PersistedSubtitleSidecar {
 
 export interface SubtitleSidecarRepository {
   /**
-   * Resolves the exact rendered alignment for one variant. `projectVersionId`
-   * omitted means the current version; an explicit historical version is honored
-   * and reported through `isCurrentVersion`.
+   * Resolves the exact rendered alignment for one output. `variantId` is the stable variant of the State of the selected Version
+   * (an unknown one is refused `output-variant-unknown`, two outputs of one aspect ratio `output-variant-ambiguous`); the render
+   * evidence is the proxy or final export made for THAT output, never the Version's other outputs'. `projectVersionId` omitted
+   * means the current version; an explicit historical version is honored and reported through `isCurrentVersion`.
    */
   readRenderedAlignment(input: {
     workspaceId: string

@@ -23,7 +23,11 @@ const SCREENSHOT_PATTERN = /^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/]+=*$/
 export function readProjectReviewService(dependencies: {
   repository: ReviewAnnotationRepository
 }) {
-  return async function read(input: { workspaceId: string; projectId: string; projectVersionId?: string; limit?: number }) {
+  /**
+   * `variantId` is the stable variant of the State of the reviewed Version whose output is reviewed. It is optional only for a
+   * Version with exactly one output: with several, naming none is refused `output-variant-required`.
+   */
+  return async function read(input: { workspaceId: string; projectId: string; projectVersionId?: string; variantId?: string; limit?: number }) {
     const workspaceId = input.workspaceId.trim()
     const projectId = input.projectId.trim()
     const limit = input.limit ?? 50
@@ -31,6 +35,7 @@ export function readProjectReviewService(dependencies: {
       /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(workspaceId) &&
         /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(projectId) &&
         (input.projectVersionId === undefined || /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(input.projectVersionId.trim())) &&
+        (input.variantId === undefined || /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(input.variantId.trim())) &&
         Number.isInteger(limit) && limit >= 1 && limit <= 100,
       'INVALID_ARGUMENT',
       'Review query is invalid',
@@ -39,6 +44,7 @@ export function readProjectReviewService(dependencies: {
       workspaceId,
       projectId,
       ...(input.projectVersionId ? { projectVersionId: input.projectVersionId.trim() } : {}),
+      ...(input.variantId ? { variantId: input.variantId.trim() } : {}),
     })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Project review context was not found')
     const annotations = await dependencies.repository.list({
@@ -65,6 +71,8 @@ export function readProjectReviewService(dependencies: {
       }))),
       scopeContext: Object.freeze({
         formatId: context.formatId,
+        variantId: context.variantId,
+        variantIds: Object.freeze([...context.variantIds]),
         localeId: context.localeId,
         recipeIds: Object.freeze([...context.recipeIds]),
         options: Object.freeze(Object.entries(context.availableScopeCounts).map(([kind, affectedCount]) => Object.freeze({
@@ -88,6 +96,8 @@ export function createProjectReviewAnnotationService(dependencies: {
     workspaceId: string
     projectId: string
     projectVersionId: string
+    /** The stable variant of the State whose output is critiqued; optional only for a Version with exactly one output. */
+    variantId?: string
     proxyArtifactId: string
     proxyHash: string
     frame: number
@@ -126,6 +136,7 @@ export function createProjectReviewAnnotationService(dependencies: {
     assertDomain(
       /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(workspaceId) &&
         /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(projectId) &&
+        (input.variantId === undefined || /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(input.variantId.trim())) &&
         idempotencyKey.length >= 8 && idempotencyKey.length <= 128,
       'INVALID_ARGUMENT',
       'Review annotation identity is invalid',
@@ -135,7 +146,9 @@ export function createProjectReviewAnnotationService(dependencies: {
       'INVALID_ARGUMENT',
       'Review screenshot must be a bounded JPEG or PNG data URL',
     )
-    const context = await dependencies.repository.readPreviewContext({ workspaceId, projectId })
+    const context = await dependencies.repository.readPreviewContext({
+      workspaceId, projectId, ...(input.variantId ? { variantId: input.variantId.trim() } : {}),
+    })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Project review context was not found')
     if (
       context.stale || context.projectVersionId !== input.projectVersionId ||
@@ -190,14 +203,15 @@ export function createProjectReviewAnnotationService(dependencies: {
               : applicationKind === 'project'
                 ? `project:${projectId}`
                 : applicationKind === 'formats'
-                  ? `format:${context.formatId}`
+                  ? `format:${context.variantId}`
                   : applicationKind === 'locales'
                     ? `locale:${context.localeId}`
                     : `recipe:${context.recipeIds[0] ?? ''}`
     const requestedScope = input.applicationScope ? { ...input.applicationScope, kind: applicationKind } : { kind: applicationKind }
     if (requestedScope.global) {
+      // Format scopes name outputs by their stable State variant; only members of the reviewed Version's State qualify.
       const allowed = {
-        formatIds: [context.formatId],
+        formatIds: [...context.variantIds],
         localeIds: [context.localeId],
         recipeIds: [...context.recipeIds],
       }
@@ -213,7 +227,7 @@ export function createProjectReviewAnnotationService(dependencies: {
       requested: requestedScope,
       current: {
         targetId: currentTargetId,
-        formatId: context.formatId,
+        formatId: context.variantId,
         localeId: context.localeId,
         ...(context.recipeIds[0] ? { recipeId: context.recipeIds[0] } : {}),
       },
@@ -278,6 +292,7 @@ export function createProjectReviewAnnotationService(dependencies: {
       annotation,
       idempotencyKey,
       requestFingerprint,
+      variantId: context.variantId,
     })
     return Object.freeze({ annotation: persisted, replayed: false })
   }

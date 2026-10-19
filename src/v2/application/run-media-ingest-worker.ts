@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto'
+import { performance } from 'node:perf_hooks'
+import { sealOutputNormalizationV3 } from '../domain/output-materialization.ts'
+import { buildOperationalOutputVersionBundleV3, type BuildOperationalOutputVersionBundleV3 } from '../domain/output-version-bundle.ts'
 
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
@@ -16,8 +19,6 @@ import { createMediaArtifactManifest, createMediaArtifactManifestV2 } from '../d
 import { createMediaUploadAuditEntry } from '../domain/media-upload-audit-entry.ts'
 import type { MediaIngestDecision } from '../domain/media-input.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
-import { createPublicEvent } from '../domain/public-event.ts'
 import { setAssetRightsService } from './set-asset-rights.ts'
 import { calculatePublicOperationRetryDelayMs } from './run-public-operation-worker.ts'
 import { compileInitialSourceEditPlan } from './apply-editorial-cut-command.ts'
@@ -90,6 +91,7 @@ export function runNextMediaIngestOperationService(dependencies: {
 
   return async function runNext(leaseOwner: string, signal?: AbortSignal) {
     if (signal?.aborted) return null
+    const monotonicAdmission=performance.now(),workEndMonotonicMs=monotonicAdmission+30*60000,hardEndMonotonicMs=workEndMonotonicMs+5000
     const claimedAt = clock()
     const claimed = await dependencies.operations.claimNext({
       leaseOwner, now: claimedAt.toISOString(), leaseUntil: leaseUntil(claimedAt), type: 'media-ingest',
@@ -137,6 +139,9 @@ export function runNextMediaIngestOperationService(dependencies: {
 
     try {
       scheduleHeartbeat()
+      // Fail before media/storage/rights effects when no explicit variant3 exists.
+      const project=await dependencies.projectMedia.readProject({workspaceId:operation.workspaceId,projectId:context.projectId})
+      if(!project)throw new DomainError('PRECONDITION_REQUIRED','Ingest project has no operational output variant')
       const upload = await dependencies.uploads.findUpload({ workspaceId: operation.workspaceId, clientId: operation.clientId, uploadId: context.uploadId })
       if (!upload || upload.status !== 'verified' || upload.projectId !== context.projectId || upload.fileName !== context.originalFileName) {
         throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Verified project media upload is no longer available')
@@ -227,12 +232,20 @@ export function runNextMediaIngestOperationService(dependencies: {
       }
 
       if (upload.kind === 'audio' || upload.kind === 'image') {
+        const observed=upload.kind==='audio'?await dependencies.processor.observeOriginalAudio({sourcePath:master.path,operationId:operation.id,
+          owner:{attempt,leaseOwner,sourceSha256:master.sha256,sourceByteSize:master.byteSize,workEndMonotonicMs,hardEndMonotonicMs},signal:abortController.signal}):null
+        const audioNormalization=observed?sealOutputNormalizationV3({schemaVersion:'output-normalization-receipt/v3',canonicalPolicyVersion:'output-canonical-json/v1',
+          id:'normalization-audio-'+createHash('sha256').update(operation.id+':'+sourceManifest.manifestHash).digest('hex').slice(0,48),
+          kind:'ffprobe-original-audio',workspaceId:operation.workspaceId,projectId:context.projectId,operationId:operation.id,attempt,leaseOwner,
+          source:{artifactId:context.sourceArtifactId,manifestId:context.sourceManifestId,manifest:sourceManifest},
+          derivative:{artifactId:context.sourceArtifactId,manifestId:context.sourceManifestId,manifest:sourceManifest},sourceProbe:observed.sourceProbe,
+          derivativeProbe:observed.derivativeProbe,audioProbes:observed.audioProbes,execution:observed.execution,createdAt:now}):null
         await enter('verifying')
         await enter('persisting')
         await dependencies.projectMedia.persistCatalogedInput({
           workspaceId: operation.workspaceId, projectId: context.projectId, uploadId: upload.id,
           originalFileName: context.originalFileName, artifactId: context.sourceArtifactId,
-          manifestId: context.sourceManifestId, mediaType: upload.kind, createdAt: clock().toISOString(),
+          manifestId: context.sourceManifestId, mediaType: upload.kind, normalization:audioNormalization,createdAt: clock().toISOString(),
         })
         if (upload.kind === 'image') {
           if (!dependencies.imageAnalysis) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Image analysis runtime is not configured')
@@ -248,7 +261,9 @@ export function runNextMediaIngestOperationService(dependencies: {
       if (!sourceProbe) throw new DomainError('PERSISTENCE_CONFLICT', 'Video probe evidence is missing after inspection')
 
       await enter('normalizing')
-      const normalize = () => dependencies.processor.normalize({ sourcePath: master.path, operationId: operation.id, signal: abortController.signal })
+      const normalize = () => dependencies.processor.normalize({ sourcePath: master.path, operationId: operation.id,
+        owner:{attempt,leaseOwner,sourceSha256:master.sha256,sourceByteSize:master.byteSize,workEndMonotonicMs,hardEndMonotonicMs},
+        signal: abortController.signal })
       const normalized = dependencies.telemetry
         ? await runPublicOperationSpan({
             telemetry: dependencies.telemetry,
@@ -265,11 +280,11 @@ export function runNextMediaIngestOperationService(dependencies: {
         extension: 'mp4', prefix: 'editing-proxies',
       })
       const proxyArtifactId = `artifact-${workspaceNamespace}-${proxyStored.sha256}`
-      const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-editing-proxy/1.1.0').digest('hex')
+      const toolDigest = normalized.observation.execution.binarySha256
       const proxyManifest = createMediaArtifactManifestV2({
         artifactKey: proxyStored.key, artifactSha256: proxyStored.sha256, byteSize: proxyStored.byteSize,
         mediaType: 'video', container: 'mp4',
-        recipe: { id: 'editing-proxy', version: '1.1.0', parameters: { maxWidth: 1280, maxHeight: 1280, videoCodec: 'h264', audioCodec: 'aac' } },
+        recipe: { id: 'editing-proxy', version: '1.2.0', parameters: { normalizationPolicy:'output-normalization-receipt/v3', maxWidth: 1280, maxHeight: 1280, videoCodec: 'h264', audioCodec: 'aac' } },
         sources: [{
           artifactKey: sourceManifest.artifact.artifactKey, sha256: sourceManifest.artifact.sha256, role: 'source-master',
           execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } },
@@ -312,8 +327,6 @@ export function runNextMediaIngestOperationService(dependencies: {
       })
 
       await enter('transcribing')
-      const project = await dependencies.projectMedia.readProject({ workspaceId: operation.workspaceId, projectId: context.projectId })
-      if (!project) throw new DomainError('PERSISTENCE_CONFLICT', 'Ingest project no longer exists')
       const transcriber = dependencies.providers
         .resolveTranscription(claimed.authenticationAudit)
         .create()
@@ -343,6 +356,12 @@ export function runNextMediaIngestOperationService(dependencies: {
         sourceDurationSeconds: sourceProbe.duration,
         fps: normalized.probe.fps,
         createdAt: clock().toISOString(),
+        sourceTranscriptCueIntent: {
+          schemaVersion: 'source-transcript-cue-intent/v1', kind: 'alignment-only',
+          emission: 'suppressed-missing-visual-clock-authority',
+          trackId: 'source-transcript-captions-' + planIdentity.slice(0, 48),
+          cueIdPrefix: 'source-transcript-cue-' + planIdentity.slice(0, 48),
+        },
       })
       const planSnapshot = createProjectSnapshot({
         id: planSnapshotId,
@@ -354,47 +373,6 @@ export function runNextMediaIngestOperationService(dependencies: {
         contentHash: calculateVersionHash(initialEditPlan),
         createdAt: initialEditPlan.createdAt,
       })
-      const planVersion = createProjectVersion({
-        id: planVersionId,
-        workspaceId: operation.workspaceId,
-        projectId: context.projectId,
-        sequence: project.currentVersion.sequence + 1,
-        parentVersionId: project.currentVersion.id,
-        snapshotRefs: {
-          ...project.currentVersion.snapshotRefs,
-          editPlan: planSnapshot.id,
-        },
-        baseHash: calculateVersionHash({
-          schemaVersion: 'ingested-source-project-version/v1',
-          previousBaseHash: project.currentVersion.baseHash,
-          editPlanHash: planSnapshot.contentHash,
-          transcriptHash: transcript.transcriptHash,
-          sourceManifestHash: sourceManifest.manifestHash,
-        }),
-        createdBy: operation.clientId,
-        createdAt: initialEditPlan.createdAt,
-      })
-      const planEvent = createPublicEvent({
-        id: deterministicUuid(`ingest-plan:${operation.id}`),
-        type: 'project.version.created',
-        version: '1.0.0',
-        workspaceId: operation.workspaceId,
-        occurredAt: initialEditPlan.createdAt,
-        sequence: planVersion.sequence,
-        actor: { clientId: operation.clientId },
-        resource: { type: 'project-version', id: planVersion.id },
-        data: {
-          projectId: context.projectId,
-          sequence: planVersion.sequence,
-          parentVersionId: planVersion.parentVersionId,
-          baseHash: planVersion.baseHash,
-          sourceTranscriptId: transcriptId,
-          sourceArtifactId: context.sourceArtifactId,
-          editPlanSnapshotId: planSnapshot.id,
-          createdAt: planVersion.createdAt,
-        },
-      })
-
       await enter('verifying')
       const lastWordEnd = transcript.words.at(-1)?.end ?? transcript.segments.at(-1)?.end ?? 0
       if (lastWordEnd <= 0 || lastWordEnd > sourceProbe.duration + 2 || Math.abs(normalized.probe.duration - sourceProbe.duration) > 1) {
@@ -403,25 +381,43 @@ export function runNextMediaIngestOperationService(dependencies: {
 
       await enter('persisting')
       await createPreviews()
-      await dependencies.projectMedia.persistCompletedIngest({
-        workspaceId: operation.workspaceId, projectId: context.projectId, uploadId: context.uploadId,
-        originalFileName: context.originalFileName, sourceArtifactId: context.sourceArtifactId,
-        sourceManifestId: context.sourceManifestId, proxyArtifactId, proxyManifestId, transcriptId,
-        transcript, sourceManifest, proxyManifest, createdAt: clock().toISOString(),
-        sourceColorProbe, proxyColorProbe,
-        initialPlan: Object.freeze({
-          snapshot: planSnapshot,
-          version: planVersion,
-          event: planEvent,
-        }),
-      })
+      const active=await dependencies.operations.findById(operation.workspaceId,operation.id)
+      if(!active||active.context.kind!=='media-ingest'||active.operation.attempt!==attempt||
+        active.operation.status!=='running'||active.operation.phase!=='persisting')throw new DomainError('VERSION_CONFLICT','Ingest lease lost before bundle preparation')
+      const fingerprint=await dependencies.projectMedia.readIngestRequestFingerprint({workspaceId:operation.workspaceId,
+        projectId:context.projectId,operationId:operation.id})
+      const normalization=sealOutputNormalizationV3({schemaVersion:'output-normalization-receipt/v3',canonicalPolicyVersion:'output-canonical-json/v1',
+        id:'normalization-'+planIdentity.slice(0,48),kind:'ffmpeg-video-derivative',workspaceId:operation.workspaceId,projectId:context.projectId,
+        operationId:operation.id,attempt,leaseOwner,source:{artifactId:context.sourceArtifactId,manifestId:context.sourceManifestId,manifest:sourceManifest},
+        derivative:{artifactId:proxyArtifactId,manifestId:proxyManifestId,manifest:proxyManifest},sourceProbe:normalized.observation.sourceProbe,
+        derivativeProbe:normalized.observation.derivativeProbe,audioProbes:normalized.observation.audioProbes,
+        execution:normalized.observation.execution,createdAt:initialEditPlan.createdAt})
+      const transcriptFacts={id:transcriptId,workspaceId:operation.workspaceId,projectId:context.projectId,
+        sourceArtifactId:context.sourceArtifactId,sourceManifestId:context.sourceManifestId,document:transcript,createdAt:initialEditPlan.createdAt}
+      const origin={kind:'ingest-operation' as const,operation:active.operation,requestFingerprint:fingerprint,leaseOwner,
+        detail:{uploadId:upload.id,sourceArtifactId:context.sourceArtifactId,sourceManifestId:context.sourceManifestId},transcript:transcriptFacts}
+      const proposal:BuildOperationalOutputVersionBundleV3={allocation:{workspaceId:operation.workspaceId,projectId:context.projectId,
+        resultVersionId:planVersionId,stateId:'output-state-ingest-'+planIdentity.slice(0,48),parentVersionId:project.currentVersion.id,
+        sequence:project.currentVersion.sequence+1,createdBy:operation.clientId,createdAt:initialEditPlan.createdAt},parent:project.outputBundle,
+        origin,restoreTarget:null,editPlanSnapshot:planSnapshot,normalizations:[normalization],
+        materializationIds:Object.fromEntries(project.outputBundle.state.document.entries.map(e=>[e.variantId,
+          'materialization-'+createHash('sha256').update(planIdentity+':'+e.variantId).digest('hex').slice(0,48)]))}
+      buildOperationalOutputVersionBundleV3(proposal)
+      await dependencies.projectMedia.persistCompletedIngest({proposal,audit:claimed.authenticationAudit,
+        versionEventId:deterministicUuid('ingest-plan:'+operation.id),operationEventId:deterministicUuid('ingest-completed:'+operation.id),
+        ingestFacts:{uploadId:upload.id,originalFileName:context.originalFileName,sourceLinkId:deterministicUuid('ingest-source-link:'+operation.id),
+          derivativeLinkId:deterministicUuid('ingest-derivative-link:'+operation.id),sourceColorProbe,derivativeColorProbe:proxyColorProbe,
+          normalization,transcript:transcriptFacts},recompose:({parent,restoreTarget,normalizations})=>({...proposal,parent,restoreTarget,normalizations})})
+      // persistCompletedIngest owns succeed and COMMIT/readback. Never publish a
+      // second terminal write outside the bundle transaction.
       stopHeartbeat()
-      const succeeded = await dependencies.operations.succeed(command(clock()))
-      if (!succeeded) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
-      await dependencies.processor.cleanup(operation.id).catch(() => undefined)
+      await dependencies.processor.cleanup(operation.id)
       return Object.freeze({ operationId: operation.id, status: 'succeeded' as const })
     } catch (error) {
       stopHeartbeat()
+      // Ordinary closed failures release this attempt directory; inconclusive
+      // process/IO owners retain it and preserve the primary error.
+      try {await dependencies.processor.cleanup(operation.id)} catch { /* retained owner: never adopt or delete another attempt */ }
       if (leaseLost) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       const failedAt = clock()
       const shuttingDown = signal?.aborted === true

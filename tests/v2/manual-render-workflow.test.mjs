@@ -9,3 +9,30 @@ test('T-FR-217 derives bounded semantic comparison from immutable EditPlans',()=
 test('T-FR-230 materializes reusable proxy first, validates hard/warnings and measures upload-to-review',()=>{const proxy=materializeProxyFirst({uploadReceivedAt:new Date(Date.now()-500).toISOString(),projectVersionId:'v1',variantId:'9:16',durationMs:10000});assert.equal(proxy.authorization.finalAllowed,false);assert.equal(proxy.spec.reusableRanges,true);assert.ok(proxy.timeToFirstProxyMs>=400);assert.equal(validateProxy({technicalIssues:[{severity:'hard',code:'CLIP'}],criticIssues:[],warningsAcknowledged:false}).finalBlocked,true);assert.equal(validateProxy({technicalIssues:[{severity:'warning',code:'DENSITY'}],criticIssues:[],warningsAcknowledged:true}).valid,true)})
 test('T-FR-230 post-render review localizes critic issues and never acknowledges hard failures',()=>{const base={projectVersionId:'version-1',proxyArtifactId:'artifact-proxy-1',proxyManifestId:'manifest-proxy-1',proxySha256:'d'.repeat(64),inputHash:'a'.repeat(64),format:'9:16',sourceSha256:'b'.repeat(64),editPlanHash:'c'.repeat(64),expectedDurationMs:10000,uploadReceivedAt:'2026-07-18T21:58:00.000Z',renderCompletedAt:'2026-07-18T22:00:00.000Z',probe:{width:540,height:960,duration:10,fps:30,codec:'h264',container:'mp4'},map:{schemaVersion:'render-element-map/v1',proxyHash:'d'.repeat(64),fps:30,durationFrames:300,canvas:{width:540,height:960},elements:[]},criticIssues:[{code:'PATTERN_DENSITY',severity:'warning',category:'editorial',message:'Dense range.',rangeMs:[2000,3000],correctable:true}]};const warning=evaluateRenderedProxy(base);assert.equal(warning.status,'warning-ack-required');assert.equal(warning.finalAllowed,false);assert.equal(warning.timeToFirstProxyMs,120000);assert.match(warning.rangeCacheKey,/^[a-f0-9]{64}$/);const accepted=evaluateRenderedProxy({...base,warningsAcknowledged:true});assert.equal(accepted.status,'ready-for-final');assert.equal(accepted.finalAllowed,true);const hard=evaluateRenderedProxy({...base,warningsAcknowledged:true,probe:{...base.probe,codec:'vp9'}});assert.equal(hard.status,'blocked');assert.equal(hard.finalAllowed,false);assert.ok(hard.technicalIssues.some(issue=>issue.code==='PROXY_CODEC_MISMATCH'))})
 test('T-FR-231 creates idempotent approved final, validates, atomically promotes and reconstructs while preserving failures',()=>{const approval={projectVersionId:'v1',variantIds:['9:16','16:9'],approved:true,stale:false,warningsAcknowledged:true};const job=createFinalRenderJob({approval,output:{codec:'h264',quality:'final'},idempotencyKey:'key'});assert.equal(createFinalRenderJob({approval,output:{codec:'h264',quality:'final'},idempotencyKey:'key',existing:{id:job.id,fingerprint:job.fingerprint}}).replayed,true);const failed=finalizeRender({jobId:job.id,bytes:Uint8Array.from([1,2,3]),validators:[{code:'AUDIO',passed:false}],attempts:[]});const done=finalizeRender({jobId:job.id,bytes:Uint8Array.from([1,2,3]),validators:[{code:'AUDIO',passed:true}],attempts:failed.attempts});assert.equal(done.status,'promoted');assert.equal(done.attempts[0].status,'failed');assert.equal(reconstructFinal(done.artifact.manifest,Uint8Array.from([1,2,3])),true);assert.equal(done.artifact.downloadGrantEligible,true)})
+
+test('T-FR-216 a replaced clip keeps its audio range matching the picture after trim and split', async () => {
+  const { timelineSpanForRate } = await import('../../src/v2/domain/clip-timing.ts')
+  const base = (rate) => ({ schemaVersion: 2, state: 'compiled', fps: 30, durationFrames: 90, videoTracks: [{ id: 'base', kind: 'base-video',
+    clips: [{ id: 'clip-1', sourceArtifactId: 'master-video', sourceInFrame: 120, sourceOutFrame: 120 + 90 * rate, timelineInFrame: 0, timelineOutFrame: 90, rate }] }], subtitleTracks: [] })
+  const apply = (editPlan, operation, n) => materializeManualEditPlan({ editPlan, operation, newVersionId: `version-${n}`,
+    createdAt: '2026-07-27T01:00:00.000Z', availableAssetIds: ['master-video', 'selected-b-roll'], variantId: '9:16' })
+  const matches = (clip) => timelineSpanForRate(clip.audioSourceOutFrame - clip.audioSourceInFrame, clip.rate) === clip.timelineOutFrame - clip.timelineInFrame &&
+    clip.audioSourceOutFrame - clip.audioSourceInFrame === clip.sourceOutFrame - clip.sourceInFrame
+  const replaced = apply(base(1), { kind: 'replace', clipId: 'clip-1', sourceId: 'selected-b-roll' }, 2)
+  assert.ok(matches(replaced.videoTracks[0].clips[0]), 'replace')
+  const trimmedEnd = apply(replaced, { kind: 'trim', clipId: 'clip-1', edge: 'end', atMs: 2000 }, 3)
+  const endClip = trimmedEnd.videoTracks[0].clips[0]
+  assert.deepEqual([endClip.sourceInFrame, endClip.sourceOutFrame, endClip.audioSourceInFrame, endClip.audioSourceOutFrame], [0, 60, 120, 180])
+  assert.ok(matches(endClip), 'trim end')
+  const trimmedStart = apply(replaced, { kind: 'trim', clipId: 'clip-1', edge: 'start', atMs: 1000 }, 4)
+  const startClip = trimmedStart.videoTracks[0].clips[0]
+  assert.deepEqual([startClip.sourceInFrame, startClip.audioSourceInFrame, startClip.audioSourceOutFrame], [30, 150, 210])
+  assert.ok(matches(startClip), 'trim start')
+  const split = apply(replaced, { kind: 'split', clipId: 'clip-1', atMs: 1000 }, 5)
+  const halves = split.videoTracks[0].clips
+  assert.equal(halves.length, 2)
+  assert.deepEqual(halves.map((clip) => [clip.audioSourceInFrame, clip.audioSourceOutFrame]), [[120, 150], [150, 210]])
+  assert.ok(halves.every(matches), 'split halves')
+  const plain = apply(base(1), { kind: 'trim', clipId: 'clip-1', edge: 'end', atMs: 2000 }, 6).videoTracks[0].clips[0]
+  assert.equal(plain.audioSourceArtifactId, undefined, 'a clip that never had its own audio range does not get one')
+})

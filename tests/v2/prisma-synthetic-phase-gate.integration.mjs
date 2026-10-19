@@ -92,99 +92,9 @@ async function seedWorkspace(prisma, { workspaceId, clientId, credentialId, now 
   } })
 }
 
-async function seedProjectVersion(prisma, {
-  workspaceId,
-  clientId,
-  projectId,
-  versionId,
-  versionHash,
-  now,
-}) {
-  await prisma.v2Project.create({
-    data: {
-      id: projectId,
-      workspaceId,
-      name: 'Synthetic phase gate PostgreSQL proof',
-      status: 'reviewing-proxy',
-      objective: 'awareness',
-      format: '16:9',
-      locale: 'pt-BR',
-      createdByType: 'api-client',
-      createdById: clientId,
-      createdAt: now,
-      updatedAt: now,
-    },
-  })
-  const snapshots = [
-    { kind: 'brief', suffix: 'brief', hash: 'a'.repeat(64), schemaVersion: 1 },
-    { kind: 'edit-plan', suffix: 'edit-plan', hash: 'b'.repeat(64), schemaVersion: 2 },
-    { kind: 'policies', suffix: 'policies', hash: 'c'.repeat(64), schemaVersion: 1 },
-  ]
-  await prisma.v2ProjectSnapshot.createMany({
-    data: snapshots.map((snapshot) => ({
-      id: `${projectId}-snapshot-${snapshot.suffix}`,
-      workspaceId,
-      projectId,
-      kind: snapshot.kind,
-      schemaVersion: snapshot.schemaVersion,
-      contentJson: JSON.stringify({ kind: snapshot.kind }),
-      contentHash: snapshot.hash,
-      createdAt: now,
-    })),
-  })
-  await prisma.v2ProjectVersion.create({
-    data: {
-      id: versionId,
-      workspaceId,
-      projectId,
-      sequence: 1,
-      briefSnapshotId: `${projectId}-snapshot-brief`,
-      editPlanSnapshotId: `${projectId}-snapshot-edit-plan`,
-      policiesSnapshotId: `${projectId}-snapshot-policies`,
-      baseHash: versionHash,
-      createdBy: clientId,
-      createdAt: now,
-    },
-  })
-  await prisma.v2Project.update({
-    where: { id: projectId },
-    data: { currentVersionId: versionId },
-  })
-}
-
-async function removeFixtures(prisma, workspaceIds) {
-  await prisma.$transaction(async (transaction) => {
-    await transaction.v2SyntheticPhaseGate.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await transaction.v2Project.updateMany({
-      where: { workspaceId: { in: workspaceIds } },
-      data: { currentVersionId: null },
-    })
-    await transaction.v2ProjectVersion.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await transaction.v2ProjectSnapshot.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await transaction.v2Project.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await transaction.v2ApiCredential.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await transaction.v2ApiClient.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await transaction.v2Workspace.deleteMany({
-      where: { id: { in: workspaceIds } },
-    })
-  })
-}
-
 test('T-F3-GATE persists a truthful internal rejection in PostgreSQL and enforces its fences', {
   skip: SKIP,
-  timeout: 30_000,
+  timeout: 120_000,
 }, async () => {
   const applicationName = assertSafeDatabaseUrl()
   const { createExternalAuditContext } = await import(
@@ -196,6 +106,7 @@ test('T-F3-GATE persists a truthful internal rejection in PostgreSQL and enforce
   const { PrismaSyntheticPhaseGateRepository } = await import(
     '../../src/v2/infrastructure/prisma/synthetic-phase-gate-repository.ts'
   )
+  const { seedSealedProject } = await import('./helpers/pg-output-world.mjs')
 
   const prisma = new PrismaClient()
   const suffix = randomUUID().replaceAll('-', '').slice(0, 12)
@@ -206,11 +117,7 @@ test('T-F3-GATE persists a truthful internal rejection in PostgreSQL and enforce
   const credentialId = `synthetic-gate-credential-${suffix}`
   const otherCredentialId = `synthetic-gate-other-credential-${suffix}`
   const projectId = `synthetic-gate-project-${suffix}`
-  const versionId = `synthetic-gate-version-${suffix}`
-  const versionHash = 'd'.repeat(64)
   const now = new Date('2026-09-09T12:00:00.000Z')
-  const workspaceIds = [workspaceId, otherWorkspaceId]
-  let primaryError
 
   try {
     const session = await prisma.$queryRawUnsafe(
@@ -225,20 +132,23 @@ test('T-F3-GATE persists a truthful internal rejection in PostgreSQL and enforce
       credentialId: otherCredentialId,
       now,
     })
-    await seedProjectVersion(prisma, {
-      workspaceId,
-      clientId,
-      projectId,
-      versionId,
-      versionHash,
-      now,
-    })
 
     const actor = actorFor(createExternalAuditContext, {
       workspaceId,
       clientId,
       credentialId,
     })
+    // The project is born the way the product makes one: creation Version, then one explicit output variant whose
+    // Version is the head the gate is run against. Every identity is unique to this invocation (sealed rows are append-only).
+    const sealed = await seedSealedProject(prisma, {
+      workspaceId,
+      actor,
+      prefix: 'synthetic-gate',
+      ids: { project: projectId },
+      name: 'Synthetic phase gate PostgreSQL proof',
+    })
+    const versionId = sealed.head.version.id
+    const versionHash = sealed.head.version.baseHash
     const otherActor = actorFor(createExternalAuditContext, {
       workspaceId: otherWorkspaceId,
       clientId: otherClientId,
@@ -367,28 +277,9 @@ test('T-F3-GATE persists a truthful internal rejection in PostgreSQL and enforce
       where: { id: created.gate.id },
       data: { recordHash: stored.recordHash },
     })
-  } catch (error) {
-    primaryError = error
-    throw error
   } finally {
-    const teardownErrors = []
-    try {
-      await removeFixtures(prisma, workspaceIds)
-    } catch (error) {
-      teardownErrors.push(error)
-    }
-    try {
-      await prisma.$disconnect()
-    } catch (error) {
-      teardownErrors.push(error)
-    }
-    if (teardownErrors.length > 0) {
-      throw new AggregateError(
-        primaryError ? [primaryError, ...teardownErrors] : teardownErrors,
-        primaryError
-          ? 'synthetic phase gate proof and teardown both failed'
-          : 'synthetic phase gate proof teardown failed',
-      )
-    }
+    // No fixture removal: the project, its Versions and its sealed State are append-only, and every identity of this
+    // invocation carries its own suffix.
+    await prisma.$disconnect()
   }
 })

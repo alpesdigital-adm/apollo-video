@@ -1,314 +1,183 @@
-import { assertDomain } from '../domain/errors.ts'
-import type { CommandActor } from '../domain/edit-command.ts'
-import {
-  createDesiredAction,
-  type DesiredActionInput,
-} from '../domain/desired-action.ts'
-import {
-  createOutputSpec,
-  type OutputAspectRatio,
-} from '../domain/output-spec.ts'
-import { readOutputFormatPreset } from '../domain/output-format-registry.ts'
-import { createProject, normalizeProjectName } from '../domain/project.ts'
+import { assertDomain, DomainError } from '../domain/errors.ts'
+import { createProject } from '../domain/project.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
 import { createProductionBrief } from '../domain/production-brief.ts'
-import {
-  assertUniquePublicEventIds,
-  createPublicEvent,
-} from '../domain/public-event.ts'
-import {
-  resolveStrategicObjective,
-  type StrategicObjectiveId,
-} from '../domain/strategic-objective.ts'
-import { createProjectCreationCommand } from '../domain/project-creation-command.ts'
-import {
-  materializeActorAuditContext,
-  requireScope,
-  type AuthenticatedExternalActor,
-} from './authenticate-api-client.ts'
-import type {
-  ProjectCreationRepository,
-  ProjectCreationResult,
-} from './ports/project-creation-repository.ts'
+import { createProjectCreationOutputCommandV2, normalizeProjectCreationIntentV2 } from '../domain/project-creation-command.ts'
+import { createOutputVariantCommand } from '../domain/output-variant-command.ts'
+import { createOutputSpecRevisionBody, type OutputSpecRevisionBody } from '../domain/output-spec-revision.ts'
+import { assertSubtitleDeliverySupportedAtFps } from '../domain/output-spec.ts'
+import { OUTPUT_CANONICAL_POLICY_VERSION, serializeOutputCanonicalJson } from '../domain/output-canonical-policy.ts'
+import { buildOperationalOutputVersionBundleV3, operationalBundlePlanV3,
+  type BuildOperationalOutputVersionBundleV3 } from '../domain/output-version-bundle.ts'
+import type { DesiredActionInput } from '../domain/desired-action.ts'
+import type { StrategicObjectiveId } from '../domain/strategic-objective.ts'
+import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
+import type { CreationOutputBundleRepositoryV2, OperationalOutputBundleRepositoryV3 } from './ports/output-version-bundle-repository.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 
-export type ProjectEntityKind =
-  | 'project'
-  | 'project-version'
-  | 'project-snapshot'
-  | 'project-creation-command'
-  | 'idempotency-record'
+function record(value: unknown, field: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new DomainError('INVALID_ARGUMENT', `${field} must be an object`)
+  return value as Record<string, unknown>
+}
+function exact(value: unknown, fields: readonly string[], field: string, optional: readonly string[] = []) {
+  const body = record(value, field)
+  if (fields.some(k => !(k in body)) || Object.keys(body).some(k => !fields.includes(k) && !optional.includes(k)))
+    throw new DomainError('INVALID_ARGUMENT', `${field} has missing or unsupported fields`)
+  return body
+}
+function sealed(value: unknown, field: string) { if (value !== null) exact(value, ['schemaVersion', 'document', 'hash'], field) }
+export function parseCreateProjectOutputVariantBody(raw: unknown): CreateProjectOutputVariantInput {
+  serializeOutputCanonicalJson(raw)
+  const body = exact(raw, ['baseVersionId', 'baseHash', 'output', 'profile', 'preset'], 'body', ['reason'])
+  if (typeof body.baseVersionId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(body.baseVersionId) ||
+    typeof body.baseHash !== 'string' || !/^[a-f0-9]{64}$/.test(body.baseHash) ||
+    body.reason !== undefined && (typeof body.reason !== 'string' || !body.reason.trim() || body.reason.length > 1000))
+    throw new DomainError('INVALID_ARGUMENT', 'Output base or reason is invalid')
+  const output = exact(body.output, ['locale', 'aspectRatio', 'width', 'height', 'fps', 'safeArea', 'deliveryProfileId'], 'output')
+  if (!Number.isInteger(output.fps) || Number(output.fps) < 1 || Number(output.fps) > 120 ||
+    !Number.isInteger(output.width) || Number(output.width) < 1 || !Number.isInteger(output.height) || Number(output.height) < 1)
+    throw new DomainError('INVALID_ARGUMENT', 'Operational output canvas and FPS must be positive integers')
+  exact(output.safeArea, ['top', 'right', 'bottom', 'left'], 'output.safeArea')
+  const profile = exact(body.profile, ['schemaVersion', 'id', 'version', 'rendererContractVersion', 'final', 'proxy',
+    'proxyToFinal', 'subtitles'], 'profile')
+  for (const kind of ['final', 'proxy']) {
+    const encoding = exact(profile[kind], ['codec', 'encoder', 'pixelFormat', 'container', 'faststart', 'width', 'height',
+      'fps', 'quality', 'audio'], `profile.${kind}`)
+    if (!Number.isInteger(encoding.fps) || Number(encoding.fps) < 1 || Number(encoding.fps) > 120 ||
+      !Number.isInteger(encoding.width) || Number(encoding.width) < 1 || !Number.isInteger(encoding.height) || Number(encoding.height) < 1)
+      throw new DomainError('INVALID_ARGUMENT', 'Delivery canvas and FPS must be positive integers')
+    exact(encoding.quality, ['mode', 'value', 'preset'], `profile.${kind}.quality`)
+    exact(encoding.audio, ['codec', 'bitrateKbps', 'sampleRateHz', 'channels'], `profile.${kind}.audio`)
+  }
+  exact(profile.proxyToFinal, ['schemaVersion', 'scaleX', 'scaleY'], 'profile.proxyToFinal')
+  const subtitles = exact(profile.subtitles, ['mode', 'configuration', 'fontAssets'], 'profile.subtitles')
+  if (!Array.isArray(subtitles.fontAssets) || subtitles.fontAssets.length > 128)
+    throw new DomainError('INVALID_ARGUMENT', 'Font assets must be an explicit bounded array')
+  for (const font of subtitles.fontAssets) exact(font, ['artifactId', 'sha256'], 'font')
+  sealed(subtitles.configuration, 'subtitle configuration'); sealed(body.preset, 'preset')
+  // Typed refusal before any repository read: burned-in subtitles are not offered above BURN_IN_SUBTITLE_MAX_FPS.
+  // The sealed OutputSpec revision enforces the same rule, so no other path can reach a render with this pair.
+  if (subtitles.mode === 'burn-in') assertSubtitleDeliverySupportedAtFps('burn-in', output.fps as number)
+  return { ...body, ...(body.reason === undefined ? {} : { reason: (body.reason as string).trim() }) } as unknown as CreateProjectOutputVariantInput
+}
 
-export interface CreateProjectRequest {
-  workspaceId: string
-  name: string
-  objective: StrategicObjectiveId
-  format: OutputAspectRatio
-  locale?: string
-  briefing?: string
-  desiredAction?: Readonly<DesiredActionInput>
-  actor: AuthenticatedExternalActor
-  idempotency: {
-    clientId: string
-    key: string
-    ttlSeconds?: number
+const policy = { canonicalPolicyVersion: OUTPUT_CANONICAL_POLICY_VERSION }
+type AllocationKind = 'project' | 'project-version' | 'project-output-state' | 'project-snapshot' | 'edit-plan' |
+  'project-creation-command' | 'idempotency-record' | 'edit-command' | 'output-variant' | 'output-spec-revision' | 'output-materialization'
+type ClockAndIds = { clock: () => Date; createId: (kind: AllocationKind) => string; createEventId: () => string }
+function authenticated(actor: AuthenticatedExternalActor, workspaceId: string) {
+  requireScope(actor, 'projects:write')
+  const audit = materializeActorAuditContext(actor)
+  assertDomain(audit.workspaceId === workspaceId, 'AUTH_INVALID', 'Output Command workspace differs from its authenticated actor')
+  return audit
+}
+function key(value: string) {
+  assertDomain(typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(value),
+    'INVALID_ARGUMENT', 'Idempotency-Key must contain 3 to 128 portable characters')
+  return value
+}
+function snapshot(workspaceId: string, projectId: string, id: string, kind: 'brief' | 'policies' | 'edit-plan',
+  document: Record<string, unknown>, createdAt: string) {
+  return createProjectSnapshot({ workspaceId, projectId, id, kind, contentSchemaVersion: Number(document.schemaVersion),
+    contentJson: stableSerialize(document), contentHash: calculateVersionHash(document), createdAt })
+}
+
+/** Public creation has no implicit OutputSpec. The independent variant Command
+ * is the only admission to the existing operational ingest path. */
+export function createProjectService(dependencies: ClockAndIds & { repository: CreationOutputBundleRepositoryV2 }) {
+  return async (request: { workspaceId: string; name: string; objective: StrategicObjectiveId; locale?: string;
+    briefing?: string; desiredAction?: Readonly<DesiredActionInput>; actor: AuthenticatedExternalActor; idempotencyKey: string }) => {
+    assertDomain(Object.keys(request).every(k => ['workspaceId', 'name', 'objective', 'locale', 'briefing',
+      'desiredAction', 'actor', 'idempotencyKey'].includes(k)), 'INVALID_ARGUMENT', 'Creation cannot specify an implicit output')
+    const audit = authenticated(request.actor, request.workspaceId), idempotencyKey = key(request.idempotencyKey)
+    const callerIntent = normalizeProjectCreationIntentV2({ schemaVersion: 'project-creation-intent/v2', kind: 'initialize-empty',
+      name: request.name, objective: request.objective, locale: request.locale ?? 'pt-BR',
+      briefing: request.briefing ?? null, desiredAction: request.desiredAction ?? {} })
+    assertDomain(callerIntent.kind === 'initialize-empty', 'INVALID_COMMAND', 'Public creation requires empty root intent')
+    // All allocations are fixed before repository retries, including the plan's
+    // independent identity. Caller intent/fingerprint contains none of them.
+    const createdAt = dependencies.clock().toISOString(), projectId = dependencies.createId('project'),
+      versionId = dependencies.createId('project-version'), stateId = dependencies.createId('project-output-state'),
+      commandId = dependencies.createId('project-creation-command')
+    const snapshots = [
+      snapshot(request.workspaceId, projectId, dependencies.createId('project-snapshot'), 'brief', {
+        schemaVersion: 1, objective: callerIntent.objective, desiredAction: callerIntent.desiredAction,
+        productionBrief: createProductionBrief({ ...(callerIntent.briefing === null ? {} : { ownerText: callerIntent.briefing }) }), createdAt,
+      }, createdAt),
+      snapshot(request.workspaceId, projectId, dependencies.createId('project-snapshot'), 'edit-plan', {
+        schemaVersion: 2, state: 'uncompiled', id: dependencies.createId('edit-plan'), projectVersionId: versionId,
+        fps: 30, durationFrames: 0, sources: [], videoTracks: [], subtitleTracks: [], audioTracks: [],
+        overlayTracks: [], effectTracks: [], createdAt,
+      }, createdAt),
+      snapshot(request.workspaceId, projectId, dependencies.createId('project-snapshot'), 'policies', {
+        schemaVersion: 1, workspaceId: request.workspaceId, state: 'unconfigured', brandKitMode: 'inherit', guardrails: [], createdAt,
+      }, createdAt),
+    ]
+    const proposal = createProjectCreationOutputCommandV2({ ...policy, id: commandId, workspaceId: request.workspaceId,
+      projectId, versionId, audit, createdAt, payload: { ...policy, schemaVersion: 'project-creation-output-payload/v2',
+        callerIntent, allocations: { stateId, snapshotRefs: Object.fromEntries(snapshots.map(s => [s.kind, s.id])),
+          renderablePlanSnapshotId: null }, snapshots, forkDerivation: null, renderableCandidate: null } })
+    const result = await dependencies.repository.persist({ proposal, idempotencyKey,
+      idempotencyRecordId: dependencies.createId('idempotency-record'),
+      eventIds: [dependencies.createEventId(), dependencies.createEventId()], recompose: facts => {
+        if (facts !== null) throw new DomainError('PERSISTENCE_CONFLICT', 'Empty creation acquired unexpected source facts')
+        return proposal
+      } })
+    const c = result.bundle.command, intent = c.payload.callerIntent
+    assertDomain(intent.kind === 'initialize-empty', 'PERSISTENCE_CONFLICT', 'Creation replay intent differs')
+    const projectAtCreation = createProject({ id: c.projectId, workspaceId: c.workspaceId, name: intent.name, status: 'draft',
+      objective: intent.objective, locale: intent.locale, ownerId: c.author.id,
+      createdBy: c.author, createdAt: c.createdAt })
+    return Object.freeze({ projectAtCreation, creationVersion: result.bundle.version, bundle: result.bundle, replayed: result.replayed })
   }
 }
 
-export interface CreateProjectDependencies {
-  repository: ProjectCreationRepository
-  clock: () => Date
-  createId: (kind: ProjectEntityKind) => string
-  createEventId: () => string
-}
+export type CreateProjectOutputVariantInput = Readonly<{ baseVersionId: string; baseHash: string;
+  output: Omit<OutputSpecRevisionBody['output'], 'id' | 'schemaVersion'>;
+  profile: OutputSpecRevisionBody['profile']; preset: OutputSpecRevisionBody['preset']; reason?: string }>
 
-const DEFAULT_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
-
-export function createProjectService(dependencies: CreateProjectDependencies) {
-  return async function execute(request: CreateProjectRequest): Promise<ProjectCreationResult> {
-    const workspaceId = request.workspaceId.trim()
-    const clientId = request.idempotency.clientId.trim()
-    const idempotencyKey = request.idempotency.key.trim()
-    const name = normalizeProjectName(request.name)
-    const objective = resolveStrategicObjective(request.objective)
-    const locale = request.locale?.trim() || 'pt-BR'
-    const outputPreset = readOutputFormatPreset(request.format).spec
-    assertDomain(Boolean(outputPreset), 'INVALID_OUTPUT_SPEC', 'Unsupported output format')
-    const outputSpec = createOutputSpec({
-      ...outputPreset,
-      id: `output-${request.format.replace(':', 'x')}-${locale.toLowerCase()}`,
-      locale,
-    })
-    const desiredAction = createDesiredAction({
-      objective: objective.id,
-      ...(request.desiredAction ? { desiredAction: request.desiredAction } : {}),
-    })
-    const productionBrief = createProductionBrief({ ownerText: request.briefing })
-    const ttlSeconds = request.idempotency.ttlSeconds ?? DEFAULT_IDEMPOTENCY_TTL_SECONDS
-
-    requireScope(request.actor, 'projects:write')
-    const audit = materializeActorAuditContext(request.actor)
-
-    assertDomain(workspaceId.length > 0, 'INVALID_PROJECT', 'workspaceId is required')
-    assertDomain(clientId.length > 0, 'INVALID_ARGUMENT', 'idempotency clientId is required')
-    assertDomain(
-      audit.workspaceId === workspaceId && audit.clientId === clientId,
-      'AUTH_INVALID',
-      'Project creation actor does not match its workspace and client',
-    )
-    assertDomain(idempotencyKey.length > 0, 'INVALID_ARGUMENT', 'idempotency key is required')
-    assertDomain(idempotencyKey.length <= 128, 'INVALID_ARGUMENT', 'idempotency key is too long')
-    assertDomain(
-      Number.isInteger(ttlSeconds) && ttlSeconds >= 60 && ttlSeconds <= 7 * 24 * 60 * 60,
-      'INVALID_ARGUMENT',
-      'idempotency ttlSeconds must be between 60 seconds and 7 days',
-    )
-
-    const now = dependencies.clock()
-    const createdAt = now.toISOString()
-    const projectId = dependencies.createId('project')
-    const versionId = dependencies.createId('project-version')
-    const briefSnapshotId = dependencies.createId('project-snapshot')
-    const editPlanSnapshotId = dependencies.createId('project-snapshot')
-    const policiesSnapshotId = dependencies.createId('project-snapshot')
-    const creationCommandId = dependencies.createId('project-creation-command')
-    const commandActor: CommandActor = audit.delegatedUserId
-      ? { type: 'api-client', id: audit.clientId, delegatedUserId: audit.delegatedUserId }
-      : { type: 'api-client', id: audit.clientId }
-
-    const briefContent = {
-      schemaVersion: 1,
-      objective: objective.id,
-      desiredAction,
-      outputSpec,
-      productionBrief,
-      createdAt,
-    }
-    const editPlanContent = {
-      schemaVersion: 2,
-      state: 'uncompiled',
-      id: `edit-plan-${versionId}`,
-      projectVersionId: versionId,
-      storyPlanId: null,
-      fps: 30,
-      durationFrames: 0,
-      sources: [],
-      videoTracks: [],
-      overlayTracks: [],
-      subtitleTracks: [],
-      audioTracks: [],
-      effectTracks: [],
-      markers: [],
-      protectedElements: [],
-      localeVariantRefs: [],
-      formatVariantRefs: [],
-      lineageRefs: [],
-      createdAt,
-    }
-    const policiesContent = {
-      schemaVersion: 1,
-      workspaceId,
-      state: 'unconfigured',
-      brandKitMode: 'inherit',
-      guardrails: [],
-      createdAt,
-    }
-
-    const briefJson = stableSerialize(briefContent)
-    const editPlanJson = stableSerialize(editPlanContent)
-    const policiesJson = stableSerialize(policiesContent)
-    const briefHash = calculateVersionHash(briefContent)
-    const editPlanHash = calculateVersionHash(editPlanContent)
-    const policiesHash = calculateVersionHash(policiesContent)
-    const versionHash = calculateVersionHash({
-      projectId,
-      sequence: 1,
-      name,
-      briefHash,
-      editPlanHash,
-      policiesHash,
-    })
-
-    const project = createProject({
-      id: projectId,
-      workspaceId,
-      name,
-      status: 'draft',
-      objective: objective.id,
-      format: request.format,
-      locale,
-      ownerId: commandActor.id,
-      currentVersionId: versionId,
-      createdBy: commandActor,
-      createdAt,
-    })
-    const snapshots = [
-      createProjectSnapshot({
-        id: briefSnapshotId,
-        workspaceId,
-        projectId,
-        kind: 'brief',
-        contentSchemaVersion: 1,
-        contentJson: briefJson,
-        contentHash: briefHash,
-        createdAt,
-      }),
-      createProjectSnapshot({
-        id: editPlanSnapshotId,
-        workspaceId,
-        projectId,
-        kind: 'edit-plan',
-        contentSchemaVersion: 2,
-        contentJson: editPlanJson,
-        contentHash: editPlanHash,
-        createdAt,
-      }),
-      createProjectSnapshot({
-        id: policiesSnapshotId,
-        workspaceId,
-        projectId,
-        kind: 'policies',
-        contentSchemaVersion: 1,
-        contentJson: policiesJson,
-        contentHash: policiesHash,
-        createdAt,
-      }),
-    ] as const
-    const version = createProjectVersion({
-      id: versionId,
-      workspaceId,
-      projectId,
-      sequence: 1,
-      snapshotRefs: {
-        brief: briefSnapshotId,
-        editPlan: editPlanSnapshotId,
-        policies: policiesSnapshotId,
-      },
-      baseHash: versionHash,
-      createdBy: commandActor.id,
-      createdAt,
-    })
-    const eventActor = {
-      clientId: commandActor.id,
-      ...(commandActor.delegatedUserId
-        ? { userId: commandActor.delegatedUserId }
-        : {}),
-    }
-    const events = [
-      createPublicEvent({
-        id: dependencies.createEventId(),
-        type: 'project.created',
-        version: '1.0.0',
-        workspaceId,
-        occurredAt: createdAt,
-        ...(eventActor ? { actor: eventActor } : {}),
-        resource: { type: 'project', id: projectId },
-        data: {
-          name,
-          status: project.status,
-          objective: objective.id,
-          format: request.format,
-          locale,
-          briefingSupplied: productionBrief.summary.supplied,
-          currentVersionId: versionId,
-          createdAt,
-        },
-      }),
-      createPublicEvent({
-        id: dependencies.createEventId(),
-        type: 'project.version.created',
-        version: '1.0.0',
-        workspaceId,
-        occurredAt: createdAt,
-        sequence: version.sequence,
-        ...(eventActor ? { actor: eventActor } : {}),
-        resource: { type: 'project-version', id: versionId },
-        data: {
-          projectId,
-          sequence: version.sequence,
-          parentVersionId: null,
-          baseHash: version.baseHash,
-          snapshotRefs: version.snapshotRefs,
-          createdAt,
-        },
-      }),
-    ] as const
-    assertUniquePublicEventIds(events)
-    const requestFingerprint = calculateVersionHash({
-      name,
-      objective: objective.id,
-      format: request.format,
-      locale,
-      briefing: productionBrief.ownerInput?.text ?? null,
-      desiredAction,
-      actorContextHash: audit.contextHash,
-    })
-    const auditCommand = createProjectCreationCommand({
-      id: creationCommandId,
-      workspaceId,
-      action: 'create',
-      projectId,
-      versionId,
-      audit,
-      requestFingerprint,
-      createdAt,
-    })
-
-    return dependencies.repository.createOrReplay({
-      project,
-      version,
-      snapshots,
-      events,
-      auditCommand,
-      idempotency: {
-        id: dependencies.createId('idempotency-record'),
-        workspaceId,
-        clientId,
-        key: idempotencyKey,
-        requestFingerprint,
-        expiresAt: new Date(now.getTime() + ttlSeconds * 1000).toISOString(),
-      },
-    })
+export function createProjectOutputVariantService(dependencies: ClockAndIds & { repository: OperationalOutputBundleRepositoryV3 }) {
+  return async (request: CreateProjectOutputVariantInput & { workspaceId: string; projectId: string;
+    actor: AuthenticatedExternalActor; idempotencyKey: string }) => {
+    const audit = authenticated(request.actor, request.workspaceId), idempotencyKey = key(request.idempotencyKey)
+    assertDomain(Object.keys(request).every(k => ['workspaceId', 'projectId', 'actor', 'idempotencyKey', 'baseVersionId',
+      'baseHash', 'output', 'profile', 'preset', 'reason'].includes(k)), 'INVALID_ARGUMENT', 'Output Command contains unsupported fields')
+    request = { ...request, ...parseCreateProjectOutputVariantBody(JSON.parse(serializeOutputCanonicalJson({
+      baseVersionId: request.baseVersionId, baseHash: request.baseHash, output: request.output,
+      profile: request.profile, preset: request.preset, ...(request.reason === undefined ? {} : { reason: request.reason }),
+    }))) }
+    const parent = await dependencies.repository.read({ workspaceId: request.workspaceId, projectId: request.projectId,
+      versionId: request.baseVersionId })
+    if (!parent) throw new DomainError('PROJECT_NOT_FOUND', 'Output Command base was not found')
+    assertDomain(parent.version.baseHash === request.baseHash, 'VERSION_CONFLICT', 'Output Command base hash differs')
+    const createdAt = dependencies.clock().toISOString(), versionId = dependencies.createId('project-version'),
+      variantId = dependencies.createId('output-variant'), stateId = dependencies.createId('project-output-state')
+    const revision = createOutputSpecRevisionBody({ ...policy, id: dependencies.createId('output-spec-revision'), variantId,
+      workspaceId: request.workspaceId, projectId: request.projectId, revisionNumber: 1, createdAt,
+      output: { ...request.output, schemaVersion: 1, id: variantId }, profile: request.profile, preset: request.preset })
+    const plan = JSON.parse(operationalBundlePlanV3(parent).contentJson)
+    const result = createOutputVariantCommand({ command: { id: dependencies.createId('edit-command'),
+      workspaceId: request.workspaceId, projectId: request.projectId, baseVersionId: parent.version.id,
+      baseHash: parent.version.baseHash, type: 'create-output-variant', author: { type: 'api-client', id: audit.clientId,
+        ...(audit.delegatedUserId ? { delegatedUserId: audit.delegatedUserId } : {}) }, idempotencyKey, createdAt,
+      ...(request.reason === undefined ? {} : { reason: request.reason }) }, audit, base: parent.version,
+      baseState: parent.state, historicalBaselineRequested: false, revision, expectedRevisionId: null,
+      expectedSpecHash: null, durationFrames: plan.durationFrames })
+    const normalizations = [...new Map(parent.state.document.schemaVersion === 'project-output-state/v3'
+      ? parent.state.document.entries.flatMap(e => e.consumption.status === 'materialized'
+        ? e.consumption.materialization.document.normalizations.map(n => [n.document.id, n] as const) : []) : []).values()]
+    const variantIds = [...parent.state.document.entries.map(e => e.variantId), variantId]
+    const proposal: BuildOperationalOutputVersionBundleV3 = { allocation: { workspaceId: request.workspaceId,
+      projectId: request.projectId, resultVersionId: versionId, stateId, parentVersionId: parent.version.id,
+      sequence: parent.version.sequence + 1, createdBy: audit.clientId, createdAt }, parent,
+      origin: { kind: 'create-output-variant', result }, restoreTarget: null,
+      editPlanSnapshot: snapshot(request.workspaceId, request.projectId, dependencies.createId('project-snapshot'), 'edit-plan',
+        { ...plan, id: dependencies.createId('edit-plan'), projectVersionId: versionId, createdAt }, createdAt),
+      normalizations, materializationIds: plan.durationFrames === 0 ? {} : Object.fromEntries(
+        variantIds.map(id => [id, dependencies.createId('output-materialization')])) }
+    buildOperationalOutputVersionBundleV3(proposal)
+    return dependencies.repository.persistChild({ proposal, audit, versionEventId: dependencies.createEventId(),
+      operationEventId: null, ingestFacts: null, recompose: facts => ({ ...proposal, parent: facts.parent,
+        restoreTarget: facts.restoreTarget, normalizations: facts.normalizations }) })
   }
 }

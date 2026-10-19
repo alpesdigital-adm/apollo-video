@@ -208,7 +208,25 @@ test('T-FR-242 external editorial Commands and durable Director runs bind creden
     'version-compare-repository.ts',
   ]) {
     const source = readFileSync(join(root, 'src/v2/infrastructure/prisma', relative), 'utf8')
-    assert.match(source, /editCommandExternalActorAuditData/)
+    if (relative === 'editorial-command-repository.ts') {
+      // Command3 is written by the shared operational bundle writer, which stores the same
+      // credential audit columns; this repository only reads and replays them.
+      const writer = readFileSync(join(root, 'src/v2/infrastructure/prisma/output-version-bundle-repository.ts'), 'utf8')
+      assert.match(writer, /externalActorAuditData\(input\.audit,\s*a\.workspaceId,\s*c\.author\.id\)/)
+      assert.match(writer, /actorCredentialId:\s*audit\.actorCredentialId/)
+      assert.match(writer, /actorContextHash:\s*audit\.actorContextHash/)
+    } else if (relative === 'version-compare-repository.ts') {
+      assert.match(source, /editCommandExternalActorAuditData/)
+    } else {
+      // A Version-producing Command is committed by the single shared writer, which stores the credential audit
+      // columns of its sealed origin; the repository only supplies the sealed bundle and reads the audit back.
+      assert.match(source, /commitProjectVersionWithOutputState\(/)
+      assert.doesNotMatch(source, /v2EditCommand\.create/, 'a repository must not write its Command beside the shared writer')
+      const shared = readFileSync(join(root, 'src/v2/infrastructure/prisma/project-version-commit.ts'), 'utf8')
+      assert.match(shared, /externalActorAuditData\(origin\.audit,\s*command\.workspaceId,\s*command\.author\.id\)/)
+      assert.match(shared, /actorCredentialId:\s*audit\?\.actorCredentialId/)
+      assert.match(shared, /actorContextHash:\s*audit\?\.actorContextHash/)
+    }
     assert.match(source, /hydrateEditCommandExternalActorAudit/)
     if (!relative.startsWith('review-patch')) {
       assert.doesNotMatch(

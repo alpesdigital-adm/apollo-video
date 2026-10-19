@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
+import { errorMonitor } from 'node:events'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
@@ -86,10 +87,11 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
   const { directMulticam } = await import('../../src/v2/domain/multicam-direction.ts')
   const { evaluateColorCritic } = await import('../../src/v2/domain/color-critic-report.ts')
   const { createTickInterval } = await import('../../src/v2/domain/session-time.ts')
-  const { createProductionBrief } = await import('../../src/v2/domain/production-brief.ts')
-  const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
-  const { createDesiredAction, createDesiredActionReference } = await import('../../src/v2/domain/desired-action.ts')
-  const { createEditorialAudioTimelineHash } = await import('../../src/v2/domain/production-modes.ts')
+  const { assertMediaArtifactManifest } = await import('../../src/v2/domain/media-artifact.ts')
+  const { assetRightsRevision, evaluateAssetUse } = await import('../../src/v2/domain/asset-rights.ts')
+  const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
+  const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
+  const { closeOwnedBrowser, observeOwnedBrowserLifecycle, boundedOwnedBrowserCleanup } = await import('./helpers/library-browser-proof.mjs')
   const fixtures = await import('./wave20-fixtures.mjs')
 
   const client = new PrismaClient()
@@ -98,7 +100,10 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
   const projectId = `w20-ui-project-${suffix}`
   const sessionId = `w20-ui-session-${suffix}`
   const reactSessionId = `w20-ui-react-${suffix}`
+  // The Version the pages read is the sealed child Command `seedBaseProjectVersion` writes under this id (a Version cannot be
+  // inserted by hand); its hash is the one the fences carry, learned when it is written.
   const projectVersionId = `w20-ui-version-${suffix}`
+  let baseHash = null
   const reportId = `w20-ui-report-${suffix}`
   // Track and asset ids are prefixed per run. `media_artifacts.id` is unique
   // across the whole database rather than per workspace, so two runs of this
@@ -106,6 +111,13 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
   // collide on `asset-cam-a` and the second one cannot even seed.
   const trackPrefix = `w20-${suffix}-`
   const masterCameraAssetId = `${trackPrefix}asset-cam-a`
+  // How long the recordings of the session are. A recording a Version is sealed over carries its whole normalization
+  // receipt, and reading that State back costs time in proportion to the frames it observed (measured: about thirteen
+  // seconds per read of ONE 300 s / 30 fps recording, three reads, 12.7-13.1 s). Three hundred seconds made every command
+  // of this journey outlast the page's own timeouts, so the session is a minute long: the same shape (cameras that stop
+  // before the directed range ends), a fifth of the frames.
+  const FIXTURE_SECONDS = 60
+  const FIXTURE_FRAMES = FIXTURE_SECONDS * 30
   const uiUsername = `w20-ui-user-${suffix}`
   const uiPassword = `Wave20-Operator-${suffix}-secure`
   const createdAt = new Date('2029-08-01T09:00:00.000Z')
@@ -118,46 +130,14 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
   const artifactRoot = mkdtempSync(join(tmpdir(), 'apollo-w20-ui-'))
   let server
   let browser
+  let browserServer, browserChild, context, primaryError, serverClose
+  const serverLifecycle = { pid: null, exitObserved: false, closeObserved: false, signalAttempt: null }
 
-  const clean = async () => {
-    await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-    await client.v2ProjectVersion.updateMany({ where: { workspaceId }, data: { commandId: null } })
-    for (const table of [
-      client.v2ColorCriticProposedDelta, client.v2ColorCriticIssue,
-      client.v2ColorCriticDimensionResult, client.v2ColorCriticReportMeasurement,
-      client.v2ColorCriticReport,
-      client.v2PlaybackUncoveredRange, client.v2PlaybackAnchor, client.v2PlaybackPiece,
-      client.v2PlaybackMapHead, client.v2PlaybackMap,
-      client.v2MatchPlanIssue, client.v2MatchNonComparableRange, client.v2MatchRangeOverride,
-      client.v2CameraMatchTransform, client.v2MatchPlanMeasurement,
-      client.v2MulticamMatchPlanHead, client.v2MulticamMatchPlan,
-      client.v2ColorMeasurementComponent, client.v2ColorMeasurementDimension,
-      client.v2CameraColorMeasurement,
-      client.v2MulticamAngleScoreComponent, client.v2MulticamAngleCandidate,
-      client.v2MulticamShotAlternative, client.v2MulticamShotDecision,
-      client.v2MulticamDirectionHead, client.v2MulticamDirection,
-      client.v2MulticamObservation, client.v2MulticamEvidenceSet,
-      client.v2SyncDiagnosticHead, client.v2SyncDiagnostic,
-      client.v2CaptureClockMap, client.v2CaptureTrackCoverage,
-      client.v2CaptureSessionClock,
-      client.v2CaptureSessionVersion, client.v2CaptureSessionHead,
-      client.v2CommandArtifactInvalidation, client.v2PublicEventOutbox,
-      client.v2EditCommand, client.v2ProjectVersion,
-      client.v2ProjectMediaAsset, client.v2ProjectSnapshot,
-      client.v2MediaArtifactManifest, client.v2MediaArtifact,
-      client.v2Project,
-    ]) {
-      await table.deleteMany({ where: { workspaceId } })
-    }
-    // Before the API client, not after: bootstrap login provisions a UI
-    // principal pointing at it, and that relation is onDelete: Restrict.
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
+  // Nothing is swept at the end. The project's Versions, Commands and snapshots and the recordings' manifests are sealed
+  // (append-only): the database refuses to update or delete them, and a workspace delete cascades into them. Every
+  // identity of the run carries `suffix`, so the next run never meets this one's rows.
 
   try {
-    await clean()
     await client.v2Workspace.create({
       data: {
         id: workspaceId, slug: workspaceId, name: 'Wave 20 operator E2E',
@@ -175,83 +155,15 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       environment: 'production',
       scopes: ['projects:read', 'projects:write'],
     })
-    await client.v2Project.create({
-      data: {
-        id: projectId, workspaceId, name: 'Wave 20 operator E2E',
-        status: 'reviewing-proxy', objective: 'discovery', format: '16:9', locale: 'pt-BR',
-        createdByType: 'api-client', createdById: issued.client.id,
-        createdAt, updatedAt: createdAt,
-      },
-    })
-    // The brief snapshot carries a real production brief rather than a stub.
-    // The workspace read re-parses it and refuses a brief that is not the
-    // canonical output of the factory — which is correct, and which means a
-    // stub here would make the project version unreadable and take the pages'
-    // fence with it.
-    //
-    // The edit plan is a real Director EditPlan for the same reason one step
-    // further on: `run-direction` derives a new plan on top of the project's
-    // current one, and the command repository both refuses a plan that is not
-    // directed (`isDirected`) and re-hashes the bytes beside the snapshot. A
-    // `{ kind: 'edit-plan' }` stub reads fine and makes the command
-    // unreachable, which is exactly how a suite ends up asserting that a button
-    // is enabled instead of asserting what it does.
-    const desiredActionRef = createDesiredActionReference(createDesiredAction({ objective: 'discovery' }))
-    const baseClips = [{
-      id: 'clip-base-0001', sourceArtifactId: masterCameraAssetId,
-      sourceInFrame: 0, sourceOutFrame: 9_000, timelineInFrame: 0, timelineOutFrame: 9_000, rate: 1,
-    }]
-    const basePlan = {
-      schemaVersion: 2, state: 'compiled', id: `edit-plan-${projectVersionId}`, projectVersionId,
-      storyPlanId: 'story-w20-ui', treatmentPlanId: 'treatment-w20-ui', directorRunId: 'director-run-w20-ui',
-      fps: 30, durationFrames: 9_000,
-      sources: [{ id: masterCameraAssetId, artifactId: masterCameraAssetId, kind: 'video', durationSeconds: 300 }],
-      videoTracks: [{ id: 'track-primary-video', kind: 'base-video', clips: baseClips }],
-      overlayTracks: [], subtitleTracks: [], audioTracks: [], effectTracks: [], transitions: [],
-      markers: [], protectedElements: [], localeVariantRefs: [], formatVariantRefs: [],
-      lineageRefs: [masterCameraAssetId],
-      editorial: { commandType: 'source-ingest', exclusions: [], retainedSourceRanges: [] },
-      retimedTranscript: { sourceTranscriptId: 'transcript-w20-ui', words: [] },
-      movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
-      subtitlePolicy: { faceProtection: true, anchor: 'bottom', maxCharactersPerBlock: 42 },
-      composition: {
-        layout: 'landscape-inset', background: 'blurred-source', foregroundScale: 1, verticalPosition: 0.5,
-        faceSafeFallback: [0.14, 0.08, 0.72, 0.56], subtitleSafeRegion: [0.08, 0.7, 0.84, 0.24],
-      },
-      director: { plannerVersion: 'w20-ui-planner/v1', decisions: [], assumptions: [] },
-      desiredActionRef,
-      audioTimelineHash: createEditorialAudioTimelineHash({ fps: 30, clips: baseClips }),
-      createdAt: createdAt.toISOString(),
-    }
-    const contentFor = (kind) => (kind === 'brief'
-      ? { productionBrief: createProductionBrief({ ownerText: 'Wave 20 operator E2E' }) }
-      : kind === 'edit-plan' ? basePlan : { kind })
-    for (const kind of ['brief', 'edit-plan', 'policies']) {
-      const content = contentFor(kind)
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id: `w20-ui-snapshot-${kind}-${suffix}`, workspaceId, projectId, kind,
-          schemaVersion: kind === 'edit-plan' ? 2 : 1,
-          contentJson: stableSerialize(content), contentHash: calculateVersionHash(content),
-          createdAt,
-        },
-      })
-    }
-    await client.v2ProjectVersion.create({
-      data: {
-        id: projectVersionId, workspaceId, projectId, sequence: 1,
-        briefSnapshotId: `w20-ui-snapshot-brief-${suffix}`,
-        editPlanSnapshotId: `w20-ui-snapshot-edit-plan-${suffix}`,
-        policiesSnapshotId: `w20-ui-snapshot-policies-${suffix}`,
-        baseHash: sha('2'), createdBy: issued.client.id, createdAt,
-      },
-    })
-    // The colour page reads the project version through the workspace
-    // capability and names it when it lists verdicts. Without a current
-    // version there is nothing to name, and a list across versions would mix
-    // judgements of different frames.
-    await client.v2Project.update({
-      where: { id: projectId }, data: { currentVersionId: projectVersionId },
+    // The project the way the product creates it: the creation Command (it seals a real production brief, which the workspace
+    // read re-parses and refuses when it is not the canonical output of the factory) and one explicit 16:9 output variant.
+    // The EditPlan the direction re-cuts is a real child Command of the variant's head, written below once the recording it
+    // plays has its receipt and its rights: `run-direction` derives a new plan on top of the project's current one, and the
+    // command repository both refuses a plan that is not directed and re-hashes the bytes beside the snapshot.
+    const { createProjectRow, registerRecording, seedBaseProjectVersion } = await import('./helpers/capture-journey.mjs')
+    await createProjectRow({
+      prisma: client, workspaceId, projectId, name: 'Wave 20 operator E2E', objective: 'discovery', format: '16:9',
+      clientId: issued.client.id, createdAt,
     })
 
     // ---- F4.012: a session directed past the end of both cameras ----------
@@ -263,7 +175,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     // fixture uses by default name nothing.
     //
     // One clip serves every part: 64×64 at five frames a second, small enough
-    // that thirty decodes cost seconds, three hundred seconds long so it spans
+    // that thirty decodes cost seconds, as long as the session so it spans
     // the coverage the parts claim, and with real motion, which is what the
     // screen-activity measurement needs in order to measure anything at all.
     //
@@ -281,7 +193,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     mkdirSync(join(artifactRoot, 'artifacts'), { recursive: true })
     execFileSync(ffmpegPath, [
       '-y', '-loglevel', 'error',
-      '-f', 'lavfi', '-i', 'testsrc=size=64x64:rate=5:duration=300',
+      '-f', 'lavfi', '-i', `testsrc=size=64x64:rate=5:duration=${FIXTURE_SECONDS}`,
       '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
       ingestPath,
     ], { stdio: ['ignore', 'ignore', 'pipe'] })
@@ -298,8 +210,9 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     })
 
     const sessions = new PrismaCaptureSessionRepository(client)
+    const rightsRepository = new PrismaAssetRightsRepository(client)
     const world = fixtures.buildDirectableMulticamWorld({
-      workspaceId, sessionId, projectId, trackPrefix, ingest,
+      workspaceId, sessionId, projectId, trackPrefix, ingest, endSecond: FIXTURE_SECONDS,
     })
     // Every recording the direction may cut has to be a linked, available
     // project asset with a probed cadence, or the command refuses before it
@@ -307,34 +220,51 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     for (const track of world.session.tracks) {
       const artifactId = track.sourceAssetId
       const mediaType = ['microphone', 'master-audio', 'scratch-audio'].includes(track.role) ? 'audio' : 'video'
-      await client.v2MediaArtifact.create({
-        data: {
-          id: artifactId, workspaceId, artifactKey: `artifacts/${artifactId}.mp4`,
-          sha256: sha('f'), byteSize: BigInt(4_096), mediaType, container: 'mp4',
-          status: 'available', createdAt,
-        },
+      const role = artifactId === masterCameraAssetId ? 'source-master' : 'selected-insert'
+      const artifactKey = `artifacts/${artifactId}.mp4`
+      // These are controlled source-link metadata, not new physical recordings. The recording is registered the way its
+      // ingest leaves it (artifact, manifest, project link and the sealed normalization receipt a child Command adopts);
+      // capture parts above name the separately generated ingest and its real SHA.
+      const artifactSha256 = createHash('sha256').update(artifactId).digest('hex')
+      const registered = await registerRecording({
+        prisma: client, workspaceId, projectId, artifactId, artifactKey, mediaType, container: 'mp4',
+        sha256: artifactSha256, byteSize: 4_096,
+        probe: mediaType === 'video' ? { width: 64, height: 64, duration: FIXTURE_SECONDS, fps: 30 } : { duration: FIXTURE_SECONDS },
+        role, originalFileName: `${artifactId}.mp4`, createdAt, recipeId: 'capture-ingest',
       })
-      await client.v2MediaArtifactManifest.create({
-        data: {
-          id: `w20-ui-manifest-${artifactId}`, workspaceId, artifactId,
-          schemaVersion: 'media-artifact-manifest/v1', manifestHash: sha('7'),
-          recipeId: 'capture-ingest', recipeVersion: '1.0.0', parametersHash: sha('8'),
-          manifestJson: JSON.stringify({
-            artifact: { artifactKey: `artifacts/${artifactId}.mp4` },
-            probe: { duration: 300, fps: 30, rFrameRate: '30/1' },
-          }),
-          createdAt,
-        },
-      })
-      await client.v2ProjectMediaAsset.create({
-        data: {
-          // A UUID column, not a readable id: the row is keyed by one.
-          id: randomUUID(), workspaceId, projectId, artifactId,
-          role: artifactId === masterCameraAssetId ? 'source-master' : 'selected-insert',
-          originalFileName: `${artifactId}.mp4`, createdAt,
-        },
-      })
+      const [storedArtifact, storedManifest] = await Promise.all([
+        client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId } }),
+        client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: registered.manifestId } }),
+      ])
+      assertMediaArtifactManifest(JSON.parse(storedManifest.manifestJson))
+      assert.deepEqual([storedArtifact.workspaceId, storedArtifact.artifactKey, storedArtifact.sha256,
+        storedArtifact.byteSize, storedArtifact.mediaType, storedArtifact.container],
+      [workspaceId, artifactKey, artifactSha256, 4096n, mediaType, 'mp4'])
+      assert.deepEqual([storedManifest.workspaceId, storedManifest.artifactId, storedManifest.manifestHash],
+        [workspaceId, artifactId, registered.manifestHash])
+      const use = role === 'source-master' ? 'rendering' : 'editorial-reuse'
+      const rights = await setAssetRightsService({ repository: rightsRepository,
+        clock: () => createdAt, createId: () => `w20-ui-rights-${artifactId}` })({ workspaceId, artifactId,
+        baseRevision: assetRightsRevision(artifactId, 0),
+        draft: { status: 'approved', allowedUses: [use], prohibitedUses: [], allowedLocales: ['pt-BR'],
+          consent: { status: 'not-required', allowedUses: [] },
+          sourceNote: 'Owner-controlled synthetic Wave20 source-link fixture; not an external recording license' },
+        actor: { type: 'api-client', id: issued.client.id } })
+      const readback = (await rightsRepository.findCurrentForArtifacts(workspaceId, [artifactId])).get(artifactId)
+      assert.equal(readback?.snapshotHash, rights.snapshot.snapshotHash)
+      assert.equal(readback?.createdBy.id, issued.client.id)
+      assert.equal(rights.revision, assetRightsRevision(artifactId, 1))
+      assert.deepEqual(readback?.allowedUses, [use])
+      assert.equal(evaluateAssetUse(readback, { workspaceId, use, locale: 'pt-BR' }, createdAt).outcome, 'allow')
+      assert.notEqual(evaluateAssetUse(readback, { workspaceId,
+        use: use === 'rendering' ? 'editorial-reuse' : 'rendering', locale: 'pt-BR' }, createdAt).outcome, 'allow')
     }
+    // The EditPlan the pages' direction re-cuts: a real child Command of the head that adopts the source master's receipt
+    // (rights are current now) and plays that recording whole.
+    baseHash = (await seedBaseProjectVersion({
+      prisma: client, workspaceId, projectId, versionId: projectVersionId, clientId: issued.client.id, objective: 'discovery',
+      sourceArtifactId: masterCameraAssetId, fps: 30, durationFrames: FIXTURE_FRAMES, transcriptId: 'transcript-w20-ui', createdAt,
+    })).baseHash
     for (const version of world.versions) {
       await sessions.appendVersion({
         session: version,
@@ -374,9 +304,9 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     const evidence = createMulticamEvidenceSet({
       session: world.session,
       observations: [
-        speaks(`${trackPrefix}track-mic-a`, 1, 120),
-        speaks(`${trackPrefix}track-mic-b`, 120, 250),
-        speaks(`${trackPrefix}track-mic-a`, 250, 300),
+        speaks(`${trackPrefix}track-mic-a`, 1, 24),
+        speaks(`${trackPrefix}track-mic-b`, 24, 50),
+        speaks(`${trackPrefix}track-mic-a`, 50, FIXTURE_SECONDS),
       ],
       generatedAt: instant(130),
     })
@@ -388,9 +318,9 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       protocolCeiling: null,
       evidence,
       format: { aspectRatio: '16:9' },
-      // Past the end of both cameras on purpose: the last hundred seconds have
+      // Past the end of both cameras on purpose: the last twenty seconds have
       // no eligible angle, so `uncovered` is non-empty and a person is needed.
-      range: createTickInterval(sec(1), sec(400)),
+      range: createTickInterval(sec(1), sec(FIXTURE_SECONDS + 20)),
       generatedAt: instant(140),
     })
     assert.ok(direction.manualReviewRequired, 'the direction fixture must need a person')
@@ -528,6 +458,17 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
+    serverLifecycle.pid = server.pid
+    server.once(errorMonitor, (error) => {
+      const message = String(error?.message ?? error)
+      serverLifecycle.error = { at: Date.now(), code: typeof error?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(error.code) ? error.code : null,
+        messageSha256: createHash('sha256').update(message).digest('hex'), messageBytes: Buffer.byteLength(message) }
+    })
+    server.once('exit', (code, signal) => { Object.assign(serverLifecycle, { exitObserved: true, exitCode: code, exitSignal: signal, exitAt: Date.now() }) })
+    serverClose = new Promise((resolve) => server.once('close', (code, signal) => {
+      Object.assign(serverLifecycle, { closeObserved: true, closeCode: code, closeSignal: signal, closeAt: Date.now() })
+      resolve()
+    }))
     server.stdout.on('data', (chunk) => { serverLogs += String(chunk) })
     server.stderr.on('data', (chunk) => { serverLogs += String(chunk) })
     await waitForServer(baseUrl, server)
@@ -561,7 +502,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     // button — looks like a rendering bug rather than a refused read.
     const workspace = await read(`/v1/projects/${project}/workspace`)
     assert.equal(workspace.version?.id, projectVersionId)
-    assert.equal(workspace.version?.baseHash, sha('2'))
+    assert.equal(workspace.version?.baseHash, baseHash)
 
     const directionRead = await read(`/v1/projects/${project}/capture-sessions/${session}/direction`)
     assert.equal(directionRead.direction.manualReviewRequired, true)
@@ -618,8 +559,12 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     assert.ok(executablePath, 'set PLAYWRIGHT_CHROME_EXECUTABLE to run the Wave 20 operator browser E2E')
 
     const { chromium } = await import('playwright-core')
-    browser = await chromium.launch({ executablePath, headless: true })
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1600 } })
+    browserServer = await chromium.launchServer({ executablePath, headless: true })
+    browserChild = browserServer.process()
+    observeOwnedBrowserLifecycle(browserServer, browserChild)
+    assert.ok(browserChild?.pid, 'Owned Wave20 browser must expose its real child process')
+    browser = await chromium.connect(browserServer.wsEndpoint())
+    context = await browser.newContext({ viewport: { width: 1440, height: 1600 } })
     // Bounded on purpose. A journey that drives six commands has many places to
     // wait, and a CI job that hangs says less than one that fails: the default
     // is generous enough for a production build on a cold cache and short
@@ -905,7 +850,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       'the derivation named a session fence the page did not read',
     )
     assert.equal(derived.body.projectBaseVersionId, projectVersionId)
-    assert.equal(derived.body.projectBaseHash, sha('2'))
+    assert.equal(derived.body.projectBaseHash, baseHash)
     const deriveAnswer = await waitForAnswer(operator, '/color-match', fromDerive, 'the derivation')
     // The answer, by its real shape rather than "something came back". On this
     // project no source carries a trusted colour compilation, so the ColorPlan
@@ -1230,7 +1175,7 @@ ${serverLogs.slice(-2_000)}`,
       'the direction named a project version the page did not read',
     )
     assert.equal(
-      directRequest.body.baseHash, sha('2'),
+      directRequest.body.baseHash, baseHash,
       'the direction named a base hash the page did not read',
     )
     assert.deepEqual(directRequest.body.format, { aspectRatio: '16:9' })
@@ -1381,25 +1326,75 @@ ${serverLogs.slice(-2_000)}`,
       + `direction v1 -> v2 and project version ${projectVersionId} -> ${advanced.version.id}, `
       + 'with the replay, the stale fence and the repeated request each answered differently',
     )
+  } catch (error) {
+    primaryError = error
+    throw error
   } finally {
-    if (browser) await browser.close()
-    if (server && server.exitCode === null) {
-      server.kill('SIGTERM')
-      await new Promise((resolve) => setTimeout(resolve, 500))
+    const errors = [], boundedSteps = []
+    let browserTerminal = !browserServer, nextTerminal = !server, clientDisconnected = false, databaseCleaned = false
+    const diagnostic = (error) => {
+      const message = String(error?.message ?? error)
+      return { code: typeof error?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(error.code) ? error.code : null,
+        messageSha256: createHash('sha256').update(message).digest('hex'), messageBytes: Buffer.byteLength(message) }
     }
-    // Reported, not rethrown: a cleanup failure that masks the real assertion
-    // turns one clear defect into two confusing ones.
-    try {
-      await clean()
-    } catch (error) {
-      console.error('cleanup failed:', error?.message ?? error)
-    } finally {
-      await client.$disconnect()
+    const emit = (record, failure = false) => {
+      try { console[failure ? 'error' : 'log'](JSON.stringify(record)) } catch (error) { errors.push(error) }
+    }
+    const stage = async (name, action) => {
+      const startedAt = Date.now(), started = performance.now()
+      emit({ kind: 'wave20-cleanup', stage: name, event: 'started', startedAt })
       try {
-        rmSync(artifactRoot, { recursive: true, force: true })
+        const result = await action()
+        emit({ kind: 'wave20-cleanup', stage: name, event: 'completed', startedAt,
+          completedAt: Date.now(), elapsedMs: performance.now() - started })
+        return result
       } catch (error) {
-        console.error('artifact root cleanup failed:', error?.message ?? error)
+        emit({ kind: 'wave20-cleanup', stage: name, event: 'failed', startedAt,
+          completedAt: Date.now(), elapsedMs: performance.now() - started, error: diagnostic(error) }, true)
+        throw error
       }
     }
+    const attempt = async (name, action) => { try { await stage(name, action) } catch (error) { errors.push(error) } }
+    await attempt('browser', async () => {
+      if (!browserServer) return
+      const proof = await closeOwnedBrowser({ context, browser, server: browserServer, child: browserChild })
+      emit({ kind: 'wave20-browser-postflight', localBrowserLifecycleTerminal: proof.localBrowserLifecycleTerminal,
+        runCgroupTerminal: proof.runCgroupTerminal, terminalProofScope: proof.terminalProofScope, process: proof.process,
+        remaining: proof.remaining, lifecycle: proof.lifecycle, warnings: proof.warnings.map(diagnostic),
+        steps: proof.steps.map(({ error, ...step }) => ({ ...step, ...(error ? { error: diagnostic(error) } : {}) })) })
+      assert.equal(proof.localBrowserLifecycleTerminal, true, 'Owned Wave20 browser cleanup must observe real closes without warnings')
+      browserTerminal = true
+    })
+    await attempt('next-server', async () => {
+      if (!server) return
+      await boundedOwnedBrowserCleanup('wave20-next-server', async () => {
+        if (server.exitCode === null && server.signalCode === null) {
+          serverLifecycle.signalAttempt = { method: 'original-ChildProcess.kill', signal: 'SIGTERM', at: Date.now(), sent: server.kill('SIGTERM') }
+        }
+        await serverClose
+        assert.equal(serverLifecycle.closeObserved, true)
+        assert.equal(serverLifecycle.error, undefined, 'Owned Next spawn/process error must fail cleanup')
+      }, boundedSteps)
+      nextTerminal = true
+    })
+    await attempt('database-retain', async () => {
+      assert.ok(browserTerminal && nextTerminal, 'Retain fixture rows when browser/Next terminality is inconclusive')
+      // The rows stay (sealed rows are append-only); `databaseCleaned` now means "left in a state the next run cannot trip on".
+      databaseCleaned = true
+    })
+    await attempt('client-disconnect', async () => {
+      await boundedOwnedBrowserCleanup('wave20-client-disconnect', () => client.$disconnect(), boundedSteps)
+      clientDisconnected = true
+    })
+    await attempt('artifact-remove', async () => {
+      assert.ok(browserTerminal && nextTerminal && clientDisconnected && databaseCleaned,
+        'Retain artifact root when cleanup terminality is inconclusive')
+      rmSync(artifactRoot, { recursive: true, force: true })
+    })
+    emit({ kind: 'wave20-cleanup-summary', browserTerminal, nextTerminal, clientDisconnected, databaseCleaned,
+      nextTerminalProofScope: 'original-ChildProcess-close; descendants-require-external-run-owner-postflight',
+      serverLifecycle, steps: boundedSteps.map(({ error, ...step }) => ({ ...step, ...(error ? { error: diagnostic(error) } : {}) })),
+      primaryError: primaryError ? diagnostic(primaryError) : null, errors: errors.map(diagnostic) })
+    if (!primaryError && errors.length) throw new AggregateError(errors, 'Wave20 cleanup failed')
   }
 })

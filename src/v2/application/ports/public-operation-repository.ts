@@ -62,6 +62,11 @@ export interface ProjectProxyRenderOperationContext {
   outputArtifactId: string
   outputManifestId: string
   originalFileName: string
+  /**
+   * The stable State variant this render is for (the output its sealed consumption named at enqueue). Absent only on a row written
+   * before the column existed: such a row belongs to the State's only output, and to none when the State has several.
+   */
+  outputVariantId?: string
   renderableSnapshot?: Readonly<{
     planId: string
     planHash: string
@@ -88,6 +93,8 @@ export interface ProjectProxyReuseOperationContext {
   outputArtifactId: string
   outputManifestId: string
   originalFileName: string
+  /** The stable State variant whose base proxy this reuse carries over (absent only on a legacy row: the State's only output). */
+  outputVariantId?: string
 }
 
 export interface ProjectFinalExportOperationContext {
@@ -125,6 +132,11 @@ export interface ProjectFinalExportOperationContext {
     note?: string
   }
   originalFileName: string
+  /**
+   * The stable State variant this export is for; `outputSpec.aspectRatio` is the aspect ratio of that output's entry. Absent only
+   * on a row written before the column existed: such a row belongs to the output whose ratio it states, when exactly one has it.
+   */
+  outputVariantId?: string
 }
 
 export interface SourceCleanupOperationContext {
@@ -164,6 +176,55 @@ export interface ProjectDirectorRunOperationContext {
   reason?: string
 }
 
+export interface PerceptionProducerRunOperationContext {
+  kind: 'perception-producer-run'
+  projectId: string
+  projectVersionId: string
+  projectVersionHash: string
+  sourceArtifactId: string
+  sourceSha256: string
+  editPlanSnapshotId: string
+  editPlanSnapshotHash: string
+  sampleIntervalFrames: number
+  requestHash: string
+}
+
+export interface TemporalProducerRunOperationContext {
+  kind: 'perception-temporal-run'
+  projectId: string
+  projectVersionId: string
+  projectVersionHash: string
+  sourceArtifactId: string
+  sourceSha256: string
+  editPlanSnapshotId: string
+  editPlanSnapshotHash: string
+  requestHash: string
+}
+
+export interface FaceProducerRunOperationContext {
+  kind: 'perception-face-run'
+  projectId: string
+  projectVersionId: string
+  projectVersionHash: string
+  sourceArtifactId: string
+  sourceSha256: string
+  editPlanSnapshotId: string
+  editPlanSnapshotHash: string
+  sampleIntervalFrames: number
+  requestHash: string
+  /** Server-side detector pipeline that claims the operation; absent on creation means the legacy YuNet diagnostic. */
+  detectorProfile?: FaceDetectorProfile
+  /** Timeline window [startTimelineFrame, endTimelineFrame) of at most 300 frames; required for the V9 timeline profile, absent otherwise. */
+  window?: Readonly<{ startTimelineFrame: number; endTimelineFrame: number }>
+  /**
+   * W65b. Window [startSourceFrame, endSourceFrame) of at most 300 frames of the SOURCE's own timeline; required for the V9 source profile,
+   * absent otherwise. The project/version/EditPlan fields are then only the context the window was requested from.
+   */
+  sourceWindow?: Readonly<{ startSourceFrame: number; endSourceFrame: number }>
+}
+
+export type FaceDetectorProfile = 'yunet-v5-diagnostic' | 'openvino-face0204-v9' | 'openvino-face0204-v9-source'
+
 export type PublicOperationContext =
   | ArtifactRenderOperationContext
   | SyntheticProductionRenderOperationContext
@@ -174,6 +235,9 @@ export type PublicOperationContext =
   | SourceCleanupOperationContext
   | LongFormIndexOperationContext
   | ProjectDirectorRunOperationContext
+  | PerceptionProducerRunOperationContext
+  | TemporalProducerRunOperationContext
+  | FaceProducerRunOperationContext
 
 export type PublicOperationCreationContext = Exclude<
   PublicOperationContext,

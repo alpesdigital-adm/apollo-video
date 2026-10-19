@@ -10,8 +10,6 @@ import {
 
 const { createMediaTranscript } =
   await import("../../../src/v2/domain/media-transcript.ts");
-const { createProductionBrief } =
-  await import("../../../src/v2/domain/production-brief.ts");
 const { createProductionBatch, deriveBatchStatus } =
   await import("../../../src/v2/domain/production-batch.ts");
 const {
@@ -67,45 +65,6 @@ export async function createLocalizationPgFixture(
     transcriptId = `transcript-${suffix}`,
     batchId = `batch-${suffix}`;
   const where = { workspaceId };
-  const cleanup = async () => {
-    await prisma.v2LocalizationVariantAction.deleteMany({ where });
-    await prisma.v2LocalizationVariantRevision.deleteMany({ where });
-    await prisma.v2LocalizationVariantHead.deleteMany({ where });
-    await prisma.v2LocalizationCanonicalScript.deleteMany({ where });
-    await prisma.v2LocalizationProfile.deleteMany({ where });
-    await prisma.v2ScriptAlignmentReview.deleteMany({ where });
-    await prisma.v2ScriptAlignmentRun.deleteMany({ where });
-    await prisma.v2ProductionBatch.deleteMany({ where });
-    await prisma.v2MediaTranscript.deleteMany({ where });
-    await prisma.v2ProjectLutSelectionHead.deleteMany({ where });
-    await prisma.v2CommandArtifactInvalidation.deleteMany({ where });
-    await prisma.v2ProjectLutSelection.deleteMany({ where });
-    await prisma.v2Project.updateMany({
-      where,
-      data: { currentVersionId: null },
-    });
-    await prisma.v2ProjectVersion.updateMany({
-      where,
-      data: { commandId: null },
-    });
-    await prisma.v2EditCommand.deleteMany({ where });
-    await prisma.v2ProjectVersion.deleteMany({ where });
-    await prisma.v2ProjectSnapshot.deleteMany({ where });
-    await prisma.v2ProjectMediaAsset.deleteMany({ where });
-    await prisma.v2Project.deleteMany({ where });
-    await prisma.v2MediaArtifact.updateMany({
-      where,
-      data: { currentRightsSnapshotId: null },
-    });
-    await prisma.v2AssetRightsChange.deleteMany({ where });
-    await prisma.v2AssetRightsSnapshot.deleteMany({ where });
-    await prisma.v2MediaColorProbe.deleteMany({ where });
-    await prisma.v2MediaArtifactManifest.deleteMany({ where });
-    await prisma.v2MediaArtifact.deleteMany({ where });
-    await prisma.v2ApiCredential.deleteMany({ where });
-    await prisma.v2ApiClient.deleteMany({ where });
-    await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } });
-  };
   try {
     await createWorkspaceRow({
       prisma,
@@ -185,6 +144,7 @@ export async function createLocalizationPgFixture(
           "subtitles-only",
           "translation",
           "project-render",
+          "rendering",
           "script-alignment",
           "editorial-reuse",
         ],
@@ -192,6 +152,12 @@ export async function createLocalizationPgFixture(
         consent: { status: "not-required", allowedUses: [] },
       },
     });
+    const persistedRights = await rights.findCurrent(workspaceId, artifactId);
+    assert.ok(persistedRights?.snapshot);
+    assert.equal(persistedRights.revision, rightsResult.revision);
+    assert.equal(persistedRights.snapshot.snapshotHash, rightsResult.snapshot.snapshotHash);
+    assert.deepEqual(persistedRights.snapshot.allowedUses, rightsResult.snapshot.allowedUses);
+    assert.ok(persistedRights.snapshot.allowedUses.includes("rendering"));
     const text = "Nina tem 10 exemplos.";
     const transcript = createMediaTranscript({
       language: "pt-BR",
@@ -239,20 +205,8 @@ export async function createLocalizationPgFixture(
       transcriptId,
       createdAt: now,
     });
-    const brief = {
-      schemaVersion: 1,
-      productionBrief: createProductionBrief({
-        ownerText:
-          "Público: operadores. Oferta: vídeo localizado. Tom: direto.",
-      }),
-    };
-    await prisma.v2ProjectSnapshot.update({
-      where: { id: `${projectId}-snapshot-brief` },
-      data: {
-        contentJson: stableSerialize(brief),
-        contentHash: calculateCanonicalHash(brief),
-      },
-    });
+    // The creation Command seals the project's brief snapshot (append-only: no UPDATE can reach it). Nothing the localization
+    // flow reads depends on the brief's owner text, so the fixture keeps the brief the product itself created.
     if (explicitNoLut) {
       const baseVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({
         where: { id: baseVersionId },
@@ -479,11 +433,9 @@ export async function createLocalizationPgFixture(
       variant,
       alignment,
       rights: rightsResult,
-      cleanup,
     };
   } catch (error) {
     try {
-      await cleanup();
     } catch (cleanupError) {
       throw new AggregateError(
         [error, cleanupError],

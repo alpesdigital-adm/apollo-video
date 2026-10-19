@@ -24,20 +24,7 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
   const memberId = '00000000-0000-4000-8000-000000000982'
   const otherMemberId = '00000000-0000-4000-8000-000000000983'
   const workspaceIds = [workspaceId, otherWorkspaceId]
-  const cleanup = async () => {
-    await client.v2UiSession.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2UiLoginAttempt.deleteMany({ where: { keyHash: { in: [keyHash, resetKeyHash] } } })
-    await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: { in: [keyHash, resetKeyHash] } } })
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2ApiAdministrationCommand.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2ApiCredential.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceMember.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2HumanIdentity.deleteMany({ where: { id: identityId } })
-    await client.v2Workspace.deleteMany({ where: { id: { in: workspaceIds } } })
-  }
   try {
-    await cleanup()
     await client.v2Workspace.create({ data: { id: workspaceId, slug: 'ui-session-security', name: 'UI Session Security' } })
     await client.v2Workspace.create({ data: { id: otherWorkspaceId, slug: 'ui-session-security-other', name: 'Other UI Session Security' } })
     await client.v2ApiClient.create({ data: {
@@ -175,7 +162,6 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
     assert.equal(await client.v2UiLoginThrottle.findUnique({ where: { keyHash: resetKeyHash } }), null)
     assert.equal((await reserve(second, 9, resetKeyHash)).allowed, true)
   } finally {
-    await cleanup()
     await client.$disconnect()
   }
 })
@@ -210,7 +196,6 @@ test('OIDC authorization transaction is browser-bound, atomic and one-shot in Po
     assert.equal(await first.consume({ stateHash, browserBindingHash: input.browserBindingHash, consumedAt: '2026-08-02T20:03:00.000Z' }), null)
     assert.equal(await first.deleteExpired({ before: '2026-08-02T20:11:00.000Z', limit: 10 }), 1)
   } finally {
-    await client.v2OidcAuthorization.deleteMany({ where: { stateHash } })
     await client.$disconnect()
   }
 })

@@ -1,9 +1,8 @@
-import { calculateCanonicalHash, stableSerialize } from '../domain/canonical-hash.ts'
+import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { createEditCommand, type CommandActor } from '../domain/edit-command.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createProjectLutSelection, projectLutRef, type ProjectLutSelectionRequest } from '../domain/project-lut-selection.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
-import { createProjectSnapshot } from '../domain/project-snapshot.ts'
+import { reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import { createProjectLutSelectionImpact } from '../domain/project-lut-selection-impact.ts'
 import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
@@ -54,7 +53,7 @@ function commandActor(
 
 export function setProjectLutSelectionService(dependencies: {
   repository: ProjectLutSelectionRepository
-  createId: (kind: 'command' | 'version' | 'selection' | 'snapshot') => string
+  createId: (kind: 'command' | 'version' | 'selection' | 'snapshot' | 'state' | 'materialization') => string
   createEventId: () => string
   clock?: () => Date
 }) {
@@ -92,8 +91,9 @@ export function setProjectLutSelectionService(dependencies: {
     }
     const context = await dependencies.repository.readContext({ workspaceId, projectId, requested })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Project LUT selection context was not found')
-    if (context.currentVersion.id !== baseVersionId || context.currentVersion.baseHash !== baseHash) throw new DomainError('VERSION_CONFLICT', 'Project LUT selection base version is stale')
-    const createdAt = clock().toISOString(); const commandId = id(dependencies.createId('command'), 'commandId'); const versionId = id(dependencies.createId('version'), 'versionId'); const snapshotId = id(dependencies.createId('snapshot'), 'snapshotId')
+    const parent = context.parent; const currentVersion = parent.version
+    if (currentVersion.id !== baseVersionId || currentVersion.baseHash !== baseHash) throw new DomainError('VERSION_CONFLICT', 'Project LUT selection base version is stale')
+    const createdAt = clock().toISOString(); const commandId = id(dependencies.createId('command'), 'commandId'); const versionId = id(dependencies.createId('version'), 'versionId'); const snapshotId = id(dependencies.createId('snapshot'), 'snapshotId'); const stateId = id(dependencies.createId('state'), 'stateId')
     const intensity = request.intensity ?? context.resolvedLutVersion?.intensity.default ?? 1
     const resolved = context.resolvedLutVersion ? Object.freeze({ mode: 'lut-version' as const, lut: projectLutRef(context.resolvedLutVersion) }) : Object.freeze({ mode: 'none' as const })
     const selection = createProjectLutSelection({
@@ -109,34 +109,24 @@ export function setProjectLutSelectionService(dependencies: {
         resolvedLutRecordHash: selection.resolved.lut.recordHash,
       } : {}),
       intensity, durationFrames: context.currentDurationFrames,
-      proxyVariantId: context.proxyVariantId, outputReferences: context.outputReferences,
+      variantIds: context.variantIds, outputReferences: context.outputReferences,
     })
     const payload = Object.freeze({ schemaVersion: 2 as const, ...requested, intensity, impact })
     const command = createEditCommand({ id: commandId, workspaceId, projectId, baseVersionId, baseHash, author: actor.author, type: 'set-project-lut-selection', scope: { project: true }, payload, ...(request.reason?.trim() ? { reason: request.reason.trim() } : {}), idempotencyKey, createdAt })
-    const editPlan = Object.freeze({ ...context.currentEditPlan, projectVersionId: versionId })
-    const editPlanJson = stableSerialize(editPlan)
-    const editPlanHash = calculateCanonicalHash(editPlan)
-    const editPlanSnapshot = createProjectSnapshot({
-      id: snapshotId, workspaceId, projectId, kind: 'edit-plan',
-      contentSchemaVersion: context.currentEditPlanSchemaVersion,
-      contentJson: editPlanJson, contentHash: editPlanHash, createdAt,
+    // The LUT lives in its own domain row; the EditPlan is the parent's under the new Version's identity.
+    const bundle = transitionProjectOutputState({
+      parent, command, audit: actor.authenticationAudit ?? null, requestFingerprint,
+      allocation: { workspaceId, projectId, resultVersionId: versionId, stateId, parentVersionId: currentVersion.id, sequence: currentVersion.sequence + 1, createdBy: actor.author.id, createdAt },
+      editPlanSnapshot: reidentifiedEditPlanSnapshot(parent, { snapshotId, versionId, createdAt }),
+      createMaterializationId: () => id(dependencies.createId('materialization'), 'materializationId'),
     })
-    const version = createProjectVersion({
-      id: versionId, workspaceId, projectId, sequence: context.currentVersion.sequence + 1, parentVersionId: context.currentVersion.id,
-      snapshotRefs: { ...context.currentVersion.snapshotRefs, editPlan: snapshotId },
-      baseHash: calculateCanonicalHash({ schemaVersion: 'project-version-lut-selection/v2', previousBaseHash: context.currentVersion.baseHash, commandId, selectionHash: selection.selectionHash, impactHash: impact.impactHash, editPlanHash }),
-      createdBy: actor.author.id, commandId, createdAt,
-    })
+    const version = bundle.version
     const event = createPublicEvent({
       id: dependencies.createEventId(), type: 'project.version.created', version: '1.0.0', workspaceId, occurredAt: createdAt, sequence: version.sequence,
       actor: actor.author.type === 'api-client' ? { clientId: actor.author.id, ...(actor.author.delegatedUserId ? { userId: actor.author.delegatedUserId } : {}) } : { userId: actor.author.id },
       resource: { type: 'project-version', id: version.id }, data: { projectId, sequence: version.sequence, parentVersionId: version.parentVersionId, baseHash: version.baseHash, commandId, commandType: command.type, selectionHash: selection.selectionHash, commandImpactHash: impact.impactHash, artifactInvalidationCount: impact.affectedArtifacts.length, createdAt },
     })
-    return dependencies.repository.commitOrReplay({
-      command,
-      ...(actor.authenticationAudit ? { authenticationAudit: actor.authenticationAudit } : {}),
-      version, editPlanSnapshot, selection, requestFingerprint, event,
-    })
+    return dependencies.repository.commitOrReplay({ bundle, selection, event })
   }
 }
 

@@ -8,7 +8,8 @@ import LogoutButton from '@/components/LogoutButton'
 import SyntheticPhaseGatePanel from '@/components/SyntheticPhaseGatePanel'
 import TransformationReviewPanel from '@/components/TransformationReviewPanel'
 import type { VisibleState } from '@/v2/domain/visible-state'
-import { createEditorReads, createLatestReadFence, type EditorReads, type ReadFailure } from '@/app/_operator/editor-reads'
+import type { ProjectReviewAvailability } from '@/v2/application/ports/project-workspace-query-repository'
+import { createEditorReads, createLatestReadFence, workspaceReviewReadTargets, type EditorReads, type ReadFailure } from '@/app/_operator/editor-reads'
 
 /** What the operator is told about a read that failed — never a stack, a body or a token. */
 function describeReviewFailure(failure: ReadFailure): string {
@@ -55,7 +56,7 @@ const DIRECTOR_DESTINATION_TYPE: Readonly<Partial<Record<
   booking: 'calendar', download: 'file',
 }
 
-interface ApiEnvelope<T> { data?: T; error?: { message?: string } }
+interface ApiEnvelope<T> { data?: T; error?: { message?: string; details?: { reason?: string } } }
 interface MediaRecord {
   id: string; role: 'source-master' | 'source-audio' | 'source-image' | 'editing-proxy' | 'editorial-proxy' | 'final-output'; originalFileName: string; artifactId: string;
   manifestId: string; mediaType: string; container: string; byteSize: string; sha256: string; status: string;
@@ -601,7 +602,7 @@ interface ContiguousExtractionData {
 interface DirectorRunSummary {
   id: string; status: 'planned' | 'rendering' | 'succeeded' | 'failed'; plannerVersion: string; criticVersion: string;
   baseVersionId: string; resultVersionId: string; treatmentSnapshotId: string; storySnapshotId: string; qualitySnapshotId: string;
-  qualityStatus: 'approved' | 'approved-with-warnings' | 'blocked'; qualityScore: number; decisionCount: number; assumptionCount: number;
+  qualityStatus: 'approved' | 'approved-with-warnings' | 'review-required' | 'blocked'; qualityScore: number; decisionCount: number; assumptionCount: number;
   uncertainties: readonly {
     id: string; label: string; type: string; band: 'review' | 'block'; value: number;
     reasonCodes: readonly string[]; calibrationVersion: string; evidenceCount: number
@@ -609,8 +610,18 @@ interface DirectorRunSummary {
   subtitleCueCount: number; transitionCount: number; automaticZoom: boolean; createdAt: string
   objective: StrategicObjectiveId; objectiveVersion: number; rubricRef: string; supersedesRunId?: string
 }
+type WorkspaceOutputPurposeVerdict = { status: 'allowed' } | { status: 'blocked'; reason: string }
+/** One output of the current version: the stable variant every variant-specific request names, and what each purpose answers for it. */
+interface WorkspaceOutput {
+  variantId: string
+  aspectRatio?: string
+  consumption: { render: WorkspaceOutputPurposeVerdict; critic: WorkspaceOutputPurposeVerdict; final: WorkspaceOutputPurposeVerdict }
+}
 interface WorkspaceData {
+  reviewAvailability: Readonly<ProjectReviewAvailability>
   project: { id: string; name: string; status: string; objective?: string; format?: string; locale?: string; createdAt: string }
+  /** Absent from a server that predates multi-output workspaces: the page then has no output to name. */
+  outputs?: readonly WorkspaceOutput[]
   version?: { id: string; sequence: number; baseHash: string; createdAt: string }
   brief?: Record<string, unknown>
   editPlan?: { id: string; state: string; fps: number; durationFrames: number; clipCount: number; cutCount: number; automaticZoom: boolean; subtitleFaceProtection: boolean }
@@ -695,7 +706,8 @@ interface ReviewSessionData {
 type ReviewApplicationScopeKind = 'frame' | 'region' | 'clip' | 'scene' | 'range' | 'project' | 'formats' | 'locales' | 'recipes'
 interface ReviewVersionData { id: string; sequence: number; createdAt: string; current: boolean; previewAvailable: boolean }
 interface ReviewScopeContextData {
-  formatId: string; localeId: string; recipeIds: string[];
+  /** Aspect ratio of the reviewed output (display only); scopes name outputs by `variantId`. */
+  formatId: string; variantId: string; variantIds: string[]; localeId: string; recipeIds: string[];
   options: { kind: ReviewApplicationScopeKind; affectedCount: number; enabled: boolean }[]
 }
 interface ReviewSceneData { id: string; label: string; startFrame: number; endFrame: number }
@@ -1016,8 +1028,69 @@ function readableBytes(value: number | string): string {
   return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`
 }
 
+// Refusals the API explains with a stable reason: the operator reads what to do next, not the generic status text.
+const REFUSAL_REASON_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
+  'copy-requires-editorial-cut':
+    'Esta cópia ainda não recebeu o corte editorial. Aplique o corte editorial na cópia antes de renderizar, revisar ou ajustar a edição.',
+  'derived-source-perception-authority-required':
+    'A exportação final de uma cópia com corte editorial ainda não está disponível: a cópia precisa ter a própria autoridade de percepção (rostos) antes de exportar. Renderização e revisão seguem liberadas.',
+  'empty-project':
+    'A saída deste projeto ainda não tem conteúdo. Ingira a mídia e monte a linha do tempo (ou crie a variante de saída) antes de renderizar, revisar ou exportar.',
+  'output-variant-required':
+    'Este projeto tem mais de uma saída. Indique a variante exata antes de renderizar, revisar ou exportar.',
+  'output-variant-unknown':
+    'A variante pedida não existe nesta versão do projeto. Atualize a página e escolha uma das saídas da versão.',
+  'output-variant-ambiguous':
+    'Duas saídas deste projeto têm o mesmo formato, então não dá para distinguir qual delas renderizar, revisar ou exportar. Mantenha um único formato por saída.',
+  'normalization-required':
+    'A mídia deste projeto ainda não foi normalizada. Conclua a ingestão da mídia antes de renderizar, revisar ou exportar.',
+  'audio-authority-required':
+    'O áudio deste projeto ainda não tem autoridade confirmada. Conclua a normalização do áudio antes de renderizar, revisar ou exportar.',
+  'output-not-consumable':
+    'A saída desta versão não pode ser renderizada, revisada nem exportada. Confira o formato de saída do projeto e a versão escolhida.',
+  'output-version-missing':
+    'A versão pedida não existe neste projeto. Atualize a página e escolha uma versão existente.',
+})
+
+// The edit endpoints name the output they act on by its stable variant id. With one output that is the output; with several it is
+// the one selected in the page; a version with no output has nothing to name and nothing guesses one.
+const OUTPUT_FORMAT_REQUIRED_MESSAGE =
+  'A versão atual ainda não tem nenhuma saída. Crie uma saída do projeto para liberar a edição manual e a restauração de versões.'
+
+/** Compact selector of the output a request is about, shown only when the current version has several. */
+function OutputSelector({ outputs, selectedId, onSelect }: {
+  outputs: readonly WorkspaceOutput[]
+  selectedId: string | null
+  onSelect: (variantId: string) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Saída do projeto" data-testid="output-selector">
+      {outputs.map((output) => {
+        const selected = output.variantId === selectedId
+        return (
+          <button
+            key={output.variantId}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            title={output.variantId}
+            data-testid={'output-option-' + output.variantId}
+            onClick={() => onSelect(output.variantId)}
+            className={'rounded-md border px-2.5 py-1.5 font-mono text-[10px] ' + (selected
+              ? 'border-[#d9a937]/50 bg-[#d9a937]/[0.12] text-[#e5bd5c]'
+              : 'border-white/[0.1] text-[#aaa49a] hover:border-white/[0.2]')}
+          >
+            {output.aspectRatio ?? output.variantId}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function apiError<T>(payload: ApiEnvelope<T>, fallback: string): string {
-  return payload.error?.message?.trim() || fallback
+  const reason = payload.error?.details?.reason
+  return (typeof reason === 'string' ? REFUSAL_REASON_MESSAGES[reason] : undefined) || payload.error?.message?.trim() || fallback
 }
 
 function localSignedUrl(value: string): string {
@@ -1107,6 +1180,7 @@ export default function ProjectWorkspacePage() {
   const previewSeekSamples = useRef<number[]>([])
   const preservedPreviewTimeMs = useRef<number | null>(null)
   const selectedReviewVersionId = useRef<string | null>(null)
+  const manuallySelectedReviewVersionId = useRef<string | null>(null)
   const sourceCleanupIdempotencyKeys = useRef(new Map<string, string>())
   const validationDecisionIdempotencyKeys =
     useRef(new Map<string, string>())
@@ -1119,6 +1193,18 @@ export default function ProjectWorkspacePage() {
     key: string
   } | null>(null)
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null)
+  // The output every variant-specific request names. One output: that one. Several: the one the operator chose (component state
+  // only), the first until then. The reads and writes name its stable variant id, never its aspect ratio.
+  const [chosenOutputId, setChosenOutputId] = useState<string | null>(null)
+  const workspaceOutputs = useMemo<readonly WorkspaceOutput[]>(() => workspace?.outputs ?? [], [workspace?.outputs])
+  const selectedOutput = useMemo<WorkspaceOutput | null>(
+    () => workspaceOutputs.find((output) => output.variantId === chosenOutputId) ?? workspaceOutputs[0] ?? null,
+    [workspaceOutputs, chosenOutputId],
+  )
+  const outputVariantId = selectedOutput?.variantId ?? null
+  const outputAspectRatio = selectedOutput?.aspectRatio ?? null
+  const selectedOutputIdRef = useRef<string | null>(null)
+  selectedOutputIdRef.current = outputVariantId
   const [projectPolicy, setProjectPolicy] = useState<ProjectPolicyOverridesData | null>(null)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
@@ -1293,6 +1379,8 @@ export default function ProjectWorkspacePage() {
         throw new Error(result.failure.message)
       }
       if (!workspaceRead.ok || !policyRead.ok) return
+      if (workspaceRead.data.project.id !== projectId) throw new Error('O workspace retornou outro projeto.')
+      workspaceReviewReadTargets(workspaceRead.data.version?.id ?? null, workspaceRead.data.reviewAvailability, null)
       setWorkspace(workspaceRead.data)
       setProjectPolicy(policyRead.data)
       const latest = workspaceRead.data.operations[0]
@@ -1316,8 +1404,9 @@ export default function ProjectWorkspacePage() {
         const total = latest.progress?.total ?? 6
         setUploadProgress(80 + Math.round((completed / total) * 20))
       }
+      return workspaceRead.data
     } catch (error) {
-      if (!quiet) setNotice(error instanceof Error ? error.message : 'Não foi possível carregar o workspace.')
+      setNotice(error instanceof Error ? error.message : 'Não foi possível carregar o workspace.')
     } finally {
       if (!quiet) setLoading(false)
     }
@@ -1353,6 +1442,11 @@ export default function ProjectWorkspacePage() {
   useEffect(() => { uploadPhaseRef.current = uploadPhase }, [uploadPhase])
   useEffect(() => {
     reads.setScope({ projectId, sessionEpoch: sessionEpochRef.current })
+    manuallySelectedReviewVersionId.current = null
+    selectedReviewVersionId.current = null
+    setWorkspace(null)
+    setReview(null)
+    setProxyReview(null)
     reviewReadFenceRef.current.invalidate()
     proxyReviewReadFenceRef.current.invalidate()
   }, [projectId, reads])
@@ -1749,6 +1843,8 @@ export default function ProjectWorkspacePage() {
     try {
       const query = new URLSearchParams({ limit: '50' })
       if (projectVersionId) query.set('projectVersionId', projectVersionId)
+      // The review is about one output: its proxy is the preview and its stable variant is what the scopes name.
+      if (selectedOutputIdRef.current) query.set('variantId', selectedOutputIdRef.current)
       const result = await reads.read<ProjectReviewData>({
         name: 'annotations',
         url: `/v1/projects/${encodeURIComponent(projectId)}/annotations?${query.toString()}`,
@@ -1787,6 +1883,8 @@ export default function ProjectWorkspacePage() {
     try {
       const query = new URLSearchParams()
       if (projectVersionId) query.set('projectVersionId', projectVersionId)
+      // A proxy review belongs to one output: the selected output's stable variant id names it.
+      if (selectedOutputIdRef.current) query.set('variantId', selectedOutputIdRef.current)
       const suffix = query.size ? `?${query.toString()}` : ''
       const result = await reads.read<{ review: ProxyReviewData }>({
         name: 'proxy-reviews',
@@ -1797,16 +1895,6 @@ export default function ProjectWorkspacePage() {
       if (!proxyReviewReadFenceRef.current.isCurrent(readTicket)) return
       if (!result.ok && result.failure.dropped) return
       if (!result.ok && result.failure.kind === 'auth') { router.replace('/login'); return }
-      if (!result.ok && result.failure.kind === 'not-found') {
-        // The API answers PROJECT_NOT_FOUND both for "no proxy review yet" and for a
-        // project this session cannot see, so the code alone cannot tell them apart.
-        // This loader only runs after the workspace read of the same project succeeded
-        // in this session (see the effect below), which is what makes 404 here mean
-        // "no report for this version" rather than "nothing to show".
-        setProxyReview(null)
-        setProxyReviewFailure(null)
-        return
-      }
       if (!result.ok) {
         setProxyReview(null)
         setProxyReviewFailure(result.failure)
@@ -1824,12 +1912,36 @@ export default function ProjectWorkspacePage() {
   }, [projectId, reads, router])
 
   const workspaceVersionId = workspace?.version?.id
-  const workspaceHasMedia = (workspace?.media.length ?? 0) > 0
+  const refreshWorkspaceReviews = useCallback(async (snapshot: WorkspaceData, quiet = true) => {
+    if (snapshot.project.id !== projectId) return
+    const { annotationsVersionId, proxyReviewVersionId: reportVersionId } = workspaceReviewReadTargets(
+      snapshot.version?.id ?? null, snapshot.reviewAvailability, manuallySelectedReviewVersionId.current,
+    )
+    if (!annotationsVersionId) {
+      reviewReadFenceRef.current.invalidate()
+      setReview(null)
+      setReviewLoading(false)
+      setReviewFailure(null)
+    }
+    if (!reportVersionId) {
+      proxyReviewReadFenceRef.current.invalidate()
+      setProxyReview(null)
+      setProxyReviewLoading(false)
+      setProxyReviewFailure(null)
+    }
+    await Promise.all([
+      ...(annotationsVersionId ? [loadReview(quiet, annotationsVersionId)] : []),
+      ...(reportVersionId ? [loadProxyReview(quiet, reportVersionId)] : []),
+    ])
+  }, [loadReview, loadProxyReview, projectId])
+  const reviewAvailabilityKey = JSON.stringify(workspace?.reviewAvailability ?? null)
+  const reviewWorkspaceRef = useRef(workspace)
+  reviewWorkspaceRef.current = workspace
   useEffect(() => {
-    if (!workspaceVersionId || !workspaceHasMedia) return
-    void loadReview(false, workspaceVersionId)
-    void loadProxyReview(true, workspaceVersionId)
-  }, [loadProxyReview, loadReview, workspaceVersionId, workspaceHasMedia])
+    const snapshot = reviewWorkspaceRef.current
+    if (snapshot) void refreshWorkspaceReviews(snapshot, false)
+    // Choosing another output reads that output's review (its own proxy and staleness).
+  }, [refreshWorkspaceReviews, reviewAvailabilityKey, outputVariantId])
 
   const activeOperation = workspace?.operations[0]
   const operationActive = Boolean(activeOperation && !activeOperation.visibleState.terminal)
@@ -1842,15 +1954,14 @@ export default function ProjectWorkspacePage() {
     // the previous one settled, so a slow server never stacks rounds, and the
     // coordinator pauses the cycle while the tab is hidden.
     const handle = reads.poll(async () => {
+      const snapshot = await loadWorkspace(true)
       await Promise.all([
-        loadWorkspace(true),
-        loadReview(true, selectedReviewVersionId.current ?? undefined),
-        loadProxyReview(true, workspaceVersionId),
+        ...(snapshot ? [refreshWorkspaceReviews(snapshot)] : []),
         loadSourceCleanups(true),
       ])
     }, { intervalMs: 2500, isTerminal: () => activeOperationTerminalRef.current })
     return () => handle.stop()
-  }, [activeOperationId, activeOperationTerminal, loadProxyReview, loadReview, loadSourceCleanups, loadWorkspace, reads, workspaceVersionId])
+  }, [activeOperationId, activeOperationTerminal, refreshWorkspaceReviews, loadSourceCleanups, loadWorkspace, reads])
 
   const finalOutput = useMemo(() => [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'final-output'), [workspace])
   const editingProxy = useMemo(() => {
@@ -2170,12 +2281,17 @@ export default function ProjectWorkspacePage() {
     }
   }
 
+
   async function submitManualEdit(input: {
     action: 'apply' | 'undo' | 'redo'
     operation?: ManualOperation
     targetVersionId?: string
   }): Promise<void> {
     if (!manualTimeline || !workspace?.version || manualBusy) return
+    if (!outputVariantId) {
+      setNotice(OUTPUT_FORMAT_REQUIRED_MESSAGE)
+      return
+    }
     const selectedId = input.operation?.clipId ?? manualSelectedClipId ?? 'project-edit-plan'
     const video = previewVideo.current
     if (video) {
@@ -2198,7 +2314,7 @@ export default function ProjectWorkspacePage() {
             baseVersionId: manualTimeline.timeline.versionId,
             baseHash: manualTimeline.baseHash,
             expectedRevision: manualTimeline.timeline.revision,
-            variantId: workspace.project.format ?? '9:16',
+            variantId: outputVariantId,
             targetId: selectedId,
             ...(input.operation ? { operation: input.operation } : {}),
             ...(input.targetVersionId ? { targetVersionId: input.targetVersionId } : {}),
@@ -2223,9 +2339,9 @@ export default function ProjectWorkspacePage() {
           : `${input.action === 'undo' ? 'Undo' : 'Redo'} registrado como versão ${result.version.sequence}.`,
       )
       reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
-      await loadWorkspace(true)
+      const refreshedWorkspace = await loadWorkspace(true)
       await loadManualTimeline(true)
-      await loadReview(true)
+      if (refreshedWorkspace) await refreshWorkspaceReviews(refreshedWorkspace)
     } catch (error) {
       preservedPreviewTimeMs.current = null
       setNotice(error instanceof Error ? error.message : 'Não foi possível aplicar a edição manual.')
@@ -2370,6 +2486,7 @@ export default function ProjectWorkspacePage() {
       const loadProxy = async (versionId: string): Promise<string | undefined> => {
         try {
           const reviewQuery = new URLSearchParams({ limit: '1', projectVersionId: versionId })
+          if (outputVariantId) reviewQuery.set('variantId', outputVariantId)
           const versionReview = await requestJson<ProjectReviewData>(
             `/v1/projects/${encodeURIComponent(projectId)}/annotations?${reviewQuery.toString()}`,
           )
@@ -2399,6 +2516,10 @@ export default function ProjectWorkspacePage() {
     action: 'accept' | 'reopen' | 'restore',
   ): Promise<void> {
     if (!versionComparison || compareBusy) return
+    if (!outputVariantId) {
+      setNotice(OUTPUT_FORMAT_REQUIRED_MESSAGE)
+      return
+    }
     setCompareBusy(true)
     setNotice(null)
     try {
@@ -2422,7 +2543,7 @@ export default function ProjectWorkspacePage() {
             baseVersionId: versionComparison.current.versionId,
             baseHash: versionComparison.current.baseHash,
             expectedRevision: versionComparison.current.revision,
-            variantId: workspace?.project.format ?? '9:16',
+            variantId: outputVariantId,
           }),
         },
       )
@@ -2436,9 +2557,9 @@ export default function ProjectWorkspacePage() {
       setVersionComparison(null)
       setComparePreviews({})
       reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
-      await loadWorkspace(true)
+      const refreshedWorkspace = await loadWorkspace(true)
       await loadManualTimeline(true)
-      await loadReview(true)
+      if (refreshedWorkspace) await refreshWorkspaceReviews(refreshedWorkspace)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível registrar a decisão da comparação.')
       await loadManualTimeline(true)
@@ -2521,6 +2642,7 @@ export default function ProjectWorkspacePage() {
     setReviewVersionLoading(true)
     setNotice(null)
     resetReviewElementResolution()
+    manuallySelectedReviewVersionId.current = version.id
     const loaded = await loadReview(false, version.id)
     if (!loaded) preservedPreviewTimeMs.current = null
     setReviewVersionLoading(false)
@@ -2728,6 +2850,8 @@ export default function ProjectWorkspacePage() {
           headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
           body: JSON.stringify({
             projectVersionId: review.session.projectVersionId,
+            // The output the displayed proxy was made for (stable variant id); the format scope names outputs by the same ids.
+            variantId: review.scopeContext.variantId,
             proxyArtifactId: review.session.proxyArtifactId,
             proxyHash: review.session.proxyHash,
             frame,
@@ -2735,7 +2859,11 @@ export default function ProjectWorkspacePage() {
             scope: reviewScope,
             ...(reviewScope === 'region' && reviewRegion ? { region: reviewRegion } : {}),
             targetIds: reviewScope === 'scene' ? [scene!.id] : selectedReviewElement && reviewElementConfirmed ? [selectedReviewElement.elementId] : [],
-            applicationScope: { kind: reviewApplicationScope, global: reviewGlobal },
+            applicationScope: {
+              kind: reviewApplicationScope,
+              global: reviewGlobal,
+              ...(reviewGlobal && reviewApplicationScope === 'formats' ? { formatIds: review.scopeContext.variantIds } : {}),
+            },
             ...(reviewGlobal ? { confirmedGlobal: reviewGlobalConfirmed } : {}),
             screenshotRef: captureReviewScreenshot(),
             text: reviewText.trim(),
@@ -2799,7 +2927,8 @@ export default function ProjectWorkspacePage() {
       setReviewPatch(result.proposal)
       setNotice(`Versão ${result.version.sequence} criada. O novo preview entrou na fila de renderização.`)
       reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
-      await Promise.all([loadWorkspace(true), loadReview(true)])
+      const refreshedWorkspace = await loadWorkspace(true)
+      if (refreshedWorkspace) await refreshWorkspaceReviews(refreshedWorkspace)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível aplicar o ajuste.')
     } finally {
@@ -2879,7 +3008,8 @@ export default function ProjectWorkspacePage() {
       setReviewBatchSelection([])
       setNotice(`Versão ${result.version.sequence} criada com ${result.batch.items.filter((item) => item.status === 'applied').length} ajustes atômicos. O preview entrou na fila.`)
       reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
-      await Promise.all([loadWorkspace(true), loadReview(true)])
+      const refreshedWorkspace = await loadWorkspace(true)
+      if (refreshedWorkspace) await refreshWorkspaceReviews(refreshedWorkspace)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível aplicar o lote de revisão.')
     } finally {
@@ -3075,11 +3205,12 @@ export default function ProjectWorkspacePage() {
   async function exportFinal() {
     if (
       !workspace?.version ||
-      !workspace.project.format ||
+      !outputVariantId ||
+      !outputAspectRatio ||
       !latestDirectorRun ||
       latestDirectorRun.resultVersionId !== workspace.version.id ||
       latestDirectorRun.status !== 'succeeded' ||
-      latestDirectorRun.qualityStatus === 'blocked' ||
+      !['approved', 'approved-with-warnings', 'review-required'].includes(latestDirectorRun.qualityStatus) ||
       reviewLoading ||
       reviewFailure !== null ||
       proxyReviewFailure !== null ||
@@ -3099,7 +3230,8 @@ export default function ProjectWorkspacePage() {
         body: JSON.stringify({
           projectVersionId: workspace.version.id,
           projectVersionHash: workspace.version.baseHash,
-          format: workspace.project.format,
+          format: outputAspectRatio,
+          variantId: outputVariantId,
           approval: { approved: true, note: 'Versão revisada no workspace e aprovada para exportação final.' },
         }),
       })
@@ -3357,7 +3489,7 @@ export default function ProjectWorkspacePage() {
         </div>
         <div className="flex items-center gap-2">
           <ProjectPolicyStatus policy={projectPolicy} />
-          <span className="hidden rounded-lg border border-[#d8a936]/20 bg-[#d8a936]/[0.07] px-2.5 py-1.5 text-[10px] font-semibold text-[#d5ad4d] sm:block">{workspace.project.format ?? '—'}</span>
+          <span className="hidden rounded-lg border border-[#d8a936]/20 bg-[#d8a936]/[0.07] px-2.5 py-1.5 text-[10px] font-semibold text-[#d5ad4d] sm:block" data-testid="selected-output-ratio">{outputAspectRatio ?? '—'}</span>
           <span className="hidden items-center gap-2 rounded-lg border border-white/[0.07] px-2.5 py-1.5 text-[10px] text-[#77736b] md:flex"><i className="h-1.5 w-1.5 rounded-full bg-[#5fbd7e]" /> API V2</span>
           <LogoutButton />
         </div>
@@ -3371,7 +3503,7 @@ export default function ProjectWorkspacePage() {
           <h2 className="mt-3 text-xl font-semibold tracking-[-0.03em]">A intenção vem antes do corte.</h2>
           <dl className="mt-7 space-y-5">
             <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">Objetivo</dt><dd className="mt-1.5 text-sm text-[#d1cbc1]">{workspace.project.objective ?? 'Não informado'}</dd></div>
-            <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">Formato mestre</dt><dd className="mt-1.5 flex items-center gap-2 text-sm text-[#d1cbc1]"><span className="grid h-7 w-7 place-items-center rounded-md border border-[#d9a937]/25 text-[9px] text-[#d9ad48]">{workspace.project.format}</span> Canvas e áreas seguras</dd></div>
+            <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">{workspaceOutputs.length > 1 ? 'Saída em edição' : 'Formato mestre'}</dt>{workspaceOutputs.length > 1 ? <dd className="mt-1.5"><OutputSelector outputs={workspaceOutputs} selectedId={outputVariantId} onSelect={setChosenOutputId} /></dd> : <dd className="mt-1.5 flex items-center gap-2 text-sm text-[#d1cbc1]"><span className="grid h-7 min-w-7 place-items-center rounded-md border border-[#d9a937]/25 px-1 text-[9px] text-[#d9ad48]">{outputAspectRatio ?? '—'}</span> Canvas e áreas seguras</dd>}</div>
             <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">Idioma</dt><dd className="mt-1.5 text-sm text-[#d1cbc1]">{workspace.project.locale ?? 'pt-BR'}</dd></div>
           </dl>
           <div className="mt-7 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4" data-testid="production-brief-state">
@@ -3447,7 +3579,7 @@ export default function ProjectWorkspacePage() {
           </div>
           <div className="mt-5 rounded-xl border border-[#6962de]/15 bg-[#6962de]/[0.045] p-4">
             <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#8c85e8]">Gate atual</p>
-            <p className="mt-2 text-xs leading-5 text-[#8f8aa4]">{latestDirectorRun ? `DirectorRun ${latestDirectorRun.qualityStatus === 'approved' ? 'aprovado' : 'aprovado com ressalvas'} pelo critic, com ${latestDirectorRun.decisionCount} decisões editoriais persistidas.` : workspace.editPlan?.state === 'compiled' ? `Corte editorial V2 aplicado em ${workspace.editPlan.clipCount} trechos, com ${workspace.editPlan.cutCount} decisões persistidas.` : 'Ingestão verificável: master, proxy de edição, transcript e lineage.'}</p>
+            <p className="mt-2 text-xs leading-5 text-[#8f8aa4]">{latestDirectorRun ? `DirectorRun ${latestDirectorRun.qualityStatus === 'review-required' ? 'com segurança facial desconhecida (na exportação final cada legenda é certificada por trecho; as que não puderem ser são omitidas e listadas para revisão)' : latestDirectorRun.qualityStatus === 'approved' ? 'aprovado' : latestDirectorRun.qualityStatus === 'approved-with-warnings' ? 'aprovado com ressalvas' : 'bloqueado'} pelo critic, com ${latestDirectorRun.decisionCount} decisões editoriais persistidas.` : workspace.editPlan?.state === 'compiled' ? `Corte editorial V2 aplicado em ${workspace.editPlan.clipCount} trechos, com ${workspace.editPlan.cutCount} decisões persistidas.` : 'Ingestão verificável: master, proxy de edição, transcript e lineage.'}</p>
             {latestDirectorRun?.uncertainties.length ? (
               <div className="mt-3 flex flex-wrap gap-1.5" data-testid="director-confidence-uncertainties">
                 {latestDirectorRun.uncertainties.map((uncertainty) => (
@@ -3465,7 +3597,7 @@ export default function ProjectWorkspacePage() {
             {workspace.editPlan?.state === 'compiled' ? <div className="mt-3 flex flex-wrap gap-2"><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Zoom automático {workspace.editPlan.automaticZoom ? 'ativo' : 'desativado'}</span><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Proteção facial {workspace.editPlan.subtitleFaceProtection ? 'ativa' : 'pendente'}</span></div> : null}
             {latestDirectorRun ? <div className="mt-3 grid grid-cols-2 gap-2 text-center"><div className="rounded-lg border border-white/[0.07] bg-black/10 px-2 py-2"><span className="block text-sm font-semibold text-[#d9b45b]">{latestDirectorRun.subtitleCueCount}</span><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f6a78]">blocos de legenda</span></div><div className="rounded-lg border border-white/[0.07] bg-black/10 px-2 py-2"><span className="block text-sm font-semibold text-[#d9b45b]">{latestDirectorRun.transitionCount}</span><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f6a78]">transições</span></div></div> : null}
             {workspace.editPlan?.state === 'compiled' && transcript ? <button className="mt-4 w-full rounded-lg bg-[#dbae3f] px-3 py-2.5 text-xs font-semibold text-[#171207] transition hover:bg-[#e5bb50] disabled:cursor-not-allowed disabled:opacity-45" disabled={directorRunning || exportRunning || operationActive} onClick={() => void runDirector()} type="button">{directorRunning ? 'Diretor planejando…' : latestDirectorRun ? 'Executar nova direção V2' : 'Executar Diretor V2'}</button> : null}
-            {latestDirectorRun?.status === 'succeeded' && latestDirectorRun.resultVersionId === workspace.version?.id && latestDirectorRun.qualityStatus !== 'blocked' ? <button className="mt-2 w-full rounded-lg border border-[#62b47d]/25 bg-[#62b47d]/10 px-3 py-2.5 text-xs font-semibold text-[#8bd0a2] transition hover:bg-[#62b47d]/15 disabled:cursor-not-allowed disabled:opacity-45" disabled={exportRunning || reviewLoading || reviewFailure !== null || proxyReviewFailure !== null || proxyReviewLoading || proxyReview?.projectVersionId !== workspace.version?.id || !proxyReview.finalAllowed || operationActive} onClick={() => void exportFinal()} type="button">{exportRunning ? 'Registrando aprovação…' : reviewLoading || reviewFailure || proxyReviewFailure || proxyReviewLoading ? 'Laudo indisponível' : proxyReview?.finalAllowed ? finalOutput ? 'Exportar novamente em alta resolução' : 'Aprovar e exportar MP4 final' : 'Aguardando liberação do proxy'}</button> : null}
+            {latestDirectorRun?.status === 'succeeded' && latestDirectorRun.resultVersionId === workspace.version?.id && ['approved', 'approved-with-warnings', 'review-required'].includes(latestDirectorRun.qualityStatus) ? <button className="mt-2 w-full rounded-lg border border-[#62b47d]/25 bg-[#62b47d]/10 px-3 py-2.5 text-xs font-semibold text-[#8bd0a2] transition hover:bg-[#62b47d]/15 disabled:cursor-not-allowed disabled:opacity-45" disabled={exportRunning || reviewLoading || reviewFailure !== null || proxyReviewFailure !== null || proxyReviewLoading || proxyReview?.projectVersionId !== workspace.version?.id || !proxyReview.finalAllowed || operationActive} onClick={() => void exportFinal()} type="button">{exportRunning ? 'Registrando aprovação…' : reviewLoading || reviewFailure || proxyReviewFailure || proxyReviewLoading ? 'Laudo indisponível' : proxyReview?.finalAllowed ? finalOutput ? 'Exportar novamente em alta resolução' : 'Aprovar e exportar MP4 final' : 'Aguardando liberação do proxy'}</button> : null}
             {finalOutput ? <a className="mt-2 block w-full rounded-lg border border-white/[0.08] px-3 py-2.5 text-center text-xs text-[#aaa49a] transition hover:border-white/[0.16] hover:text-white" download={finalOutput.originalFileName} href={`/v1/artifacts/${encodeURIComponent(finalOutput.artifactId)}/content`}>Baixar MP4 final</a> : null}
           </div>
           {workspace.version ? <SyntheticPhaseGatePanel
@@ -3515,10 +3647,15 @@ export default function ProjectWorkspacePage() {
                 </div>
                 {[...proxyReview.technicalIssues, ...proxyReview.criticIssues].length ? (
                   <div className="mt-3 space-y-1.5" data-testid="proxy-review-issues">
-                    {[...proxyReview.technicalIssues, ...proxyReview.criticIssues].slice(0, 4).map((issue) => (
-                      <div className="flex items-start gap-2 border-l border-white/[0.09] pl-2 text-[9px] leading-4 text-[#8e8980]" key={`${issue.code}:${issue.targetId ?? 'proxy'}`}>
+                    {[
+                      ...[...proxyReview.technicalIssues, ...proxyReview.criticIssues].filter((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'),
+                      ...[...proxyReview.technicalIssues, ...proxyReview.criticIssues].filter((issue) => issue.code !== 'FACE_PERCEPTION_UNAVAILABLE').slice(0, 4),
+                    ].map((issue) => (
+                      <div className="flex items-start gap-2 border-l border-white/[0.09] pl-2 text-[9px] leading-4 text-[#8e8980]" key={`${issue.code}:${issue.targetId ?? 'proxy'}:${issue.evidenceRange?.startFrame ?? 'all'}`}>
                         <span className={issue.severity === 'hard' ? 'text-[#dc7777]' : 'text-[#d5ae52]'}>{issue.severity === 'hard' ? '!' : '△'}</span>
-                        <span><span className="font-mono text-[#aaa49a]">{issue.outputSpecId ?? proxyReview.outputSpecId}</span> · {issue.message}{issue.evidenceRange ? ` · frames ${issue.evidenceRange.startFrame}–${issue.evidenceRange.endFrame}` : ''}</span>
+                        <span><span className="font-mono text-[#aaa49a]">{issue.outputSpecId ?? proxyReview.outputSpecId}</span> · {issue.code === 'FACE_PERCEPTION_UNAVAILABLE'
+                          ? `Legenda ${issue.targetId?.replace(/^subtitle:/, '') ?? 'do trecho'} omitida: cobertura facial desconhecida; variante bloqueada para exportação.`
+                          : issue.message}{issue.evidenceRange ? ` · frames ${issue.evidenceRange.startFrame}–${issue.evidenceRange.endFrame}` : ''}</span>
                       </div>
                     ))}
                   </div>
@@ -3548,7 +3685,7 @@ export default function ProjectWorkspacePage() {
 
           <div className="mt-5 flex min-h-[500px] items-center justify-center overflow-hidden rounded-2xl border border-white/[0.08] bg-[#030303] p-4 shadow-[0_30px_80px_rgba(0,0,0,.25)]">
             {editingProxy ? (
-              <div className="relative flex max-h-[560px] max-w-full items-center justify-center overflow-hidden rounded-xl border border-white/[0.1] bg-black" style={{ aspectRatio: (workspace.project.format ?? '16:9').replace(':', ' / ') }}>
+              <div className="relative flex max-h-[560px] max-w-full items-center justify-center overflow-hidden rounded-xl border border-white/[0.1] bg-black" style={{ aspectRatio: (outputAspectRatio ?? '16:9').replace(':', ' / ') }}>
                 <video
                   className="max-h-[560px] max-w-full object-contain"
                   controls
@@ -3663,12 +3800,13 @@ export default function ProjectWorkspacePage() {
                   <p className="mt-1 text-[10px] text-[#706c64]">
                     V{manualTimeline.timeline.revision} · snap 120 ms · S divide · Delete apara · Ctrl+Z desfaz
                   </p>
+                  {!outputVariantId ? <p className="mt-1 text-[10px] text-[#b58d31]" data-testid="manual-format-required">{OUTPUT_FORMAT_REQUIRED_MESSAGE}</p> : null}
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     className="border border-white/[0.08] px-3 py-2 text-[9px] text-[#918b82] hover:border-white/[0.18] hover:text-white disabled:opacity-30"
                     data-testid="manual-undo"
-                    disabled={manualBusy || !undoTargetVersionId}
+                    disabled={manualBusy || !outputVariantId || !undoTargetVersionId}
                     onClick={() => undoTargetVersionId && void submitManualEdit({ action: 'undo', targetVersionId: undoTargetVersionId })}
                     type="button"
                   >
@@ -3677,7 +3815,7 @@ export default function ProjectWorkspacePage() {
                   <button
                     className="border border-white/[0.08] px-3 py-2 text-[9px] text-[#918b82] hover:border-white/[0.18] hover:text-white disabled:opacity-30"
                     data-testid="manual-redo"
-                    disabled={manualBusy || !redoTargetVersionId}
+                    disabled={manualBusy || !outputVariantId || !redoTargetVersionId}
                     onClick={() => redoTargetVersionId && void submitManualEdit({ action: 'redo', targetVersionId: redoTargetVersionId })}
                     type="button"
                   >
@@ -3733,7 +3871,7 @@ export default function ProjectWorkspacePage() {
                       <span className="mr-auto font-mono text-[9px] text-[#8a847b]" data-testid="manual-selected-clip">{manualSelectedClip.id}</span>
                       <button
                         className="border border-white/[0.09] px-3 py-2 text-[9px] text-[#aaa49a] hover:border-[#d9aa3d]/40 hover:text-white disabled:opacity-30"
-                        disabled={manualBusy}
+                        disabled={manualBusy || !outputVariantId}
                         onClick={() => void submitManualEdit({ action: 'apply', operation: { kind: 'trim', clipId: manualSelectedClip.id, edge: 'start', atMs: Math.round((previewVideo.current?.currentTime ?? manualSelectedClip.startMs / 1000) * 1000) } })}
                         type="button"
                       >
@@ -3741,7 +3879,7 @@ export default function ProjectWorkspacePage() {
                       </button>
                       <button
                         className="border border-white/[0.09] px-3 py-2 text-[9px] text-[#aaa49a] hover:border-[#d9aa3d]/40 hover:text-white disabled:opacity-30"
-                        disabled={manualBusy}
+                        disabled={manualBusy || !outputVariantId}
                         onClick={() => void submitManualEdit({ action: 'apply', operation: { kind: 'split', clipId: manualSelectedClip.id, atMs: Math.round((previewVideo.current?.currentTime ?? manualSelectedClip.startMs / 1000) * 1000) } })}
                         type="button"
                       >
@@ -3749,7 +3887,7 @@ export default function ProjectWorkspacePage() {
                       </button>
                       <button
                         className="border border-white/[0.09] px-3 py-2 text-[9px] text-[#aaa49a] hover:border-[#d9aa3d]/40 hover:text-white disabled:opacity-30"
-                        disabled={manualBusy}
+                        disabled={manualBusy || !outputVariantId}
                         onClick={() => void submitManualEdit({ action: 'apply', operation: { kind: 'trim', clipId: manualSelectedClip.id, edge: 'end', atMs: Math.round((previewVideo.current?.currentTime ?? manualSelectedClip.endMs / 1000) * 1000) } })}
                         type="button"
                       >
@@ -3760,7 +3898,7 @@ export default function ProjectWorkspacePage() {
                         <select
                           className="max-w-36 bg-transparent text-[9px] normal-case text-[#b3ada4] outline-hidden"
                           data-testid="manual-replace"
-                          disabled={manualBusy}
+                          disabled={manualBusy || !outputVariantId}
                           onChange={(event) => {
                             if (event.target.value && event.target.value !== manualSelectedClip.sourceId) {
                               void submitManualEdit({ action: 'apply', operation: { kind: 'replace', clipId: manualSelectedClip.id, sourceId: event.target.value } })
@@ -3808,7 +3946,7 @@ export default function ProjectWorkspacePage() {
                       <button
                         className="mt-3 w-full border border-[#dbae3f]/45 bg-[#dbae3f]/10 px-3 py-2 text-[9px] font-bold text-[#ddb858] disabled:opacity-35"
                         data-testid="manual-crop-apply"
-                        disabled={manualBusy || !manualCropValid}
+                        disabled={manualBusy || !outputVariantId || !manualCropValid}
                         onClick={submitManualCrop}
                         type="button"
                       >
@@ -3851,7 +3989,7 @@ export default function ProjectWorkspacePage() {
                     <button
                       className="mt-3 w-full bg-[#dbae3f] px-3 py-2 text-[9px] font-bold text-[#171207] disabled:opacity-35"
                       data-testid="manual-inspector-apply"
-                      disabled={manualBusy}
+                      disabled={manualBusy || !outputVariantId}
                       onClick={submitManualInspector}
                       type="button"
                     >
@@ -4072,10 +4210,11 @@ export default function ProjectWorkspacePage() {
                     <div className="border border-white/[0.07] bg-[#050505] p-3">
                       <p className="text-[8px] font-semibold uppercase tracking-[0.17em] text-[#827b70]">Decisão</p>
                       <p className="mt-2 text-[9px] leading-4 text-[#625e57]">Aceitar e reabrir registram Command. Restaurar cria uma nova child version; A e B permanecem intactas.</p>
+                      {!outputVariantId ? <p className="mt-2 text-[9px] leading-4 text-[#b58d31]" data-testid="compare-format-required">{OUTPUT_FORMAT_REQUIRED_MESSAGE}</p> : null}
                       <div className="mt-3 grid gap-2">
-                        <button className="bg-[#7167ff] px-3 py-2 text-[9px] font-bold text-white disabled:opacity-35" data-testid="compare-accept" disabled={compareBusy || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('accept')} type="button">Aceitar depois</button>
-                        <button className="border border-white/[0.1] px-3 py-2 text-[9px] text-[#aaa49a] disabled:opacity-35" data-testid="compare-reopen" disabled={compareBusy || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('reopen')} type="button">Reabrir edição</button>
-                        <button className="border border-[#d9aa3d]/30 px-3 py-2 text-[9px] text-[#d7b35f] disabled:opacity-35" data-testid="compare-restore" disabled={compareBusy || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('restore')} type="button">Restaurar antes como nova versão</button>
+                        <button className="bg-[#7167ff] px-3 py-2 text-[9px] font-bold text-white disabled:opacity-35" data-testid="compare-accept" disabled={compareBusy || !outputVariantId || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('accept')} type="button">Aceitar depois</button>
+                        <button className="border border-white/[0.1] px-3 py-2 text-[9px] text-[#aaa49a] disabled:opacity-35" data-testid="compare-reopen" disabled={compareBusy || !outputVariantId || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('reopen')} type="button">Reabrir edição</button>
+                        <button className="border border-[#d9aa3d]/30 px-3 py-2 text-[9px] text-[#d7b35f] disabled:opacity-35" data-testid="compare-restore" disabled={compareBusy || !outputVariantId || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('restore')} type="button">Restaurar antes como nova versão</button>
                       </div>
                     </div>
                   </div>
@@ -4091,7 +4230,7 @@ export default function ProjectWorkspacePage() {
               aria-live="polite"
             >
               <p className="font-semibold text-[#e7a59b]">
-                Revisão indisponível{workspaceHasMedia ? ' — a mídia já autorizada continua inspecionável abaixo' : ''}.
+                Não foi possível carregar a revisão solicitada.
               </p>
               <p className="mt-1">{describeReviewFailure(reviewFailure)}</p>
               <p className="mt-1 font-mono text-[10px] text-[#b7857d]" data-testid="review-unavailable-code">
@@ -4101,7 +4240,7 @@ export default function ProjectWorkspacePage() {
                 type="button"
                 data-testid="review-retry"
                 disabled={reviewRetryWaitMs > 0}
-                onClick={() => { void loadReview(false, workspaceVersionId, true) }}
+                onClick={() => { void loadReview(false, manuallySelectedReviewVersionId.current ?? review?.session.projectVersionId ?? workspaceVersionId, true) }}
                 className="mt-2 rounded-lg border border-[#d46f63]/40 px-3 py-1.5 text-[11px] font-semibold text-[#e7a59b] disabled:opacity-50"
               >
                 {reviewRetryWaitMs > 0 ? `Tentar novamente em ${Math.ceil(reviewRetryWaitMs / 1000)} s` : 'Tentar novamente'}
@@ -4112,7 +4251,7 @@ export default function ProjectWorkspacePage() {
           {reviewEntry && !review ? (
             <section ref={reviewEntryTarget} tabIndex={-1} data-testid="review-entry-panel" data-entry-mode="review" aria-label="Mesa de revisão editorial" className="mt-5 scroll-mt-6 border-y border-white/[0.08] py-5">
               <p className="text-sm font-semibold text-[#c9c3b9]">Mesa de revisão</p>
-              <p className="mt-1 text-xs text-[#88847d]">{workspaceHasMedia ? 'A revisão será exibida quando um proxy autorizado estiver disponível.' : 'Este projeto ainda não possui mídia e proxy disponíveis para revisão.'}</p>
+              <p className="mt-1 text-xs text-[#88847d]">{!workspace ? 'Aguardando a disponibilidade de revisão do workspace.' : workspace.reviewAvailability.annotations.state === 'available' ? 'Há um proxy registrado para revisão. A mesa será exibida após uma leitura válida.' : workspace.reviewAvailability.annotations.reason === 'no-version' ? 'Este projeto ainda não possui uma versão para revisão.' : 'O workspace ainda não registra um proxy disponível para revisão desta versão.'}</p>
             </section>
           ) : null}
           {review ? (
@@ -4963,12 +5102,12 @@ export default function ProjectWorkspacePage() {
                   <div className="border-b border-white/[0.07] bg-[#0b0b0b] px-5 py-5 lg:border-b-0 lg:border-r">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-[#777168]">Mapa de risco</p>
-                      <span className="font-mono text-[9px] text-[#625d56]">{workspace.project.format ?? '9:16'}</span>
+                      <span className="font-mono text-[9px] text-[#625d56]">{outputAspectRatio ?? '—'}</span>
                     </div>
                     <div
                       className="relative mx-auto mt-4 max-h-72 w-full max-w-40 overflow-hidden border border-white/[0.12] bg-[radial-gradient(circle_at_50%_35%,#292824_0,#171715_34%,#0e0e0d_72%)] shadow-[0_20px_55px_rgba(0,0,0,.35)]"
                       data-testid="contamination-region-map"
-                      style={{ aspectRatio: (workspace.project.format ?? '9:16').replace(':', ' / ') }}
+                      style={{ aspectRatio: outputAspectRatio ? outputAspectRatio.replace(':', ' / ') : '1 / 1' }}
                     >
                       <span className="absolute inset-x-0 top-1/2 h-px bg-white/[0.035]" />
                       <span className="absolute inset-y-0 left-1/2 w-px bg-white/[0.035]" />

@@ -16,7 +16,8 @@ import type { RenderElementMap } from './review-system.ts'
  */
 export const SUBTITLE_SIDECAR_SCHEMA_VERSION = 'subtitle-sidecar/v1'
 export const SUBTITLE_SIDECAR_RECIPE_ID = 'subtitle-sidecar'
-export const SUBTITLE_SIDECAR_RECIPE_VERSION = '1.0.0'
+export const SUBTITLE_SIDECAR_RECIPE_VERSION = '1.2.0'
+export const SUBTITLE_SIDECAR_TEXT_POLICY = 'vtt-literal-single-decode/v1'
 export const SUBTITLE_SIDECAR_ELEMENT_PREFIX = 'subtitle:'
 export const SUBTITLE_SIDECAR_FORMATS = Object.freeze(['srt', 'vtt'] as const)
 export type SubtitleSidecarFormat = (typeof SUBTITLE_SIDECAR_FORMATS)[number]
@@ -71,11 +72,17 @@ export interface EncodedSubtitleSidecar {
 }
 
 /**
- * Frames are converted with a single documented rule: the frame index is divided
- * by the canonical fps of the map (already rounded to six decimals when the map
- * was built) and rounded half-up to the nearest millisecond. Rounding happens
- * once, on the frame boundary, so re-deriving the same map always yields the same
- * milliseconds.
+ * A frame boundary becomes the largest whole millisecond that is not after the exact frame time
+ * k / fps (floor, in exact integer arithmetic over the six-decimal canonical rate of the map).
+ *
+ * A player shows a cue at media time t iff start <= t < end and presents frame k at exactly
+ * k / fps. Rounding to the nearest millisecond can put a start after its own frame (30 fps, frame 2
+ * is 66.67 ms and rounds to 67, so the first frame of the cue is shown without it) or an end after
+ * the first uncovered frame. The floor is the only choice that covers frame `a` and excludes frame
+ * `a - 1` for the start, and covers frame `b - 1` and excludes frame `b` for the exclusive end,
+ * whenever consecutive frames are more than one millisecond apart; at faster rates the ranges
+ * collapse and `assertRenderedSubtitleCues` refuses the cue instead of publishing a wrong one.
+ * Adjacent cues share their boundary millisecond, so they never overlap or leave a gap.
  */
 export function subtitleSidecarFrameToMs(frame: number, fps: number): number {
   assertDomain(
@@ -83,7 +90,11 @@ export function subtitleSidecarFrameToMs(frame: number, fps: number): number {
     'INVALID_ARGUMENT',
     'Subtitle sidecar frame conversion requires a non-negative frame and a positive fps',
   )
-  return Math.round((frame * 1000) / fps)
+  const microFps = BigInt(Math.round(fps * 1_000_000))
+  assertDomain(microFps > BigInt(0), 'INVALID_ARGUMENT', 'Subtitle sidecar frame rate is below one microhertz')
+  const milliseconds = BigInt(frame) * BigInt(1_000_000_000) / microFps
+  assertDomain(milliseconds <= BigInt(Number.MAX_SAFE_INTEGER), 'INVALID_ARGUMENT', 'Subtitle sidecar time overflows')
+  return Number(milliseconds)
 }
 
 export function normalizeSubtitleCueText(value: string, cueId: string): string {
@@ -245,7 +256,10 @@ export function renderSubtitleSidecarText(
   const blocks = cues.map((cue, index) => {
     const header = format === 'srt' ? `${index + 1}${eol}` : ''
     const timing = `${stamp(cue.startMs, format)} --> ${stamp(cue.endMs, format)}`
-    return `${header}${timing}${eol}${cue.text.split('\n').join(eol)}`
+    const literal = format === 'vtt'
+      ? cue.text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+      : cue.text
+    return `${header}${timing}${eol}${literal.split('\n').join(eol)}`
   })
   const head = format === 'vtt' ? `WEBVTT${eol}${eol}` : ''
   return `${head}${blocks.join(`${eol}${eol}`)}${eol}`
@@ -345,7 +359,10 @@ export function parseSubtitleSidecar(
     }
     const timing = lines[timingIndex]?.split(' --> ')
     assertDomain(timing?.length === 2, 'INVALID_ARGUMENT', 'Subtitle sidecar cue timing is invalid')
-    const text = lines.slice(timingIndex + 1).join('\n')
+    const encoded = lines.slice(timingIndex + 1).join('\n')
+    // One pass only: encoded &amp;lt; is literal &lt;, never a tag.
+    const text = format === 'vtt' ? encoded.replace(/&(amp|lt|gt);/g,
+      (_entity, name: string) => name === 'amp' ? '&' : name === 'lt' ? '<' : '>') : encoded
     assertDomain(text.length > 0, 'INVALID_ARGUMENT', 'Subtitle sidecar cue text is empty')
     return Object.freeze({
       startMs: parseStamp(timing![0]!, format),
@@ -392,5 +409,8 @@ export function subtitleSidecarLineageHash(lineage: Readonly<SubtitleSidecarLine
     'INVALID_ARGUMENT',
     'Subtitle sidecar lineage is incomplete',
   )
-  return createHash('sha256').update(stableSerialize(lineage)).digest('hex')
+  return createHash('sha256').update(stableSerialize({
+    ...lineage, recipeVersion: SUBTITLE_SIDECAR_RECIPE_VERSION,
+    textPolicy: SUBTITLE_SIDECAR_TEXT_POLICY,
+  })).digest('hex')
 }

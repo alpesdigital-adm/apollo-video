@@ -2,8 +2,9 @@ import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
 import { readOutputFormatPreset } from './output-format-registry.ts'
 import { OUTPUT_ASPECT_RATIOS, type NormalizedBounds, type OutputAspectRatio } from './output-spec.ts'
+import type { CaptionPixelIssueV1 } from './caption-pixel-verdict.ts'
 import type { RenderElementMap } from './review-system.ts'
-import type { SubtitleAnchorPlanV1 } from './subtitle-anchor-plan.ts'
+import type { SubtitleAnchorPlan } from './subtitle-anchor-plan.ts'
 
 export const FORMAT_QUALITY_CODES = [
   'OUTPUT_CLIPPING', 'OUTPUT_SAFE_AREA', 'SUBJECT_NOT_VISIBLE',
@@ -11,6 +12,9 @@ export const FORMAT_QUALITY_CODES = [
   // F1.036 / FR-173: the anchor decision reports into the variant's own report, so a cue that had
   // nowhere safe to go blocks *this* output instead of being discovered by eye on the MP4.
   'NO_SAFE_SUBTITLE_REGION', 'SUBTITLE_ANCHOR_FALLBACK', 'SUBTITLE_ANCHOR_UNSTABLE',
+  'FACE_PERCEPTION_UNAVAILABLE',
+  // W65: where the captions of the delivered MP4 really are, measured on its pixels (see caption-pixel-verdict.ts).
+  'CAPTION_PLACEMENT_MISMATCH', 'SUBTITLE_FACE_OVERLAP_IN_PIXELS', 'FACE_PIXEL_CHECK_UNAVAILABLE',
 ] as const
 export type FormatQualityCode = (typeof FORMAT_QUALITY_CODES)[number]
 
@@ -120,7 +124,12 @@ export function critiqueOutputFormat(input: Readonly<{
    * into this report so the variant verdict already carries them: a suppressed cue is a hard block,
    * a relaxed band or a forced early move is a warning the reviewer can see next to the pixels.
    */
-  subtitleAnchorPlan?: Readonly<SubtitleAnchorPlanV1> | null
+  subtitleAnchorPlan?: Readonly<SubtitleAnchorPlan> | null
+  /**
+   * W65. What the pixel critic found on the delivered frames. Like the anchor decision it is lifted into this report, so a caption
+   * that is not where the plan put it, or that covers a face a veto detector found, blocks this output.
+   */
+  captionPixelIssues?: readonly Readonly<CaptionPixelIssueV1>[]
 }>): Readonly<FormatQualityReportV2> {
   assertDomain(ID.test(input.outputSpecId) && OUTPUT_ASPECT_RATIOS.includes(input.format), 'INVALID_OUTPUT_SPEC', 'Format critic output identity is invalid')
   assertDomain(SHA256.test(input.proxyHash) && input.map.proxyHash === input.proxyHash, 'INVALID_RENDER_INPUT', 'Format critic proxy evidence is inconsistent')
@@ -183,6 +192,17 @@ export function critiqueOutputFormat(input: Readonly<{
       evidenceRange: issue.evidenceRange,
       elementIds: issue.elementIds,
       evidenceIds: [...issue.evidenceIds, `subtitle-anchor-plan:${input.subtitleAnchorPlan!.anchorPlanHash}`],
+    })
+  }
+  for (const issue of input.captionPixelIssues ?? []) {
+    assertDomain(
+      issue.evidenceRange.startFrame >= 0 && issue.evidenceRange.endFrame <= input.map.durationFrames,
+      'INVALID_RENDER_INPUT', 'Caption pixel issue is outside the rendered timeline',
+    )
+    add({
+      code: issue.code, severity: issue.severity, message: issue.message,
+      evidenceRange: issue.evidenceRange, elementIds: issue.elementIds,
+      evidenceIds: [...issue.evidenceIds, `render-map:${input.proxyHash}`],
     })
   }
   for (const subject of subjects.filter((item) => item.critical)) {

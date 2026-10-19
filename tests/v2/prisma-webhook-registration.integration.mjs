@@ -168,23 +168,6 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const cleanup = async (attempt = 1) => {
     try {
       await client.$transaction(async (transaction) => {
-        await transaction.v2WebhookWorkerShardLease.deleteMany({
-          where: { poolId: 'webhook-integration-pool' },
-        })
-        await transaction.v2WebhookReplayReceipt.deleteMany({ where: { workspaceId } })
-        await transaction.v2WebhookVerificationChallenge.deleteMany({ where: { workspaceId } })
-        await transaction.v2WebhookDeliveryAttempt.deleteMany({ where: { workspaceId } })
-        await transaction.v2WebhookDelivery.deleteMany({ where: { workspaceId } })
-        await transaction.v2WebhookAdministrationCommand.deleteMany({ where: { workspaceId } })
-        await transaction.v2WebhookSubscription.deleteMany({ where: { workspaceId } })
-        await transaction.v2WebhookSigningSecretRotation.deleteMany({ where: { workspaceId } })
-        await transaction.v2WebhookSigningSecretPayload.deleteMany({ where: { workspaceId } })
-        await transaction.v2WebhookSigningSecret.deleteMany({ where: { workspaceId } })
-        await transaction.v2WebhookEndpoint.deleteMany({ where: { workspaceId } })
-        await transaction.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-        await transaction.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-        await transaction.v2ApiClient.deleteMany({ where: { workspaceId } })
-        await transaction.v2Workspace.deleteMany({ where: { id: workspaceId } })
       }, { isolationLevel: 'Serializable' })
     } catch (error) {
       if (
@@ -434,7 +417,8 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     }
     const concurrentWinner = concurrentResults.find((result) => result.status === 'fulfilled')
     const concurrentLoser = concurrentResults.find((result) => result.status === 'rejected')
-    assert.ok(concurrentWinner)
+    assert.ok(concurrentWinner, `no concurrent creation committed: ${JSON.stringify(concurrentResults.map((result) =>
+      result.status === 'rejected' ? { code: result.reason?.code, message: String(result.reason?.message).slice(0, 400) } : result.status))}`)
     assert.equal(concurrentWinner.value.replayed, false)
     assert.ok(concurrentLoser)
     assert.equal(concurrentLoser.reason instanceof DomainError, true)

@@ -17,9 +17,11 @@ import {
   type PersistedManualEditPayload,
 } from '../domain/manual-editing.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
+import { offeredObservationsFor } from './adoptable-observations.ts'
+import { transitionManualEditOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import { createManualCommandImpact } from '../domain/command-impact.ts'
+import { outputVariantsOf, requireOutputVariant } from '../domain/output-consumption.ts'
 import {
   materializeActorAuditContext,
   requireScope,
@@ -93,7 +95,7 @@ export function readArtifactInvalidationsService(dependencies: {
 export function applyManualEditService(dependencies: {
   repository: ManualEditRepository
   clock: () => Date
-  createId: (kind: 'edit-command' | 'project-version' | 'project-snapshot') => string
+  createId: (kind: 'edit-command' | 'project-version' | 'project-snapshot' | 'project-output-state' | 'output-materialization') => string
   createEventId: () => string
 }) {
   return async function execute(request: {
@@ -194,11 +196,9 @@ export function applyManualEditService(dependencies: {
       ...(targetVersionId ? { targetVersionId } : {}),
     })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Project or restore target was not found')
-    assertDomain(
-      context.renderVariantIds.includes(variantId),
-      'INVALID_ARGUMENT',
-      'Manual edit variant is not configured for this project',
-    )
+    // The variant is the VIEW the edit was made on: the stable id of one output of the State the edit starts from. The plan the edit
+    // changes is shared by every output, so the view only has to be an exact member (unknown and ambiguous are published refusals).
+    requireOutputVariant(context.bundle.state, variantId)
     if (
       context.version.id !== baseVersionId ||
       context.version.baseHash !== request.baseHash ||
@@ -212,7 +212,7 @@ export function applyManualEditService(dependencies: {
     }
     if (request.action === 'undo') {
       assertDomain(
-        context.version.parentVersionId === targetVersionId,
+        ('parentVersionId' in context.version ? context.version.parentVersionId : undefined) === targetVersionId,
         'INVALID_ARGUMENT',
         'Undo must restore the direct parent of the current version',
       )
@@ -235,6 +235,7 @@ export function applyManualEditService(dependencies: {
     const commandId = dependencies.createId('edit-command')
     const versionId = dependencies.createId('project-version')
     const snapshotId = dependencies.createId('project-snapshot')
+    const stateId = dependencies.createId('project-output-state')
     const editPlan = request.action === 'apply'
       ? materializeManualEditPlan({
           editPlan: context.editPlan,
@@ -259,6 +260,7 @@ export function applyManualEditService(dependencies: {
       baseVersionId,
       resultVersionId: versionId,
       variantId,
+      outputVariantIds: outputVariantsOf(context.bundle.state).map((output) => output.variantId),
       targetId,
       action: request.action,
       ...(operation ? { operation } : {}),
@@ -289,6 +291,8 @@ export function applyManualEditService(dependencies: {
           : {}),
       },
       type: 'manual-edit',
+      // The scope names the VIEW (the stable variant of the output the edit was made on), which the sealed manual origin and its
+      // database guard require as `outputSpecIds`; the impact of the edit is the renders of every output.
       scope: {
         clipIds: [targetId],
         outputSpecIds: [variantId],
@@ -308,27 +312,24 @@ export function applyManualEditService(dependencies: {
       contentHash: editPlanHash,
       createdAt,
     })
-    const version = createProjectVersion({
-      id: versionId,
-      workspaceId,
-      projectId,
-      sequence: context.version.sequence + 1,
-      parentVersionId: context.version.id,
-      snapshotRefs: { ...context.version.snapshotRefs, editPlan: snapshotId },
-      baseHash: calculateVersionHash({
-        projectId,
-        sequence: context.version.sequence + 1,
-        parentVersionId: context.version.id,
-        previousBaseHash: context.version.baseHash,
-        commandId,
-        editPlanHash,
-        action: request.action,
-        targetVersionId: targetVersionId ?? null,
-      }),
-      createdBy: authenticationAudit.clientId,
-      commandId,
-      createdAt,
+    // The Command's own action decides the origin: a render-free selection inherits, undo/redo/restore return to
+    // an exact factual target, any other operation is a child Command that recompiles the plan.
+    // A replaced asset (or any other apply that consumes a recording the head State does not observe) adopts the
+    // persisted receipt of that recording; undo, redo and restore return to an exact factual target and adopt nothing.
+    const adoptable = request.action === 'apply'
+      ? await offeredObservationsFor(dependencies.repository, context.bundle, JSON.parse(snapshot.contentJson) as Record<string, unknown>)
+      : []
+    const bundle = transitionManualEditOutputState({
+      ...(adoptable.length > 0 ? { adoptable } : {}),
+      parent: context.bundle, restoreTarget: request.action === 'apply' ? null : context.targetVersion!.bundle,
+      command, audit: authenticationAudit, requestFingerprint, editPlanSnapshot: snapshot,
+      allocation: {
+        workspaceId, projectId, resultVersionId: versionId, stateId, parentVersionId: context.version.id,
+        sequence: context.version.sequence + 1, createdBy: authenticationAudit.clientId, createdAt,
+      },
+      createMaterializationId: () => dependencies.createId('output-materialization'),
     })
+    const version = bundle.version
     const comparison = Object.freeze({
       beforeVersionId: context.version.id,
       afterVersionId: version.id,
@@ -369,11 +370,7 @@ export function applyManualEditService(dependencies: {
       },
     })
     return dependencies.repository.commitOrReplay({
-      command,
-      authenticationAudit,
-      requestFingerprint,
-      snapshot,
-      version,
+      bundle,
       event,
       comparison,
       impact,

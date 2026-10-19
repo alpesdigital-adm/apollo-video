@@ -6,6 +6,7 @@ import net from 'node:net'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 
 async function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -89,7 +90,7 @@ test('T-FR-045 catalogs and searches a hierarchical two-hour live through the pu
   let serverLogs = ''
 
   try {
-    await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE')
+    await resetDisposableDatabase(client)
     await client.v2Workspace.create({
       data: {
         id: workspaceId,

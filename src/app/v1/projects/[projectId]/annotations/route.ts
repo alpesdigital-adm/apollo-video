@@ -96,11 +96,14 @@ export async function GET(
     const rawLimit = request.nextUrl.searchParams.get('limit')
     const limit = rawLimit === null ? 50 : Number(rawLimit)
     const projectVersionId = request.nextUrl.searchParams.get('projectVersionId')?.trim() || undefined
+    // The stable variant of the output reviewed; optional only for a Version with exactly one output.
+    const variantId = request.nextUrl.searchParams.get('variantId')?.trim() || undefined
     const { projectId } = await context.params
     const result = await readProjectReviewService({ repository: createReviewAnnotationRepository() })({
       workspaceId: actor.workspaceId,
       projectId,
       ...(projectVersionId ? { projectVersionId } : {}),
+      ...(variantId ? { variantId } : {}),
       limit,
     })
     return NextResponse.json(presentSuccess({
@@ -134,7 +137,7 @@ export async function POST(
       throw new DomainError('INVALID_ARGUMENT', 'Request body must be an object')
     }
     const record = body as Record<string, unknown>
-    const allowed = ['projectVersionId', 'proxyArtifactId', 'proxyHash', 'frame', 'timeRangeMs', 'scope', 'region', 'targetIds', 'applicationScope', 'confirmedGlobal', 'screenshotRef', 'text']
+    const allowed = ['projectVersionId', 'variantId', 'proxyArtifactId', 'proxyHash', 'frame', 'timeRangeMs', 'scope', 'region', 'targetIds', 'applicationScope', 'confirmedGlobal', 'screenshotRef', 'text']
     if (Object.keys(record).some((key) => !allowed.includes(key))) {
       throw new DomainError('INVALID_ARGUMENT', 'Request body contains an unsupported field')
     }
@@ -147,6 +150,9 @@ export async function POST(
       !Array.isArray(record.targetIds) || !record.targetIds.every((item) => typeof item === 'string') ||
       typeof record.screenshotRef !== 'string' || typeof record.text !== 'string'
     ) throw new DomainError('INVALID_ARGUMENT', 'Review annotation body is invalid')
+    if (record.variantId !== undefined && (typeof record.variantId !== 'string' || !record.variantId.trim())) {
+      throw new DomainError('INVALID_ARGUMENT', 'variantId must be a non-empty string')
+    }
     const region = parseRegion(record.region)
     const applicationScope = parseApplicationScope(record.applicationScope)
     if (record.confirmedGlobal !== undefined && typeof record.confirmedGlobal !== 'boolean') {
@@ -161,6 +167,7 @@ export async function POST(
       workspaceId: actor.workspaceId,
       projectId,
       projectVersionId: record.projectVersionId,
+      ...(typeof record.variantId === 'string' ? { variantId: record.variantId.trim() } : {}),
       proxyArtifactId: record.proxyArtifactId,
       proxyHash: record.proxyHash,
       frame: record.frame as number,

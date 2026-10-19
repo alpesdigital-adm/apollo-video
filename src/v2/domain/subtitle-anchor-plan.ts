@@ -12,6 +12,7 @@ import {
 } from './perception-timeline.ts'
 import type { SubtitleRegionV1 } from './subtitle-region.ts'
 import type { SubtitleAnchor } from './subtitle-system.ts'
+import type { SubtitleAnchorPlanV3 } from './subtitle-anchor-plan-v3.ts'
 
 /**
  * F1.036 / FR-173 — the subtitle anchor is **decided**, never authored.
@@ -43,10 +44,10 @@ export const SUBTITLE_ANCHOR_BLOCKER_KINDS = Object.freeze([
 export type SubtitleAnchorBlockerKind = (typeof SUBTITLE_ANCHOR_BLOCKER_KINDS)[number]
 
 /** Perception kinds that can block a band, mapped onto the blocker vocabulary above. */
-const PERCEPTION_BLOCKER_KIND = Object.freeze({
+export const PERCEPTION_BLOCKER_KIND = Object.freeze({
   face: 'face', ocr: 'ocr', 'image-insert': 'insert',
 } as const satisfies Partial<Record<PerceptionKind, SubtitleAnchorBlockerKind>>)
-const PERCEPTION_BLOCKER_KINDS = Object.freeze(
+export const PERCEPTION_BLOCKER_KINDS = Object.freeze(
   Object.keys(PERCEPTION_BLOCKER_KIND) as readonly PerceptionKind[],
 )
 
@@ -54,10 +55,11 @@ const PERCEPTION_BLOCKER_KINDS = Object.freeze(
  * A face is *critical*: covering it is the exact failure the recovery E2E forbids, so no fallback
  * may ever land on one. The other blockers are avoided, and only relaxed with a recorded warning.
  */
-const CRITICAL_BLOCKER_KINDS = Object.freeze(['face'] as const)
+export const CRITICAL_BLOCKER_KINDS = Object.freeze(['face'] as const)
 
 export const SUBTITLE_ANCHOR_REASON_CODES = Object.freeze([
   'NO_SAFE_SUBTITLE_REGION', 'SUBTITLE_ANCHOR_FALLBACK', 'SUBTITLE_ANCHOR_UNSTABLE',
+  'FACE_PERCEPTION_UNAVAILABLE',
 ] as const)
 export type SubtitleAnchorReasonCode = (typeof SUBTITLE_ANCHOR_REASON_CODES)[number]
 
@@ -107,12 +109,17 @@ export interface SubtitleAnchorDecisionV1 {
 export interface SubtitleAnchorPolicyV1 {
   /** Minimum frames a decision must hold before another change is considered stable. */
   minFramesBetweenChanges: number
-  /** What to do when every band is blocked. Never "draw it anyway". */
-  onNoSafeRegion: 'suppress-cue' | 'fail-closed'
+  /**
+   * What to do when every band is blocked. Never "draw it anyway".
+   * - `suppress-cue`: the cue is not drawn and the reason is a HARD issue (the render cannot be approved);
+   * - `omit-and-list` (W65b, `subtitle-anchor-plan/v3` only): the cue is not drawn and the reason is a WARNING that lists it as
+   *   a review item, so the rest of the render can be approved and delivered without it;
+   * - `fail-closed`: planning throws.
+   */
+  onNoSafeRegion: 'suppress-cue' | 'omit-and-list' | 'fail-closed'
 }
 
-export interface SubtitleAnchorPlanV1 {
-  schemaVersion: 'subtitle-anchor-plan/v1'
+export interface SubtitleAnchorPlanBase {
   outputSpecId: string
   format: OutputAspectRatio
   canvas: Readonly<{ width: number; height: number }>
@@ -138,6 +145,21 @@ export interface SubtitleAnchorPlanV1 {
   anchorPlanHash: string
 }
 
+type UnknownFaceSafety = Readonly<{ status: 'unknown'; reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' }>
+export type OcrEvidenceIdentity = Readonly<{ envelopeId: string; envelopeHash: string; inputVersionId: string; timeMapHash: string }>
+export type SubtitleAnchorPlanV1 = Readonly<SubtitleAnchorPlanBase & {
+  schemaVersion: 'subtitle-anchor-plan/v1'
+  faceSafety?: never
+  ocrEvidence?: never
+}>
+export type SubtitleAnchorPlanV2 = Readonly<SubtitleAnchorPlanBase & {
+  schemaVersion: 'subtitle-anchor-plan/v2'
+  faceSafety: UnknownFaceSafety
+  /** Server-resolved OCR identity. Its samples obstruct only their observed frame ranges. */
+  ocrEvidence?: OcrEvidenceIdentity
+}>
+export type SubtitleAnchorPlan = SubtitleAnchorPlanV1 | SubtitleAnchorPlanV2 | SubtitleAnchorPlanV3
+
 export interface SubtitleAnchorCueV1 {
   id: string
   startFrame: number
@@ -153,7 +175,7 @@ export const DEFAULT_SUBTITLE_ANCHOR_POLICY: Readonly<SubtitleAnchorPolicyV1> = 
   onNoSafeRegion: 'suppress-cue' as const,
 })
 
-function overlaps(left: Readonly<NormalizedBounds>, right: Readonly<NormalizedBounds>): boolean {
+export function overlaps(left: Readonly<NormalizedBounds>, right: Readonly<NormalizedBounds>): boolean {
   return left.x < right.x + right.width - EPSILON && left.x + left.width > right.x + EPSILON &&
     left.y < right.y + right.height - EPSILON && left.y + left.height > right.y + EPSILON
 }
@@ -174,7 +196,7 @@ function validBounds(value: unknown): value is NormalizedBounds {
  * product already uses are read: `{ bounds: {x,y,width,height} }` (the reframe ROI shape) and
  * `{ box: [x,y,width,height] }`. Anything else yields `null` and is recorded, not guessed.
  */
-function readObservationBounds(value: unknown): Readonly<NormalizedBounds> | null {
+export function readObservationBounds(value: unknown): Readonly<NormalizedBounds> | null {
   if (typeof value !== 'object' || value === null) return null
   const record = value as Record<string, unknown>
   if (validBounds(record.bounds)) {
@@ -189,13 +211,13 @@ function readObservationBounds(value: unknown): Readonly<NormalizedBounds> | nul
   return null
 }
 
-const FULL_CANVAS: Readonly<NormalizedBounds> = Object.freeze({ x: 0, y: 0, width: 1, height: 1 })
+export const FULL_CANVAS: Readonly<NormalizedBounds> = Object.freeze({ x: 0, y: 0, width: 1, height: 1 })
 
-function msToFrame(ms: number, fps: number): number {
+export function msToFrame(ms: number, fps: number): number {
   return Math.round(ms / 1_000 * fps)
 }
 
-function frameToMs(frame: number, fps: number): number {
+export function frameToMs(frame: number, fps: number): number {
   return Math.round(frame / fps * 1_000)
 }
 
@@ -231,6 +253,46 @@ export function deriveSubtitleAnchorBands(input: Readonly<{
     // The bottom band is the region itself: it is what a render with no perception already draws.
     bottom: Object.freeze({ x, width, height, y: input.region.bounds.y }),
   })
+}
+
+/** Runtime anchor plan: geometry alone cannot prove the absence of a face. */
+export function createSubtitleAnchorPlan(input: Readonly<Parameters<typeof solveSubtitleAnchorGeometry>[0] & {
+  faceSafety: UnknownFaceSafety
+  ocrEvidence?: OcrEvidenceIdentity
+}>): Readonly<SubtitleAnchorPlanV2> {
+  assertDomain(input.faceSafety?.status === 'unknown' &&
+    input.faceSafety.reasonCode === 'FACE_PERCEPTION_UNAVAILABLE',
+  'INVALID_RENDER_INPUT', 'Runtime subtitle plan requires explicit unknown facial coverage')
+  assertDomain(input.perceptionTimeline === undefined
+    ? input.ocrEvidence === undefined
+    : input.ocrEvidence !== undefined && ID.test(input.ocrEvidence.envelopeId) &&
+      ID.test(input.ocrEvidence.inputVersionId) && SHA256.test(input.ocrEvidence.envelopeHash) &&
+      SHA256.test(input.ocrEvidence.timeMapHash),
+  'INVALID_RENDER_INPUT', 'Runtime OCR timeline requires sealed envelope identity')
+  const geometry = solveSubtitleAnchorGeometry(input)
+  const issues = geometry.decisions.map((decision) => Object.freeze({
+    code: 'FACE_PERCEPTION_UNAVAILABLE' as const, severity: 'hard' as const,
+    cueId: decision.cueId,
+    evidenceRange: Object.freeze({ startFrame: decision.startFrame, endFrame: decision.endFrame }),
+    rangeMs: Object.freeze([frameToMs(decision.startFrame, input.fps),
+      frameToMs(decision.endFrame, input.fps)] as const),
+    elementIds: Object.freeze([`subtitle:${decision.cueId}`]),
+    evidenceIds: Object.freeze([...(input.ocrEvidence ? [input.ocrEvidence.envelopeId] : []),
+      ...decision.evidenceIds].toSorted()),
+    message: `Facial coverage is unknown for cue ${decision.cueId}; the cue was suppressed pending review.`,
+  }))
+  const decisions = geometry.decisions.map((decision, index) => Object.freeze({
+    ...decision, anchor: null, bounds: null, stable: false, changedFromPrevious: false,
+    suppressed: true, eligibleAnchors: Object.freeze([] as SubtitleAnchor[]),
+    issues: Object.freeze([issues[index]!]),
+  }))
+  const body = Object.freeze({ ...geometry,
+    schemaVersion: 'subtitle-anchor-plan/v2' as const,
+    faceSafety: Object.freeze({ ...input.faceSafety }),
+    ...(input.ocrEvidence ? { ocrEvidence: Object.freeze({ ...input.ocrEvidence }) } : {}),
+    decisions: Object.freeze(decisions), issues: Object.freeze(issues),
+  })
+  return Object.freeze({ ...body, anchorPlanHash: calculateCanonicalHash(body) })
 }
 
 function collectBlockers(input: Readonly<{
@@ -296,7 +358,7 @@ function collectBlockers(input: Readonly<{
  * that, hysteresis preserves the previous anchor whenever it is still eligible, even if a
  * higher-preference band became free — the subtitle does not chase the layout around.
  */
-export function createSubtitleAnchorPlan(input: Readonly<{
+export function solveSubtitleAnchorGeometry(input: Readonly<{
   spec: Readonly<OutputSpec>
   format: OutputAspectRatio
   canvas: Readonly<{ width: number; height: number }>
@@ -307,7 +369,7 @@ export function createSubtitleAnchorPlan(input: Readonly<{
   perceptionTimeline?: Readonly<PerceptionTimeline>
   placements?: readonly Readonly<{ elementId: string; kind: string; bounds: Readonly<NormalizedBounds>; timeRange: Readonly<{ startFrame: number; endFrame: number }> }>[]
   policy?: Partial<SubtitleAnchorPolicyV1>
-}>): Readonly<SubtitleAnchorPlanV1> {
+}>) {
   assertDomain(
     Number.isFinite(input.fps) && input.fps > 0 &&
     Number.isSafeInteger(input.durationFrames) && input.durationFrames >= 1,
@@ -407,8 +469,7 @@ export function createSubtitleAnchorPlan(input: Readonly<{
       previous = anchor
     }
   }
-  const body = Object.freeze({
-    schemaVersion: 'subtitle-anchor-plan/v1' as const,
+  return Object.freeze({
     outputSpecId: input.spec.id,
     format: input.format,
     canvas: Object.freeze({ width: input.canvas.width, height: input.canvas.height }),
@@ -430,14 +491,13 @@ export function createSubtitleAnchorPlan(input: Readonly<{
       left.evidenceRange.startFrame - right.evidenceRange.startFrame || left.code.localeCompare(right.code) || left.cueId.localeCompare(right.cueId))),
     evidenceWithoutGeometry: withoutGeometry,
   })
-  return Object.freeze({ ...body, anchorPlanHash: calculateCanonicalHash(body) })
 }
 
 /**
  * Fail-closed gate. Everything the plan claims is re-derived from the region it declares: a
  * rewritten band, a moved decision or an edited hash cannot reach the renderer.
  */
-export function validateSubtitleAnchorPlan(plan: Readonly<SubtitleAnchorPlanV1>, expected: Readonly<{
+export function validateSubtitleAnchorPlan(plan: Readonly<SubtitleAnchorPlanV1 | SubtitleAnchorPlanV2>, expected: Readonly<{
   region: Readonly<SubtitleRegionV1>
   safeArea: Readonly<OutputSpec['safeArea']>
   outputSpecId: string
@@ -445,7 +505,16 @@ export function validateSubtitleAnchorPlan(plan: Readonly<SubtitleAnchorPlanV1>,
   canvas: Readonly<{ width: number; height: number }>
   durationFrames: number
 }>): void {
-  assertDomain(plan.schemaVersion === 'subtitle-anchor-plan/v1', 'INVALID_RENDER_INPUT', 'Subtitle anchor plan schema version is unsupported')
+  assertDomain(plan.schemaVersion === 'subtitle-anchor-plan/v1' || plan.schemaVersion === 'subtitle-anchor-plan/v2',
+    'INVALID_RENDER_INPUT', 'Subtitle anchor plan schema version is unsupported (v3 plans have their own validator)')
+  assertDomain(plan.schemaVersion === 'subtitle-anchor-plan/v2'
+    ? plan.faceSafety?.status === 'unknown' && plan.faceSafety.reasonCode === 'FACE_PERCEPTION_UNAVAILABLE' &&
+      Object.keys(plan.faceSafety).sort().join('|') === 'reasonCode|status' &&
+      plan.decisions.every((decision) => decision.suppressed && decision.anchor === null &&
+        decision.bounds === null && decision.issues.some((issue) =>
+          issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'hard'))
+    : plan.faceSafety === undefined,
+  'INVALID_RENDER_INPUT', 'Subtitle anchor facial evidence state is invalid')
   assertDomain(
     plan.outputSpecId === expected.outputSpecId && plan.format === expected.format &&
     plan.canvas.width === expected.canvas.width && plan.canvas.height === expected.canvas.height &&
@@ -462,6 +531,15 @@ export function validateSubtitleAnchorPlan(plan: Readonly<SubtitleAnchorPlanV1>,
     plan.perceptionTimelineHash === null || SHA256.test(plan.perceptionTimelineHash),
     'INVALID_RENDER_INPUT', 'Subtitle anchor plan perception identity is invalid',
   )
+  assertDomain(plan.schemaVersion === 'subtitle-anchor-plan/v2'
+    ? ((plan.perceptionTimelineHash === null) === (plan.ocrEvidence === undefined) &&
+      (!plan.ocrEvidence || (
+       ID.test(plan.ocrEvidence.envelopeId) && ID.test(plan.ocrEvidence.inputVersionId) &&
+       SHA256.test(plan.ocrEvidence.envelopeHash) && SHA256.test(plan.ocrEvidence.timeMapHash) &&
+       Object.keys(plan.ocrEvidence).sort().join('|') ===
+         'envelopeHash|envelopeId|inputVersionId|timeMapHash')))
+    : plan.ocrEvidence === undefined,
+  'INVALID_RENDER_INPUT', 'Subtitle anchor OCR evidence identity is invalid')
   const bands = deriveSubtitleAnchorBands({ region: expected.region, safeArea: expected.safeArea })
   assertDomain(
     calculateCanonicalHash(plan.bands) === calculateCanonicalHash(bands),
@@ -479,7 +557,10 @@ export function validateSubtitleAnchorPlan(plan: Readonly<SubtitleAnchorPlanV1>,
     if (decision.anchor === null) {
       assertDomain(decision.suppressed && decision.bounds === null, 'INVALID_RENDER_INPUT', 'A subtitle cue without an anchor must be suppressed')
       assertDomain(
-        decision.issues.some((issue) => issue.code === 'NO_SAFE_SUBTITLE_REGION' && issue.severity === 'hard'),
+        decision.issues.some((issue) =>
+          (issue.code === 'NO_SAFE_SUBTITLE_REGION' ||
+            (plan.schemaVersion === 'subtitle-anchor-plan/v2' && issue.code === 'FACE_PERCEPTION_UNAVAILABLE')) &&
+          issue.severity === 'hard'),
         'INVALID_RENDER_INPUT', 'A suppressed subtitle cue must carry its localized reason code',
       )
     } else {
@@ -555,7 +636,7 @@ export const SUBTITLE_ANCHOR_PERCEPTION_FIXTURES = Object.freeze({
 
 /** The decision that governs `cueId`, or `null` when the plan never saw that cue. */
 export function subtitleAnchorDecisionFor(
-  plan: Readonly<SubtitleAnchorPlanV1>, cueId: string,
+  plan: Readonly<Pick<SubtitleAnchorPlan, 'decisions'>>, cueId: string,
 ): Readonly<SubtitleAnchorDecisionV1> | null {
   return plan.decisions.find((decision) => decision.cueId === cueId) ?? null
 }

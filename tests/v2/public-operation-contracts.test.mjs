@@ -21,6 +21,18 @@ import {
   publicSchemaDocument,
   publicSchemaExamples,
 } from '../../src/v2/public-api/schema-examples.ts'
+import {
+  advancePublicOperationPhase,
+  createQueuedPublicOperation,
+  startPublicOperationAttempt,
+  succeedPublicOperation,
+} from '../../src/v2/domain/public-operation.ts'
+import { FACE0204_OUTPUT_BYTES, FACE0204_OUTPUT_POLICY_ID, FACE0204_OUTPUT_POLICY_SHA256 } from '../../src/v2/domain/face-detector-output.ts'
+import { FACE_EVIDENCE_POLICY, FACE_EVIDENCE_POLICY_SHA256 } from '../../src/v2/domain/face-evidence-policy.ts'
+import { ACCEPTED_FACE_PRODUCERS, authenticateFaceEnvelope } from '../../src/v2/domain/face-producer-registry.ts'
+import { acceptedProducer, sealedWindow } from './helpers/face-envelope-v2.mjs'
+import { sealedSourceWindow } from './helpers/face-source-envelope-v3.mjs'
+import { presentPublicOperationV2 } from '../../src/v2/public-api/presenters.ts'
 
 const root = resolve(import.meta.dirname, '../..')
 const openApi = createOpenApiDocument()
@@ -104,7 +116,37 @@ function parameterMap(operation) {
 }
 
 test('T-FR-241 every public operation has an executable, versioned contract test', async (t) => {
-  assert.equal(FOUNDATION_CAPABILITIES.length, 380)
+  assert.equal(FOUNDATION_CAPABILITIES.length, 391)
+  assert.deepEqual(FOUNDATION_CAPABILITIES
+    .filter((capability) => capability.id.startsWith('apollo.projects.perception-producer-operations.'))
+    .map((capability) => capability.id).sort(), [
+      'apollo.projects.perception-producer-operations.create',
+      'apollo.projects.perception-producer-operations.read',
+    ])
+  assert.deepEqual(FOUNDATION_CAPABILITIES
+    .filter((capability) => capability.id.startsWith('apollo.projects.temporal-producer-operations.'))
+    .map((capability) => capability.id).sort(), [
+      'apollo.projects.temporal-producer-operations.create',
+      'apollo.projects.temporal-producer-operations.read',
+    ])
+  assert.deepEqual(FOUNDATION_CAPABILITIES
+    .filter((capability) => capability.id.startsWith('apollo.projects.face-producer-operations.'))
+    .map((capability) => capability.id).sort(), [
+      'apollo.projects.face-producer-operations.create',
+      'apollo.projects.face-producer-operations.read',
+    ])
+  assert.deepEqual(FOUNDATION_CAPABILITIES
+    .filter((capability) => capability.id.startsWith('apollo.projects.face-window-operations.'))
+    .map((capability) => capability.id).sort(), [
+      'apollo.projects.face-window-operations.create',
+      'apollo.projects.face-window-operations.read',
+    ])
+  assert.deepEqual(FOUNDATION_CAPABILITIES
+    .filter((capability) => capability.id.startsWith('apollo.projects.face-source-windows.'))
+    .map((capability) => capability.id).sort(), [
+      'apollo.projects.face-source-windows.create',
+      'apollo.projects.face-source-windows.read',
+    ])
   const endpoints = new Set()
 
   for (const capability of FOUNDATION_CAPABILITIES) {
@@ -195,6 +237,274 @@ test('T-FR-241 every public operation has an executable, versioned contract test
 
   assert.equal(endpoints.size, FOUNDATION_CAPABILITIES.length)
   assert.equal(Object.keys(DIRECT_PUBLIC_API_BOUNDARIES).length, 6)
+})
+
+test('perception producer public responses accept each real stage and reject unrelated domain phases', () => {
+  for (const [name, type, phases] of [
+    ['perception', 'perception-producer-run', ['probing', 'transcribing', 'verifying', 'persisting']],
+    ['temporal', 'perception-temporal-run', ['probing', 'analyzing', 'verifying', 'persisting']],
+    ['face', 'perception-face-run', ['probing', 'analyzing', 'verifying', 'persisting']],
+  ]) {
+    const created = ajv.getSchema(`apollo://schemas/${name}-producer-operation-created/v1`)
+    const read = ajv.getSchema(`apollo://schemas/${name}-producer-operation-read/v1`)
+    assert.ok(created)
+    assert.ok(read)
+    let operation = startPublicOperationAttempt(createQueuedPublicOperation({
+      id: `operation-${name}-stages-1`, workspaceId: 'workspace-stages-1',
+      projectId: 'project-stages-1', clientId: 'client-stages-1', type,
+      target: { type: 'project-version', id: 'version-stages-1' },
+      createdAt: '2026-10-08T00:00:00.000Z',
+    }), '2026-10-08T00:00:01.000Z')
+    for (const [index, phase] of phases.entries()) {
+      operation = advancePublicOperationPhase(operation, phase, `2026-10-08T00:00:0${index + 2}.000Z`)
+      assert.deepEqual(operation.progress, { completed: index, total: 4, unit: 'stage' })
+      const presented = presentPublicOperationV2(operation)
+      assert.equal(read({ data: { operation: presented }, meta: { apiVersion: 'v1' } }), true,
+        `${name}/${phase}: ${ajv.errorsText(read.errors)}`)
+      assert.equal(created({ data: { operation: presented, replayed: true }, meta: { apiVersion: 'v1' } }), true,
+        `${name}/${phase} replay: ${ajv.errorsText(created.errors)}`)
+    }
+    for (const forbidden of ['rendering', 'directing', name === 'perception' ? 'analyzing' : 'transcribing']) {
+      assert.throws(() => advancePublicOperationPhase(operation, forbidden, '2026-10-08T00:00:09.000Z'),
+        (error) => error.code === 'INVALID_PUBLIC_OPERATION')
+    }
+    const unknown = structuredClone(presentPublicOperationV2(operation))
+    unknown.phase = 'detecting-faces'
+    assert.equal(read({ data: { operation: unknown }, meta: { apiVersion: 'v1' } }), false)
+  }
+})
+
+test('diagnostic face capabilities require scoped auth and do not accept caller safety authority', () => {
+  const capabilities = new Map(FOUNDATION_CAPABILITIES.map((capability) => [capability.id, capability]))
+  const create = capabilities.get('apollo.projects.face-producer-operations.create')
+  const read = capabilities.get('apollo.projects.face-producer-operations.read')
+  assert.equal(create.version, '1.0.0')
+  assert.equal(create.authMode, 'required')
+  assert.deepEqual(create.requiredScopes, ['projects:write'])
+  assert.equal(create.idempotency, 'required')
+  assert.equal(create.inputSchemaRef, 'apollo://schemas/face-producer-run-request/v1')
+  assert.equal(create.outputSchemaRef, 'apollo://schemas/face-producer-operation-created/v1')
+  assert.deepEqual(create.endpoint, { method: 'POST', path: '/v1/projects/{projectId}/face-producer-operations' })
+  assert.deepEqual(create.successStatuses, [202, 200])
+  assert.equal(read.version, '1.0.0')
+  assert.equal(read.authMode, 'required')
+  assert.deepEqual(read.requiredScopes, ['projects:read'])
+  assert.equal(read.outputSchemaRef, 'apollo://schemas/face-producer-operation-read/v1')
+  assert.deepEqual(read.endpoint, { method: 'GET', path: '/v1/projects/{projectId}/face-producer-operations/{operationId}' })
+
+  const request = ajv.getSchema(create.inputSchemaRef)
+  assert.ok(request)
+  const valid = { projectVersionId: 'version-face-1', sourceArtifactId: 'artifact-face-1', sampleIntervalFrames: 30 }
+  assert.equal(request(valid), true, ajv.errorsText(request.errors))
+  for (const extra of [{ faceSafety: 'verified' }, { authority: 'server-produced' }, { producer: 'trusted-detector' }]) {
+    assert.equal(request({ ...valid, ...extra }), false)
+  }
+  for (const sampleIntervalFrames of [0, 301]) assert.equal(request({ ...valid, sampleIntervalFrames }), false)
+  const response = ajv.getSchema(read.outputSchemaRef)
+  assert.ok(response)
+  const queued = structuredClone(publicSchemaExamples(getPublicSchema(read.outputSchemaRef))[0])
+  assert.equal(response(queued), true, ajv.errorsText(response.errors))
+  queued.data.operation.status = 'succeeded'
+  queued.data.operation.phase = 'completed'
+  assert.equal(response(queued), false, 'successful diagnostic operation must include its sealed envelope')
+})
+
+test('owner-accepted face window capabilities require scoped auth, own the cadence and never grant face safety', () => {
+  const capabilities = new Map(FOUNDATION_CAPABILITIES.map((capability) => [capability.id, capability]))
+  const create = capabilities.get('apollo.projects.face-window-operations.create')
+  const read = capabilities.get('apollo.projects.face-window-operations.read')
+  assert.equal(create.version, '1.0.0')
+  assert.equal(create.authMode, 'required')
+  assert.deepEqual(create.requiredScopes, ['projects:write'])
+  assert.equal(create.idempotency, 'required')
+  assert.equal(create.inputSchemaRef, 'apollo://schemas/face-window-run-request/v1')
+  assert.equal(create.outputSchemaRef, 'apollo://schemas/face-window-operation-created/v1')
+  assert.deepEqual(create.endpoint, { method: 'POST', path: '/v1/projects/{projectId}/face-window-operations' })
+  assert.deepEqual(create.successStatuses, [202, 200])
+  assert.equal(read.version, '1.0.0')
+  assert.deepEqual(read.requiredScopes, ['projects:read'])
+  assert.equal(read.outputSchemaRef, 'apollo://schemas/face-window-operation-read/v1')
+  assert.deepEqual(read.endpoint, { method: 'GET', path: '/v1/projects/{projectId}/face-window-operations/{operationId}' })
+
+  const request = ajv.getSchema(create.inputSchemaRef)
+  const valid = { projectVersionId: 'version-face-1', sourceArtifactId: 'artifact-face-1', window: { startTimelineFrame: 100, endTimelineFrame: 250 } }
+  assert.equal(request(valid), true, ajv.errorsText(request.errors))
+  // cadence, thresholds, profile and every kind of authority are the server's, never the caller's
+  for (const extra of [{ sampleIntervalFrames: 5 }, { scoreThreshold: 0.1 }, { detectorProfile: 'openvino-face0204-v9' }, { faceSafety: 'verified' },
+    { authority: 'server-produced' }, { producer: 'trusted-detector' }]) {
+    assert.equal(request({ ...valid, ...extra }), false, JSON.stringify(extra))
+  }
+  for (const window of [undefined, {}, { startTimelineFrame: 0 }, { startTimelineFrame: -1, endTimelineFrame: 10 }, { startTimelineFrame: 0, endTimelineFrame: 0 },
+    { startTimelineFrame: 0.5, endTimelineFrame: 10 }, { startTimelineFrame: 0, endTimelineFrame: 10, stride: 5 }]) {
+    assert.equal(request({ ...valid, window }), false, JSON.stringify(window))
+  }
+
+  const response = ajv.getSchema(read.outputSchemaRef)
+  const queued = structuredClone(publicSchemaExamples(getPublicSchema(read.outputSchemaRef))[0])
+  assert.equal(response(queued), true, ajv.errorsText(response.errors))
+  let operation = startPublicOperationAttempt(createQueuedPublicOperation({
+    id: 'operation-face-window-succeeded-1', workspaceId: 'workspace-1', projectId: 'project-1', clientId: 'client-1',
+    type: 'perception-face-run', target: { type: 'project-version', id: 'version-1' }, createdAt: '2026-10-08T00:00:00.000Z',
+  }), '2026-10-08T00:00:01.000Z')
+  for (const [index, phase] of ['probing', 'analyzing', 'verifying', 'persisting'].entries()) {
+    operation = advancePublicOperationPhase(operation, phase, '2026-10-08T00:00:0' + (index + 2) + '.000Z')
+  }
+  const succeeded = presentPublicOperationV2(succeedPublicOperation(operation, '2026-10-08T00:00:09.000Z'), { includeProjectId: true })
+  assert.equal(response({ data: { operation: succeeded }, meta: { apiVersion: 'v1' } }), false, 'success must carry its sealed envelope and the producer verdict')
+
+  const envelope = sealedWindow({ rowsAt: (frame) => (frame % 10 === 0 ? [[0.9, 0.2, 0.2, 0.4, 0.6]] : []) })
+  const authentication = authenticateFaceEnvelope(envelope)
+  assert.equal(authentication.authenticated, true)
+  const body = (overrides = {}) => ({ data: { operation: succeeded, envelope, producerAuthentication: authentication, ...overrides }, meta: { apiVersion: 'v1' } })
+  assert.equal(response(body()), true, ajv.errorsText(response.errors))
+  assert.equal(response(body({ envelope: undefined })), false)
+  assert.equal(response(body({ producerAuthentication: undefined })), false)
+
+  // a Linux producer is a valid envelope that the registry does not authenticate: both facts are visible
+  const linux = sealedWindow({ producer: acceptedProducer('linux') })
+  const linuxVerdict = authenticateFaceEnvelope(linux)
+  assert.equal(linuxVerdict.authenticated, false)
+  assert.equal(response(body({ envelope: linux, producerAuthentication: linuxVerdict })), true, ajv.errorsText(response.errors))
+
+  const edit = (mutate) => { const clone = structuredClone(envelope); mutate(clone); return body({ envelope: clone }) }
+  for (const [label, mutate] of [
+    ['face safety granted', (value) => { value.faceSafety = 'safe' }],
+    ['identity performed', (value) => { value.identity = 'performed' }],
+    ['qualified assessment', (value) => { value.producer.assessment.status = 'qualified' }],
+    ['independent confirmation', (value) => { value.producer.assessment.independentConfirmation = 'performed' }],
+    ['v1 schema version', (value) => { value.schemaVersion = 'face-producer-envelope/v1' }],
+    ['other model', (value) => { value.producer.model.xmlSha256 = 'f'.repeat(64) }],
+    ['other policy', (value) => { value.policySha256 = 'f'.repeat(64) }],
+    ['other detector input', (value) => { value.detectorConfig.inputWidth = 640 }],
+    ['wrong raw output size', (value) => { value.samples[0].rawOutput.bytes = FACE0204_OUTPUT_BYTES - 1 }],
+    ['score under the collection floor', (value) => { value.samples[2].boxes[0].confidence = 0.1 }],
+    ['sixty-one samples', (value) => { value.samples = [...value.samples, ...value.samples, ...value.samples].slice(0, 61) }],
+    ['unknown field', (value) => { value.approvedBy = 'someone' }],
+  ]) assert.equal(response(edit(mutate)), false, label)
+})
+
+test('the published face window envelope contract is pinned to the domain constants it mirrors', () => {
+  const schema = getPublicSchema('apollo://schemas/face-window-operation-read/v1')
+  const text = JSON.stringify(schema)
+  const accepted = ACCEPTED_FACE_PRODUCERS[0]
+  for (const pinned of [FACE_EVIDENCE_POLICY.id, FACE_EVIDENCE_POLICY_SHA256, FACE0204_OUTPUT_POLICY_ID, FACE0204_OUTPUT_POLICY_SHA256,
+    accepted.model.xmlSha256, accepted.model.binSha256, accepted.model.licenseSha256, accepted.model.sourceCommit,
+    accepted.v9ReceiptSha256, accepted.v9PreregistrationSha256, accepted.ownerAcceptanceSha256]) {
+    assert.ok(text.includes(pinned), pinned + ' is not in the published schema')
+  }
+  // The sampled-frame cap and the windows the policy allows are the same numbers the schema states.
+  assert.equal(FACE_EVIDENCE_POLICY.sampling.maxSamplesPerWindow, 60)
+  assert.equal(FACE_EVIDENCE_POLICY.sampling.maxWindowFrames, 300)
+  const request = getPublicSchema('apollo://schemas/face-window-run-request/v1')
+  assert.match(JSON.stringify(request), /at most 300 frames and at most 60 sampled frames/)
+})
+
+test('face source window capabilities are keyed by the source, own the cadence and never grant face safety', () => {
+  const capabilities = new Map(FOUNDATION_CAPABILITIES.map((capability) => [capability.id, capability]))
+  const create = capabilities.get('apollo.projects.face-source-windows.create')
+  const read = capabilities.get('apollo.projects.face-source-windows.read')
+  assert.equal(create.version, '1.0.0')
+  assert.equal(create.authMode, 'required')
+  assert.deepEqual(create.requiredScopes, ['projects:write'])
+  assert.equal(create.idempotency, 'required')
+  assert.equal(create.inputSchemaRef, 'apollo://schemas/face-source-window-run-request/v1')
+  assert.equal(create.outputSchemaRef, 'apollo://schemas/face-source-window-operation-created/v1')
+  assert.deepEqual(create.endpoint, { method: 'POST', path: '/v1/projects/{projectId}/face-source-windows' })
+  assert.deepEqual(create.successStatuses, [202, 200])
+  assert.equal(read.version, '1.0.0')
+  assert.deepEqual(read.requiredScopes, ['projects:read'])
+  assert.equal(read.outputSchemaRef, 'apollo://schemas/face-source-window-operation-read/v1')
+  assert.deepEqual(read.endpoint, { method: 'GET', path: '/v1/projects/{projectId}/face-source-windows/{operationId}' })
+
+  const request = ajv.getSchema(create.inputSchemaRef)
+  const valid = { sourceArtifactId: 'artifact-face-1', window: { startSourceFrame: 100, endSourceFrame: 250 } }
+  assert.equal(request(valid), true, ajv.errorsText(request.errors))
+  // the request names the SOURCE: no Version, no timeline range; cadence, thresholds and every kind of authority are the server's
+  for (const extra of [{ projectVersionId: 'version-face-1' }, { sampleIntervalFrames: 5 }, { scoreThreshold: 0.1 },
+    { detectorProfile: 'openvino-face0204-v9-source' }, { faceSafety: 'verified' }, { authority: 'server-produced' },
+    { producer: 'trusted-detector' }, { sourceSha256: 'f'.repeat(64) }]) {
+    assert.equal(request({ ...valid, ...extra }), false, JSON.stringify(extra))
+  }
+  for (const window of [undefined, {}, { startSourceFrame: 0 }, { startSourceFrame: -1, endSourceFrame: 10 }, { startSourceFrame: 0, endSourceFrame: 0 },
+    { startSourceFrame: 0.5, endSourceFrame: 10 }, { startSourceFrame: 0, endSourceFrame: 10, stride: 5 },
+    { startTimelineFrame: 0, endTimelineFrame: 10 }]) {
+    assert.equal(request({ ...valid, window }), false, JSON.stringify(window))
+  }
+  assert.equal(request({ window: valid.window }), false, 'the source is required')
+
+  const response = ajv.getSchema(read.outputSchemaRef)
+  const queued = structuredClone(publicSchemaExamples(getPublicSchema(read.outputSchemaRef))[0])
+  assert.equal(response(queued), true, ajv.errorsText(response.errors))
+  let operation = startPublicOperationAttempt(createQueuedPublicOperation({
+    id: 'operation-face-source-window-succeeded-1', workspaceId: 'workspace-1', projectId: 'project-1', clientId: 'client-1',
+    type: 'perception-face-run', target: { type: 'project-version', id: 'version-1' }, createdAt: '2026-10-18T00:00:00.000Z',
+  }), '2026-10-18T00:00:01.000Z')
+  for (const [index, phase] of ['probing', 'analyzing', 'verifying', 'persisting'].entries()) {
+    operation = advancePublicOperationPhase(operation, phase, '2026-10-18T00:00:0' + (index + 2) + '.000Z')
+  }
+  const succeeded = presentPublicOperationV2(succeedPublicOperation(operation, '2026-10-18T00:00:09.000Z'), { includeProjectId: true })
+  assert.equal(response({ data: { operation: succeeded }, meta: { apiVersion: 'v1' } }), false, 'success must carry its sealed envelope and the producer verdict')
+
+  const envelope = sealedSourceWindow({ rowsAt: (frame) => (frame % 10 === 0 ? [[0.9, 0.2, 0.2, 0.4, 0.6]] : []) })
+  const authentication = authenticateFaceEnvelope(envelope)
+  assert.equal(authentication.authenticated, true)
+  const body = (overrides = {}) => ({ data: { operation: succeeded, envelope, producerAuthentication: authentication, ...overrides }, meta: { apiVersion: 'v1' } })
+  assert.equal(response(body()), true, ajv.errorsText(response.errors))
+  assert.equal(response(body({ envelope: undefined })), false)
+  assert.equal(response(body({ producerAuthentication: undefined })), false)
+
+  // a Linux producer is a valid envelope that the registry does not authenticate: both facts are visible
+  const linux = sealedSourceWindow({ producer: acceptedProducer('linux') })
+  const linuxVerdict = authenticateFaceEnvelope(linux)
+  assert.equal(linuxVerdict.authenticated, false)
+  assert.equal(response(body({ envelope: linux, producerAuthentication: linuxVerdict })), true, ajv.errorsText(response.errors))
+
+  // an unknown-sample window with a failed detector frame is still a valid, sealed envelope
+  const withFailure = sealedSourceWindow({ rowsAt: (frame) => (frame === 20 ? 'unknown' : []) })
+  assert.equal(response(body({ envelope: withFailure, producerAuthentication: authenticateFaceEnvelope(withFailure) })), true, ajv.errorsText(response.errors))
+
+  const edit = (mutate) => { const clone = structuredClone(envelope); mutate(clone); return body({ envelope: clone }) }
+  for (const [label, mutate] of [
+    ['face safety granted', (value) => { value.faceSafety = 'safe' }],
+    ['identity performed', (value) => { value.identity = 'performed' }],
+    ['qualified assessment', (value) => { value.producer.assessment.status = 'qualified' }],
+    ['independent confirmation', (value) => { value.producer.assessment.independentConfirmation = 'performed' }],
+    ['v2 schema version', (value) => { value.schemaVersion = 'face-producer-envelope/v2' }],
+    ['a project in the evidence', (value) => { value.projectId = 'project-1' }],
+    ['a version in the evidence', (value) => { value.projectVersionId = 'version-1' }],
+    ['a time map in the evidence', (value) => { value.timeMap = [] }],
+    ['a timeline window', (value) => { value.window = { startTimelineFrame: 0, endTimelineFrame: 10 } }],
+    ['a timeline frame on a sample', (value) => { value.samples[0].timelineFrame = 0 }],
+    ['non-integer frame rate', (value) => { value.sourceFps = { num: 30000, den: 1001 } }],
+    ['variable frame rate', (value) => { value.sourceClock = 'variable-frame-rate' }],
+    ['rotated source', (value) => { value.sourceOrientation = 'rotation-90' }],
+    ['other model', (value) => { value.producer.model.xmlSha256 = 'f'.repeat(64) }],
+    ['other policy', (value) => { value.policySha256 = 'f'.repeat(64) }],
+    ['other detector input', (value) => { value.detectorConfig.inputWidth = 640 }],
+    ['wrong raw output size', (value) => { value.samples[0].rawOutput.bytes = FACE0204_OUTPUT_BYTES - 1 }],
+    ['score under the collection floor', (value) => { value.samples[2].boxes[0].confidence = 0.1 }],
+    ['sixty-one samples', (value) => { value.samples = [...value.samples, ...value.samples, ...value.samples].slice(0, 61) }],
+    ['a gap without a reason', (value) => { value.gaps = [{ startSourceFrame: 0, endSourceFrame: 1, reasonCode: 'not a code' }] }],
+    ['unknown field', (value) => { value.approvedBy = 'someone' }],
+  ]) assert.equal(response(edit(mutate)), false, label)
+})
+
+test('the published face source window envelope contract is pinned to the domain constants it mirrors', () => {
+  const schema = getPublicSchema('apollo://schemas/face-source-window-operation-read/v1')
+  const text = JSON.stringify(schema)
+  const accepted = ACCEPTED_FACE_PRODUCERS[0]
+  for (const pinned of [FACE_EVIDENCE_POLICY.id, FACE_EVIDENCE_POLICY_SHA256, FACE0204_OUTPUT_POLICY_ID, FACE0204_OUTPUT_POLICY_SHA256,
+    accepted.model.xmlSha256, accepted.model.binSha256, accepted.model.licenseSha256, accepted.model.sourceCommit,
+    accepted.v9ReceiptSha256, accepted.v9PreregistrationSha256, accepted.ownerAcceptanceSha256, 'face-producer-envelope/v3']) {
+    assert.ok(text.includes(pinned), pinned + ' is not in the published schema')
+  }
+  assert.equal(FACE_EVIDENCE_POLICY.sampling.maxSamplesPerWindow, 60)
+  assert.equal(FACE_EVIDENCE_POLICY.sampling.maxWindowFrames, 300)
+  const request = getPublicSchema('apollo://schemas/face-source-window-run-request/v1')
+  assert.match(JSON.stringify(request), /at most 300 frames, at most 60 sampled frames/)
+  // the timeline-keyed contract is untouched by the source-keyed one
+  assert.ok(JSON.stringify(getPublicSchema('apollo://schemas/face-window-operation-read/v1')).includes('face-producer-envelope/v2'))
+  assert.ok(!JSON.stringify(getPublicSchema('apollo://schemas/face-window-operation-read/v1')).includes('face-producer-envelope/v3'))
 })
 
 test('T-F4.015 each renderable-plan compiler is reached by its own route and by no other', () => {

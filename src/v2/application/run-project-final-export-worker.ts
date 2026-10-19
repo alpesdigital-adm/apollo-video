@@ -15,7 +15,7 @@ import {
   FFMPEG_EDITORIAL_RENDERER_VERSION,
   type EditorialProxyRenderer,
 } from './ports/editorial-proxy-renderer.ts'
-import type { ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
+import type { ProjectFinalExportFailureStage, ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
@@ -23,9 +23,15 @@ import type { ProjectLutRenderMaterializer } from './ports/project-lut-render-ma
 import type { ProjectColorPlanRepository } from './ports/project-color-plan-repository.ts'
 import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
 import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
-import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
+import { contextVariantSelection, projectFinalRenderInputHash, projectRenderSourcesFingerprint, sourceOutputVariantId } from './project-render-sources.ts'
+import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
+import { deriveEditorialRenderGeometry } from './derive-editorial-render-geometry.ts'
+import {
+  certifyFinalCaptions, describeFinalCaptionCertification, FINAL_CAPTION_CERTIFICATION_POLICY_SHA256, type FinalPixelCheck,
+} from '../domain/final-caption-certification.ts'
+import type { CaptionPixelCritic } from './ports/caption-pixel-critic.ts'
+import type { FaceSourceWindowEvidenceReader } from './ports/face-source-window-evidence-reader.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
-import { calculateVersionHash } from './version-hash.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
 import {
   immediateNextAttemptAt,
@@ -42,12 +48,15 @@ const NON_RETRYABLE_CODES = new Set([
   'ASSET_RIGHTS_BLOCKED',
 ])
 
-function safeFailure(error: unknown) {
+function safeFailure(error: unknown, stage: ProjectFinalExportFailureStage) {
   const retryable = !(error instanceof DomainError && NON_RETRYABLE_CODES.has(error.code))
+  const nodeCode = error && typeof error === 'object' && 'code' in error ? (error as { code?: unknown }).code : undefined
   return {
-    code: error instanceof DomainError ? error.code.toLowerCase() : 'final_export_failed',
+    code: error instanceof DomainError ? error.code.toLowerCase()
+      : nodeCode === 'ENOENT' ? 'required_file_missing' : 'final_export_failed',
     message: 'Project final export could not be completed',
     retryable,
+    stage,
   }
 }
 
@@ -63,6 +72,13 @@ export function runNextProjectFinalExportOperationService(dependencies: {
   colorPlans: Pick<ProjectColorPlanRepository, 'readEffectiveForVersion'>
   luts: ProjectLutRenderMaterializer
   sources: ArtifactSourceMaterializer
+  /** W65/W65b. The sealed face windows of the SOURCES the approved Version plays; without them no cue over the picture can be certified. */
+  faceEvidence?: FaceSourceWindowEvidenceReader
+  /**
+   * W65b. Confirms, on the delivered MP4, that every burned caption is where the plan put it. A final that burns at least one
+   * caption is refused (before the encode) without it: a caption is never delivered on the strength of the plan alone.
+   */
+  captionPixelCritic?: CaptionPixelCritic
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
@@ -112,6 +128,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
     let renewal: Promise<boolean> | undefined
     let leaseCommandTail: Promise<void> = Promise.resolve()
     let attemptRecorded = false
+    let failureStage: ProjectFinalExportFailureStage = 'source-read'
     let validators: Array<{ code: string; passed: boolean; message: string }> = []
     const command = (now: Date) => ({ operationId: operation.id, leaseOwner, attempt, now: now.toISOString() })
     const withLeaseCommand = <T>(action: () => Promise<T>): Promise<T> => {
@@ -180,6 +197,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
     }
     try {
       scheduleHeartbeat()
+      // `final` purpose: the repository reads the exact Version through the persisted `final` verdict (state/entry/spec sealed).
       const source = await dependencies.projects.readImmutableApprovedSource({
         workspaceId: operation.workspaceId,
         projectId: context.projectId,
@@ -194,14 +212,23 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         proxyArtifactId: context.proxyArtifactId,
         sourceArtifactId: context.sourceArtifactId,
         sourceManifestId: context.sourceManifestId,
+        ...contextVariantSelection(context),
+        // Sealed to a Version that is no longer the head: it can never publish, so it refuses before it renders anything.
+        requireCurrent: true,
       })
       if (!source) throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Immutable approved final export source disappeared')
+      // The output this export was approved for is the one the operation persisted; a source sealed to another output is no source.
+      if (context.outputVariantId !== undefined && context.outputVariantId !== sourceOutputVariantId(source)) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Immutable final export source is not the output its operation was approved for')
+      }
       const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
+      failureStage = 'color-plan'
       const colorPlan = await dependencies.colorPlans.readEffectiveForVersion({
         workspaceId: operation.workspaceId,
         projectId: context.projectId,
         projectVersionId: context.projectVersionId,
       })
+      failureStage = 'color-bindings'
       const colorPipelines = await loadBoundRenderColorPipelines({
         repository: dependencies.colorPipelines, workspaceId: operation.workspaceId,
         projectId: context.projectId, bindings: context.colorPipelineBindings,
@@ -210,13 +237,14 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         (!colorPipelines.has(asset.artifactId) || context.colorPipelineBindings.find((binding) => binding.sourceArtifactId === asset.artifactId)?.sourceManifestId !== asset.manifestId))) {
         throw new DomainError('INVALID_RENDER_INPUT', 'Final render video source is missing its bound color pipeline')
       }
+      failureStage = 'lut-materialization'
       const materializedLut = await dependencies.luts.materialize({
         workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
         operationId: operation.id, compilations: [...colorPipelines.values()],
         ...(colorPlan ? { executions: colorPlan.compiled.targets } : {}),
       })
-      const immutableInputHash = calculateVersionHash({
-        kind: 'project-final-export/v1',
+      failureStage = 'input-validation'
+      const immutableInputHash = projectFinalRenderInputHash({
         projectId: context.projectId,
         projectVersionId: context.projectVersionId,
         projectVersionHash: context.projectVersionHash,
@@ -234,6 +262,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
         colorPipelineBindings: context.colorPipelineBindings,
         outputSpec: context.outputSpec,
+        // Re-read through the same `final` verdict: another State, variant revision or materialization is another input hash.
+        outputConsumptionSealHash: source.outputConsumption.sealHash,
       })
       if (
         immutableInputHash !== context.inputHash ||
@@ -246,8 +276,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         Math.abs(source.editPlan.fps - context.outputSpec.fps) > 0.01
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Approved EditPlan or final OutputSpec is not safe to render')
       const renderSourceIds = source.renderSources.map((asset) => asset.artifactId)
+      failureStage = 'rights'
       await assertRights(renderSourceIds, source.locale)
-      const subtitleCues = source.editPlan.subtitleTracks.flatMap((track) => 'cues' in track ? track.cues : [])
+      failureStage = 'input-validation'
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
       const musicTracks = 'audioTracks' in source.editPlan && Array.isArray(source.editPlan.audioTracks) ? source.editPlan.audioTracks : []
@@ -255,7 +286,40 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         ? createDirectedAudioTimelineHash({ fps: source.editPlan.fps, clips, musicTracks })
         : createEditorialAudioTimelineHash({ fps: source.editPlan.fps, clips })
       if ('audioTimelineHash' in source.editPlan && source.editPlan.audioTimelineHash !== audioTimelineHash) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted Director audio timeline identity changed before final render')
+      // W65/W65b. The geometry the approved proxy was drawn from (cues, CTA overlays, the placement plan, the persisted reframe plan),
+      // derived by the same function from the same sealed source and the same planner. Only the canvas is the final's: the OutputSpec
+      // the operation approved. The final decides its captions the way the proxy does, on the FINAL canvas, from the sealed face
+      // windows of the sources the cut plays. A cue that cannot be certified in a free band is OMITTED (the renderer never draws it)
+      // and LISTED as a review item in the receipt, never silently dropped: that is the sanctioned remedy, not a failure. What stops
+      // the export before the encode is anything else - a hard issue, a band that is not free-certified under a placed cue, or a
+      // burned caption that nothing would confirm in the delivered pixels. When the geometry cannot be derived the export stops here;
+      // rendering the cut without its captions is not an option.
+      const { subtitleCues, ctaOverlays, placementPlan, reframePlan } = await deriveEditorialRenderGeometry({
+        source,
+        canvas: { width: context.outputSpec.width, height: context.outputSpec.height },
+        workspaceId: operation.workspaceId, projectId: context.projectId, clips,
+        ...(composition ? { composition } : {}),
+        ...(dependencies.faceEvidence ? { faceEvidence: dependencies.faceEvidence } : {}),
+        clock,
+        uncertifiedCues: 'omit-and-list',
+      })
+      const hardCaptionIssues = placementPlan.subtitleAnchorPlan?.issues.filter((issue) => issue.severity === 'hard') ?? []
+      if (hardCaptionIssues.length > 0) {
+        throw new DomainError('INVALID_RENDER_INPUT',
+          `Final export has ${hardCaptionIssues.length} caption(s) that could not be placed (${[...new Set(hardCaptionIssues.map((issue) => issue.code))].join(', ')}); review is required`)
+      }
+      // Everything about the plan that does not need pixels. `completed` with no issues stands for "the delivered pixels agree".
+      const preflight = certifyFinalCaptions({ plan: placementPlan, pixelCheck: { measurement: 'completed', issues: [] } })
+      if (!preflight.admissible) {
+        throw new DomainError('INVALID_RENDER_INPUT', `Final export captions are not certified (${preflight.failures.slice(0, 3).join('; ')})`)
+      }
+      const burnedCaptions = preflight.receipt.burned.length
+      if (burnedCaptions > 0 && !dependencies.captionPixelCritic) {
+        throw new DomainError('INVALID_RENDER_INPUT',
+          `Final export would burn ${burnedCaptions} caption(s) but no caption pixel critic is available to confirm them in the delivered pixels`)
+      }
       await enter('rendering')
+      failureStage = 'source-materialization'
       const materializedSources = await Promise.all(source.renderSources.map((asset) =>
         dependencies.sources.materialize({
           operationId: operation.id,
@@ -263,7 +327,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           sha256: asset.sha256,
           byteSize: asset.byteSize,
         })))
-      const render = () => dependencies.renderer.render({
+      failureStage = 'render'
+      const renderRequest: Parameters<typeof dependencies.renderer.render>[0] = {
         operationId: operation.id,
         renderKind: 'final',
         sources: source.renderSources.map((asset, index) => ({
@@ -280,11 +345,15 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         format: source.format,
         outputSpec: context.outputSpec,
         subtitleCues,
+        ...(ctaOverlays.length ? { ctaOverlays } : {}),
         transitions,
         ...(musicTracks[0] ? { backgroundMusic: musicTracks[0] } : {}),
         ...(composition ? { composition } : {}),
+        placementPlan,
+        ...(reframePlan ? { reframePlan } : {}),
         signal: abortController.signal,
-      })
+      }
+      const render = () => dependencies.renderer.render(renderRequest)
       const rendered = dependencies.telemetry
         ? await runPublicOperationSpan({
             telemetry: dependencies.telemetry,
@@ -297,7 +366,34 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           })
         : await render()
       await enter('verifying')
+      failureStage = 'output-verification'
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Final export lease was lost')
+      // ---- W65b. Where the burned captions really are, measured on the bytes that were rendered ----
+      // The control is the same encode without the cues; a final that burns nothing has nothing to confirm. Unlike the proxy, a
+      // critic that was wired and could not measure does NOT leave a deliverable behind: the caption is not confirmed.
+      let pixelCheck: FinalPixelCheck | null = null
+      if (burnedCaptions > 0) {
+        const controlOperationId = `${operation.id}-caption-control`
+        try {
+          const verification = await dependencies.captionPixelCritic!.verify({
+            plan: placementPlan, deliveredPath: rendered.outputPath, signal: abortController.signal,
+            renderControl: async () => {
+              const control = await dependencies.renderer.render({ ...renderRequest, operationId: controlOperationId, subtitleCues: [] })
+              return { path: control.outputPath }
+            },
+          })
+          pixelCheck = Object.freeze({
+            measurement: verification.measurement === 'completed' ? 'completed' as const : 'failed' as const,
+            issues: verification.issues,
+          })
+        } catch (error) {
+          if (abortController.signal.aborted) throw error
+          pixelCheck = Object.freeze({ measurement: 'failed' as const, issues: [] })
+        } finally {
+          await dependencies.renderer.cleanup(controlOperationId).catch(() => undefined)
+        }
+      }
+      const certification = certifyFinalCaptions({ plan: placementPlan, pixelCheck })
       const expectedFrames = clips.reduce(
         (total, clip) => total + clip.sourceOutFrame - clip.sourceInFrame,
         0,
@@ -352,11 +448,20 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             Math.abs(rendered.renderElementMap.fps - context.outputSpec.fps) <= 0.01,
           message: 'RenderElementMap must match final output identity and timing.',
         },
+        {
+          code: 'FINAL_CAPTION_CERTIFICATION',
+          passed: certification.admissible,
+          message: certification.admissible
+            ? describeFinalCaptionCertification(certification.receipt)
+            : `Burned captions are not certified: ${certification.failures.slice(0, 3).join('; ')}`.slice(0, 500),
+        },
       ]
       if (validators.some((validator) => !validator.passed)) {
         throw new DomainError('RENDER_OUTPUT_INVALID', 'Final export does not match its approved OutputSpec')
       }
+      failureStage = 'rights'
       await assertRights(renderSourceIds, source.locale)
+      failureStage = 'output-promotion'
       await enter('persisting')
       const stored = await dependencies.storage.promoteDerived({
         workspaceId: operation.workspaceId,
@@ -434,6 +539,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             cubeHash: asset.cubeHash,
             intensity: asset.intensity,
           })),
+          // The placement the encode was decided with: a reconstruction renders the same captions in the same bands.
+          placementPlan: placementPlan.subtitleAnchorPlan ? placementPlan : null,
           expectedOutputSha256: rendered.sha256,
           expectedOutputByteSize: rendered.byteSize,
           ffmpegBinarySha256: rendered.ffmpegBinarySha256 ?? null,
@@ -454,6 +561,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           id: 'editorial-final',
           version: EDITORIAL_FINAL_RECIPE_VERSION,
           parameters: {
+            assEmissionPolicy: ASS_EMISSION_POLICY,
             inputHash: context.inputHash,
             audioTimelineHash,
             projectVersionId: context.projectVersionId,
@@ -474,6 +582,13 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             projectLutSelectionHash: materializedLut.selectionHash,
             materializedCubeHash: materializedLut.materializedCubeHash ?? null,
             materializedCubeHashes: materializedLut.materializedCubeHashes ?? [],
+            placementPlanHash: placementPlan.placementPlanHash,
+            reframePlanHash: reframePlan?.reframePlanHash ?? null,
+            subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null,
+            perceptionTimelineHash: placementPlan.subtitleAnchorPlan?.perceptionTimelineHash ?? null,
+            // W65b. What was burned, how each band was certified, and what was omitted and listed for review.
+            captionCertificationPolicySha256: FINAL_CAPTION_CERTIFICATION_POLICY_SHA256,
+            captionCertification: certification.receipt,
           },
         },
         sources: [
@@ -498,6 +613,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         },
         renderInput,
       })
+      failureStage = 'artifact-persistence'
       const persisted = await dependencies.artifacts.persistOrReplay({
         workspaceId: operation.workspaceId,
         artifactId: context.outputArtifactId,
@@ -575,7 +691,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       // retryable and comes back immediately, and the attempt record below says so
       // rather than blaming a validator that never ran.
       const shuttingDown = signal?.aborted === true
-      const failure = shuttingDown ? workerShutdownFailure() : safeFailure(error)
+      const failure = shuttingDown ? { ...workerShutdownFailure(), stage: failureStage } : safeFailure(error, failureStage)
       if (!attemptRecorded) {
         if (validators.length === 0) {
           validators = [{
@@ -592,7 +708,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             attempt,
             status: 'failed',
             validators,
-            error: { code: failure.code, message: failure.message },
+            error: { code: failure.code, message: failure.message, stage: failure.stage },
             startedAt: attemptStartedAt,
             completedAt: failedAt.toISOString(),
           })

@@ -7,9 +7,12 @@ import type {
 import type {
   PersistedSubtitleSidecar,
   RenderedSubtitleAlignmentSource,
+  SidecarOutputConsumptionSeal,
   SubtitleSidecarRepository,
 } from '../../application/ports/subtitle-sidecar-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { renderRowsOfVariant } from '../../domain/render-row-variant.ts'
+import { requirePersistedOutputConsumptionV3, type RequiredOutputConsumptionV3 } from './output-state-consumption.ts'
 import {
   renderElementMapHash,
   validateRenderElementMap,
@@ -20,6 +23,8 @@ import {
   SUBTITLE_SIDECAR_FORMATS,
   type SubtitleSidecarFormat,
 } from '../../domain/subtitle-sidecar.ts'
+
+const PROXY_REVIEW_STATUSES = ['blocked', 'warning-ack-required', 'ready-for-final'] as const
 
 function parseObject(value: string, field: string): Record<string, unknown> {
   try {
@@ -133,6 +138,9 @@ function toRecord(row: V2ProjectSubtitleSidecar): Readonly<PersistedSubtitleSide
   })
 }
 
+const sealOf = (consumption: Readonly<RequiredOutputConsumptionV3>): SidecarOutputConsumptionSeal =>
+  Object.freeze({ seal: consumption.seal, sealHash: consumption.sealHash })
+
 export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepository {
   private readonly client: PrismaClient
 
@@ -143,12 +151,13 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
   async readRenderedAlignment(input: {
     workspaceId: string
     projectId: string
+    /** The stable variant of the State whose output is aligned. */
     variantId: string
     projectVersionId?: string
   }): Promise<Readonly<RenderedSubtitleAlignmentSource> | null> {
     const project = await this.client.v2Project.findFirst({
       where: { id: input.projectId, workspaceId: input.workspaceId },
-      select: { id: true, format: true, currentVersionId: true },
+      select: { id: true, currentVersionId: true },
     })
     if (!project) return null
     const projectVersionId = input.projectVersionId ?? project.currentVersionId
@@ -159,21 +168,28 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
     })
     if (!version) return null
 
-    // A final export is the stronger evidence of what the audience sees, so it
-    // wins whenever one exists for the requested variant.
-    const [final, proxy] = await Promise.all([
-      this.client.v2ProjectFinalExportOperation.findFirst({
+    // The output of exactly this Version (never the head, never the project's format): the one persisted consumption reader
+    // admits it for rendering, or refuses with the published reason (a copy no editorial cut has materialized, a Version
+    // without outputs, an unknown or ambiguous variant). `variantId` is the stable variant of that State.
+    const scope = { workspaceId: input.workspaceId, projectId: input.projectId, versionId: projectVersionId }
+    const rendered = await requirePersistedOutputConsumptionV3(this.client, { ...scope, variantId: input.variantId, purpose: 'render' })
+    const outputVariantId = rendered.entry.variantId
+
+    // The renders of this Version made for THIS output (selected by the output they name, never by Version alone: the other
+    // outputs of the Version have renders of their own). A final export is the stronger evidence of what the audience sees, so
+    // it wins whenever one exists for the requested output.
+    const [finals, proxies] = await Promise.all([
+      this.client.v2ProjectFinalExportOperation.findMany({
         where: {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
           projectVersionId,
-          outputAspectRatio: input.variantId,
           operation: { status: 'succeeded', phase: 'completed' },
         },
         orderBy: [{ createdAt: 'desc' }],
         include: { editPlanSnapshot: true },
       }),
-      this.client.v2ProjectProxyRenderOperation.findFirst({
+      this.client.v2ProjectProxyRenderOperation.findMany({
         where: {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
@@ -184,32 +200,39 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
         include: { editPlanSnapshot: true },
       }),
     ])
-    const render = final && final.outputAspectRatio === input.variantId
+    const final = renderRowsOfVariant(rendered.state, finals, outputVariantId)[0] ?? null
+    const proxy = renderRowsOfVariant(rendered.state, proxies, outputVariantId)[0] ?? null
+    const render = final
       ? {
           kind: 'final' as const,
-          variantId: final.outputAspectRatio,
           outputArtifactId: final.outputArtifactId,
           outputManifestId: final.outputManifestId,
           renderInputHash: final.inputHash,
+          reviewWhere: { id: final.proxyReviewId } as const,
           editPlanSnapshotId: final.editPlanSnapshotId,
           editPlanHash: final.editPlanSnapshot.contentHash,
           editPlanJson: final.editPlanSnapshot.contentJson,
         }
-      : proxy && (project.format ?? input.variantId) === input.variantId
+      : proxy
         ? {
             kind: 'proxy' as const,
-            variantId: project.format ?? input.variantId,
             outputArtifactId: proxy.outputArtifactId,
             outputManifestId: proxy.outputManifestId,
             renderInputHash: proxy.inputHash,
+            reviewWhere: { operationId: proxy.operationId } as const,
             editPlanSnapshotId: proxy.editPlanSnapshotId,
             editPlanHash: proxy.editPlanSnapshot.contentHash,
             editPlanJson: proxy.editPlanSnapshot.contentJson,
           }
         : null
     if (!render) return null
+    // What the audience sees is a final export: the Version must be consumable as one too (a cut copy stays blocked until its
+    // target owns perception authority), or the sidecar would describe an export the product refuses to make.
+    const finalConsumption = render.kind === 'final'
+      ? await requirePersistedOutputConsumptionV3(this.client, { ...scope, variantId: rendered.entry.variantId, purpose: 'final' })
+      : null
 
-    const [artifact, mapRow] = await Promise.all([
+    const [artifact, mapRow, reviewRow] = await Promise.all([
       this.client.v2MediaArtifact.findFirst({
         where: { id: render.outputArtifactId, workspaceId: input.workspaceId },
         select: { id: true, artifactKey: true, sha256: true, status: true },
@@ -222,15 +245,22 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
           proxyArtifactId: render.outputArtifactId,
         },
       }),
+      this.client.v2ProxyReview.findFirst({
+        where: { ...render.reviewWhere, workspaceId: input.workspaceId, projectId: input.projectId },
+        select: { status: true, finalAllowed: true, reviewHash: true },
+      }),
     ])
     if (!artifact || !mapRow) return null
+    if (reviewRow && !PROXY_REVIEW_STATUSES.includes(reviewRow.status as (typeof PROXY_REVIEW_STATUSES)[number])) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review status is invalid')
+    }
 
     return Object.freeze({
       projectId: input.projectId,
       projectVersionId,
       projectVersionSequence: version.sequence,
       isCurrentVersion: project.currentVersionId === projectVersionId,
-      variantId: render.variantId,
+      variantId: outputVariantId,
       outputKind: render.kind,
       outputArtifactId: render.outputArtifactId,
       outputManifestId: render.outputManifestId,
@@ -243,6 +273,14 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
       renderElementMapHash: mapRow.mapHash,
       map: mapOf(mapRow),
       cueTexts: cueTextsOf(render.editPlanJson),
+      outputConsumption: Object.freeze({ render: sealOf(rendered), ...(finalConsumption ? { final: sealOf(finalConsumption) } : {}) }),
+      review: reviewRow
+        ? Object.freeze({
+            status: reviewRow.status as (typeof PROXY_REVIEW_STATUSES)[number],
+            finalAllowed: reviewRow.finalAllowed,
+            reviewHash: reviewRow.reviewHash,
+          })
+        : null,
     })
   }
 

@@ -1,6 +1,20 @@
 import { calculateCanonicalHash } from "./canonical-hash.ts";
 import { assertDomain } from "./errors.ts";
 import type { MeasuredWord } from "./localization.ts";
+import type { DirectedEditPlan } from "./director-run.ts";
+
+export function collectLocalizationDependentPlanIds(
+  plans: readonly Pick<DirectedEditPlan, 'subtitleTracks' | 'videoTracks' | 'transitions'>[],
+) {
+  const unique = (ids: readonly string[]) => Object.freeze([...new Set(ids)].sort());
+  const captionIds = unique(plans.flatMap((plan) => plan.subtitleTracks.flatMap((track) => track.cues.map((cue) => cue.id))));
+  const clipIds = unique(plans.flatMap((plan) => plan.videoTracks.filter((track) => track.kind === 'base-video').flatMap((track) => track.clips.map((clip) => clip.id))));
+  const brollIds = unique(plans.flatMap((plan) => plan.videoTracks.filter((track) => track.kind !== 'base-video').flatMap((track) => track.clips.map((clip) => clip.id))));
+  const eventIds = unique(plans.flatMap((plan) => plan.transitions.map((event) => event.id)));
+  assertDomain(captionIds.length > 0 && clipIds.length > 0, 'PRECONDITION_REQUIRED',
+    'Localization approval requires persisted caption and clip identities');
+  return Object.freeze({ captionIds, clipIds, brollIds, eventIds });
+}
 
 export const LOCALIZATION_MEDIA_RUN_SCHEMA_VERSION =
   "localization-media-run/v1" as const;

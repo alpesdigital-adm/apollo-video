@@ -179,7 +179,26 @@ test('T-FR-092 controlled provider output becomes a person-free real MP4 with di
   const materialized = { ...compiled.proxy, schemaVersion: 'materialized-render-input/v1', assets: compiled.proxy.assets.map((item) => ({ ...item, uri: pathToFileURL(fileByKey.get(item.artifactKey)).href })) }
   const renderer = new RemotionRenderInputRenderer({ projectRoot: process.cwd(), outputRoot, timeoutMs: 60_000, createId: () => 'synthetic-controlled-stage', clock: () => new Date('2029-01-01T00:00:10.000Z') })
   const outputKey = 'synthetic/controlled-presenter.mp4'
-  const staged = await renderer.stage(materialized, { outputKey })
+  const renderStartedAt = Date.now(), renderStarted = performance.now()
+  let staged
+  try {
+    staged = await renderer.stage(materialized, { outputKey })
+  } catch (error) {
+    const phases = ['request-reading', 'assets-starting', 'composition-selecting', 'still-rendering',
+      'media-rendering', 'render-completed', 'completed']
+    try {
+      console.error(JSON.stringify({ kind: 'synthetic-presenter-render-stage-diagnostic', startedAt: renderStartedAt,
+        completedAt: Date.now(), elapsedMs: performance.now() - renderStarted,
+        code: typeof error?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(error.code) ? error.code : null,
+        observedWorkerPhase: phases.includes(error?.details?.phase) ? error.details.phase : null,
+        declaredOutput: { width: materialized.output.width, height: materialized.output.height,
+          fps: materialized.output.fps, durationInFrames: materialized.output.durationInFrames },
+        declaredWorkerOptions: { timeoutMs: 60000, codec: 'h264', crf: 23, pixelFormat: 'yuv420p', imageFormat: 'jpeg',
+          concurrency: 1, disallowParallelEncoding: true, x264Preset: 'not-explicit', browserExecutable: 'not-explicit' },
+        scope: 'last-worker-phase-only/not-browser-or-frame-progress-or-timeout-cause' }))
+    } catch { /* Diagnostic IO cannot replace the original failed render. */ }
+    throw error
+  }
   const receipt = await staged.commit()
   const output = path.join(outputRoot, ...outputKey.split('/'))
   const { stdout } = await execFileAsync(ffprobePath, ['-v','error','-count_frames','-show_entries','stream=codec_type,codec_name,width,height,nb_read_frames','-of','json',output])

@@ -2,22 +2,28 @@ import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import net from 'node:net'
-import { dirname, isAbsolute, join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { proveCatalogOutputBrowser } from './helpers/catalog-output-browser-proof.mjs'
+import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 
-// The Director result, reviewed proxy, and Rec.709 color probe (including its
-// producer identity) are controlled upstream seeds. The final-export API,
-// color compilation, worker, FFmpeg render, validation, and download are real.
+// The persisted Director quality is review-required with unknown face safety, and it stays that way for the whole test.
+// W65b: unknown face safety no longer refuses an export by itself - the gate admits that report and the worker certifies
+// every BURNED caption (prisma-final-caption-certification.integration.mjs proves that chain). What the public API must
+// still refuse is a report that is not honest about everything else. A separately injected, test-only approval port
+// exercises the export mechanics (catalog, download, reconstruction) with real PostgreSQL, FFmpeg and artifact storage;
+// this is not a facial-safety claim.
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
 const ffmpegStatic = require('ffmpeg-static')
+const ffprobeStatic = require('ffprobe-static')?.path
 
 async function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -43,20 +49,103 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
-test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs one immutable final', {
+function reviewRequiredQualityReport({ suffix, evaluatedAt, createQualityReport, resolveStrategicRubric }) {
+  const rubric = resolveStrategicRubric('discovery')
+  const strategic = createQualityReport({ objective: 'discovery',
+    evidence: rubric.criteria.map((criterion) => ({ criterionId: criterion.id, score: 100,
+      evidence: [`controlled:${criterion.id}`] })),
+    gates: { narrativeIntegrity: true, legibility: true, rights: true }, evaluatedAt })
+  return {
+    schemaVersion: 'director-quality-report/v3',
+    id: `final-export-quality-report-${suffix}`,
+    desiredActionRef: { id: `final-export-action-${suffix}` },
+    status: 'review-required',
+    strategic,
+    faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
+    hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true,
+      subtitlesFaceSafe: false, subtitlesBounded: true, forbiddenSpeechAbsent: true,
+      timelineContinuous: true },
+    score: 1,
+    issues: [],
+    criticVersion: 'project-director-critic/v2',
+    evaluatedAt,
+  }
+}
+
+function emptyDirectorPerceptionSnapshot({ id, sourceTranscriptId, createPerceptionTimeline }) {
+  return {
+    schemaVersion: 1,
+    id,
+    timeline: createPerceptionTimeline({ durationMs: 4_000, observations: [] }),
+    summary: { id: `${id}-summary`, speechCoverage: 0, visualCoverage: 'absent',
+      faceCoverage: 'absent', confidence: 0, sourceTranscriptId },
+  }
+}
+
+test('T-FR-231 controlled fixture keeps quality unknown and materializes authenticated actor audit', async () => {
+  const { createQualityReport, resolveStrategicRubric } = await import('../../src/v2/domain/strategic-rubric.ts')
+  const { parseFinalExportQuality } = await import('../../src/v2/infrastructure/prisma/project-final-export-repository.ts')
+  const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
+  const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
+  const { createPerceptionTimeline } = await import('../../src/v2/domain/perception-timeline.ts')
+  const { parseDirectorPerceptionSnapshotUnchecked } = await import('../../src/v2/infrastructure/prisma/director-run-repository.ts')
+  const quality = reviewRequiredQualityReport({ suffix: 'offline-smoke',
+    evaluatedAt: '2026-07-26T20:00:00.000Z', createQualityReport, resolveStrategicRubric })
+  const rubric = resolveStrategicRubric('discovery')
+  const parse = (report) => parseFinalExportQuality({ contentJson: stableSerialize(report),
+    contentHash: calculateVersionHash(report), contentSchemaVersion: 3,
+    objective: 'discovery', rubricRef: `${rubric.id}/v${rubric.version}` })
+  assert.equal(parse(quality).status, 'review-required')
+  assert.throws(() => parse({ ...quality, status: 'approved' }),
+    (error) => error.code === 'PERSISTENCE_CONFLICT')
+  const perception = emptyDirectorPerceptionSnapshot({ id: 'final-export-perception-offline',
+    sourceTranscriptId: 'final-export-transcript-offline', createPerceptionTimeline })
+  assert.equal(parseDirectorPerceptionSnapshotUnchecked({ contentJson: stableSerialize(perception),
+    contentHash: calculateVersionHash(perception), schemaVersion: 1,
+    baseVersionId: 'final-export-base-offline' }).summary.faceCoverage, 'absent')
+  const invalidPerception = { schemaVersion: 1, state: 'complete' }
+  assert.throws(() => parseDirectorPerceptionSnapshotUnchecked({
+    contentJson: stableSerialize(invalidPerception),
+    contentHash: calculateVersionHash(invalidPerception), schemaVersion: 1,
+    baseVersionId: 'final-export-base-offline',
+  }), (error) => error.code === 'PERSISTENCE_CONFLICT')
+  const auditContext = createExternalAuditContext({ clientId: 'controlled-client-smoke',
+    credentialId: 'controlled-credential-smoke', workspaceId: 'controlled-workspace-smoke',
+    environment: 'production' })
+  const actor = { ...auditContext, auditContext, scopes: new Set(['projects:write']),
+    authenticationKind: 'bearer', clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' }
+  const audit = materializeActorAuditContext(actor)
+  assert.equal(audit.clientId, actor.clientId)
+  assert.equal(audit.credentialId, actor.credentialId)
+  assert.equal(audit.workspaceId, actor.workspaceId)
+  assert.match(audit.contextHash, /^[a-f0-9]{64}$/)
+})
+
+test('T-FR-231 rejects unknown face safety through the API and verifies controlled export mechanics', {
   skip: process.env.APOLLO_FINAL_EXPORT_E2E !== '1' && 'set APOLLO_FINAL_EXPORT_E2E=1 and use an isolated V2 database',
   timeout: process.env.APOLLO_FINAL_EXPORT_SERVER_MODE === 'dev' ? 360_000 : 180_000,
 }, async () => {
   assert.ok(process.env.V2_DATABASE_URL, 'V2_DATABASE_URL must point to an isolated PostgreSQL database')
   const artifactRoot = process.env.APOLLO_V2_ARTIFACT_ROOT?.trim() ?? ''
   assert.equal(isAbsolute(artifactRoot), true, 'APOLLO_V2_ARTIFACT_ROOT must be absolute')
-  assert.ok(ffmpegStatic, 'ffmpeg-static is required')
+  const ffmpegBin = process.env.FFMPEG_BIN?.trim() || ffmpegStatic
+  assert.ok(ffmpegBin && isAbsolute(ffmpegBin), 'a pinned absolute FFmpeg binary is required')
+  const ffprobeBin = process.env.APOLLO_V2_FFPROBE_PATH?.trim() ||
+    process.env.FFPROBE_PATH?.trim() || process.env.FFPROBE_BIN?.trim() ||
+    process.env.APOLLO_OCR_FFPROBE?.trim() || ffprobeStatic
+  assert.ok(ffprobeBin && isAbsolute(ffprobeBin), 'an absolute FFprobe binary is required')
+  assert.equal((await stat(ffprobeBin)).isFile(), true)
 
   const { assetRightsRevision } = await import('../../src/v2/domain/asset-rights.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
+  const { createMediaArtifactManifestV2, assertMediaArtifactManifest } = await import('../../src/v2/domain/media-artifact.ts')
+  const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
+  const { enqueueProjectFinalExportService } = await import('../../src/v2/application/enqueue-project-final-export.ts')
+  const { runNextProjectFinalExportOperationService } = await import('../../src/v2/application/run-project-final-export-worker.ts')
   const { reconstructFinal } = await import('../../src/v2/application/render-workflow.ts')
   const { setProjectLutSelectionService } = await import('../../src/v2/application/project-lut-selections.ts')
   const { catalogApprovedOutputService } = await import('../../src/v2/application/catalog-approved-output.ts')
@@ -64,10 +153,27 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
   const { listMediaLibraryService } = await import('../../src/v2/application/media-library.ts')
   const { PrismaMediaLibraryRepository } = await import('../../src/v2/infrastructure/prisma/media-library-repository.ts')
   const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
-  const { createProjectFinalExportWorker } = await import('../../src/v2/infrastructure/repository-factory.ts')
+  const { createQualityReport, resolveStrategicRubric } = await import('../../src/v2/domain/strategic-rubric.ts')
+  const { createPerceptionTimeline } = await import('../../src/v2/domain/perception-timeline.ts')
+  const { commitSealedChild, testActor } = await import('./helpers/pg-output-world.mjs')
+  const { registerMeasuredVideo, seedReviewProject } = await import('./helpers/review-edit-world.mjs')
+  const {
+    createArtifactSourceMaterializer,
+    createAutomaticCatalogService, createColorPipelineCompilationRepository,
+    createMediaArtifactPersistenceRepository, createProjectColorPlanRepository,
+    createProjectLutSelectionRepository,
+    createRenderElementMapRepository, createWorkspaceLutRepository,
+  } = await import('../../src/v2/infrastructure/repository-factory.ts')
+  const { createFfmpegEditorialProxyRendererFromEnvironment } = await import('../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts')
+  const { createLocalMediaUploadStorageFromEnvironment } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
+  const { LocalProjectLutRenderMaterializer } = await import('../../src/v2/infrastructure/media/local-project-lut-render-materializer.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
   const { PrismaProjectLutSelectionRepository } = await import('../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
+  const { PrismaProjectFinalExportRepository } = await import('../../src/v2/infrastructure/prisma/project-final-export-repository.ts')
+  const { PrismaProjectProxyRenderRepository } = await import('../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts')
+  const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
+  const { createProtectedPayloadCipherFromEnvironment } = await import('../../src/v2/infrastructure/security/recipe-parameter-cipher.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
   const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
   const { probeVideo } = await import('../../src/v2/infrastructure/media/video-probe.ts')
@@ -75,7 +181,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
   const client = new PrismaClient()
   const databaseName = new URL(process.env.V2_DATABASE_URL).pathname.slice(1)
   assert.match(databaseName, /(?:^|_)e2e(?:_|$)/, 'destructive E2E setup requires an explicitly isolated database')
-  await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE')
+  await resetDisposableDatabase(client)
   const suffix = randomUUID().slice(0, 8)
   const workspaceId = `final-export-workspace-${suffix}`
   const projectId = `final-export-project-${suffix}`
@@ -94,12 +200,15 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
   const sourcePath = join(artifactRoot, ...sourceArtifactKey.split('/'))
   const uiUsername = `catalog-${suffix}`
   const uiPassword = `Catalog-${suffix}-controlled-password`
+  const protectedPayloadKeyId = `final-export-controlled-${suffix}`
+  const protectedPayloadKey = Buffer.alloc(32, 7).toString('base64url')
   let server
   let serverLogs = ''
+  let primaryError
 
   try {
     await mkdir(dirname(sourcePath), { recursive: true })
-    await execFileAsync(ffmpegStatic, [
+    await execFileAsync(ffmpegBin, [
       '-hide_banner', '-loglevel', 'error', '-y',
       '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30',
       '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
@@ -149,32 +258,60 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     assert.equal(authenticationAudit.environment, 'production')
     assert.equal(authenticationAudit.authenticationKind, 'bearer')
     assert.match(authenticationAudit.contextHash, /^[a-f0-9]{64}$/)
-    await client.v2Project.create({
-      data: {
-        id: projectId,
-        workspaceId,
-        name: 'Final export E2E',
-        status: 'reviewing-proxy',
-        objective: 'conversion',
-        format: '9:16',
-        locale: 'pt-BR',
-        createdByType: 'api-client',
-        createdById: issued.client.id,
-        createdAt,
-        updatedAt: createdAt,
-      },
+    // The project is the sealed world the product builds: the creation Command, one explicit 9:16 output variant, the source's
+    // persisted ingest (artifact, manifest, link, color probe, rights, sealed receipt), a child Command that adopts that receipt and
+    // plays the source whole, the neutral LUT selection, and then the Version of a Director run (a child Command of type run-director)
+    // with the run's own snapshots. The run is controlled, as it always was here: the persisted quality is review-required with unknown
+    // face safety. The product's Director would plan captions, which the final-export worker has no placement plan to render.
+    const actor = testActor({ workspaceId, clientId: issued.client.id, credentialId: issued.credential.id, environment: 'production',
+      scopes: ['projects:read', 'projects:write', 'operations:read', 'artifacts:read'] })
+    await seedReviewProject(client, { workspaceId, actor, prefix: 'final-export', ids: { project: projectId },
+      name: 'Final export E2E', objective: 'discovery', aspectRatio: '9:16', status: 'reviewing-proxy' })
+    // The ingest ran before the controlled instant of the rest of the fixture, so its operation is the older one.
+    const registered = await registerMeasuredVideo(client, { workspaceId, projectId, actor, artifactId: sourceArtifactId,
+      artifactKey: sourceArtifactKey, sha256: sourceSha256, byteSize: sourceBytes.byteLength,
+      probe: { width: 320, height: 180, duration: 4, fps: 30 }, slug: `final-export-${suffix}`, manifestId: sourceManifestId,
+      originalFileName: 'final-export-source.mp4', recipeId: 'source-master', createdAt: new Date(createdAt.getTime() - 60_000) })
+    const sourceManifest = registered.manifest
+    const colorProbe = createMediaColorProbe({
+      id: `final-export-color-probe-${suffix}`,
+      workspaceId,
+      artifactId: sourceArtifactId,
+      manifestId: sourceManifestId,
+      detection: { state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
+      producer: { provider: 'ffprobe', version: '7.1.1', binaryDigest: sha256('final-export-ffprobe') },
+      createdAt: createdAt.toISOString(),
     })
-
+    await client.v2MediaColorProbe.create({ data: {
+      id: colorProbe.id, workspaceId, artifactId: sourceArtifactId, manifestId: sourceManifestId,
+      schemaVersion: colorProbe.schemaVersion, state: 'ready', metadataJson: stableSerialize(colorMetadata),
+      pixelFormat: 'yuv420p', hdrMode: 'sdr', reasonsJson: stableSerialize([]), producerProvider: 'ffprobe',
+      producerVersion: colorProbe.producer.version, producerBinaryDigest: colorProbe.producer.binaryDigest,
+      createdAt, probeHash: colorProbe.probeHash,
+    } })
+    await setAssetRightsService({
+      repository: new PrismaAssetRightsRepository(client),
+      clock: () => createdAt,
+      createId: () => `final-export-rights-${suffix}`,
+    })({
+      workspaceId,
+      artifactId: sourceArtifactId,
+      baseRevision: assetRightsRevision(sourceArtifactId, 0),
+      draft: {
+        status: 'approved',
+        allowedUses: ['rendering', 'editorial-reuse'],
+        prohibitedUses: [],
+        allowedLocales: ['pt-BR'],
+        consent: { status: 'approved', allowedUses: ['rendering', 'editorial-reuse'], allowedLocales: ['pt-BR'] },
+      },
+      actor: { type: 'api-client', id: issued.client.id },
+    })
     const editPlanSnapshotId = `final-export-edit-plan-${suffix}`
     const qualitySnapshotId = `final-export-quality-${suffix}`
     const snapshotIds = {
-      brief: `final-export-brief-${suffix}`,
-      policies: `final-export-policies-${suffix}`,
       perception: `final-export-perception-${suffix}`,
       treatment: `final-export-treatment-${suffix}`,
       story: `final-export-story-${suffix}`,
-      baseEditPlan: `final-export-base-edit-plan-${suffix}`,
-      editPlan: editPlanSnapshotId,
       quality: qualitySnapshotId,
     }
     const editPlan = {
@@ -197,6 +334,9 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
           rate: 1,
         }],
       }],
+      sources: [{ id: sourceArtifactId, artifactId: sourceArtifactId, kind: 'video', durationSeconds: 4 }],
+      overlayTracks: [], audioTracks: [], effectTracks: [], markers: [], protectedElements: [],
+      localeVariantRefs: [], formatVariantRefs: [], lineageRefs: [sourceArtifactId],
       subtitleTracks: [],
       transitions: [],
       movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
@@ -214,54 +354,8 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       id: `final-export-base-plan-${suffix}`,
       projectVersionId: baseVersionId,
     }
-    const qualityReport = {
-      schemaVersion: 'director-quality-report/v1',
-      id: `final-export-quality-report-${suffix}`,
-      status: 'approved',
-      score: 0.98,
-      issues: [],
-      evaluatedAt: createdAt.toISOString(),
-    }
-    const snapshots = [
-      [snapshotIds.brief, 'brief', 1, { schemaVersion: 1, productionBrief: { ownerInput: { text: 'Final aprovado.' } } }],
-      [snapshotIds.policies, 'policies', 1, { schemaVersion: 1, state: 'configured' }],
-      [snapshotIds.perception, 'perception', 1, { schemaVersion: 1, state: 'complete' }],
-      [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
-      [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
-      [snapshotIds.baseEditPlan, 'edit-plan', 2, baseEditPlan],
-      [snapshotIds.editPlan, 'edit-plan', 2, editPlan],
-      [snapshotIds.quality, 'quality-report', 1, qualityReport],
-    ]
-    for (const [id, kind, schemaVersion, content] of snapshots) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id,
-          workspaceId,
-          projectId,
-          kind,
-          schemaVersion,
-          contentJson: stableSerialize(content),
-          contentHash: calculateVersionHash(content),
-          createdAt,
-        },
-      })
-    }
-    const baseVersionHash = calculateVersionHash({ projectId, version: baseVersionId })
-    await client.v2ProjectVersion.create({
-      data: {
-        id: baseVersionId,
-        workspaceId,
-        projectId,
-        sequence: 1,
-        briefSnapshotId: snapshotIds.brief,
-        editPlanSnapshotId: snapshotIds.baseEditPlan,
-        policiesSnapshotId: snapshotIds.policies,
-        baseHash: baseVersionHash,
-        createdBy: issued.client.id,
-        createdAt,
-      },
-    })
-    await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: baseVersionId } })
+    const baseBundle = await commitSealedChild(client, { workspaceId, projectId, actor, suffix: `final-export-base-${suffix}`,
+      versionId: baseVersionId, mutatePlan: () => baseEditPlan, adopt: [sourceArtifactId] })
     const noLut = await setProjectLutSelectionService({
       repository: new PrismaProjectLutSelectionRepository(client),
       createId: (kind) => `final-export-lut-${kind}-${suffix}`,
@@ -270,61 +364,43 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     })({
       workspaceId,
       projectId,
-      baseVersionId,
-      baseHash: baseVersionHash,
+      baseVersionId: baseBundle.version.id,
+      baseHash: baseBundle.version.baseHash,
       selection: { mode: 'none' },
-      actor: { type: 'system', id: 'final-export-e2e-system' },
+      actor,
       idempotencyKey: `final-export-lut-none-${suffix}`,
       reason: 'Keep this final-export fixture colorimetrically neutral.',
     })
     assert.equal(noLut.selection.resolved.mode, 'none')
-    await client.v2EditCommand.create({
-      data: {
-        id: commandId,
-        workspaceId,
-        projectId,
-        baseVersionId: noLut.version.id,
-        baseHash: noLut.version.baseHash,
-        type: 'run-director',
-        scopeJson: stableSerialize({ kind: 'video', targetIds: [] }),
-        payloadJson: stableSerialize({ schemaVersion: 1, directorRunId }),
-        reason: 'E2E final render',
-        actorType: 'api-client',
-        actorId: issued.client.id,
-        actorCredentialId: authenticationAudit.credentialId,
-        actorEnvironment: authenticationAudit.environment,
-        actorAuthenticationKind: authenticationAudit.authenticationKind,
-        actorContextHash: authenticationAudit.contextHash,
-        idempotencyKey: `final-export-director-${suffix}`,
-        requestFingerprint: calculateVersionHash({ commandId }),
-        createdAt,
-      },
-    })
-    const projectVersionHash = calculateVersionHash({ projectId, version: projectVersionId })
-    await client.v2ProjectVersion.create({
-      data: {
-        id: projectVersionId,
-        workspaceId,
-        projectId,
-        sequence: 3,
-        parentVersionId: noLut.version.id,
-        briefSnapshotId: snapshotIds.brief,
-        treatmentSnapshotId: snapshotIds.treatment,
-        storySnapshotId: snapshotIds.story,
-        editPlanSnapshotId,
-        policiesSnapshotId: snapshotIds.policies,
-        baseHash: projectVersionHash,
-        createdBy: issued.client.id,
-        commandId,
-        createdAt,
-      },
-    })
+    // The run's own snapshots. A snapshot is inserted, never edited: the quality report is the one the run persisted.
+    const qualityReport = reviewRequiredQualityReport({ suffix, evaluatedAt: createdAt.toISOString(),
+      createQualityReport, resolveStrategicRubric })
+    for (const [id, kind, schemaVersion, content] of [
+      [snapshotIds.perception, 'perception', 1, emptyDirectorPerceptionSnapshot({
+        id: snapshotIds.perception, sourceTranscriptId: `final-export-transcript-${suffix}`,
+        createPerceptionTimeline })],
+      [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
+      [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
+      [snapshotIds.quality, 'quality-report', 3, qualityReport],
+    ]) {
+      await client.v2ProjectSnapshot.create({
+        data: {
+          id, workspaceId, projectId, kind, schemaVersion,
+          contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt,
+        },
+      })
+    }
+    // The Director run's Version: a real child Command (run-director) over the neutral-LUT Version, playing the same source.
+    const directedBundle = await commitSealedChild(client, { workspaceId, projectId, actor, suffix: `final-export-run-${suffix}`,
+      type: 'run-director', versionId: projectVersionId, snapshotId: editPlanSnapshotId, mutatePlan: () => editPlan })
+    const projectVersionHash = directedBundle.version.baseHash
+    assert.equal(directedBundle.origin.command.baseVersionId, noLut.version.id)
     await client.v2DirectorRun.create({
       data: {
         id: directorRunId,
         workspaceId,
         projectId,
-        commandId,
+        commandId: directedBundle.origin.command.id,
         baseVersionId: noLut.version.id,
         resultVersionId: projectVersionId,
         status: 'succeeded',
@@ -346,104 +422,25 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         updatedAt: createdAt,
       },
     })
-    await client.v2Project.update({
-      where: { id: projectId },
-      data: { currentVersionId: projectVersionId },
-    })
-
-    await client.v2MediaArtifact.create({
-      data: {
-        id: sourceArtifactId,
-        workspaceId,
-        artifactKey: sourceArtifactKey,
-        sha256: sourceSha256,
-        byteSize: BigInt(sourceBytes.byteLength),
-        mediaType: 'video',
-        container: 'mp4',
-        status: 'available',
-        createdAt,
-      },
-    })
-    await client.v2MediaArtifactManifest.create({
-      data: {
-        id: sourceManifestId,
-        workspaceId,
-        artifactId: sourceArtifactId,
-        schemaVersion: 'media-artifact-manifest/v2',
-        manifestHash: calculateVersionHash({ sourceManifestId }),
-        recipeId: 'source-master',
-        recipeVersion: '1.0.0',
-        parametersHash: calculateVersionHash({ sourceManifestId, parameters: true }),
-        manifestJson: stableSerialize({
-          schemaVersion: 'media-artifact-manifest/v2',
-          artifact: {
-            artifactKey: sourceArtifactKey,
-            sha256: sourceSha256,
-            byteSize: sourceBytes.byteLength,
-            mediaType: 'video',
-            container: 'mp4',
-          },
-          recipe: {
-            id: 'source-master',
-            version: '1.0.0',
-            parametersHash: calculateVersionHash({ sourceManifestId, parameters: true }),
-          },
-          sources: [],
-        }),
-        createdAt,
-      },
-    })
-    const colorProbe = createMediaColorProbe({
-      id: `final-export-color-probe-${suffix}`,
-      workspaceId,
-      artifactId: sourceArtifactId,
-      manifestId: sourceManifestId,
-      detection: { state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
-      producer: { provider: 'ffprobe', version: '7.1.1', binaryDigest: sha256('final-export-ffprobe') },
-      createdAt: createdAt.toISOString(),
-    })
-    await client.v2MediaColorProbe.create({ data: {
-      id: colorProbe.id, workspaceId, artifactId: sourceArtifactId, manifestId: sourceManifestId,
-      schemaVersion: colorProbe.schemaVersion, state: 'ready', metadataJson: stableSerialize(colorMetadata),
-      pixelFormat: 'yuv420p', hdrMode: 'sdr', reasonsJson: stableSerialize([]), producerProvider: 'ffprobe',
-      producerVersion: colorProbe.producer.version, producerBinaryDigest: colorProbe.producer.binaryDigest,
-      createdAt, probeHash: colorProbe.probeHash,
-    } })
-    await client.v2ProjectMediaAsset.create({
-      data: {
-        id: randomUUID(),
-        workspaceId,
-        projectId,
-        artifactId: sourceArtifactId,
-        role: 'source-master',
-        originalFileName: 'final-export-source.mp4',
-        createdAt,
-      },
-    })
-    await setAssetRightsService({
-      repository: new PrismaAssetRightsRepository(client),
-      clock: () => createdAt,
-      createId: () => `final-export-rights-${suffix}`,
-    })({
-      workspaceId,
-      artifactId: sourceArtifactId,
-      baseRevision: assetRightsRevision(sourceArtifactId, 0),
-      draft: {
-        status: 'approved',
-        allowedUses: ['rendering', 'editorial-reuse'],
-        prohibitedUses: [],
-        allowedLocales: ['pt-BR'],
-        consent: { status: 'approved', allowedUses: ['rendering', 'editorial-reuse'], allowedLocales: ['pt-BR'] },
-      },
-      actor: { type: 'api-client', id: issued.client.id },
-    })
+    const qualitySnapshotHash = calculateVersionHash(qualityReport)
+    const editPlanHash = directedBundle.editPlanSnapshot.contentHash
 
     const proxySha256 = calculateVersionHash({ proxyArtifactId })
+    const proxyArtifactKey = `workspaces/final-export-e2e-${suffix}/proxies/proxy.mp4`
+    // Controlled proxy metadata only: the one declared byte is not a rendered MP4.
+    const proxyManifest = createMediaArtifactManifestV2({
+      artifactKey: proxyArtifactKey, artifactSha256: proxySha256, byteSize: 1,
+      mediaType: 'video', container: 'mp4',
+      recipe: { id: 'editorial-proxy', version: '1.0.0', parameters: { proxyManifestId, parameters: true } },
+      sources: [{ artifactKey: sourceArtifactKey, sha256: sourceSha256, role: 'source-master',
+        execution: { tool: { id: 'controlled-fixture-metadata', version: '1.0.0',
+          digest: sha256(await readFile(new URL(import.meta.url))) } } }],
+    })
     await client.v2MediaArtifact.create({
       data: {
         id: proxyArtifactId,
         workspaceId,
-        artifactKey: `workspaces/final-export-e2e-${suffix}/proxies/proxy.mp4`,
+        artifactKey: proxyArtifactKey,
         sha256: proxySha256,
         byteSize: 1n,
         mediaType: 'video',
@@ -457,14 +454,12 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         id: proxyManifestId,
         workspaceId,
         artifactId: proxyArtifactId,
-        schemaVersion: 'media-artifact-manifest/v2',
-        manifestHash: calculateVersionHash({ proxyManifestId }),
-        recipeId: 'editorial-proxy',
-        recipeVersion: '1.0.0',
-        parametersHash: calculateVersionHash({ proxyManifestId, parameters: true }),
-        manifestJson: stableSerialize({
-          artifact: { artifactKey: `workspaces/final-export-e2e-${suffix}/proxies/proxy.mp4` },
-        }),
+        schemaVersion: proxyManifest.schemaVersion,
+        manifestHash: proxyManifest.manifestHash,
+        recipeId: proxyManifest.recipe.id,
+        recipeVersion: proxyManifest.recipe.version,
+        parametersHash: proxyManifest.recipe.parametersHash,
+        manifestJson: stableSerialize(proxyManifest),
         createdAt,
       },
     })
@@ -479,6 +474,27 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         createdAt,
       },
     })
+    for (const [artifactId, manifestId, expected] of [
+      [sourceArtifactId, sourceManifestId, sourceManifest],
+      [proxyArtifactId, proxyManifestId, proxyManifest],
+    ]) {
+      const [artifact, manifest] = await Promise.all([
+        client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId } }),
+        client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: manifestId } }),
+      ])
+      assertMediaArtifactManifest(JSON.parse(manifest.manifestJson))
+      assert.deepEqual([artifact.workspaceId, artifact.artifactKey, artifact.sha256,
+        Number(artifact.byteSize), artifact.mediaType, artifact.container],
+      [workspaceId, expected.artifact.artifactKey, expected.artifact.sha256,
+        expected.artifact.byteSize, expected.artifact.mediaType, expected.artifact.container])
+      assert.deepEqual([manifest.workspaceId, manifest.artifactId, manifest.schemaVersion],
+        [workspaceId, artifactId, expected.schemaVersion])
+      if (artifactId === proxyArtifactId) {
+        assert.deepEqual(JSON.parse(manifest.manifestJson), expected)
+        assert.deepEqual([manifest.manifestHash, manifest.recipeId, manifest.recipeVersion, manifest.parametersHash],
+          [expected.manifestHash, expected.recipe.id, expected.recipe.version, expected.recipe.parametersHash])
+      }
+    }
     const proxyInputHash = calculateVersionHash({ projectVersionId, proxyArtifactId })
     await client.v2PublicOperation.create({
       data: {
@@ -571,9 +587,50 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       },
     })
 
+    // Persisted quality remains review-required for the entire test. Syntax of a
+    // forged "approved" report never grants evidence authority.
+    const finalExportRepository = new PrismaProjectFinalExportRepository(client)
+    const approvalInput = { workspaceId, projectId, projectVersionId, projectVersionHash,
+      outputSpecId: 'preset-9x16', requireCurrent: true }
+    const admittedApproval = await finalExportRepository.readApproval(approvalInput)
+    assert.equal(admittedApproval?.qualityStatus, 'review-required', 'the report is admitted as it is: face safety is not being claimed')
+    assert.equal(admittedApproval?.admissionBasis, 'per-cue-caption-certification')
+    // A stored snapshot cannot be updated (a trigger refuses it), so the forgery is a second quality-report snapshot, INSERTED with
+    // the "approved" status, and the Director run pointed at it inside a transaction that always rolls back.
+    const forgedReport = { ...qualityReport, status: 'approved' }
+    const forgedSnapshotId = `final-export-forged-quality-${suffix}`
+    const rolledBack = new Error('forged approval rolled back')
+    await assert.rejects(() => client.$transaction(async (transaction) => {
+      await transaction.v2ProjectSnapshot.create({ data: {
+        id: forgedSnapshotId, workspaceId, projectId, kind: 'quality-report', schemaVersion: 3,
+        contentJson: stableSerialize(forgedReport), contentHash: calculateVersionHash(forgedReport), createdAt,
+      } })
+      await transaction.v2DirectorRun.update({ where: { id: directorRunId }, data: { qualitySnapshotId: forgedSnapshotId } })
+      await assert.rejects(new PrismaProjectFinalExportRepository(transaction).readApproval(approvalInput),
+        (error) => error.code === 'PERSISTENCE_CONFLICT')
+      throw rolledBack
+    }), (error) => error === rolledBack)
+    assert.equal((await client.v2DirectorRun.findUniqueOrThrow({ where: { id: directorRunId } })).qualitySnapshotId, qualitySnapshotId)
+    assert.equal(await client.v2ProjectSnapshot.findUnique({ where: { id: forgedSnapshotId } }), null)
+    assert.equal((await finalExportRepository.readApproval(approvalInput))?.admissionBasis, 'per-cue-caption-certification')
+    const sourceReader = new PrismaProjectProxyRenderRepository(client)
+    let preflightSource
+    try { preflightSource = await sourceReader.readCurrentSource({ workspaceId, projectId }) }
+    catch (error) {
+      assert.fail(`Final export fixture source is invalid: ${error?.code ?? 'UNKNOWN'}: ${error?.message ?? String(error)}`)
+    }
+    assert.ok(preflightSource)
+    assert.equal(preflightSource.projectVersionId, projectVersionId)
+    assert.equal(preflightSource.editPlanSnapshotId, editPlanSnapshotId)
+    assert.equal(preflightSource.editPlanHash, editPlanHash)
+    assert.equal(preflightSource.sourceArtifactId, sourceArtifactId)
+    assert.equal(preflightSource.sourceManifestId, sourceManifestId)
+    assert.equal(preflightSource.sourceSha256, sourceSha256)
+    assert.equal(preflightSource.trustedOcr, undefined)
+
     const port = await getFreePort()
     const baseUrl = `http://127.0.0.1:${port}`
-    server = spawn(process.execPath, ['node_modules/next/dist/bin/next', ...(process.env.APOLLO_FINAL_EXPORT_SERVER_MODE === 'dev' ? ['dev', '--webpack'] : ['start']), '-p', String(port)], {
+    server = spawn(process.execPath, ['node_modules/next/dist/bin/next', ...(process.env.APOLLO_FINAL_EXPORT_SERVER_MODE === 'dev' ? ['dev', '--webpack'] : ['start']), '-H', '127.0.0.1', '-p', String(port)], {
       cwd: process.cwd(),
       env: {
         ...process.env,
@@ -584,6 +641,9 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         APOLLO_UI_USERNAME: uiUsername, APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(uiPassword, `catalog-salt-${suffix}`),
         APOLLO_UI_SESSION_SECRET: `catalog-${suffix}-session-secret-with-32-bytes`, APOLLO_UI_API_CLIENT_ID: issued.client.id,
         APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
+        APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
+        APOLLO_PROTECTED_PAYLOAD_KEY_ID: protectedPayloadKeyId,
+        APOLLO_PROTECTED_PAYLOAD_KEY: protectedPayloadKey,
         APOLLO_MEDIA_DOWNLOAD_BASE_URL: `${baseUrl}/`,
         APOLLO_MEDIA_DOWNLOAD_SIGNING_SECRET: `final-export-download-${suffix}`.padEnd(48, 'x'),
       },
@@ -621,93 +681,177 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       projectVersionId,
       projectVersionHash,
       format: '9:16',
-      approval: { approved: true, note: 'Aprovado pelo E2E para render final.' },
+      approval: { approved: true, note: 'Controlled request; real quality remains review-required.' },
     }
-    const enqueueResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/exports`, {
+    // W65b: the API refuses what the gate refuses. Unknown face safety is no longer that; a hard check that failed still is.
+    // A stored snapshot is never edited (a trigger refuses the UPDATE): the dishonest report is a second quality-report snapshot, INSERTED, and the
+    // Director run (a mutable pointer) is pointed at it for the one request and put back afterwards. The extra row stays, as every sealed row does.
+    const dishonestReport = { ...qualityReport, hardChecks: { ...qualityReport.hardChecks, timelineContinuous: false } }
+    const dishonestSnapshotId = `final-export-dishonest-quality-${suffix}`
+    await client.v2ProjectSnapshot.create({ data: {
+      id: dishonestSnapshotId, workspaceId, projectId, kind: 'quality-report', schemaVersion: 3,
+      contentJson: stableSerialize(dishonestReport), contentHash: calculateVersionHash(dishonestReport), createdAt,
+    } })
+    await client.v2DirectorRun.update({ where: { id: directorRunId }, data: { qualitySnapshotId: dishonestSnapshotId } })
+    const reviewBlockedResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/exports`, {
       method: 'POST',
-      headers: {
-        authorization,
-        'content-type': 'application/json',
-        'idempotency-key': `final-export-${suffix}`,
-      },
+      headers: { authorization, 'content-type': 'application/json',
+        'idempotency-key': `final-export-review-blocked-${suffix}` },
       body: JSON.stringify(exportBody),
     })
-    const enqueuePayload = await enqueueResponse.json()
-    assert.equal(enqueueResponse.status, 202, `${JSON.stringify(enqueuePayload)}\n${serverLogs.slice(-4_000)}`)
-    assert.equal(enqueuePayload.data.replayed, false)
-    assert.deepEqual(enqueuePayload.data.outputSpec, {
-      aspectRatio: '9:16',
-      width: 1080,
-      height: 1920,
-      fps: 30,
-    })
-    const operationId = enqueuePayload.data.operation.id
-    const replayResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/exports`, {
-      method: 'POST',
-      headers: {
-        authorization,
-        'content-type': 'application/json',
-        'idempotency-key': `final-export-${suffix}`,
-      },
-      body: JSON.stringify(exportBody),
-    })
-    const replayPayload = await replayResponse.json()
-    assert.equal(replayResponse.status, 202, JSON.stringify(replayPayload))
-    assert.equal(replayPayload.data.replayed, true)
-    assert.equal(replayPayload.data.operation.id, operationId)
+    const reviewBlockedPayload = await reviewBlockedResponse.json()
+    assert.equal(reviewBlockedResponse.status, 422, JSON.stringify(reviewBlockedPayload))
+    assert.equal(reviewBlockedPayload.error.code, 'EDITORIAL_ACCEPTANCE_FAILED')
+    assert.equal(await client.v2PublicOperation.count({ where: { workspaceId, type: 'project-final-export' } }), 0)
+    assert.equal(await client.v2ProjectFinalExportAttempt.count({ where: { workspaceId } }), 0)
+    assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId } }), 0)
+    await client.v2DirectorRun.update({ where: { id: directorRunId }, data: { qualitySnapshotId } })
 
-    const mismatchResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/exports`, {
-      method: 'POST',
-      headers: {
-        authorization,
-        'content-type': 'application/json',
-        'idempotency-key': `final-export-${suffix}`,
-      },
-      body: JSON.stringify({
-        ...exportBody,
-        approval: { approved: true, note: 'Payload diferente com a mesma chave.' },
-      }),
+    // From here on only this test-owned port supplies a controlled approval to
+    // the application services. It validates the same PG lineage and immutable
+    // source identities, while leaving the stored quality report UNKNOWN.
+    const controlledIdentity = Object.freeze({ workspaceId, projectId, projectVersionId,
+      projectVersionHash, editPlanSnapshotId, directorRunId, qualitySnapshotId,
+      qualitySnapshotHash, proxyReviewId, proxyReviewHash, proxyArtifactId,
+      sourceArtifactId, sourceManifestId, sourceSha256 })
+    async function readControlledSource(input, immutable) {
+      if (Object.entries(input).some(([key, value]) => key in controlledIdentity && controlledIdentity[key] !== value) ||
+          input.workspaceId !== workspaceId || input.projectId !== projectId ||
+          input.projectVersionId !== projectVersionId || input.projectVersionHash !== projectVersionHash ||
+          (immutable && Object.keys(controlledIdentity).filter((key) => key !== 'sourceSha256')
+            .some((key) => input[key] !== controlledIdentity[key]))) return null
+      const source = immutable
+        ? await sourceReader.readImmutableSource(input)
+        : await sourceReader.readCurrentSource({ workspaceId, projectId })
+      if (!source || source.projectVersionId !== projectVersionId ||
+          source.editPlanSnapshotId !== editPlanSnapshotId || source.sourceArtifactId !== sourceArtifactId ||
+          source.editPlanHash !== editPlanHash ||
+          source.sourceManifestId !== sourceManifestId || source.sourceSha256 !== sourceSha256 ||
+          source.renderSources.length !== 1 || source.renderSources[0].artifactId !== sourceArtifactId ||
+          source.renderSources[0].manifestId !== sourceManifestId ||
+          source.renderSources[0].sha256 !== sourceSha256) return null
+      const [project, version, run, snapshot, review, artifact, manifest] = await Promise.all([
+        client.v2Project.findFirst({ where: { id: projectId, workspaceId } }),
+        client.v2ProjectVersion.findFirst({ where: { id: projectVersionId, workspaceId, projectId, baseHash: projectVersionHash } }),
+        client.v2DirectorRun.findFirst({ where: { id: directorRunId, workspaceId, projectId,
+          resultVersionId: projectVersionId, qualitySnapshotId, status: 'succeeded' } }),
+        client.v2ProjectSnapshot.findFirst({ where: { id: qualitySnapshotId, workspaceId, projectId, kind: 'quality-report' } }),
+        client.v2ProxyReview.findFirst({ where: { id: proxyReviewId, workspaceId, projectId,
+          projectVersionId, reviewHash: proxyReviewHash, proxyArtifactId, status: 'ready-for-final', finalAllowed: true } }),
+        client.v2MediaArtifact.findFirst({ where: { id: sourceArtifactId, workspaceId, sha256: sourceSha256, status: 'available' } }),
+        client.v2MediaArtifactManifest.findFirst({ where: { id: sourceManifestId, workspaceId, artifactId: sourceArtifactId } }),
+      ])
+      if (!project || (immutable ? false : project.currentVersionId !== projectVersionId) ||
+          !version || version.editPlanSnapshotId !== editPlanSnapshotId || !run || !snapshot ||
+          snapshot.contentHash !== qualitySnapshotHash || snapshot.contentJson !== stableSerialize(qualityReport) ||
+          !review || !artifact || !manifest || Number(artifact.byteSize) !== sourceBytes.byteLength) return null
+      return Object.freeze({ ...source, projectVersionHash, locale: project.locale ?? 'pt-BR',
+        directorRunId, qualitySnapshotId, qualitySnapshotHash, qualityStatus: 'approved',
+        qualityScore: qualityReport.score, proxyReviewId, proxyReviewHash, proxyArtifactId })
+    }
+    const controlledProjects = Object.freeze({
+      readApprovedCurrentSource: (input) => readControlledSource(input, false),
+      readImmutableApprovedSource: (input) => readControlledSource(input, true),
+      convergeOutputIdentity: (input) => finalExportRepository.convergeOutputIdentity(input),
+      attachCompletedOutput: (input) => finalExportRepository.attachCompletedOutput(input),
+      markExportFailed: (input) => finalExportRepository.markExportFailed(input),
+      recordAttempt: (input) => finalExportRepository.recordAttempt(input),
+      readAttemptHistory: (input) => finalExportRepository.readAttemptHistory(input),
     })
-    assert.equal(mismatchResponse.status, 409, JSON.stringify(await mismatchResponse.json()))
-    const staleResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/exports`, {
-      method: 'POST',
-      headers: {
-        authorization,
-        'content-type': 'application/json',
-        'idempotency-key': `final-export-stale-${suffix}`,
-      },
-      body: JSON.stringify({ ...exportBody, projectVersionHash: '0'.repeat(64) }),
-    })
-    assert.equal(staleResponse.status, 422, JSON.stringify(await staleResponse.json()))
-
+    const auditContext = createExternalAuditContext({ clientId: issued.client.id,
+      credentialId: issued.credential.id, workspaceId, environment: 'production' })
+    const controlledActor = { ...auditContext, auditContext, scopes: new Set(['projects:write']),
+      authenticationKind: 'bearer', clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' }
     const workerEnvironment = {
       ...process.env,
       APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
+      APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
+      FFMPEG_PATH: ffmpegBin,
       APOLLO_V2_RENDER_LEASE_MS: '120000',
       APOLLO_V2_RENDER_HEARTBEAT_MS: '5000',
       APOLLO_V2_WORKER_RETRY_BASE_MS: '1',
       APOLLO_V2_WORKER_RETRY_MAX_MS: '1',
-      APOLLO_PROTECTED_PAYLOAD_KEY_ID: 'final-export-e2e-key',
-      APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 7).toString('base64url'),
+      APOLLO_PROTECTED_PAYLOAD_KEY_ID: protectedPayloadKeyId,
+      APOLLO_PROTECTED_PAYLOAD_KEY: protectedPayloadKey,
     }
-    const failingWorker = createProjectFinalExportWorker({
-      ...workerEnvironment,
-      FFMPEG_PATH: process.execPath,
+    const operations = new PrismaPublicOperationRepository(client, randomUUID,
+      () => createProtectedPayloadCipherFromEnvironment(workerEnvironment))
+    const rights = new PrismaAssetRightsRepository(client)
+    const enqueue = enqueueProjectFinalExportService({ projects: controlledProjects,
+      rights, operations,
+      colorPipelines: createColorPipelineCompilationRepository(), clock: () => new Date(),
+      createId: (kind) => `final-export-controlled-${kind}-${suffix}` })
+    const enqueuePayload = await enqueue({ workspaceId, projectId, ...exportBody,
+      actor: controlledActor, idempotencyKey: `final-export-${suffix}` })
+    assert.equal(enqueuePayload.replayed, false)
+    assert.deepEqual(enqueuePayload.context.outputSpec, {
+      aspectRatio: '9:16',
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      codec: 'h264',
+      audioCodec: 'aac',
+      container: 'mp4',
+      quality: 'final',
     })
+    const operationId = enqueuePayload.operation.id
+    const replayPayload = await enqueue({ workspaceId, projectId, ...exportBody,
+      actor: controlledActor, idempotencyKey: `final-export-${suffix}` })
+    assert.equal(replayPayload.replayed, true)
+    assert.equal(replayPayload.operation.id, operationId)
+    await assert.rejects(enqueue({ workspaceId, projectId, ...exportBody,
+      approval: { approved: true, note: 'A different payload with the same key.' },
+      actor: controlledActor, idempotencyKey: `final-export-${suffix}` }),
+    (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH')
+    await assert.rejects(enqueue({ workspaceId, projectId, ...exportBody,
+      projectVersionHash: '0'.repeat(64), actor: controlledActor,
+      idempotencyKey: `final-export-stale-${suffix}` }),
+    (error) => error.code === 'EDITORIAL_ACCEPTANCE_FAILED')
+
+    function controlledWorker(ffmpegPath) {
+      return runNextProjectFinalExportOperationService({
+        operations, projects: controlledProjects, rights,
+        artifacts: createMediaArtifactPersistenceRepository(workerEnvironment),
+        storage: createLocalMediaUploadStorageFromEnvironment(workerEnvironment),
+        renderer: createFfmpegEditorialProxyRendererFromEnvironment({ ...workerEnvironment, FFMPEG_PATH: ffmpegPath }),
+        renderElementMaps: createRenderElementMapRepository(),
+        colorPipelines: createColorPipelineCompilationRepository(),
+        colorPlans: createProjectColorPlanRepository(),
+        luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(),
+          join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),
+        sources: createArtifactSourceMaterializer(workerEnvironment),
+        catalogOutput: createAutomaticCatalogService(),
+        leaseDurationMs: 120_000, heartbeatIntervalMs: 5_000,
+        retryBaseDelayMs: 1, retryMaxDelayMs: 1,
+      })
+    }
+    const failingWorker = controlledWorker(process.execPath)
     const failedOutcome = await failingWorker(
       `final-export-worker-failed-${suffix}`,
     )
-    assert.deepEqual(failedOutcome, { operationId, status: 'retrying' })
     const failedAttempt = await client.v2ProjectFinalExportAttempt.findUnique({
       where: { operationId_attempt: { operationId, attempt: 1 } },
     })
+    assert.deepEqual(failedOutcome, { operationId, status: 'retrying' }, JSON.stringify({
+      attempt: failedAttempt && JSON.parse(JSON.stringify(failedAttempt, (key, value) => typeof value === 'bigint' ? String(value) : value)),
+      operation: await client.v2PublicOperation.findUnique({ where: { id: operationId },
+        select: { status: true, phase: true, attempt: true, maxAttempts: true, errorCode: true, errorMessage: true } }),
+    }))
     assert.equal(failedAttempt?.status, 'failed')
     assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId } }), 0)
     assert.equal(await client.v2MediaLibraryEntry.count({ where: { workspaceId, originType: 'generated' } }), 0)
     await new Promise((resolve) => setTimeout(resolve, 25))
-    const worker = createProjectFinalExportWorker(workerEnvironment)
+    const worker = controlledWorker(ffmpegBin)
     const completedOutcome = await worker(`final-export-worker-promoted-${suffix}`)
-    assert.deepEqual(completedOutcome, { operationId, status: 'succeeded' })
+    const promotedAttempt = await client.v2ProjectFinalExportAttempt.findUnique({
+      where: { operationId_attempt: { operationId, attempt: 2 } },
+    })
+    assert.deepEqual(completedOutcome, { operationId, status: 'succeeded' }, JSON.stringify({
+      attemptStatus: promotedAttempt?.status,
+      errorCode: promotedAttempt?.errorCode,
+      errorMessage: promotedAttempt?.errorMessage,
+    }))
 
     const attemptsResponse = await fetch(
       `${baseUrl}/v1/operations/${operationId}/final-export-attempts`,
@@ -730,11 +874,11 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     assert.equal(attemptsPayload.data.attempts[1].validators.every((validator) => validator.passed), true)
     const output = attemptsPayload.data.attempts[1].output
     assert.match(output.sha256, /^[a-f0-9]{64}$/)
-    // The factory's real worker must perform the first catalog write itself.
+    // The controlled worker performs the real first catalog write itself.
     // These are independent PostgreSQL reads, not a catalog callback fake.
     const catalogRepository = new PrismaAutomaticCatalogRepository(client)
     const catalogRecord = await catalogRepository.find(workspaceId, output.artifactId)
-    assert.ok(catalogRecord, 'promoted real worker output must be automatically cataloged')
+    assert.ok(catalogRecord, 'promoted controlled-mechanics output must be automatically cataloged')
     assert.equal(catalogRecord.outputKind, 'final')
     assert.equal(catalogRecord.manifestId, output.manifestId)
     assert.match(catalogRecord.recordHash, /^[a-f0-9]{64}$/)
@@ -757,7 +901,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId, artifactId: output.artifactId } }), 1)
     assert.equal(await client.v2MediaLibraryEntry.count({ where: { workspaceId, artifactId: output.artifactId } }), 1)
     assert.equal((await new PrismaAssetRightsRepository(client).findCurrent(workspaceId, output.artifactId)).snapshot.id, inheritedRights.snapshot.id)
-    // Recreate the first catalog write from an approved, promoted real output.
+    // Recreate the first catalog write from the controlled, promoted output.
     // This exercises the unique PostgreSQL commit under simultaneous writers;
     // the replay above only exercises reads of an already existing record.
     await client.v2AutomaticCatalogRecord.delete({ where: { id: catalogRecord.id } })
@@ -790,6 +934,10 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     assert.equal(operationResponse.status, 200, JSON.stringify(operationPayload))
     assert.equal(operationPayload.data.operation.status, 'succeeded')
     assert.equal(operationPayload.data.operation.attempt, 2)
+    const approvalAfter = await finalExportRepository.readApproval(approvalInput)
+    assert.equal(approvalAfter?.qualityStatus, 'review-required',
+      'mechanical completion must not upgrade the persisted unknown-face report')
+    assert.equal(approvalAfter?.admissionBasis, 'per-cue-caption-certification')
     const completedProject = await client.v2Project.findUnique({ where: { id: projectId } })
     assert.equal(completedProject?.status, 'completed')
 
@@ -844,30 +992,81 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     }, downloadedBytes), true)
     const finalPath = join(artifactRoot, ...finalArtifact.artifactKey.split('/'))
     assert.equal((await stat(finalPath)).size, downloadedBytes.byteLength)
-    const finalProbe = await probeVideo(finalPath)
+    // The content-addressed key can exceed Windows MAX_PATH under an E2E
+    // scratch root. Probe/decode an authenticated short copy, then remove it.
+    const probeDir = await mkdtemp(join(tmpdir(), 'af-'))
+    const probePath = join(probeDir, 'final.mp4')
+    let finalProbe
+    let probeError
+    let probeCleanupError
+    try {
+      await copyFile(finalPath, probePath)
+      assert.equal((await stat(probePath)).size, downloadedBytes.byteLength)
+      assert.equal(sha256(await readFile(probePath)), output.sha256)
+      finalProbe = await probeVideo(probePath, { environment: {
+        ...process.env, APOLLO_V2_FFPROBE_PATH: ffprobeBin,
+      } })
+      await execFileAsync(ffmpegBin, ['-v', 'error', '-xerror', '-i', probePath, '-f', 'null', '-'],
+        { windowsHide: true, timeout: 60_000, maxBuffer: 2 * 1024 * 1024 })
+      assert.equal((await stat(probePath)).size, downloadedBytes.byteLength)
+      assert.equal(sha256(await readFile(probePath)), output.sha256)
+    } catch (error) {
+      probeError = error
+    } finally {
+      try { await rm(probeDir, { recursive: true, force: true }) }
+      catch (error) { probeCleanupError = error }
+    }
+    if (probeError && probeCleanupError) {
+      throw new AggregateError([probeError, probeCleanupError], 'Final export probe and cleanup failed')
+    }
+    if (probeError) throw probeError
+    if (probeCleanupError) throw probeCleanupError
     assert.equal(finalProbe.width, 1080)
     assert.equal(finalProbe.height, 1920)
     assert.equal(finalProbe.codec, 'h264')
     assert.equal(finalProbe.audioCodec, 'aac')
     assert.match(finalProbe.container, /mp4/)
-    const catalogBrowser = await proveCatalogOutputBrowser({ baseUrl, authorization, username: uiUsername, password: uiPassword, prisma: client, workspaceId, output, catalogRecord, evidenceDir: process.env.APOLLO_LIBRARY_EVIDENCE_ROOT ?? join(artifactRoot, 'catalog-browser-evidence') })
-    await execFileAsync(ffmpegStatic, ['-v', 'error', '-i', finalPath, '-f', 'null', '-'], { windowsHide: true, timeout: 60_000, maxBuffer: 2 * 1024 * 1024 })
-    console.log(JSON.stringify({ event: 'automatic-catalog-real-final-proof', artifactId: output.artifactId, sha256: output.sha256, byteSize: downloadedBytes.byteLength, catalogRecordId: catalogRecord.id, recordHash: catalogRecord.recordHash, rightsSnapshotId: catalogRecord.rightsSnapshotId, lineageSourceIds: catalogRecord.lineage.map((edge) => edge.sourceArtifactId), fullDecode: 'passed' }))
+    console.log(JSON.stringify({ event: 'controlled-final-export-mechanics-proof', qualityStatus: 'review-required',
+      faceSafety: 'unknown', artifactId: output.artifactId, sha256: output.sha256,
+      byteSize: downloadedBytes.byteLength, catalogRecordId: catalogRecord.id,
+      recordHash: catalogRecord.recordHash, rightsSnapshotId: catalogRecord.rightsSnapshotId,
+      lineageSourceIds: catalogRecord.lineage.map((edge) => edge.sourceArtifactId),
+      originalPathLength: finalPath.length, probePathLength: probePath.length,
+      fullDecode: 'passed' }))
+    const mechanicsProof = {
+      schemaVersion: 'automatic-catalog-proof/v1', proofScope: 'controlled-mechanics',
+      qualityStatus: 'review-required', faceSafety: 'unknown', browserStatus: 'pending',
+      controlledUpstream: ['Director snapshots', 'proxy review', 'color probe', 'test-only approval port'],
+      sourceCommit: process.env.GITHUB_SHA ?? null, ciRunId: process.env.GITHUB_RUN_ID ?? null,
+      ownerPid: process.pid, serverPid: server.pid,
+      runtime: ['public export API rejection', 'DI application-service worker', 'FFmpeg renderer', 'PostgreSQL', 'local artifact storage'],
+      artifact: { id: output.artifactId, manifestId: output.manifestId,
+        sha256: output.sha256, byteSize: downloadedBytes.byteLength },
+      catalogRecord, inheritedRights: inheritedRights.snapshot, fullDecode: 'passed',
+      replayConcurrency: 3, firstWriteConcurrency: 3, catalogRows: 1, libraryRows: 1,
+      failedAttemptCatalogRows: 0, rejectedOutputCatalogRows: 0, quarantinedOutputLibraryRows: 0,
+      deployed: false, ownerAccepted: false,
+    }
+    let mechanicsProofPath
     if (process.env.APOLLO_LIBRARY_EVIDENCE_ROOT) {
       const evidenceRoot = process.env.APOLLO_LIBRARY_EVIDENCE_ROOT
       assert.equal(isAbsolute(evidenceRoot), true)
       await mkdir(evidenceRoot, { recursive: true })
-      await copyFile(finalPath, join(evidenceRoot, 'w49-catalog-approved-final.mp4'))
-      await writeFile(join(evidenceRoot, 'w49-catalog-approved-final.json'), JSON.stringify({
-        schemaVersion: 'automatic-catalog-proof/v1', controlledUpstream: ['Director snapshots', 'proxy approval', 'color probe'],
-        sourceCommit: process.env.GITHUB_SHA ?? null, ciRunId: process.env.GITHUB_RUN_ID ?? null, ownerPid: process.pid, serverPid: server.pid,
-        runtime: ['public export API', 'factory worker', 'FFmpeg renderer', 'PostgreSQL', 'local artifact storage'],
-        artifact: { id: output.artifactId, manifestId: output.manifestId, sha256: output.sha256, byteSize: downloadedBytes.byteLength },
-        catalogRecord, catalogBrowser, inheritedRights: inheritedRights.snapshot, fullDecode: 'passed',
-        replayConcurrency: 3, firstWriteConcurrency: 3, catalogRows: 1, libraryRows: 1, failedAttemptCatalogRows: 0, rejectedOutputCatalogRows: 0, quarantinedOutputLibraryRows: 0,
-        deployed: false, ownerAccepted: false,
-      }, null, 2))
+      const mechanicsMediaPath = join(evidenceRoot, 'controlled-final-export-mechanics.mp4')
+      await writeFile(mechanicsMediaPath, downloadedBytes)
+      assert.equal((await stat(mechanicsMediaPath)).size, downloadedBytes.byteLength)
+      assert.equal(sha256(await readFile(mechanicsMediaPath)), output.sha256)
+      mechanicsProofPath = join(evidenceRoot, 'controlled-final-export-mechanics.json')
+      await writeFile(mechanicsProofPath, JSON.stringify(mechanicsProof, null, 2))
     }
+    const catalogBrowser = await proveCatalogOutputBrowser({ baseUrl, authorization,
+      username: uiUsername, password: uiPassword, prisma: client, workspaceId,
+      output, catalogRecord, proofScope: 'controlled-mechanics',
+      qualityStatus: 'review-required', faceSafety: 'unknown',
+      evidenceDir: process.env.APOLLO_LIBRARY_EVIDENCE_ROOT ?? join(artifactRoot, 'catalog-browser-evidence') })
+    mechanicsProof.browserStatus = 'passed'
+    mechanicsProof.catalogBrowser = catalogBrowser
+    if (mechanicsProofPath) await writeFile(mechanicsProofPath, JSON.stringify(mechanicsProof, null, 2))
 
 
     const tamperedUrl = new URL(grantPayload.data.downloadUrl)
@@ -891,19 +1090,48 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     assert.equal(revokedGrant?.revokerAuthenticationKind, 'bearer')
     assert.match(revokedGrant?.revokerContextHash ?? '', /^[a-f0-9]{64}$/)
     assert.equal((await fetch(grantPayload.data.downloadUrl)).status, 409)
+  } catch (error) {
+    primaryError = error
   } finally {
-    if (server && server.exitCode === null) {
-      server.kill()
-      await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
-      if (server.exitCode === null && server.signalCode === null) {
-        server.kill('SIGKILL')
-        await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
+    const cleanupErrors = []
+    const cleanupStage = async (name, action) => {
+      const startedAt = Date.now()
+      const before = process.getActiveResourcesInfo()
+      let outcome = 'completed'
+      try { await action() }
+      catch (error) { outcome = 'failed'; cleanupErrors.push(error) }
+      finally {
+        console.log(JSON.stringify({ event: 'final-export-cleanup-stage', name, outcome,
+          ownerPid: process.pid, serverPid: server?.pid ?? null,
+          serverExitCode: server?.exitCode ?? null, serverSignalCode: server?.signalCode ?? null,
+          durationMs: Date.now() - startedAt, resourcesBefore: before,
+          resourcesAfter: process.getActiveResourcesInfo() }))
       }
     }
-    assert.ok(!server || server.exitCode !== null || server.signalCode !== null, 'Owned export Next server must terminate')
-    const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
-    await disconnectV2PostgresClient()
-    await client.$disconnect()
-    await rm(join(artifactRoot, `workspaces/final-export-e2e-${suffix}`), { recursive: true, force: true })
+    await cleanupStage('next-server', async () => {
+      if (server && server.exitCode === null && server.signalCode === null) {
+        server.kill()
+        await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
+        if (server.exitCode === null && server.signalCode === null) {
+          server.kill('SIGKILL')
+          await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
+        }
+      }
+      assert.ok(!server || server.exitCode !== null || server.signalCode !== null,
+        'Owned export Next server must terminate')
+    })
+    await cleanupStage('repository-factory-prisma', async () => {
+      const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
+      await disconnectV2PostgresClient()
+    })
+    await cleanupStage('fixture-prisma', () => client.$disconnect())
+    await cleanupStage('fixture-media', async () => {
+      await rm(join(artifactRoot, `workspaces/final-export-e2e-${suffix}`), { recursive: true, force: true })
+    })
+    if (cleanupErrors.length) {
+      throw new AggregateError(primaryError ? [primaryError, ...cleanupErrors] : cleanupErrors,
+        'Final-export fixture failed to clean up all owned resources')
+    }
   }
+  if (primaryError) throw primaryError
 })

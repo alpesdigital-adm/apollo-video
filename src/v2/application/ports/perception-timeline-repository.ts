@@ -2,11 +2,12 @@ import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { PerceptionTimeline } from '../../domain/perception-timeline.ts'
 
 export interface PersistedPerceptionTimeline {
-  schemaVersion: 'persisted-perception-timeline/v1'
+  schemaVersion: 'persisted-perception-timeline/v2'
   id: string
   workspaceId: string
   projectId: string
   projectVersionId: string
+  origin: Readonly<{ kind: 'manual-controlled'; trust: 'unverified'; suppliedByClientId: string }>
   baseRevision: string | null
   timeline: Readonly<PerceptionTimeline>
   requestFingerprint: string

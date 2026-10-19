@@ -1,9 +1,11 @@
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { FormatSubjectEvidenceV1 } from '../../domain/format-quality-critic.ts'
+import type { OutputConsumptionSealV3 } from '../../domain/output-consumption.ts'
+import type { PerceptionTimeline } from '../../domain/perception-timeline.ts'
 import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
 import type { SubtitlePresetId, SubtitlePresetSnapshot } from '../../domain/subtitle-system.ts'
-import type { ProxyQualityIssue } from '../render-workflow.ts'
+import type { ProxyQualityIssue, ProxyReview } from '../render-workflow.ts'
 
 /**
  * Upper bound on how many disjoint stale ranges a single partial proxy render may
@@ -48,7 +50,19 @@ export interface ProjectRenderSourceAsset {
   mediaType: 'video' | 'audio'
   container: string
   role: 'source-master' | 'selected-insert' | 'approved-music'
+  /**
+   * Observed dimensions of the stored video (its manifest probe). The caption planner projects the source frame onto the
+   * variant's canvas with them; without them the projection is unavailable and every band is unknown. Deliberately NOT part
+   * of `projectRenderSourcesFingerprint`: the enqueue identity of a render does not move because a probe became known.
+   */
+  probe?: Readonly<{ width: number; height: number }>
 }
+
+/**
+ * What a render consumer may do with a Version: the proxy renders it (`render`), the final export publishes it (`final`). The
+ * persisted consumption reader decides both; a consumer never completes the answer with the project's format or the head.
+ */
+export type ProjectRenderConsumptionPurpose = 'render' | 'final'
 
 export interface ProjectProxyRenderSource {
   projectId: string
@@ -56,7 +70,22 @@ export interface ProjectProxyRenderSource {
   editPlanSnapshotId: string
   editPlanHash: string
   editPlan: Readonly<EditorialCutEditPlan | DirectedEditPlan>
+  /** The aspect ratio the sealed entry of the consumed State carries: the only authority for the format of this render. */
   format: string
+  /**
+   * The exact Version, State, variant revision and materialization this source was read from (the persisted consumption
+   * verdict, sealed). Its hash is part of every input hash derived from this source, so an operation sealed to one State is
+   * refused when the State, the variant revision or the materialization it consumes is another.
+   */
+  outputConsumption: Readonly<{ seal: Readonly<OutputConsumptionSealV3>; sealHash: string }>
+  /** Present only after repository verification of sealed OCR, base/result lineage and identical time map. */
+  trustedOcr?: Readonly<{
+    envelopeId: string
+    envelopeHash: string
+    inputVersionId: string
+    timeMapHash: string
+    timeline: Readonly<PerceptionTimeline>
+  }>
   sourceArtifactId: string
   sourceManifestId: string
   sourceArtifactKey: string
@@ -99,8 +128,28 @@ export interface ProjectProxyRenderSource {
   }>[]
 }
 
+/** Captured from the repository-resolved render input; re-resolved at attachment. */
+export interface ProjectProxyOcrReceipt {
+  envelopeId: string
+  envelopeHash: string
+  inputVersionId: string
+  timeMapHash: string
+  timelineHash: string
+  sourceArtifactId: string
+  sourceManifestId: string
+  sourceSha256: string
+  editPlanHash: string
+}
+
+export interface ProjectProxyCompletionLease {
+  readonly owner: string
+  readonly attempt: number
+  readonly now: string
+}
+
 export interface ProjectProxyRenderRepository {
-  readCurrentSource(input: { workspaceId: string; projectId: string }): Promise<Readonly<ProjectProxyRenderSource> | null>
+  /** `variantId`: the State variant to consume; absent means the State's only output. */
+  readCurrentSource(input: { workspaceId: string; projectId: string; purpose?: ProjectRenderConsumptionPurpose; variantId?: string }): Promise<Readonly<ProjectProxyRenderSource> | null>
   readImmutableSource(input: {
     workspaceId: string
     projectId: string
@@ -108,6 +157,15 @@ export interface ProjectProxyRenderRepository {
     editPlanSnapshotId: string
     sourceArtifactId: string
     sourceManifestId: string
+    purpose?: ProjectRenderConsumptionPurpose
+    /** The State variant to consume; absent means the State's only output. */
+    variantId?: string
+    /**
+     * A worker sealed to a Version that is no longer the project's head can never publish (admission and completion both fence on
+     * the head), so it refuses before it renders anything: PERSISTENCE_CONFLICT when the head moved. Off by default: the read is
+     * otherwise of the exact Version, whichever the head is.
+     */
+    requireCurrent?: boolean
   }): Promise<Readonly<ProjectProxyRenderSource> | null>
   readRenderableSnapshotSource(input: {
     workspaceId: string
@@ -115,26 +173,40 @@ export interface ProjectProxyRenderRepository {
     planId: string
     planHash: string
     format: string
+    /** The State variant of the plan's Version to consume; absent means that State's only output. */
+    variantId?: string
   }): Promise<Readonly<ProjectProxyRenderSource> | null>
   attachCompletedOutput(input: {
+    lease: Readonly<ProjectProxyCompletionLease>
+    review: Readonly<ProxyReview>
     workspaceId: string
     operationId: string
     projectId: string
     projectVersionId: string
+    /** The stable State variant the render was made for (never an aspect ratio): invalidations it resolves are attributed to it. */
     variantId: string
+    /** The aspect ratio the render drew (the sealed entry's); the recipe records the same. */
+    format: string
     outputArtifactId: string
     outputManifestId: string
     originalFileName: string
     createdAt: string
+    recipeParameters: Readonly<Record<string, unknown>>
+    ocrReceipt: Readonly<ProjectProxyOcrReceipt> | null
   }): Promise<void>
   attachCompletedSnapshotOutput(input: {
+    lease: Readonly<ProjectProxyCompletionLease>
+    review: Readonly<ProxyReview>
     workspaceId: string
     operationId: string
     projectId: string
+    /** The LOCALIZATION variant of the renderable snapshot (`renderableVariantId`); the output is the operation's own `outputVariantId`. */
     variantId: string
     outputArtifactId: string
     outputManifestId: string
     originalFileName: string
     createdAt: string
+    recipeParameters: Readonly<Record<string, unknown>>
+    ocrReceipt: null
   }): Promise<void>
 }

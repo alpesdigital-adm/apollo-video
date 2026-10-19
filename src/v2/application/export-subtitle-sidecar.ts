@@ -134,6 +134,49 @@ async function assertAlignmentMatchesArtifact(
   return { artifact: artifact!, manifest: manifest!, map }
 }
 
+/**
+ * A render the review blocked, or one no review ever judged, is not a deliverable: no sidecar is derived,
+ * staged, promoted or persisted for it. Runs before any byte is produced, like the artifact checks below.
+ */
+function assertReviewAllowsSidecar(review: RenderedSubtitleAlignmentSource['review']): void {
+  if (review === null) {
+    throw new DomainError('SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
+      'The render carries no review verdict; no sidecar is published for it', { reason: 'review-missing' })
+  }
+  if (review.status === 'blocked') {
+    throw new DomainError('SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
+      'The render was blocked by its review; no sidecar is published for it',
+      { reason: 'render-blocked', reviewStatus: review.status, reviewHash: review.reviewHash })
+  }
+}
+
+/**
+ * The render the repository resolved must be exactly the one the request names: same project, same variant and, when
+ * the request names a ProjectVersion, that very version. This is what lets a historical version have a sidecar of its
+ * own (reported as `current: false`) without ever borrowing the current head's render, cue map or EditPlan: the lineage
+ * below binds the render's own RenderInput, EditPlan snapshot and cue map, and a resolution that disagrees with the
+ * request is refused before any artifact is read, staged or stored.
+ */
+function assertAlignmentIsTheRequestedRender(
+  request: Readonly<{ projectId: string; variantId: string; projectVersionId?: string }>,
+  alignment: Readonly<RenderedSubtitleAlignmentSource>,
+): void {
+  if (
+    alignment.projectId !== request.projectId ||
+    alignment.variantId !== request.variantId ||
+    (request.projectVersionId !== undefined && alignment.projectVersionId !== request.projectVersionId)
+  ) {
+    throw new DomainError('SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
+      'The resolved render is not the render the request names; no sidecar is published for it', {
+        reason: 'render-binding-mismatch',
+        requestedVersionId: request.projectVersionId ?? null,
+        resolvedVersionId: alignment.projectVersionId,
+        requestedVariantId: request.variantId,
+        resolvedVariantId: alignment.variantId,
+      })
+  }
+}
+
 export function exportProjectSubtitleSidecarService(dependencies: {
   sidecars: SubtitleSidecarRepository
   artifacts: MediaArtifactQueryRepository
@@ -147,6 +190,10 @@ export function exportProjectSubtitleSidecarService(dependencies: {
     workspaceId: string
     actor: AuthenticatedExternalActor
     projectId: string
+    /**
+     * The stable State variant of the output whose render the sidecar aligns (never an aspect ratio). It must be an exact member of the
+     * State of the selected Version; the evidence is the proxy or final export made for THAT output.
+     */
     variantId: string
     format: SubtitleSidecarFormat
     locale?: string
@@ -181,6 +228,8 @@ export function exportProjectSubtitleSidecarService(dependencies: {
         'No rendered output with a persisted cue alignment exists for this project version and variant',
       )
     }
+    assertAlignmentIsTheRequestedRender(input, alignment)
+    assertReviewAllowsSidecar(alignment.review)
     const verified = await assertAlignmentMatchesArtifact(
       dependencies.artifacts,
       input.workspaceId,

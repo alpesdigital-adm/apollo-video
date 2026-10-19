@@ -4,6 +4,7 @@ import {
   type V2ProjectVersion,
 } from '../../../../generated/prisma-v2/index.js'
 import type {
+  ProjectColorPlanCommandPayloadV1,
   ProjectColorPlanCommit,
   ProjectColorPlanContext,
   ProjectColorPlanRepository,
@@ -21,9 +22,14 @@ import {
   createProjectColorPlanInvalidations,
   parseProjectColorPlanImpact,
 } from '../../domain/project-color-plan-impact.ts'
-import { createProjectVersion } from '../../domain/project-version.ts'
+import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { renderOutputReferences } from '../../domain/output-variant-references.ts'
+import { childCommandOf } from '../../domain/project-output-state-transition.ts'
+import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 const colorPlanInclude = Prisma.validator<Prisma.V2ProjectColorPlanInclude>()({
   command: { include: { artifactInvalidations: true } },
@@ -78,26 +84,7 @@ function trustedMetadata(value: unknown): Readonly<ColorMetadata> {
 }
 
 function hydrateVersion(row: V2ProjectVersion) {
-  return createProjectVersion({
-    id: row.id,
-    workspaceId: row.workspaceId,
-    projectId: row.projectId,
-    sequence: row.sequence,
-    ...(row.parentVersionId ? { parentVersionId: row.parentVersionId } : {}),
-    ...(row.forkedFromProjectId ? { forkedFromProjectId: row.forkedFromProjectId } : {}),
-    ...(row.forkedFromVersionId ? { forkedFromVersionId: row.forkedFromVersionId } : {}),
-    snapshotRefs: {
-      brief: row.briefSnapshotId,
-      ...(row.treatmentSnapshotId ? { treatment: row.treatmentSnapshotId } : {}),
-      ...(row.storySnapshotId ? { story: row.storySnapshotId } : {}),
-      editPlan: row.editPlanSnapshotId,
-      policies: row.policiesSnapshotId,
-    },
-    baseHash: row.baseHash,
-    createdBy: row.createdBy,
-    ...(row.commandId ? { commandId: row.commandId } : {}),
-    createdAt: row.createdAt.toISOString(),
-  })
+  return hydrateProjectVersionRowV3(row)
 }
 
 function hydrateAuthenticationAudit(row: StoredColorPlan['command']): Readonly<ApiAccessAuditContext> | undefined {
@@ -134,28 +121,17 @@ function hydrateAuthenticationAudit(row: StoredColorPlan['command']): Readonly<A
   }
 }
 
-function commandAuditData(audit: Readonly<ApiAccessAuditContext> | undefined) {
-  return audit ? {
-    actorCredentialId: audit.credentialId,
-    actorEnvironment: audit.environment,
-    actorAuthenticationKind: audit.authenticationKind,
-    actorContextHash: audit.contextHash,
-    actorDelegatedIdentityId: audit.delegatedIdentityId,
-    actorWorkspaceRole: audit.workspaceRole,
-  } : {}
-}
-
-function assertCommitAudit(input: Readonly<ProjectColorPlanCommit>): void {
-  if (input.command.author.type === 'api-client') {
-    if (
-      !input.authenticationAudit ||
-      input.authenticationAudit.clientId !== input.command.author.id ||
-      input.authenticationAudit.workspaceId !== input.command.workspaceId ||
-      input.authenticationAudit.delegatedUserId !== input.command.author.delegatedUserId
-    ) throw new DomainError('AUTH_INVALID', 'Project ColorPlan audit does not match its author')
-  } else if (input.authenticationAudit) {
-    throw new DomainError('AUTH_INVALID', 'Internal Project ColorPlan command cannot carry an external audit')
-  }
+/** The bundle already proves its Command, audit and Version belong together; this proves the ColorPlan row belongs to that Command. */
+function assertColorPlanBinding(input: Readonly<ProjectColorPlanCommit>) {
+  const { command, requestFingerprint } = childCommandOf<ProjectColorPlanCommandPayloadV1>(input.bundle)
+  const version = input.bundle.version, colorPlan = input.colorPlan
+  if (
+    command.type !== 'set-project-color-plan' || version.commandId !== command.id || colorPlan.commandId !== command.id ||
+    colorPlan.resultVersionId !== version.id || colorPlan.baseVersionId !== command.baseVersionId ||
+    colorPlan.workspaceId !== command.workspaceId || colorPlan.projectId !== command.projectId ||
+    version.workspaceId !== command.workspaceId || version.projectId !== command.projectId || version.parentVersionId !== command.baseVersionId
+  ) throw new DomainError('PERSISTENCE_CONFLICT', 'Project ColorPlan does not belong to the Command that produced its Version')
+  return { command, requestFingerprint }
 }
 
 function hydrate(row: StoredColorPlan, replayed: boolean): Readonly<ProjectColorPlanResult> {
@@ -196,6 +172,7 @@ function hydrate(row: StoredColorPlan, replayed: boolean): Readonly<ProjectColor
     createdAt: row.command.createdAt.toISOString(),
   })
   const version = hydrateVersion(row.resultVersion)
+  if (row.command.commandHash !== command.commandHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project ColorPlan command seal is invalid')
   const expectedPayload = {
     schemaVersion: 1,
     colorPlanId: colorPlan.id,
@@ -273,22 +250,25 @@ function creativeLutRefs(colorPlan: ProjectColorPlanCommit['colorPlan']) {
 }
 
 async function readContext(client: DbClient, input: { workspaceId: string; projectId: string }): Promise<Readonly<ProjectColorPlanContext> | null> {
-  const project = await client.v2Project.findFirst({
-    where: { id: input.projectId, workspaceId: input.workspaceId },
-    include: { currentVersion: { include: { editPlanSnapshot: true } } },
-  })
-  if (!project?.currentVersion || !project.format) return null
-  const editPlan = parse(project.currentVersion.editPlanSnapshot.contentJson, 'project ColorPlan EditPlan')
+  const project = await client.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId } })
+  if (!project?.currentVersionId) return null
+  const parent = await readPersistedOperationalOutputBundleV3(client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersionId })
+  if (!parent) return null
+  // A ColorPlan is project-wide: its impact covers EVERY output the sealed State carries, each render attributed to its own.
+  const variantIds = parent.state.document.entries.map((entry) => entry.variantId)
+  if (variantIds.length === 0) return null
+  const currentVersionId = parent.version.id
+  const editPlan = parse(operationalBundlePlanV3(parent).contentJson, 'project ColorPlan EditPlan')
   const targets = targetsFromEditPlan(editPlan)
   const sourceIds = [...new Set(targets.map((target) => target.sourceId))].sort()
   const [proxyOutputs, finalOutputs, colorCompilations] = await Promise.all([
     client.v2ProjectProxyRenderOperation.findMany({
-      where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } },
-      select: { outputArtifactId: true },
+      where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+      select: { outputArtifactId: true, outputVariantId: true },
     }),
     client.v2ProjectFinalExportOperation.findMany({
-      where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } },
-      select: { outputArtifactId: true, outputAspectRatio: true },
+      where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+      select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
     }),
     client.v2ColorPipelineCompilation.findMany({
       where: {
@@ -342,15 +322,12 @@ async function readContext(client: DbClient, input: { workspaceId: string; proje
     throw new DomainError('PERSISTENCE_CONFLICT', 'Project outputs exist before a ColorPlan timeline')
   }
   return Object.freeze({
-    currentVersion: hydrateVersion(project.currentVersion),
+    parent,
     targets,
     trustedSourceMetadata: Object.freeze(trustedSourceMetadata),
     currentDurationFrames,
-    proxyVariantId: project.format,
-    outputReferences: Object.freeze([
-      ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: project.currentVersion!.id, variantId: project.format! })),
-      ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: project.currentVersion!.id, variantId: output.outputAspectRatio })),
-    ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
+    variantIds: Object.freeze(variantIds),
+    outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: currentVersionId, proxies: proxyOutputs, finals: finalOutputs }),
   })
 }
 
@@ -422,28 +399,30 @@ export class PrismaProjectColorPlanRepository implements ProjectColorPlanReposit
   }
 
   async commitOrReplay(input: Readonly<ProjectColorPlanCommit>, serializationAttempt = 1): Promise<Readonly<ProjectColorPlanResult>> {
-    assertCommitAudit(input)
+    const { command, requestFingerprint } = assertColorPlanBinding(input)
+    const version = input.bundle.version
     try {
       return await this.client.$transaction(async (transaction) => {
-        const context = await readContext(transaction, { workspaceId: input.command.workspaceId, projectId: input.command.projectId })
+        const context = await readContext(transaction, { workspaceId: command.workspaceId, projectId: command.projectId })
         if (
           !context ||
-          context.currentVersion.id !== input.command.baseVersionId ||
-          context.currentVersion.baseHash !== input.command.baseHash ||
-          input.version.parentVersionId !== context.currentVersion.id ||
-          input.version.sequence !== context.currentVersion.sequence + 1 ||
+          context.parent.version.id !== command.baseVersionId ||
+          context.parent.version.baseHash !== command.baseHash ||
+          version.parentVersionId !== context.parent.version.id ||
+          version.sequence !== context.parent.version.sequence + 1 ||
+          input.bundle.state.document.parentStateHash !== context.parent.state.stateHash ||
           stableSerialize(context.targets.map((target) => stableSerialize(target)).toSorted()) !==
             stableSerialize(input.colorPlan.compiled.targets.map((target) => stableSerialize(target.target)).toSorted()) ||
-          stableSerialize(context.outputReferences) !== stableSerialize(input.command.payload.impact.affectedArtifacts)
+          stableSerialize(context.outputReferences) !== stableSerialize(command.payload.impact.affectedArtifacts)
         ) throw new DomainError('VERSION_CONFLICT', 'Project ColorPlan context changed before commit')
         const lutRefs = creativeLutRefs(input.colorPlan)
         if (lutRefs.length > 0) {
           const versions = await transaction.v2WorkspaceLutVersion.findMany({
-            where: { workspaceId: input.command.workspaceId, id: { in: lutRefs.map((ref) => ref.artifactId) } },
+            where: { workspaceId: command.workspaceId, id: { in: lutRefs.map((ref) => ref.artifactId) } },
             select: { id: true, lutId: true, cubeContentHash: true, licensePolicy: true },
           })
           const heads = await transaction.v2WorkspaceLut.findMany({
-            where: { workspaceId: input.command.workspaceId, id: { in: versions.map((version) => version.lutId) } },
+            where: { workspaceId: command.workspaceId, id: { in: versions.map((version) => version.lutId) } },
             select: { id: true, status: true },
           })
           if (lutRefs.some((ref) => {
@@ -452,40 +431,7 @@ export class PrismaProjectColorPlanRepository implements ProjectColorPlanReposit
             return !version || version.cubeContentHash !== ref.sha256 || !head || head.status !== 'active' || !['owned', 'licensed'].includes(version.licensePolicy)
           })) throw new DomainError('VERSION_CONFLICT', 'ColorPlan creative LUT availability changed before commit')
         }
-        await transaction.v2EditCommand.create({ data: {
-          id: input.command.id,
-          workspaceId: input.command.workspaceId,
-          projectId: input.command.projectId,
-          baseVersionId: input.command.baseVersionId,
-          baseHash: input.command.baseHash,
-          type: input.command.type,
-          scopeJson: stableSerialize(input.command.scope),
-          payloadJson: stableSerialize(input.command.payload),
-          reason: input.command.reason,
-          actorType: input.command.author.type,
-          actorId: input.command.author.id,
-          delegatedUserId: input.command.author.delegatedUserId,
-          ...commandAuditData(input.authenticationAudit),
-          idempotencyKey: input.command.idempotencyKey,
-          requestFingerprint: input.requestFingerprint,
-          createdAt: new Date(input.command.createdAt),
-        } })
-        await transaction.v2ProjectVersion.create({ data: {
-          id: input.version.id,
-          workspaceId: input.version.workspaceId,
-          projectId: input.version.projectId,
-          sequence: input.version.sequence,
-          parentVersionId: input.version.parentVersionId,
-          briefSnapshotId: input.version.snapshotRefs.brief!,
-          treatmentSnapshotId: input.version.snapshotRefs.treatment,
-          storySnapshotId: input.version.snapshotRefs.story,
-          editPlanSnapshotId: input.version.snapshotRefs.editPlan,
-          policiesSnapshotId: input.version.snapshotRefs.policies,
-          baseHash: input.version.baseHash,
-          createdBy: input.version.createdBy,
-          commandId: input.command.id,
-          createdAt: new Date(input.version.createdAt),
-        } })
+        await commitProjectVersionWithOutputState(transaction, input.bundle)
         await transaction.v2ProjectColorPlan.create({ data: {
           id: input.colorPlan.id,
           workspaceId: input.colorPlan.workspaceId,
@@ -502,12 +448,12 @@ export class PrismaProjectColorPlanRepository implements ProjectColorPlanReposit
           recordHash: input.colorPlan.recordHash,
           createdAt: new Date(input.colorPlan.createdAt),
         } })
-        const invalidations = createProjectColorPlanInvalidations({ impact: input.command.payload.impact, createdAt: input.command.createdAt })
+        const invalidations = createProjectColorPlanInvalidations({ impact: command.payload.impact, createdAt: command.createdAt })
         if (invalidations.length > 0) {
           await transaction.v2CommandArtifactInvalidation.createMany({ data: invalidations.map((item) => ({
             id: item.id,
-            workspaceId: input.command.workspaceId,
-            projectId: input.command.projectId,
+            workspaceId: command.workspaceId,
+            projectId: command.projectId,
             commandId: item.commandId,
             baseVersionId: item.baseVersionId,
             resultVersionId: item.resultVersionId,
@@ -527,8 +473,8 @@ export class PrismaProjectColorPlanRepository implements ProjectColorPlanReposit
           update: { colorPlanId: input.colorPlan.id, updatedAt: new Date(input.colorPlan.createdAt) },
         })
         const updated = await transaction.v2Project.updateMany({
-          where: { id: input.command.projectId, workspaceId: input.command.workspaceId, currentVersionId: input.command.baseVersionId },
-          data: { currentVersionId: input.version.id },
+          where: { id: command.projectId, workspaceId: command.workspaceId, currentVersionId: command.baseVersionId },
+          data: { currentVersionId: version.id },
         })
         if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project current version changed during ColorPlan commit')
         await transaction.v2PublicEventOutbox.create({ data: {
@@ -544,13 +490,14 @@ export class PrismaProjectColorPlanRepository implements ProjectColorPlanReposit
           resourceId: input.event.resource.id,
           dataJson: stableSerialize(input.event.data),
         } })
+        await settleDeferredOutputGuards(transaction)
         const row = await transaction.v2ProjectColorPlan.findUniqueOrThrow({ where: { id: input.colorPlan.id }, include: colorPlanInclude })
         return hydrate(row, false)
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const replay = await this.findIdempotent({ workspaceId: input.command.workspaceId, projectId: input.command.projectId, idempotencyKey: input.command.idempotencyKey })
-        if (replay?.requestFingerprint === input.requestFingerprint) return replay.result
+        const replay = await this.findIdempotent({ workspaceId: command.workspaceId, projectId: command.projectId, idempotencyKey: command.idempotencyKey })
+        if (replay?.requestFingerprint === requestFingerprint) return replay.result
         if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with another project ColorPlan')
         throw new DomainError('VERSION_CONFLICT', 'Project ColorPlan conflicted with another write')
       }

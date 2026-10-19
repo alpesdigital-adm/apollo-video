@@ -75,7 +75,10 @@ function w31Manifest(directory) {
     browser: { pid: 321, mutatingRequests: 0, mobileOverflowPx: 0 },
     postflight: { browserProcessTerminal: true, browserPidAliveAtEnd: false, cleanupErrors: [] },
     counts: { before: counts, after: counts }, projectRowsBefore: rows, projectRowsAfter: rows,
-    fixtures: Array.from({ length: 11 }, (_, index) => ({ id: `w31-fixture-${index}` })),
+    fixtures: Array.from({ length: 11 }, (_, index) => ({ id: `w31-fixture-${index}`, format: index === 7 ? '16:9' : '9:16' })),
+    // apollo.projects.list 6.1.0: the 9:16 answer holds the fixtures that store the format and a 6.0.0 project found by its outputs.
+    formatOutputsCase: { query: { limit: '24', format: '9:16' }, status: 200, outputOnlyIds: ['project-found-by-outputs'],
+      ids: ['project-found-by-outputs', ...Array.from({ length: 11 }, (_, index) => `w31-fixture-${index}`).filter((_, index) => index !== 7)] },
     uiCases, persistence,
     apiCases: uiCases.map((item) => ({ id: item.id, status: 200, ids: item.expectedIds, oracleIds: item.expectedIds })),
     boundaryCases: [
@@ -123,6 +126,11 @@ test('W31 CI guard accepts bound evidence and rejects any tampered binding, case
     mutate((value) => { value.persistence[5].request = { limit: '24', text: 'w31-alfa', status: 'bogus' } })
     mutate((value) => { value.boundaryCases[0].ids = [] })
     mutate((value) => { value.invalidCases[0].status = 200 })
+    mutate((value) => { delete value.formatOutputsCase })
+    mutate((value) => { value.formatOutputsCase.outputOnlyIds = [] })
+    mutate((value) => { value.formatOutputsCase.outputOnlyIds = ['w31-fixture-0'] })
+    mutate((value) => { value.formatOutputsCase.ids.pop() })
+    mutate((value) => { value.formatOutputsCase.query.format = '16:9' })
     mutate((value) => { value.browser.mutatingRequests = 1 })
     mutate((value) => { value.browser.mobileOverflowPx = 12 })
     mutate((value) => { value.counts.after.projects += 1 })

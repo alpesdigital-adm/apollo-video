@@ -167,6 +167,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one empty draft project with no provider or external side effect.',
     },
+    'apollo.projects.output-variants.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one stable output variant and an immutable ProjectVersion against an exact base version and hash; it starts no render or provider work and the prior version stays restorable.',
+    },
     'apollo.projects.duplicates.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible copy-on-write project while sharing immutable snapshots and artifact bytes.',
@@ -699,11 +703,11 @@ export function createFoundationAgentToolSafety(
     // about the cut — a recompile of an unmoved derivation is the same row.
     'apollo.projects.capture-sessions.playback-map.plan.compile': {
       impact: 'bounded', confirmation: 'none',
-      reason: 'Turns one resolved playback map, named by the exact version and hash the caller read, into a stored renderable plan; every frame number comes from the map and from durations the server measured, and a recompile of the same map returns the same row.',
+      reason: 'Turns one resolved playback map, named by the exact version and hash the caller read, into a stored renderable plan born with a child Version of the project head the caller names (a moved head is refused); every frame number comes from the map and from durations the server measured, and a recompile of the same map on the same head returns the same row.',
     },
     'apollo.projects.editorial-syntheses.render-plan.compile': {
       impact: 'bounded', confirmation: 'none',
-      reason: 'Turns one immutable multi-range synthesis into a stored renderable plan, refusing any master whose bytes are no longer the ones the ranges were selected from; it renders nothing, changes no media and converges on a recompile.',
+      reason: 'Turns one immutable multi-range synthesis into a stored renderable plan born with a child Version of the project head the caller names (a moved head is refused), refusing any master whose bytes are no longer the ones the ranges were selected from; it renders nothing, changes no media and converges on a recompile on the same head.',
     },
     // F4.016. Bounded and unconfirmed, unlike every other Wave 20 command: this
     // one writes an audit record and nothing else. It changes no media, moves no
@@ -737,6 +741,26 @@ export function createFoundationAgentToolSafety(
     'apollo.projects.music-montages.compile': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Compiles a deterministic edit from persisted analysis and current media authority, atomically publishing its renderer snapshot without provider dispatch.',
+    },
+    'apollo.projects.perception-producer-operations.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Queues sampled local OCR only for one current rights-approved source version, under fixed sample and worker deadlines; facial safety remains unknown.',
+    },
+    'apollo.projects.temporal-producer-operations.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Queues at most 300 observed frames of pinned local FFmpeg measurement for one current rights-approved unit-rate source; no hard-cut, motion semantic or face approval is inferred.',
+    },
+    'apollo.projects.face-producer-operations.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Queues sampled local YuNet candidate boxes for one current rights-approved source under a fixed worker deadline; the model failed quality gates and cannot approve face safety.',
+    },
+    'apollo.projects.face-window-operations.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Queues at most 60 sampled frames of one bounded window of a current rights-approved source for the owner-accepted V9 detector under a fixed worker deadline; the decision is scoped to foreground faces and the speaker, and cannot approve face safety or identity.',
+    },
+    'apollo.projects.face-source-windows.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Queues at most 60 sampled frames of one bounded window of a current rights-approved, attached source for the owner-accepted V9 detector under a fixed worker deadline; the decision is scoped to foreground faces and the speaker, and cannot approve face safety or identity.',
     },
     'apollo.projects.music-analyses.request': { impact: 'bounded', confirmation: 'none', reason: 'Queues local deterministic FFmpeg analysis only after current project, byte identity and music rights authority are bound.' },
     'apollo.projects.music-analyses.cancel': { impact: 'bounded', confirmation: 'none', reason: 'Stops one bounded analysis request and invalidates its worker lease without modifying source media.' },

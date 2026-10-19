@@ -17,6 +17,7 @@ import test from 'node:test'
 import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
@@ -163,7 +164,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
   }
 
   try {
-    await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE')
+    await resetDisposableDatabase(client)
     await mkdir(dirname(primaryBrollInput), { recursive: true })
     await mkdir(evidenceRoot, { recursive: true })
 

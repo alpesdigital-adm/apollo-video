@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 
 test('T-FR-235 persists preflight and partial matrix state in PostgreSQL and rejects tampering', {
   skip: process.env.APOLLO_EXPORT_MATRIX_DB !== '1' && 'set APOLLO_EXPORT_MATRIX_DB=1 with an isolated V2 PostgreSQL database',
@@ -20,7 +21,7 @@ test('T-FR-235 persists preflight and partial matrix state in PostgreSQL and rej
   const clientId = `client-export-matrix-${suffix}`
   const createdAt = '2026-08-24T18:00:00.000Z'
   try {
-    await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE')
+    await resetDisposableDatabase(client)
     await client.v2Workspace.create({ data: { id: workspaceId, slug: `export-matrix-${suffix}`, name: 'Export matrix E2E', createdAt: new Date(createdAt), updatedAt: new Date(createdAt) } })
     await client.v2ApiClient.create({ data: {
       id: clientId, workspaceId, name: 'Export matrix E2E', allowedEnvironmentsJson: '["production"]', scopeGrantsJson: '["projects:read","projects:write"]', createdBy: clientId,
@@ -64,7 +65,7 @@ test('T-FR-235 persists preflight and partial matrix state in PostgreSQL and rej
     await client.v2ExportMatrixPreflight.update({ where: { id: stored.id }, data: { preflightJson: preflight.preflightHash } })
     await assert.rejects(() => repository.readPreflight({ workspaceId, preflightId: stored.id }), (error) => error?.code === 'PERSISTENCE_CONFLICT')
   } finally {
-    await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE').catch(() => undefined)
+    await resetDisposableDatabase(client).catch(() => undefined)
     await client.$disconnect()
   }
 })

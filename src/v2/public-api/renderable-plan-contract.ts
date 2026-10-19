@@ -118,8 +118,11 @@ const COMPILE_PLAYBACK_KEYS = Object.freeze([
 ] as const)
 
 /**
- * The map version to compile, the project version to compile it into, and the
- * frame rate to compile at.
+ * The map version to compile, the project head to compile it on, and the frame
+ * rate to compile at. The plan is born with the Version that is that head's
+ * child (a `compile-renderable-plan` Command), so the answer names the child
+ * and a head that has moved is a 409 VERSION_CONFLICT unless the same compile
+ * was already made on it.
  *
  * No clip, no rate, no duration and no source: every frame number in the plan
  * is derived from the stored map and from durations the server measured on the
@@ -129,8 +132,9 @@ const COMPILE_PLAYBACK_KEYS = Object.freeze([
  * drift nobody chose into every timeline.
  *
  * Because it is the caller's, it is part of the stored plan's identity: the
- * snapshot repository keys on (derivation, source hash, project version,
- * delivery rate), so a second rate is a second plan rather than a collision.
+ * snapshot repository keys on (derivation, source hash, the Version the plan is
+ * born with, delivery rate), so a second rate is a second plan (made on the head
+ * the first one left) rather than a collision.
  * It was not, until the review of this lane: a caller who compiled a map at
  * 30/1 and then asked for 25/1 was answered 409 PERSISTENCE_CONFLICT, with
  * nothing in the schema, the description or the error details saying the rate
@@ -166,7 +170,8 @@ export interface ParsedCompileSynthesisPlanBody {
 const COMPILE_SYNTHESIS_KEYS = Object.freeze(['projectVersionId', 'objective'] as const)
 
 /**
- * The project version to compile the synthesis into, and what the cut is for.
+ * The project head to compile the synthesis on (the plan is born with its
+ * child), and what the cut is for.
  *
  * There is no fence here and the absence is deliberate: an `EditorialSynthesis`
  * is one immutable content-addressed cut, so there is no later version of it to

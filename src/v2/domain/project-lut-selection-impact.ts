@@ -1,6 +1,7 @@
 import { calculateCanonicalHash, stableSerialize } from './canonical-hash.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference, CommandImpactRange } from './command-impact.ts'
 import { assertDomain } from './errors.ts'
+import { assertRendersBelongToVariants, isProxyRenderFromStart, projectWideProxyRenders, projectWideVariantIds } from './project-wide-render-impact.ts'
 
 export interface ProjectLutSelectionImpactV1 {
   schemaVersion: 'project-lut-selection-impact/v1'
@@ -58,7 +59,8 @@ export function createProjectLutSelectionImpact(input: {
   resolvedLutRecordHash?: string
   intensity: number
   durationFrames: number
-  proxyVariantId: string
+  /** Every output of the project (the stable variant ids of its State): a LUT selection changes the plan they all re-materialize from. */
+  variantIds: readonly string[]
   outputReferences: readonly Readonly<CommandImpactOutputReference>[]
 }): Readonly<ProjectLutSelectionImpactV1> {
   assertDomain(Number.isSafeInteger(input.durationFrames) && input.durationFrames >= 0, 'INVALID_ARGUMENT', 'durationFrames is invalid')
@@ -71,6 +73,7 @@ export function createProjectLutSelectionImpact(input: {
     'resolved LUT identity is inconsistent',
   )
   const baseVersionId = identifier(input.baseVersionId, 'baseVersionId')
+  const variantIds = projectWideVariantIds(input.variantIds, input.durationFrames > 0)
   assertDomain(input.durationFrames > 0 || input.outputReferences.length === 0, 'INVALID_ARGUMENT', 'outputs cannot exist before a renderable timeline')
   const seenArtifacts = new Set<string>()
   const outputs = input.outputReferences.map((item, index) => {
@@ -83,6 +86,7 @@ export function createProjectLutSelectionImpact(input: {
     seenArtifacts.add(artifactId)
     return Object.freeze({ artifactId, sourceVersionId, variantId, kind: item.kind })
   }).sort((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
+  assertRendersBelongToVariants(outputs, variantIds)
   const range = input.durationFrames > 0 ? Object.freeze({ startFrame: 0, endFrame: input.durationFrames }) : undefined
   const body = {
     schemaVersion: 'project-lut-selection-impact/v1' as const,
@@ -101,11 +105,7 @@ export function createProjectLutSelectionImpact(input: {
     affectedRanges: Object.freeze(range ? [range] : []),
     affectedVariantIds: Object.freeze([...new Set(outputs.map((item) => item.variantId))].sort()),
     affectedArtifacts: Object.freeze(outputs),
-    minimalRenders: Object.freeze(range ? [Object.freeze({
-      kind: 'proxy' as const,
-      variantId: identifier(input.proxyVariantId, 'proxyVariantId'),
-      ranges: Object.freeze([range]),
-    })] : []),
+    minimalRenders: projectWideProxyRenders(variantIds, range),
     renderSemanticsChanged: true as const,
     renderDeferredUntilTimeline: input.durationFrames === 0,
   }
@@ -123,8 +123,6 @@ export function parseProjectLutSelectionImpact(value: unknown): Readonly<Project
   ].sort()
   const actualKeys = Object.keys(impact).sort()
   const affected = Array.isArray(impact.affectedRanges) ? impact.affectedRanges[0] : undefined
-  const minimal = Array.isArray(impact.minimalRenders) ? impact.minimalRenders[0] : undefined
-  const render = minimal && Array.isArray(minimal.ranges) ? minimal.ranges[0] : undefined
   assertDomain(actualKeys.length === expectedKeys.length && actualKeys.every((key, index) => key === expectedKeys[index]), 'PERSISTENCE_CONFLICT', 'Stored project LUT selection impact fields are invalid')
   assertDomain(
     impact.schemaVersion === 'project-lut-selection-impact/v1' && impact.commandType === 'set-project-lut-selection' &&
@@ -135,10 +133,11 @@ export function parseProjectLutSelectionImpact(value: unknown): Readonly<Project
     Array.isArray(impact.affectedRanges) && impact.affectedRanges.length === (impact.renderDeferredUntilTimeline ? 0 : 1) &&
     (impact.renderDeferredUntilTimeline || (affected?.startFrame === 0 && Number.isSafeInteger(affected?.endFrame) && Number(affected?.endFrame) > 0)) &&
     Array.isArray(impact.affectedVariantIds) && Array.isArray(impact.affectedArtifacts) &&
-    Array.isArray(impact.minimalRenders) && impact.minimalRenders.length === (impact.renderDeferredUntilTimeline ? 0 : 1) &&
+    Array.isArray(impact.minimalRenders) &&
     (impact.renderDeferredUntilTimeline
-      ? impact.affectedArtifacts.length === 0 && impact.affectedVariantIds.length === 0
-      : minimal?.kind === 'proxy' && Array.isArray(minimal.ranges) && minimal.ranges.length === 1 && render?.startFrame === 0 && render?.endFrame === affected?.endFrame),
+      ? impact.minimalRenders.length === 0 && impact.affectedArtifacts.length === 0 && impact.affectedVariantIds.length === 0
+      : impact.minimalRenders.length >= 1 && impact.minimalRenders.every((render) =>
+        isProxyRenderFromStart(render) && render.ranges[0]!.endFrame === affected?.endFrame)),
     'PERSISTENCE_CONFLICT',
     'Stored project LUT selection impact is invalid',
   )
@@ -155,7 +154,7 @@ export function parseProjectLutSelectionImpact(value: unknown): Readonly<Project
       : {}),
     intensity: impact.intensity,
     durationFrames: impact.renderDeferredUntilTimeline ? 0 : affected!.endFrame,
-    proxyVariantId: impact.renderDeferredUntilTimeline ? 'deferred' : minimal!.variantId,
+    variantIds: impact.renderDeferredUntilTimeline ? [] : impact.minimalRenders.map((render) => render.variantId),
     outputReferences: impact.affectedArtifacts,
   })
   assertDomain(stableSerialize(recreated) === stableSerialize(impact), 'PERSISTENCE_CONFLICT', 'Stored project LUT selection impact is inconsistent')

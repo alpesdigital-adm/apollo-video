@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
+import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -275,6 +276,9 @@ test(
     // memory was wrong.
     const { COLOR_CRITIC_ACTIONS, COLOR_CRITIC_CAUSES } = await import('../../src/v2/domain/color-critic-report.ts')
     const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
+    const { assetRightsRevision } = await import('../../src/v2/domain/asset-rights.ts')
+    const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
+    const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
     const sessionsRoute = await import('../../src/app/v1/projects/[projectId]/capture-sessions/route.ts')
     const tracksRoute = await import('../../src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/tracks/route.ts')
     const trackPartsRoute = await import('../../src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/track-parts/route.ts')
@@ -308,9 +312,12 @@ test(
     const versionId = 'podcast-multicam-e2e-version-1'
     const masterTrackId = 'track-master-audio'
     const cameraTrackIds = Object.freeze({ a: 'track-camera-a', b: 'track-camera-b' })
-    const masterArtifactId = 'artifact-master-audio'
-    const cameraArtifactIds = Object.freeze({ a: 'artifact-camera-a', b: 'artifact-camera-b' })
-    const cardTwoArtifactId = 'artifact-camera-b-card-2'
+    // Artifact ids are global to the database and sealed rows are never deleted, so a second suite in one database that names
+    // 'artifact-camera-a' would collide: these carry the invocation.
+    const runTag = randomUUID().replaceAll('-', '').slice(0, 10)
+    const masterArtifactId = `artifact-master-audio-${runTag}`
+    const cameraArtifactIds = Object.freeze({ a: `artifact-camera-a-${runTag}`, b: `artifact-camera-b-${runTag}` })
+    const cardTwoArtifactId = `artifact-camera-b-card-2-${runTag}`
     // The episode was recorded in the PAST, and that is load-bearing rather
     // than decorative: `evaluateRenderedProxy` refuses a proxy whose completion
     // predates the upload it was rendered from (`render-workflow.ts:221`), and
@@ -365,57 +372,7 @@ test(
     // still be refused. Same value the four synthetic journeys use.
     process.env.APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM = '400'
 
-    const clean = async () => {
-      await prisma.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-      await prisma.v2ProjectVersion.updateMany({ where: { workspaceId }, data: { commandId: null } })
-      for (const table of [
-        prisma.v2ColorCriticProposedDelta, prisma.v2ColorCriticIssue,
-        prisma.v2ColorCriticDimensionResult, prisma.v2ColorCriticReportMeasurement,
-        prisma.v2ColorCriticReport,
-        prisma.v2MatchPlanIssue, prisma.v2MatchNonComparableRange,
-        prisma.v2MatchRangeOverride, prisma.v2CameraMatchTransform,
-        prisma.v2MatchPlanMeasurement, prisma.v2MulticamMatchPlanHead,
-        prisma.v2MulticamMatchPlan,
-        prisma.v2ColorMeasurementComponent, prisma.v2ColorMeasurementDimension,
-        prisma.v2CameraColorMeasurement,
-        prisma.v2MulticamAngleScoreComponent, prisma.v2MulticamAngleCandidate,
-        prisma.v2MulticamShotAlternative, prisma.v2MulticamShotDecision,
-        prisma.v2MulticamDirectionHead, prisma.v2MulticamDirection,
-        prisma.v2MulticamObservation, prisma.v2MulticamEvidenceSet,
-        prisma.v2SpeakerDiarizationSegment, prisma.v2SpeakerDiarizationRun,
-        prisma.v2LongFormIndexWorkflow, prisma.v2MediaTranscript,
-        prisma.v2SyncDiagnosticHead, prisma.v2SyncDiagnostic,
-        prisma.v2CaptureSessionProtocol, prisma.v2CaptureProtocolEvaluation,
-        prisma.v2CaptureTrackCoverage, prisma.v2CaptureClockMapPiece, prisma.v2CaptureClockMap,
-        prisma.v2CaptureSyncEvidence, prisma.v2CaptureSyncRun, prisma.v2CaptureSessionClock,
-        prisma.v2CaptureSessionHead, prisma.v2CaptureSessionVersion,
-        prisma.v2ProxyReviewDecision, prisma.v2ProxyReview, prisma.v2RenderElementMap,
-        prisma.v2ProjectProxyRenderOperation,
-        prisma.v2ProjectColorPlanHead, prisma.v2ProjectColorPlan,
-        prisma.v2ProjectLutSelectionHead, prisma.v2ProjectLutSelection,
-        prisma.v2CommandArtifactInvalidation, prisma.v2PublicEventOutbox,
-        prisma.v2EditCommand, prisma.v2ProjectVersion, prisma.v2ProjectSnapshot,
-        prisma.v2ColorPipelineCompilation, prisma.v2MediaColorProbe,
-        prisma.v2ProjectMediaAsset, prisma.v2PublicOperation,
-        // The render's own manifest records what it was derived from, and the
-        // lineage row outlives the operation that wrote it: deleting manifests
-        // first violates `media_artifact_lineage_manifestId_workspaceId_fkey`.
-        prisma.v2MediaArtifactLineage,
-        prisma.v2MediaArtifactManifest, prisma.v2MediaArtifact,
-        prisma.v2Project, prisma.v2UiSession, prisma.v2WorkspaceUiPrincipal,
-        prisma.v2WorkspaceMember, prisma.v2ApiCredential, prisma.v2ApiClient,
-      ]) {
-        await table.deleteMany({ where: { workspaceId } })
-      }
-      await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } })
-    }
-
     t.after(async () => {
-      try {
-        await clean()
-      } catch (error) {
-        console.log(`podcast cleanup reported: ${error?.message ?? error}`)
-      }
       await closeJourneyObjectStore(objectStore).catch((error) => {
         console.log(`podcast object storage cleanup reported: ${error?.message ?? error}`)
       })
@@ -424,7 +381,10 @@ test(
       })
       await prisma.$disconnect()
     })
-    await clean()
+    // Sealed rows are append-only, so this journey cannot clear a previous run: its identities are fixed, and it is single-use per
+    // database (a workflow gives it a fresh one). Say so here instead of failing later on a unique constraint.
+    assert.equal(await prisma.v2Workspace.count({ where: { id: workspaceId } }), 0,
+      'this journey needs a fresh database: its workspace already exists and sealed rows are never deleted')
 
     // ---- the four recordings ----------------------------------------------
     // One room, four microphones. The recorder hears the whole afternoon at
@@ -586,6 +546,28 @@ test(
     })
 
     const registered = {}
+    const rightsRepository = new PrismaAssetRightsRepository(prisma)
+    // These four recordings were generated by this fixture. Grant their named
+    // roles explicitly and persist the real rights change audit; registration
+    // alone never implies permission and the shared helper keeps that boundary.
+    const grantRecordingRights = async (artifactId, allowedUses) => {
+      const snapshotId = `podcast-rights-${artifactId}`
+      const result = await setAssetRightsService({ repository: rightsRepository,
+        clock: () => at(0), createId: () => snapshotId })({ workspaceId, artifactId,
+        baseRevision: assetRightsRevision(artifactId, 0),
+        draft: { status: 'approved', allowedUses, prohibitedUses: [], allowedLocales: ['pt-BR'],
+          consent: { status: 'not-required', allowedUses: [] },
+          sourceNote: 'Owner-generated controlled podcast recording; no territorial restriction' },
+        actor: { type: 'api-client', id: clientId } })
+      // This production reader checks snapshot integrity AND its persisted
+      // audit/revision association, rather than trusting the write result alone.
+      const readback = (await rightsRepository.findCurrentForArtifacts(workspaceId, [artifactId])).get(artifactId)
+      assert.equal(readback?.id, snapshotId)
+      assert.equal(readback?.snapshotHash, result.snapshot.snapshotHash)
+      assert.equal(readback?.createdBy.id, clientId)
+      assert.deepEqual(readback?.allowedUses, [...allowedUses].sort())
+      assert.equal(result.revision, assetRightsRevision(artifactId, 1))
+    }
     registered[masterArtifactId] = await helpers.registerRecording({
       prisma, workspaceId, projectId,
       artifactId: masterArtifactId,
@@ -604,6 +586,8 @@ test(
       createdAt: at(0),
       recipeId: 'capture-recorder-ingest',
     })
+    // The dedicated recorder is linked as selected-insert in this journey.
+    await grantRecordingRights(masterArtifactId, ['editorial-reuse'])
     for (const camera of CAMERAS) {
       registered[cameraArtifactIds[camera]] = await helpers.registerRecording({
         prisma, workspaceId, projectId,
@@ -628,6 +612,9 @@ test(
         createdAt: at(0),
         recipeId: 'capture-camera-ingest',
       })
+      // Each camera also supplies its near-mic transcription/diarization evidence.
+      await grantRecordingRights(cameraArtifactIds[camera],
+        camera === 'a' ? ['rendering', 'transcription'] : ['editorial-reuse', 'transcription'])
     }
     // Camera B's second card. Ingested exactly like the others — the bytes were
     // read, hashed and probed here, and it is only the CAPTURE SESSION that
@@ -656,6 +643,7 @@ test(
       createdAt: at(0),
       recipeId: 'capture-camera-ingest',
     })
+    await grantRecordingRights(cardTwoArtifactId, ['editorial-reuse'])
     await helpers.seedBaseProjectVersion({
       prisma, workspaceId, projectId, versionId, clientId,
       objective: 'warming',

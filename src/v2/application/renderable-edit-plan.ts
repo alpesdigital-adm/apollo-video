@@ -1,4 +1,5 @@
-import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
+import { calculateRenderablePlanHash, RENDERABLE_PLAN_COMPILER_VERSION } from '../domain/renderable-plan-authority.ts'
+export { calculateRenderablePlanHash, RENDERABLE_PLAN_COMPILER_VERSION } from '../domain/renderable-plan-authority.ts'
 import {
   createDesiredAction,
   createDesiredActionReference,
@@ -67,7 +68,6 @@ export const RENDERABLE_PLAN_ORIGINS = Object.freeze([
 ] as const)
 export type RenderablePlanOrigin = (typeof RENDERABLE_PLAN_ORIGINS)[number]
 
-export const RENDERABLE_PLAN_COMPILER_VERSION = 'renderable-edit-plan/2026-09-05-v1'
 
 /**
  * The edge fade the director puts on every straight cut
@@ -307,50 +307,6 @@ export function assembleDirectedEditPlan(
   return validateDirectedEditPlan(plan)
 }
 
-/** The one field the plan's identity deliberately does not cover. See below. */
-const HASH_EXCLUDED_FIELD = 'createdAt' as const
-
-/**
- * The identity of a compiled plan: the whole document, minus when it was
- * written.
- *
- * This hash answers two questions, and until Wave 20's review it only answered
- * the first:
- *
- * - **Have we already compiled this exact plan?** The replay key of
- *   `renderable_plan_snapshots`, so a recompile of an unmoved derivation is one
- *   row rather than a conflict.
- * - **Is the stored document still the one the compiler produced?**
- *   `hydrate` (`infrastructure/prisma/renderable-plan-snapshot-repository.ts`)
- *   recomputes this over the parsed `planJson` and refuses a row that no longer
- *   matches. A hash over a *projection* of the plan — clips, sources,
- *   transitions, markers — left everything else outside it: `director.decisions`
- *   (the decision log, which an UPDATE could otherwise fill with an approval
- *   nobody gave), `overlayTracks` (burned-in copy), `subtitleTracks`, `composition`,
- *   `movementPolicy`, `subtitlePolicy`, `editorial.exclusions`,
- *   `retimedTranscript`, `state`, `schemaVersion` and `protectedElements`. An
- *   UPDATE that injected a fabricated critic decision and a CTA overlay
- *   recomputed to the same digest and read back clean.
- *
- * So every field of the plan is hashed. `createdAt` is the single exclusion,
- * because it is the only field that would make the same cut, from the same
- * derivation at the same hash, hash differently on two days — turning a replay
- * into a `PERSISTENCE_CONFLICT` against a row nobody changed. Everything else,
- * including the plan id and `projectVersionId`, is in: the same cut belonging to
- * two project versions is two plans.
- */
-export function calculateRenderablePlanHash(plan: Readonly<DirectedEditPlan>): string {
-  const document: Record<string, unknown> = { ...plan }
-  delete document[HASH_EXCLUDED_FIELD]
-  return calculateCanonicalHash({
-    // Bumped from v1 with the change above: a digest computed under the old
-    // projection is not this one, and a row carrying it must fail to hydrate
-    // rather than be read as if it had been verified.
-    schemaVersion: 'renderable-edit-plan-hash/v2',
-    compilerVersion: RENDERABLE_PLAN_COMPILER_VERSION,
-    plan: document,
-  })
-}
 
 /**
  * The row a compiled plan is stored as, derived from the plan itself.

@@ -38,35 +38,28 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaReviewPatchBatchRepository } = await import('../../src/v2/infrastructure/prisma/review-patch-batch-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
+  const { commitSealedChild, persistRecording } = await import('./helpers/pg-output-world.mjs')
+  const { recordingNames } = await import('./helpers/operational-editorial-fixture.mjs')
+  const { registerColorPipeline, seedReviewProject } = await import('./helpers/review-edit-world.mjs')
 
   const client = new PrismaClient()
   const suffix = randomUUID().slice(0, 8)
   const workspaceId = `batch-review-workspace-${suffix}`
   const projectId = `batch-review-project-${suffix}`
-  const artifactId = `batch-review-artifact-${suffix}`
+  // The source is an ingested recording (its sealed receipt is what the first Version adopts); its ids derive from its slug.
+  const slug = `batch-review-${suffix}`
+  const names = recordingNames(slug)
+  const artifactId = names.sourceArtifactId
+  const manifestId = names.sourceManifestId
   const initialVersionId = `batch-review-version-${suffix}`
   const createdAt = new Date('2026-07-26T14:00:00.000Z')
-  const artifactHash = calculateVersionHash({ artifactId })
+  const artifactHash = names.sourceSha
   const repository = new PrismaReviewPatchBatchRepository(client)
   let server
   let authenticatedActor
+  // The annotations name the format they were made on by the STABLE variant of the project's output (the State's id), never the aspect ratio.
+  let stableVariantId
 
-  const cleanup = async () => {
-    await client.v2CommandArtifactInvalidation.deleteMany({ where: { workspaceId } })
-    await client.v2ReviewPatchBatch.deleteMany({ where: { workspaceId } })
-    await client.v2ReviewPatchProposal.deleteMany({ where: { workspaceId } })
-    await client.v2ReviewAnnotation.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
-    await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   const seedAnnotationAndProposal = async ({ versionId, targetId, text, operationText }) => {
     const audit = materializeActorAuditContext(authenticatedActor)
@@ -102,7 +95,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     await client.v2ReviewAnnotation.create({ data: {
       id: annotationId, workspaceId, projectId, projectVersionId: versionId, proxyArtifactId: artifactId, proxyHash: artifactHash,
       frame, timeStartMs: frame * 33, timeEndMs: frame * 33, scope: 'point',
-      targetIdsJson: stableSerialize([targetId]), applicationScopeJson: stableSerialize({ kind: 'scene', targetIds: ['scene:clip-1'], formatIds: ['9:16'], localeIds: ['pt-BR'], recipeIds: ['project-proxy-render'], global: false }),
+      targetIdsJson: stableSerialize([targetId]), applicationScopeJson: stableSerialize({ kind: 'scene', targetIds: ['scene:clip-1'], formatIds: [stableVariantId], localeIds: ['pt-BR'], recipeIds: ['project-proxy-render'], global: false }),
       affectedCount: 1, screenshotRef: 'data:image/jpeg;base64,/9j/2Q==', text,
       authorType: 'api-client', authorId: audit.clientId, authorName: audit.clientId, status: 'open',
       ...actorAuditData,
@@ -142,9 +135,6 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
   })
 
   try {
-    await cleanup()
-    const brief = { schemaVersion: 1, objective: 'discovery', createdAt: createdAt.toISOString() }
-    const policies = { schemaVersion: 1, state: 'configured', createdAt: createdAt.toISOString() }
     const editPlan = {
       schemaVersion: 2, state: 'compiled', id: `edit-plan-${initialVersionId}`, projectVersionId: initialVersionId,
       storyPlanId: 'story-batch', treatmentPlanId: 'treatment-batch', directorRunId: 'director-batch', fps: 30, durationFrames: 150,
@@ -161,8 +151,6 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
       composition: { layout: 'landscape-inset', background: 'blurred-source', foregroundScale: 1, verticalPosition: 0.5 },
       director: { plannerVersion: 'batch-e2e', decisions: [], assumptions: [] }, createdAt: createdAt.toISOString(),
     }
-    const briefId = `batch-brief-${suffix}`
-    const policiesId = `batch-policies-${suffix}`
     const editPlanId = `batch-edit-plan-${suffix}`
     await client.v2Workspace.create({ data: { id: workspaceId, slug: workspaceId, name: 'Batch Review Workspace', status: 'active', createdAt, updatedAt: createdAt } })
     const issued = await createApiClientService({
@@ -192,44 +180,38 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
       workspaceAccessStatus: 'active',
       auditContext,
     })
-    await client.v2Project.create({ data: { id: projectId, workspaceId, name: 'Batch Review Project', status: 'reviewing-proxy', objective: 'discovery', format: '9:16', locale: 'pt-BR', createdByType: 'api-client', createdById: 'batch-test-client', createdAt, updatedAt: createdAt } })
-    for (const [id, kind, content] of [[briefId, 'brief', brief], [policiesId, 'policies', policies], [editPlanId, 'edit-plan', editPlan]]) {
-      await client.v2ProjectSnapshot.create({ data: { id, workspaceId, projectId, kind, schemaVersion: kind === 'edit-plan' ? 2 : 1, contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt } })
-    }
-    await client.v2ProjectVersion.create({ data: { id: initialVersionId, workspaceId, projectId, sequence: 1, briefSnapshotId: briefId, editPlanSnapshotId: editPlanId, policiesSnapshotId: policiesId, baseHash: calculateVersionHash({ projectId, editPlan }), createdBy: 'batch-test-client', createdAt } })
-    await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: initialVersionId } })
-    await client.v2MediaArtifact.create({ data: { id: artifactId, workspaceId, artifactKey: `batch/${artifactId}.mp4`, sha256: artifactHash, byteSize: 1n, mediaType: 'video', container: 'mp4', status: 'available', createdAt } })
-    await client.v2MediaArtifactManifest.create({ data: {
-      id: `batch-review-manifest-${suffix}`, workspaceId, artifactId,
-      schemaVersion: 'media-artifact-manifest/v2', manifestHash: calculateVersionHash({ artifactId, manifest: true }),
-      recipeId: 'batch-review-source', recipeVersion: '1.0.0', parametersHash: calculateVersionHash({ source: true }),
-      manifestJson: stableSerialize({ artifact: { artifactKey: `batch/${artifactId}.mp4` }, probe: { width: 640, height: 360, duration: 5, fps: 30 } }),
-      createdAt,
-    } })
-    await client.v2ProjectMediaAsset.createMany({ data: [
-      { id: randomUUID(), workspaceId, projectId, artifactId, role: 'source-master', originalFileName: 'batch.mp4', createdAt },
-      { id: randomUUID(), workspaceId, projectId, artifactId, role: 'editing-proxy', originalFileName: 'batch.mp4', createdAt },
-    ] })
+    // The project is the sealed world the product builds: the creation Command, one explicit 9:16 output variant, the recording's
+    // persisted ingest (with its source rights) and a child Command that adopts that receipt and plays the recording.
+    stableVariantId = (await seedReviewProject(client, { workspaceId, actor: authenticatedActor, prefix: 'batch-review', ids: { project: projectId },
+      name: 'Batch Review Project', aspectRatio: '9:16', status: 'reviewing-proxy', at: () => createdAt })).variantId
+    await persistRecording(client, { workspaceId, projectId, actor: authenticatedActor, slug, durationFrames: 150,
+      createdAt: createdAt.toISOString() })
+    const initialBundle = await commitSealedChild(client, { workspaceId, projectId, actor: authenticatedActor,
+      suffix: `batch-review-${suffix}`, versionId: initialVersionId, snapshotId: editPlanId,
+      createdAt: new Date(createdAt.getTime() + 2_000).toISOString(), mutatePlan: () => editPlan, adopt: [artifactId] })
+    const initialSequence = initialBundle.version.sequence
+    // Every video render source needs its colour pipeline compilation before a proxy render can be admitted.
+    await registerColorPipeline(client, { workspaceId, projectId, actor: authenticatedActor, artifactId, manifestId, createdAt })
     const seedOperationId = `batch-review-seed-operation-${suffix}`
     const seedAuthenticationAudit = materializeActorAuditContext(authenticatedActor)
     await client.v2PublicOperation.create({ data: {
       id: seedOperationId, workspaceId, projectId, clientId: issued.client.id, type: 'project-proxy-render',
-      actorClientId: seedAuthenticationAudit.clientId,
       actorCredentialId: seedAuthenticationAudit.credentialId,
       actorEnvironment: seedAuthenticationAudit.environment,
       actorAuthenticationKind: seedAuthenticationAudit.authenticationKind,
       actorContextHash: seedAuthenticationAudit.contextHash,
       status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: artifactId,
-      cancelable: false, retryable: false, attempt: 1, resultJson: stableSerialize({ artifactId }),
+      cancelable: false, retryable: false, attempt: 1, maxAttempts: 3, progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
+      resultJson: stableSerialize({ artifactId }),
       idempotencyKey: `batch-review-seed-${suffix}`, requestFingerprint: calculateVersionHash({ seedOperationId }),
       createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
     } })
     await client.v2ProjectProxyRenderOperation.create({ data: {
       operationId: seedOperationId, workspaceId, projectId, projectVersionId: initialVersionId,
       editPlanSnapshotId: editPlanId, sourceArtifactId: artifactId,
-      sourceManifestId: `batch-review-manifest-${suffix}`,
+      sourceManifestId: manifestId, colorPipelineBindingsJson: stableSerialize([]),
       inputHash: calculateVersionHash({ seedOperationId, input: true }), outputArtifactId: artifactId,
-      outputManifestId: `batch-review-manifest-${suffix}`, originalFileName: 'batch.mp4', createdAt,
+      outputManifestId: manifestId, originalFileName: 'batch.mp4', createdAt,
     } })
 
     const first = await seedAnnotationAndProposal({ versionId: initialVersionId, targetId: 'subtitle:cue-1', text: 'Trocar primeira legenda.', operationText: 'Primeira corrigida' })
@@ -245,7 +227,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     assert.match(storedReadyBatch.actorContextHash, /^[a-f0-9]{64}$/)
     assert.equal(ready.batch.patch.operations.length, 2)
     const applied = await applyBatch(ready.batch.id, `batch-ready-apply-${suffix}`)
-    assert.equal(applied.version.sequence, 2)
+    assert.equal(applied.version.sequence, initialSequence + 1)
     assert.equal(applied.batch.items.filter((item) => item.status === 'applied').length, 2)
     assert.equal(applied.impact.commandType, 'apply-review-patch-batch')
     assert.deepEqual(applied.impact.affectedRanges, [{ startFrame: 29, endFrame: 30 }, { startFrame: 59, endFrame: 60 }])
@@ -291,7 +273,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     assert.equal(partial.batch.status, 'partial')
     assert.deepEqual(partial.batch.patch.annotationIds, [safe.annotationId])
     const partialApplied = await applyBatch(partial.batch.id, `batch-partial-apply-${suffix}`)
-    assert.equal(partialApplied.version.sequence, 3)
+    assert.equal(partialApplied.version.sequence, initialSequence + 2)
     assert.equal(partialApplied.batch.items.find((item) => item.annotationId === safe.annotationId).status, 'applied')
     assert.equal(partialApplied.batch.items.find((item) => item.annotationId === conflictA.annotationId).status, 'retryable')
     assert.equal((await client.v2PublicEventOutbox.count({
@@ -319,7 +301,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     await assert.rejects(() => applyBatch(rollbackBatch.batch.id, `batch-rollback-apply-${suffix}`, failingRepository), (error) => error instanceof DomainError && error.code === 'VERSION_CONFLICT')
     const afterRollback = await client.v2Project.findUnique({ where: { id: projectId }, include: { versions: true } })
     assert.equal(afterRollback.currentVersionId, rollbackVersionId)
-    assert.equal(afterRollback.versions.length, 3)
+    assert.equal(afterRollback.versions.length, initialSequence + 2)
     const rollbackAnnotations = await client.v2ReviewAnnotation.findMany({ where: { id: { in: [rollbackA.annotationId, rollbackB.annotationId] } }, select: { status: true } })
     assert.ok(rollbackAnnotations.every((row) => row.status === 'open'))
     assert.equal((await client.v2PublicEventOutbox.count({
@@ -367,7 +349,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     })
     const publicApplied = await applyResponse.json()
     assert.equal(applyResponse.status, 201, `${JSON.stringify(publicApplied)}\n${serverLogs.slice(-4_000)}`)
-    assert.equal(publicApplied.data.version.sequence, 4)
+    assert.equal(publicApplied.data.version.sequence, initialSequence + 3)
     assert.equal(publicApplied.data.operation.status, 'queued')
     assert.equal(publicApplied.data.batch.items.filter((item) => item.status === 'applied').length, 2)
   } finally {
@@ -375,7 +357,6 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
       server.kill()
       await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
     }
-    await cleanup()
     await client.$disconnect()
   }
 })

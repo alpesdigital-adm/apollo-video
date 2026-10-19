@@ -148,7 +148,7 @@ process.env.APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM = '400'
  * module graph: ten criteria over coverage, clock maps, diagnostics, colour
  * plans, final-export operations and media MANIFESTS — the manifest, never the
  * file. `buildGateWorld` writes no bytes anywhere, in either mode
- * (`multicam-longform-gate-world.mjs:1017-1075` creates `v2MediaArtifact` and
+ * (`multicam-longform-gate-world.mjs:951-998` creates `v2MediaArtifact` and
  * `v2MediaArtifactManifest` rows and stops), and the artifacts the report cites
  * carry synthetic digests no real file could have.
  *
@@ -263,10 +263,7 @@ test(
     const { MULTICAM_LONGFORM_CRITERIA, MULTICAM_LONGFORM_GATE_ID } = await import(
       '../../src/v2/domain/multicam-longform-gate.ts'
     )
-    const { buildGateWorld, cleanGateWorld } = await import(
-      './helpers/multicam-longform-gate-world.mjs'
-    )
-    const { acquireGateFixtureLease } = await import('./helpers/gate-fixture-lease.mjs')
+    const { buildGateWorld } = await import('./helpers/synth-pg-gate-world.mjs')
     // The four breakages below write real aggregates: no hash is invented, so
     // every hash the gate re-derives afterwards is the hash the product
     // computes over the doctored body. Three go through their domain factory.
@@ -317,58 +314,39 @@ test(
     )
 
     const client = new PrismaClient()
-    const A = 'f4016-journey-workspace-a'
-    const B = 'f4016-journey-workspace-b'
-    const PROJECT_A = 'f4016-journey-project-a'
-    const PROJECT_B = 'f4016-journey-project-b'
-    const VERSION_A = 'f4016-journey-version-a'
-    const OWNER_A = 'f4016-journey-owner-a'
-    const OWNER_B = 'f4016-journey-owner-b'
-    // `buildGateWorld` writes fixed fixture ids — media artifacts among them,
-    // and `media_artifacts.id` is unique across the whole database rather than
-    // per workspace. A crashed run of THIS suite or of
-    // `multicam-longform-gate.e2e.mjs` therefore blocks the next seed, so the
-    // cleanup takes back both worlds. Today the two are separate, sequential
-    // CI steps — but nothing in the workflow enforces that, and a suite that
-    // empties another suite's live fixture mid-flight fails as a domain bug.
-    // The lease below makes the second runner WAIT instead, so the sentence
-    // "they never run at once" is now true because something makes it true.
-    const WORKSPACES = [A, B, 'f4016-workspace-a', 'f4016-workspace-b']
-
-    const clean = () => cleanGateWorld({ client, workspaceIds: WORKSPACES })
-    const lease = await acquireGateFixtureLease()
+    // Sealed rows are append-only, so nothing here is deleted and nothing is shared: every identity this journey and its
+    // world write carries RUN. CI runs the journey twice in one database (the integration step and the s3 step), and a
+    // second run has to find the first one's rows untouched and none of its own ids taken.
+    const RUN = randomUUID().replaceAll('-', '').slice(0, 10)
+    const A = `f4016-journey-workspace-a-${RUN}`
+    const B = `f4016-journey-workspace-b-${RUN}`
+    const OWNER_A = `f4016-journey-owner-a-${RUN}`
+    const OWNER_B = `f4016-journey-owner-b-${RUN}`
     const objectStore = await openJourneyObjectStore()
 
     t.after(async () => {
-      // Reported, not rethrown: a cleanup failure that masks the assertion
-      // turns one clear defect into two confusing ones.
-      try {
-        await clean()
-      } catch (error) {
-        console.error('cleanup failed:', error?.message ?? error)
-      }
       await closeJourneyObjectStore(objectStore).catch((error) => {
         console.error('object storage cleanup failed:', error?.message ?? error)
       })
       await client.$disconnect()
-      await lease.release()
     })
 
-    await clean()
     const world = await buildGateWorld({
       client,
+      run: RUN,
       workspaceId: A,
-      projectId: PROJECT_A,
-      versionId: VERSION_A,
       clientId: OWNER_A,
       otherWorkspaceId: B,
-      otherProjectId: PROJECT_B,
       otherClientId: OWNER_B,
       // The two renderable plans are NOT seeded. Section 0 below writes them
       // through the published routes, which is the only way this journey can
       // claim the gate is reachable from outside a test.
       renderablePlans: 'omit',
     })
+    // The projects are born through the creation Command and one explicit output variant; their ids and the head
+    // Version come back from the world.
+    const PROJECT_A = world.projectId
+    const VERSION_A = world.versionId
 
     // The credentials the journey actually authenticates with. They are issued
     // after the world is built because building it starts by emptying the
@@ -482,6 +460,11 @@ test(
     assert.equal(compileMap.payload.data.plan.sourceHash, world.resolvedReact.map.mapHash)
     assert.equal(compileMap.payload.data.plan.sourceVersion, world.resolvedReact.map.version)
     assert.ok(compileMap.payload.data.plan.clipCount >= 1)
+    // A plan is born with its Version: the compile is a Command on the head, so the answer names the child of VERSION_A, which is
+    // now the head the next compile has to name.
+    const VERSION_B = compileMap.payload.data.plan.projectVersionId
+    assert.notEqual(VERSION_B, VERSION_A)
+    assert.equal((await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: VERSION_B } })).parentVersionId, VERSION_A)
 
     // The fence is a fence over the wire and not only inside the service: the
     // pair the build produced is one version behind the anchor that resolved
@@ -512,7 +495,7 @@ test(
       method: 'POST',
       path: `/v1/projects/${PROJECT_A}/editorial-syntheses/${world.synthesis.id}/render-plan`,
       params: { projectId: PROJECT_A, synthesisId: world.synthesis.id },
-      body: { projectVersionId: VERSION_A, objective: 'discovery' },
+      body: { projectVersionId: VERSION_B, objective: 'discovery' },
       authorization: bearerA,
     })
     assert.equal(compileCut.status, 201, compileCut.text)
@@ -536,7 +519,7 @@ test(
       method: 'POST',
       path: `/v1/projects/${PROJECT_A}/editorial-syntheses/${world.synthesis.id}/render-plan`,
       params: { projectId: PROJECT_A, synthesisId: world.synthesis.id },
-      body: { projectVersionId: VERSION_A, objective: 'discovery' },
+      body: { projectVersionId: VERSION_B, objective: 'discovery' },
       authorization: bearerA,
     })
     assert.equal(compileAgain.status, 200, compileAgain.text)
@@ -548,11 +531,33 @@ test(
       method: 'POST',
       path: `/v1/projects/${PROJECT_A}/editorial-syntheses/${world.synthesis.id}/render-plan`,
       params: { projectId: PROJECT_A, synthesisId: world.synthesis.id },
-      body: { projectVersionId: VERSION_A, objective: 'discovery' },
+      body: { projectVersionId: VERSION_B, objective: 'discovery' },
       authorization: bearerB,
     })
     assert.equal(foreignCompile.status, 404, foreignCompile.text)
     assert.equal(foreignCompile.payload.error.code, 'EDITORIAL_SYNTHESIS_NOT_FOUND')
+
+    // The base of the first compile is no longer the head: a compile that was never made is a conflict, not a plan on a stale base.
+    const staleBase = await callRoute(NextRequest, playbackPlanRoute, {
+      method: 'POST',
+      path: `/v1/projects/${PROJECT_A}/capture-sessions/${world.ids.reactSession}/playback-map/plan`,
+      params: { projectId: PROJECT_A, sessionId: world.ids.reactSession },
+      body: {
+        baseVersionId: `${world.ids.reactSession}:playback:track-reaction:v${world.resolvedReact.map.version}`,
+        baseHash: world.resolvedReact.map.mapHash,
+        reactionTrackId: 'track-reaction',
+        projectVersionId: VERSION_A,
+        objective: 'discovery',
+        planFps: '25/1',
+      },
+      authorization: bearerA,
+    })
+    assert.equal(staleBase.status, 409, staleBase.text)
+    assert.equal(staleBase.payload.error.code, 'VERSION_CONFLICT')
+
+    // The gate judges the CURRENT Version, and each compile moved it: the colour critic's verdict is re-issued for the head the
+    // second compile left, as the product's critic would.
+    await world.rehomeCriticReport()
 
     // Exactly two rows, both written by a route handler.
     assert.equal(
@@ -620,7 +625,7 @@ test(
       'the replay wrote a third row; only section 0 and the approval may have written',
     )
 
-    const mismatch = await evaluate(bearerA, approvedKey, { sessionId: 'f4016-session-podcast' })
+    const mismatch = await evaluate(bearerA, approvedKey, { sessionId: world.ids.podcastSession })
     assert.equal(mismatch.status, 409, mismatch.text)
     assert.equal(mismatch.payload.error.code, 'IDEMPOTENCY_PAYLOAD_MISMATCH')
 

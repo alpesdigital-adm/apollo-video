@@ -11,8 +11,8 @@ const commit = 'a'.repeat(40)
 const context = { sourceCommit: commit, ciRunId: '4321', applicationName: 'apollo-video-e2e-w29-ci' }
 const SIBLINGS = {
   29: 'w29-lut-browser-proof/v1', 30: 'w30-dashboard-browser-proof/v1', 31: 'w31-dashboard-combined-filters/v1',
-  32: 'w32-dashboard-pagination/v1', 33: 'w33-dashboard-workspace-isolation/v1', 34: 'w34-dashboard-aggregate/v1',
-  35: 'w35-dashboard-states/v1', 36: 'w36-dashboard-events/v1', 37: 'w37-rename-from-card/v1',
+  32: 'w32-dashboard-pagination/v1', 33: 'w33-dashboard-workspace-isolation/v1', 34: 'w34-dashboard-aggregate/v2',
+  35: 'w35-dashboard-states/v2', 36: 'w36-dashboard-events/v1', 37: 'w37-rename-from-card/v1',
   38: 'w38-archive-restore/v1', 39: 'w39-duplicate-copy-on-write/v1',
 }
 const SCREENSHOTS = [
@@ -52,7 +52,7 @@ function manifest() {
   })
   const finalProject = (key, status, commands) => ({
     project: { id: ids[key], status, archivedFromStatus: null }, commands: commands.map(([action, base, result]) => command(action, base, result)),
-    events: [], versions: key === 'copy' ? 2 : 1, editCommands: key === 'copy' ? 1 : 0,
+    events: [], versions: key === 'dup' ? 3 : 1, editCommands: key === 'dup' ? 2 : 0,
   })
   return {
     schemaVersion: 'w40-consolidated/v1', wave: 'w40', runId: '11111111-1111-4111-8111-111111111111', sourceCommit: commit, ciRunId: '4321',
@@ -109,7 +109,12 @@ function manifest() {
         sharedArtifactIds: ['art-master'], copiedBytes: 0, objectCounts: { projectReferences: 2, workspaceMediaArtifacts: 9, storageObjects: 1 },
         storage: [{ key: 'w40/x/master-original.mp4', bytes: 8976, sha256: hex('4') }], master: { sha256: hex('4'), bytes: 8976, unchanged: true },
         destination: { urlPath: `/projects/${ids.copy}`, workspaceStatus: 200, mediaArtifactIds: ['art-master'] },
-        commandOnCopy: { type: 'set-project-lut-selection', copyVersionSequenceAfter: 2, copyEditCommands: 1, sourceEditCommands: 0, cards: { source: 'v1', copy: 'v2' } },
+        commands: {
+          type: 'create-output-variant',
+          onCopy: { status: 428, code: 'PRECONDITION_REQUIRED', copyUnchanged: true, originalUnchanged: true },
+          onOriginal: { status: 201, versionSequenceAfter: 3, editCommandsBefore: 1, editCommandsAfter: 2, earlierVersionsUnchanged: true, earlierSnapshotsUnchanged: true, copyUnchanged: true, copyEditCommands: 0 },
+          cards: { source: 'v3', copy: 'v1' },
+        },
         sourceUnchanged: true,
       },
     },
@@ -123,7 +128,7 @@ function manifest() {
       refusal('workspace-switched-in-another-tab-404', 404, 'PROJECT_NOT_FOUND', { observed: { status: 404, code: 'PROJECT_NOT_FOUND', errorVisibleInDialog: true } }),
       refusal('stale-rename-409', 409, 'VERSION_CONFLICT', { timingAid: 'the dashboard feed poll was held until the refused request returned', observed: { status: 409, code: 'VERSION_CONFLICT', errorVisibleInDialog: true, browserCommandsWritten: 0 } }),
       refusal('stale-archive-409', 409, 'VERSION_CONFLICT', { timingAid: 'the dashboard feed poll was held until the refused request returned', observed: { status: 409, code: 'VERSION_CONFLICT', errorVisibleInDialog: true, persistedStatus: 'completed' } }),
-      refusal('stale-duplicate-409', 409, 'VERSION_CONFLICT'), refusal('stale-rename-api-409', 409, 'VERSION_CONFLICT'), refusal('stale-archive-api-409', 409, 'VERSION_CONFLICT'),
+      refusal('stale-duplicate-409', 409, 'VERSION_CONFLICT'), refusal('command-on-copy-refused-fork-root', 428, 'PRECONDITION_REQUIRED'), refusal('stale-rename-api-409', 409, 'VERSION_CONFLICT'), refusal('stale-archive-api-409', 409, 'VERSION_CONFLICT'),
       { id: 'session-rotation-real-path', expected: {}, observed: { rotated: true, successorStatus: 200, previousTokenStatus: 401, previousTokenCode: 'AUTH_INVALID', previousRowRevoked: true } },
       { id: 'recovery-after-409', expected: { status: 200 }, observed: { status: 200 } },
       { id: 'expired-session-page-redirect', expected: { landing: '/login' }, observed: { landing: '/login' } },
@@ -263,6 +268,29 @@ test('W40 guard rejects a sibling manifest from another commit, another run or a
     writeFileSync(join(directory, 'w40-desktop-baseline.png'), Buffer.from('tampered'.repeat(40)))
     assert.throws(() => verifyW40Evidence(directory, context, { siblings }))
   } finally { cleanup() }
+})
+
+test('W40 accepts only W34/W35 v2 and rejects historical or mixed sibling versions', () => {
+  for (const versions of [
+    { 34: 'w34-dashboard-aggregate/v1' },
+    { 35: 'w35-dashboard-states/v1' },
+    { 34: 'w34-dashboard-aggregate/v1', 35: 'w35-dashboard-states/v1' },
+    { 34: 'w34-dashboard-aggregate/v3' },
+    { 35: 'w35-dashboard-states/v3' },
+  ]) {
+    const { directory, siblings, cleanup } = world()
+    try {
+      assert.doesNotThrow(() => verifyJourneyManifests(siblings, context))
+      for (const [wave, schemaVersion] of Object.entries(versions)) {
+        const path = join(siblings[wave], `w${wave}-manifest.json`)
+        const sibling = JSON.parse(readFileSync(path, 'utf8'))
+        sibling.schemaVersion = schemaVersion
+        writeFileSync(path, JSON.stringify(sibling))
+      }
+      assert.throws(() => verifyJourneyManifests(siblings, context))
+      assert.throws(() => verifyW40Evidence(directory, context, { siblings }))
+    } finally { cleanup() }
+  }
 })
 
 test('W40 guard rejects proof code that could fake the feed chain with a synthetic event', () => {

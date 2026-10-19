@@ -16,7 +16,7 @@ import { createRenderPlacementPlan } from '../../src/v2/domain/render-placement-
 import { createRenderReframePlan } from '../../src/v2/domain/render-reframe-plan.ts'
 
 const require = createRequire(import.meta.url)
-const ffmpegPath = require('ffmpeg-static')
+const ffmpegPath = process.env.FFMPEG_BIN ?? require('ffmpeg-static')
 const colorMetadata = Object.freeze({
   colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709',
   range: 'limited', bitDepth: 8,
@@ -245,7 +245,7 @@ test('T-FR-164 the renderer pans a reframe trajectory deterministically across r
   }
 })
 
-test('T-FR-171 subtitles resolved to none render zero caption pixels', { timeout: 10 * 60_000 }, async () => {
+test('T-FR-171 subtitles resolved to none, and cues with unknown face coverage, render zero caption pixels', { timeout: 10 * 60_000 }, async () => {
   const context = await fixture()
   try {
     const base = {
@@ -254,17 +254,26 @@ test('T-FR-171 subtitles resolved to none render zero caption pixels', { timeout
       composition: { foregroundScale: 1, verticalPosition: 0.5 },
     }
     const cues = [{ id: 'cue-1', startFrame: 0, endFrame: 90, text: 'A FALA CONTINUA AQUI', anchor: 'bottom' }]
-    const withCaptions = await context.renderer.render({ ...base, operationId: 'render-geometry-subs-on', subtitleCues: cues })
+    // A rendered cue needs a complete unknown-face review plan (renderer rule, not relaxed). With face coverage unknown the
+    // cue is suppressed, so "captions enabled" and "none" now agree on the pixels; the positive caption geometry is carried
+    // by the anchor goldens (T-FR-173), which build their pixels as a labelled test-only experiment.
+    const placementPlan = createRenderPlacementPlan({
+      format: '9:16', canvas: CANVAS, durationFrames: DURATION_FRAMES, subtitlePresetId: 'kinetic', elements: [],
+      subtitleAnchor: { fps: FPS, cues: cues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame })),
+        faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' } },
+    })
+    const withCaptions = await context.renderer.render({ ...base, operationId: 'render-geometry-subs-on', subtitleCues: cues, placementPlan })
     const withoutCaptions = await context.renderer.render({ ...base, operationId: 'render-geometry-subs-none', subtitleCues: [] })
 
-    const drawn = captionPixels(frameBytes(withCaptions.outputPath, 30))
-    const suppressed = captionPixels(frameBytes(withoutCaptions.outputPath, 30))
-    console.log(`T-FR-171 caption pixels in the bottom third: enabled=${drawn} none=${suppressed}`)
-    assert.ok(drawn > 400, `captions must actually draw pixels, counted ${drawn}`)
-    assert.equal(suppressed, 0, `none must leave zero caption pixels, counted ${suppressed}`)
-    // Only the caption layer changed: both renders keep the same timeline identity.
+    const enabled = captionPixels(frameBytes(withCaptions.outputPath, 30))
+    const none = captionPixels(frameBytes(withoutCaptions.outputPath, 30))
+    console.log(`T-FR-171 caption pixels in the bottom third: enabled-with-unknown-face=${enabled} none=${none}`)
+    assert.equal(enabled, 0, `unknown face coverage must leave zero caption pixels, counted ${enabled}`)
+    assert.equal(none, 0, `none must leave zero caption pixels, counted ${none}`)
+    assert.equal(withCaptions.renderElementMap.elements.some((element) => element.type === 'subtitle'), false)
+    assert.equal(withoutCaptions.renderElementMap.elements.some((element) => element.type === 'subtitle'), false)
+    // Both renders keep the same timeline identity.
     assert.equal(withCaptions.renderElementMap.durationFrames, withoutCaptions.renderElementMap.durationFrames)
-    assert.notEqual(withCaptions.sha256, withoutCaptions.sha256)
   } finally {
     await rm(context.root, { recursive: true, force: true })
   }

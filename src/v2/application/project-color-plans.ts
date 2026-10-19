@@ -5,7 +5,7 @@ import { createEditCommand, type CommandActor } from '../domain/edit-command.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createProjectColorPlan } from '../domain/project-color-plan.ts'
 import { createProjectColorPlanImpact } from '../domain/project-color-plan-impact.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
+import { reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import {
   materializeActorAuditContext,
@@ -96,7 +96,7 @@ function assertPlanTargets(
 export function setProjectColorPlanService(dependencies: {
   repository: ProjectColorPlanRepository
   luts: Pick<WorkspaceLutRepository, 'read' | 'readVersionById'>
-  createId: (kind: 'command' | 'version' | 'color-plan') => string
+  createId: (kind: 'command' | 'version' | 'color-plan' | 'edit-plan-snapshot' | 'state' | 'materialization') => string
   createEventId: () => string
   clock?: () => Date
 }) {
@@ -136,7 +136,9 @@ export function setProjectColorPlanService(dependencies: {
     }
     const context = await dependencies.repository.readContext({ workspaceId, projectId })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Project ColorPlan context was not found')
-    if (context.currentVersion.id !== baseVersionId || context.currentVersion.baseHash !== baseHash) {
+    const parent = context.parent
+    const currentVersion = parent.version
+    if (currentVersion.id !== baseVersionId || currentVersion.baseHash !== baseHash) {
       throw new DomainError('VERSION_CONFLICT', 'Project ColorPlan base version is stale')
     }
     assertPlanTargets(canonicalPlan, context.targets)
@@ -156,6 +158,8 @@ export function setProjectColorPlanService(dependencies: {
     const createdAt = clock().toISOString()
     const commandId = id(dependencies.createId('command'), 'commandId')
     const versionId = id(dependencies.createId('version'), 'versionId')
+    const editPlanSnapshotId = id(dependencies.createId('edit-plan-snapshot'), 'editPlanSnapshotId')
+    const stateId = id(dependencies.createId('state'), 'stateId')
     const colorPlan = createProjectColorPlan({
       id: id(dependencies.createId('color-plan'), 'colorPlanId'),
       workspaceId,
@@ -190,7 +194,7 @@ export function setProjectColorPlanService(dependencies: {
       colorPlanHash: colorPlan.plan.planHash,
       compiledManifestHash: colorPlan.compiled.manifestHash,
       durationFrames: context.currentDurationFrames,
-      proxyVariantId: context.proxyVariantId,
+      variantIds: context.variantIds,
       outputReferences: context.outputReferences,
     })
     const payload = Object.freeze({
@@ -214,24 +218,20 @@ export function setProjectColorPlanService(dependencies: {
       idempotencyKey,
       createdAt,
     })
-    const version = createProjectVersion({
-      id: versionId,
-      workspaceId,
-      projectId,
-      sequence: context.currentVersion.sequence + 1,
-      parentVersionId: context.currentVersion.id,
-      snapshotRefs: context.currentVersion.snapshotRefs,
-      baseHash: calculateCanonicalHash({
-        schemaVersion: 'project-version-color-plan/v1',
-        previousBaseHash: context.currentVersion.baseHash,
-        commandId,
-        colorPlanRecordHash: colorPlan.recordHash,
-        impactHash: impact.impactHash,
-      }),
-      createdBy: actor.author.id,
-      commandId,
-      createdAt,
+    // The ColorPlan lives in its own domain row; the EditPlan is the parent's under the new Version's identity.
+    const bundle = transitionProjectOutputState({
+      parent,
+      command,
+      audit: actor.authenticationAudit ?? null,
+      requestFingerprint,
+      allocation: {
+        workspaceId, projectId, resultVersionId: versionId, stateId, parentVersionId: currentVersion.id,
+        sequence: currentVersion.sequence + 1, createdBy: actor.author.id, createdAt,
+      },
+      editPlanSnapshot: reidentifiedEditPlanSnapshot(parent, { snapshotId: editPlanSnapshotId, versionId, createdAt }),
+      createMaterializationId: () => id(dependencies.createId('materialization'), 'materializationId'),
     })
+    const version = bundle.version
     const event = createPublicEvent({
       id: dependencies.createEventId(),
       type: 'project.version.created',
@@ -257,14 +257,7 @@ export function setProjectColorPlanService(dependencies: {
         createdAt,
       },
     })
-    return dependencies.repository.commitOrReplay({
-      command,
-      ...(actor.authenticationAudit ? { authenticationAudit: actor.authenticationAudit } : {}),
-      version,
-      colorPlan,
-      requestFingerprint,
-      event,
-    })
+    return dependencies.repository.commitOrReplay({ bundle, colorPlan, event })
   }
 }
 

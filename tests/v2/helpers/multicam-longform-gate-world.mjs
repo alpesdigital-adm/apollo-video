@@ -23,6 +23,11 @@ import { randomUUID } from 'node:crypto'
  * The domain arrives through `await import`: tsx resolves a static `.ts`
  * specifier before transforming the target, and an `.mjs` that names one dies
  * at link time (the same reason `wave20-fixtures.mjs` is written this way).
+ *
+ * Sealed rows are never deleted. The project is created the way the product creates it (the creation Command and one
+ * explicit 16:9 output variant, see `pg-output-world.mjs`); a ProjectVersion, its Command, its snapshots and the manifests
+ * of the world's artifacts are append-only, so nothing here sweeps and every identity carries the run
+ * (`world.run`). A suite that needs a second world in the same database simply builds another one.
  */
 
 const {
@@ -48,7 +53,6 @@ const { createSyncDiagnostic, deriveTrackStatus } = await import(
 )
 const { evaluateSyncEvidence } = await import('../../../src/v2/domain/sync-evidence.ts')
 const { STORY_GOLDEN_FIXTURES } = await import('../../../src/v2/domain/story-plan.ts')
-const { createWorkspace } = await import('../../../src/v2/domain/workspace.ts')
 
 const { createEditorialSynthesisService } = await import(
   '../../../src/v2/application/editorial-synthesis.ts'
@@ -91,9 +95,8 @@ const { PrismaRenderSourceRepository } = await import(
 const { PrismaSyncDiagnosticRepository } = await import(
   '../../../src/v2/infrastructure/prisma/sync-diagnostic-repository.ts'
 )
-const { PrismaWorkspaceRepository } = await import(
-  '../../../src/v2/infrastructure/prisma/workspace-repository.ts'
-)
+
+const { seedSealedProject, testActor, uniqueRun } = await import('./pg-output-world.mjs')
 
 const {
   buildDirectableMulticamWorld,
@@ -203,101 +206,24 @@ function simpleTrack(trackId, role, assetId, deviceId) {
   }
 }
 
-/** Every table this world writes, in an order a delete can walk. */
-const TABLES = [
-  'v2MulticamLongformGateEvidence',
-  'v2MulticamLongformGateCheck',
-  'v2MulticamLongformGateCriterion',
-  'v2MulticamLongformGate',
-  'v2ProjectFinalExportAttempt',
-  'v2ProjectFinalExportOperation',
-  'v2ProxyReview',
-  'v2ProjectProxyRenderOperation',
-  'v2DirectorRun',
-  'v2ProjectColorPlanHead',
-  'v2ProjectColorPlan',
-  'v2RenderablePlanSnapshot',
-  'v2EditorialSynthesisJoin',
-  'v2EditorialSynthesisRange',
-  'v2EditorialSynthesis',
-  'v2ColorCriticProposedDelta',
-  'v2ColorCriticIssue',
-  'v2ColorCriticDimensionResult',
-  'v2ColorCriticReportMeasurement',
-  'v2ColorCriticReport',
-  'v2CameraMatchTransform',
-  'v2MulticamMatchPlanHead',
-  'v2MulticamMatchPlan',
-  'v2ColorMeasurementComponent',
-  'v2ColorMeasurementDimension',
-  'v2CameraColorMeasurement',
-  'v2PlaybackUncoveredRange',
-  'v2PlaybackAnchor',
-  'v2PlaybackPiece',
-  'v2PlaybackMapHead',
-  'v2PlaybackMap',
-  'v2MulticamShotAlternative',
-  'v2MulticamAngleScoreComponent',
-  'v2MulticamAngleCandidate',
-  'v2MulticamShotDecision',
-  'v2MulticamDirectionHead',
-  'v2MulticamDirection',
-  'v2MulticamObservation',
-  'v2MulticamEvidenceSet',
-  'v2SyncDiagnosticHead',
-  'v2SyncDiagnostic',
-  'v2CaptureSyncEvidence',
-  'v2CaptureClockMapPiece',
-  'v2CaptureClockMap',
-  'v2CaptureTrackCoverage',
-  'v2CaptureSessionClock',
-  'v2CaptureProtocolEvaluation',
-  'v2CaptureSessionProtocol',
-  'v2CaptureSessionVersion',
-  'v2CaptureSessionHead',
-  'v2ProjectMediaAsset',
-  'v2MediaArtifactManifest',
-  'v2MediaArtifact',
-  'v2PublicOperation',
-  'v2EditCommand',
-]
-
 /**
- * Remove everything this world writes, for the given workspaces.
- *
- * Exported separately because the suite has to be able to start from a dirty
- * database: a run that failed halfway through leaves rows behind, and a
- * fixture that only cleans up on the way out makes the next run's failure
- * about the previous run.
+ * Kept for the suites that still call it. A world no longer sweeps: the rows it writes include sealed ones (Versions,
+ * Commands, snapshots, manifests) that the database refuses to update or delete, and every identity of a world carries its
+ * own run, so the next world never meets the previous one's rows. Resolves without touching the database.
  */
-export async function cleanGateWorld({ client, workspaceIds, protocolRowIds = [] }) {
-  const workspaceId = { in: [...workspaceIds] }
-  for (const table of TABLES) {
-    const model = client[table]
-    if (!model) throw new Error(`the fixture names a table the client does not have: ${table}`)
-    await model.deleteMany({ where: { workspaceId } })
-  }
-  // `capture_protocols` is a global catalogue with no workspace column, so a
-  // suite that publishes one leaves it behind for every later suite — and
-  // `sync-diagnostic-persistence.e2e.mjs` asserts that its own first publish is
-  // not a replay. Only the rows THIS world created are removed; a protocol
-  // another suite published stays where it is.
-  if (protocolRowIds.length > 0) {
-    await client.v2CaptureProtocol.deleteMany({ where: { id: { in: [...protocolRowIds] } } })
-  }
-  await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-  await client.v2ProjectVersion.deleteMany({ where: { workspaceId } })
-  await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId } })
-  await client.v2Project.deleteMany({ where: { workspaceId } })
-  await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-  await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
+export async function cleanGateWorld() {
+  return undefined
 }
 
 export async function buildGateWorld({
   client,
   workspaceId,
   projectId,
-  versionId,
+  /**
+   * Accepted and ignored. A ProjectVersion cannot be inserted by hand, so the Version the world hangs from is the head of the
+   * project's explicit output variant; it is returned as `world.versionId`.
+   */
+  versionId: _bornWithTheProject,
   clientId,
   otherWorkspaceId = null,
   otherProjectId = null,
@@ -312,10 +238,11 @@ export async function buildGateWorld({
    * `playback-map/plan` and `editorial-syntheses/{id}/render-plan` existed.
    */
   renderablePlans = 'repository',
+  /** Identities unique to this world (default: a fresh run). */
+  run = uniqueRun('f4016').run,
 }) {
   const workspaceIds = [workspaceId, ...(otherWorkspaceId ? [otherWorkspaceId] : [])]
-  await cleanGateWorld({ client, workspaceIds })
-  /** Catalogue rows this world published, so cleanup takes back only its own. */
+  /** Catalogue rows this world published. */
   const protocolRowIds = []
 
   const sessions = new PrismaCaptureSessionRepository(client)
@@ -331,52 +258,33 @@ export async function buildGateWorld({
   const criticReports = new PrismaColorCriticReportRepository(client)
 
   // ---- workspace, client, project, version --------------------------------
-  const workspaces = new PrismaWorkspaceRepository(client)
-  for (const id of workspaceIds) {
-    await workspaces.create(createWorkspace({
-      id, slug: id, name: 'F4.016 gate', status: 'active', createdAt: at(0),
-    }))
-  }
-  for (const [id, workspace] of [
-    [clientId, workspaceId],
-    ...(otherClientId ? [[otherClientId, otherWorkspaceId]] : []),
-  ]) {
-    await client.v2ApiClient.create({
-      data: {
-        id,
-        workspaceId: workspace,
-        name: 'F4.016 gate client',
-        allowedEnvironmentsJson: JSON.stringify(['sandbox']),
-        scopeGrantsJson: JSON.stringify(['projects:read', 'projects:write']),
-        createdBy: 'f4016-operator',
-        createdAt: new Date(at(0)),
-        updatedAt: new Date(at(0)),
-      },
+  // The projects the way the product creates them: the creation Command, then one explicit 16:9 output variant on the project
+  // that carries the world (the other workspace's project only has to exist). The variant's head is the Version every row
+  // below hangs from.
+  const sealedActor = (id, workspace) => testActor({
+    workspaceId: workspace, clientId: id, scopes: ['projects:read', 'projects:write'],
+  })
+  const sealed = await seedSealedProject(client, {
+    workspaceId, actor: sealedActor(clientId, workspaceId), prefix: 'f4016', ids: { project: projectId }, name: 'F4.016 gate',
+    at: () => new Date(at(0)),
+  })
+  if (otherWorkspaceId) {
+    await seedSealedProject(client, {
+      workspaceId: otherWorkspaceId, actor: sealedActor(otherClientId, otherWorkspaceId), prefix: 'f4016',
+      ids: { project: otherProjectId }, name: 'F4.016 gate', variant: false, at: () => new Date(at(0)),
     })
   }
-  for (const [id, workspace, createdById] of [
-    [projectId, workspaceId, clientId],
-    ...(otherProjectId ? [[otherProjectId, otherWorkspaceId, otherClientId]] : []),
-  ]) {
-    await client.v2Project.create({
-      data: {
-        id,
-        workspaceId: workspace,
-        name: 'F4.016 gate',
-        status: 'reviewing-proxy',
-        objective: 'discovery',
-        format: '16:9',
-        locale: 'pt-BR',
-        createdByType: 'api-client',
-        createdById,
-        createdAt: new Date(at(0)),
-        updatedAt: new Date(at(0)),
-      },
-    })
-  }
-  const snapshotIds = {}
-  for (const kind of ['brief', 'edit-plan', 'policies', 'perception', 'treatment', 'story', 'quality-report']) {
-    snapshotIds[kind] = `f4016-snapshot-${kind}`
+  const versionId = sealed.head.version.id
+  const versionBaseHash = sealed.head.version.baseHash
+  // A renderable plan is born with the child of the head it is compiled on, and that child becomes the head: the gate judges the
+  // CURRENT Version (its colour critic above all), so the world compiles on the head it finds and re-homes the critic's verdict on
+  // the head each compile leaves. `versionId` stays the Version the world's other rows hang from.
+  const headOf = async () => (await client.v2Project.findUniqueOrThrow({ where: { id: projectId }, select: { currentVersionId: true } })).currentVersionId
+  let rehomeCriticReport = async () => {}
+  // The snapshots the Director run and the export chain name besides the head's own EditPlan.
+  const snapshotIds = { 'edit-plan': sealed.head.editPlanSnapshot.id }
+  for (const kind of ['perception', 'treatment', 'story', 'quality-report']) {
+    snapshotIds[kind] = `f4016-snapshot-${kind}-${run}`
     await client.v2ProjectSnapshot.create({
       data: {
         id: snapshotIds[kind],
@@ -390,35 +298,20 @@ export async function buildGateWorld({
       },
     })
   }
-  await client.v2ProjectVersion.create({
-    data: {
-      id: versionId,
-      workspaceId,
-      projectId,
-      sequence: 1,
-      briefSnapshotId: snapshotIds.brief,
-      editPlanSnapshotId: snapshotIds['edit-plan'],
-      policiesSnapshotId: snapshotIds.policies,
-      baseHash: sha('2'),
-      createdBy: clientId,
-      createdAt: new Date(at(0)),
-    },
-  })
-  await client.v2Project.update({
-    where: { id: projectId },
-    data: { currentVersionId: versionId },
-  })
 
   const ids = {
-    podcastSession: 'f4016-session-podcast',
-    teacherSession: 'f4016-session-teacher',
-    insufficientSession: 'f4016-session-insufficient',
-    reactSession: 'f4016-session-react',
+    podcastSession: `f4016-session-podcast-${run}`,
+    teacherSession: `f4016-session-teacher-${run}`,
+    insufficientSession: `f4016-session-insufficient-${run}`,
+    reactSession: `f4016-session-react-${run}`,
   }
 
   // ---- criterion 1 and 5: a synchronised podcast, directed ----------------
+  // Track coverage is stored under an id derived from the track alone (`<track>:coverage`), so the tracks of every session
+  // carry the run: a second world in one database must not meet the first one's coverage rows.
+  const podcastPrefix = `f4016-${run}-`
   const podcast = buildDirectableMulticamWorld({
-    workspaceId, projectId, sessionId: ids.podcastSession, endSecond: 600,
+    workspaceId, projectId, sessionId: ids.podcastSession, endSecond: 600, trackPrefix: podcastPrefix,
   })
   await storeCaptureWorld({ sessions, diagnostics, workspaceId, world: podcast })
   const podcastProtocol = currentProtocolForScenario('podcast')
@@ -446,11 +339,11 @@ export async function buildGateWorld({
   const evidenceSet = createMulticamEvidenceSet({
     session: podcast.session,
     observations: [
-      observation('track-mic-a', [1, 120], 'active-speaker', { speakerKey: 'cluster-a', identityResolved: false }),
-      observation('track-mic-b', [120, 250], 'active-speaker', { speakerKey: 'cluster-b', identityResolved: false }),
-      observation('track-camera-a', [300, 360], 'demonstration', { surface: 'screen' }),
-      observation('track-screen', [300, 360], 'screen-activity', { activityBps: 8_000 }, 0.95),
-      observation('track-mic-a', [380, 500], 'active-speaker', { speakerKey: 'cluster-a', identityResolved: false }),
+      observation(`${podcastPrefix}track-mic-a`, [1, 120], 'active-speaker', { speakerKey: 'cluster-a', identityResolved: false }),
+      observation(`${podcastPrefix}track-mic-b`, [120, 250], 'active-speaker', { speakerKey: 'cluster-b', identityResolved: false }),
+      observation(`${podcastPrefix}track-camera-a`, [300, 360], 'demonstration', { surface: 'screen' }),
+      observation(`${podcastPrefix}track-screen`, [300, 360], 'screen-activity', { activityBps: 8_000 }, 0.95),
+      observation(`${podcastPrefix}track-mic-a`, [380, 500], 'active-speaker', { speakerKey: 'cluster-a', identityResolved: false }),
     ],
     generatedAt: at(130),
   })
@@ -477,7 +370,7 @@ export async function buildGateWorld({
     cameraEndSecond: 420,
     // Coverage is keyed by track alone, so the two worlds must not share a
     // track id or the second one silently steals the first one's rows.
-    trackPrefix: 'teacher-',
+    trackPrefix: `teacher-${run}-`,
   })
   await storeCaptureWorld({ sessions, diagnostics, workspaceId, world: teacher })
   const teacherProtocol = currentProtocolForScenario('teacher-and-screen')
@@ -558,6 +451,11 @@ export async function buildGateWorld({
   // ---- criterion 4: a react session cut through a piecewise map ----------
   const react = buildPlaybackWorld({
     workspaceId, projectId, sessionId: ids.reactSession, uncoveredStretches: 1,
+    // The recordings' artifacts are rows with global ids: the world names them after the run.
+    ingest: {
+      reaction: { artifactId: `artifact-f4016-reaction-${run}`, sha256: sha('a') },
+      reference: { artifactId: `artifact-f4016-reference-${run}`, sha256: sha('c') },
+    },
   })
   await sessions.appendVersion({ session: react.session, occurredAt: at(40) })
   for (const track of react.session.tracks) {
@@ -596,7 +494,7 @@ export async function buildGateWorld({
     baseVersionId: `${ids.reactSession}:playback:track-reaction:v${react.map.version}`,
     baseHash: react.map.mapHash,
     anchor: {
-      anchorId: 'f4016-anchor-1',
+      anchorId: `f4016-anchor-1-${run}`,
       reactionTick: react.map.uncovered[0].range.start,
       referenceTick: null,
       mode: 'commentary-only',
@@ -610,7 +508,7 @@ export async function buildGateWorld({
     snapshots,
     clock: reactClock,
   })
-  if (renderablePlans === 'repository') await compileReact({
+  const compileReactPlan = async () => compileReact({
     actor: reactActor,
     sessionId: ids.reactSession,
     reactionTrackId: 'track-reaction',
@@ -618,24 +516,25 @@ export async function buildGateWorld({
     // like every other playback command.
     baseVersionId: `${ids.reactSession}:playback:track-reaction:v${resolvedReact.map.version}`,
     baseHash: resolvedReact.map.mapHash,
-    projectVersionId: versionId,
+    projectVersionId: await headOf(),
     objective: 'discovery',
     planFps: rational(30n, 1n),
-  })
+  }).then(async (compiled) => { await rehomeCriticReport(); return compiled })
+  if (renderablePlans === 'repository') await compileReactPlan()
 
   // ---- criterion 6: two hours of master as a two-minute multi-range cut ---
   await storeArtifact({
     client,
     workspaceId,
     projectId,
-    artifactId: 'artifact-master-interview',
+    artifactId: `artifact-master-interview-${run}`,
     sha256: `${SYNTHESIS_SHA}1`,
     durationSeconds: TWO_HOURS_MS / 1_000,
     key: `workspaces/${workspaceId}/sources/master-interview.mp4`,
   })
   const storyPlan = {
     ...STORY_GOLDEN_FIXTURES.linear,
-    id: 'f4016-story-plan',
+    id: `f4016-story-plan-${run}`,
     targetDurationMs: { min: 100_000, max: 140_000 },
     blocks: STORY_GOLDEN_FIXTURES.linear.blocks.map((block) => ({
       ...block,
@@ -643,14 +542,14 @@ export async function buildGateWorld({
     })),
   }
   const synthesisLineage = {
-    sourceArtifactId: 'artifact-master-interview',
+    sourceArtifactId: `artifact-master-interview-${run}`,
     sourceArtifactSha256: `${SYNTHESIS_SHA}1`,
-    sourceManifestId: 'manifest-artifact-master-interview',
+    sourceManifestId: `manifest-artifact-master-interview-${run}`,
     sourceManifestHash: `${SYNTHESIS_SHA}2`,
-    indexRunId: 'f4016-index-run',
-    momentId: 'f4016-moment',
+    indexRunId: `f4016-index-run-${run}`,
+    momentId: `f4016-moment-${run}`,
     momentHash: `${SYNTHESIS_SHA}3`,
-    evaluationId: 'f4016-evaluation',
+    evaluationId: `f4016-evaluation-${run}`,
     evaluationHash: `${SYNTHESIS_SHA}4`,
   }
   const windows = [
@@ -663,7 +562,7 @@ export async function buildGateWorld({
   ].map((window) => ({
     ...window,
     lineage: synthesisLineage,
-    rightsSnapshotId: 'f4016-rights-master',
+    rightsSnapshotId: `f4016-rights-master-${run}`,
     rightsStatus: 'approved',
     consentStatus: 'approved',
   }))
@@ -672,7 +571,7 @@ export async function buildGateWorld({
     storyPlans: {
       async read({ storyPlanId }) {
         return storyPlanId === storyPlan.id
-          ? { plan: storyPlan, requestFingerprint: `${SYNTHESIS_SHA}5`, idempotencyKey: 'f4016-story-key' }
+          ? { plan: storyPlan, requestFingerprint: `${SYNTHESIS_SHA}5`, idempotencyKey: `f4016-story-key-${run}` }
           : null
       },
     },
@@ -681,14 +580,14 @@ export async function buildGateWorld({
   const synthesis = await createSynthesis({
     workspaceId,
     projectId,
-    synthesisId: 'f4016-synthesis',
+    synthesisId: `f4016-synthesis-${run}`,
     objective: 'two-minute cut of the founder interview',
     targetDurationMs: TWO_MINUTES_MS,
     toleranceMs: 2_000,
     sourceDurationMs: TWO_HOURS_MS,
     frameRate: rational(30_000n, 1_001n),
     storyPlanId: storyPlan.id,
-    editPlanId: 'f4016-edit-plan',
+    editPlanId: `f4016-edit-plan-${run}`,
     ranges: windows,
     joins: windows.slice(0, -1).map((window, index) => ({
       beforeRangeId: window.rangeId,
@@ -701,13 +600,15 @@ export async function buildGateWorld({
   const compileSynthesis = compileSynthesisRenderPlanService({
     syntheses, sources: renderSources, snapshots, clock: () => new Date(at(51)),
   })
-  if (renderablePlans === 'repository') await compileSynthesis({
+  const compileSynthesisPlan = async () => compileSynthesis({
     workspaceId,
     projectId,
     synthesisId: synthesis.synthesis.id,
-    projectVersionId: versionId,
+    projectVersionId: await headOf(),
     objective: 'discovery',
-  })
+    actor: { kind: 'human', id: `f4016-operator-${run}` },
+  }).then(async (compiled) => { await rehomeCriticReport(); return compiled })
+  if (renderablePlans === 'repository') await compileSynthesisPlan()
 
   // ---- criterion 7: the camera match, and the colour plan it resolves in --
   const match = buildMatchWorld({
@@ -719,27 +620,27 @@ export async function buildGateWorld({
   await matchPlans.appendVersion({ plan: match.plan, base: null, occurredAt: at(61) })
   await client.v2EditCommand.create({
     data: {
-      id: 'f4016-command-colour',
+      id: `f4016-command-colour-${run}`,
       workspaceId,
       projectId,
       baseVersionId: versionId,
-      baseHash: sha('2'),
+      baseHash: versionBaseHash,
       type: 'set-project-color-plan',
       scopeJson: JSON.stringify({ kind: 'project' }),
       payloadJson: JSON.stringify({ plan: 'f4016' }),
       reason: 'the gate fixture needs a stored colour plan to resolve',
       actorType: 'api-client',
       actorId: clientId,
-      idempotencyKey: 'f4016-colour-key',
+      idempotencyKey: `f4016-colour-key-${run}`,
       requestFingerprint: sha('3'),
       createdAt: new Date(at(62)),
     },
   })
   const colourPlan = createProjectColorPlan({
-    id: 'f4016-colour-plan',
+    id: `f4016-colour-plan-${run}`,
     workspaceId,
     projectId,
-    commandId: 'f4016-command-colour',
+    commandId: `f4016-command-colour-${run}`,
     baseVersionId: versionId,
     resultVersionId: versionId,
     plan: {
@@ -780,25 +681,34 @@ export async function buildGateWorld({
   })
 
   // ---- criterion 8: the colour critic's verdict on the current version ----
-  const criticReport = buildCriticReport({
+  const criticFor = (projectVersionId, reportId) => buildCriticReport({
     workspaceId,
     projectId,
-    projectVersionId: versionId,
-    reportId: 'f4016-critic-report',
+    projectVersionId,
+    reportId,
     matchPlan: match.plan,
   })
+  // The verdict is on the current Version: when a compile moves the head, the same verdict is re-issued for the Version it left.
+  let rehomed = 0
+  rehomeCriticReport = async () => {
+    const head = await headOf()
+    if (head === criticReport.projectVersionId) return
+    criticReport = criticFor(head, `f4016-critic-report-${run}-head-${(rehomed += 1)}`)
+    await criticReports.persist({ report: criticReport, createdAt: at(70) })
+  }
+  let criticReport = criticFor(await headOf(), `f4016-critic-report-${run}`)
   await criticReports.persist({ report: criticReport, createdAt: at(70) })
 
   // ---- criterion 9: the delivered MP4, its artifact and its manifest -----
   const exportIds = {
-    proxyOperation: 'f4016-proxy-operation',
-    finalOperation: 'f4016-final-operation',
-    directorRun: 'f4016-director-run',
-    directorCommand: 'f4016-command-director',
-    proxyReview: 'f4016-proxy-review',
-    sourceArtifact: 'f4016-artifact-source',
-    proxyArtifact: 'f4016-artifact-proxy',
-    outputArtifact: 'f4016-artifact-output',
+    proxyOperation: `f4016-proxy-operation-${run}`,
+    finalOperation: `f4016-final-operation-${run}`,
+    directorRun: `f4016-director-run-${run}`,
+    directorCommand: `f4016-command-director-${run}`,
+    proxyReview: `f4016-proxy-review-${run}`,
+    sourceArtifact: `f4016-artifact-source-${run}`,
+    proxyArtifact: `f4016-artifact-proxy-${run}`,
+    outputArtifact: `f4016-artifact-output-${run}`,
   }
   const artifacts = {}
   for (const [key, seed, role] of [
@@ -827,14 +737,14 @@ export async function buildGateWorld({
       workspaceId,
       projectId,
       baseVersionId: versionId,
-      baseHash: sha('2'),
+      baseHash: versionBaseHash,
       type: 'run-director',
       scopeJson: JSON.stringify({ kind: 'project' }),
       payloadJson: JSON.stringify({ reason: 'finalise the multicam cut' }),
       reason: 'the gate fixture needs a director run to hang the export off',
       actorType: 'api-client',
       actorId: clientId,
-      idempotencyKey: 'f4016-director-key',
+      idempotencyKey: `f4016-director-key-${run}`,
       requestFingerprint: sha('7'),
       createdAt: new Date(at(80)),
     },
@@ -953,7 +863,7 @@ export async function buildGateWorld({
       workspaceId,
       projectId,
       projectVersionId: versionId,
-      projectVersionHash: sha('2'),
+      projectVersionHash: versionBaseHash,
       editPlanSnapshotId: snapshotIds['edit-plan'],
       directorRunId: exportIds.directorRun,
       qualitySnapshotId: snapshotIds['quality-report'],
@@ -1001,6 +911,16 @@ export async function buildGateWorld({
 
   return {
     renderablePlans,
+    run,
+    projectId: sealed.projectId,
+    versionId,
+    /** The project head now: the Version the last compile left, or `versionId` while nothing compiled. */
+    headVersionId: headOf,
+    /** Re-issue the colour critic's verdict for the current head (a compile outside the world's own closures moved it). */
+    rehomeCriticReport: () => rehomeCriticReport(),
+    /** Compile the two renderable plans criteria 4 and 6 need, for a world built with `renderablePlans: 'omit'`. Each compiles on the head it finds. */
+    compileReactPlan,
+    compileSynthesisPlan,
     ids,
     exportIds,
     artifacts,
@@ -1014,7 +934,7 @@ export async function buildGateWorld({
     synthesis: synthesis.synthesis,
     match,
     colourPlan,
-    criticReport,
+    get criticReport() { return criticReport },
     insufficientSession,
     snapshotIds,
     protocolRowIds,

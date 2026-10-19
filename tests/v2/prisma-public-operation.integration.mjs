@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { commitSealedChild, persistRecording, planPlayingRecordings, seedSealedProject, testActor } from './helpers/pg-output-world.mjs'
 
 test('PublicOperation persistence is idempotent, workspace-scoped and integrity checked', async () => {
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
@@ -22,13 +24,15 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
   )
 
   const client = new PrismaClient()
-  const workspaceId = 'operation-integration-workspace'
-  const clientId = 'operation-integration-client'
-  const credentialId = 'operation-integration-credential'
-  const artifactId = 'operation-integration-artifact'
-  const manifestId = 'operation-integration-manifest'
-  const authorizationId = 'operation-integration-authorization'
-  const operationId = 'operation-integration-render-1'
+  // Sealed rows are append-only, so nothing is cleaned up: every identity carries this invocation's run id.
+  const run = randomUUID().replaceAll('-', '').slice(0, 12)
+  const workspaceId = `operation-integration-workspace-${run}`
+  const clientId = `operation-integration-client-${run}`
+  const credentialId = `operation-integration-credential-${run}`
+  const artifactId = `operation-integration-artifact-${run}`
+  const manifestId = `operation-integration-manifest-${run}`
+  const authorizationId = `operation-integration-authorization-${run}`
+  const operationId = `operation-integration-render-1-${run}`
   const sha = (character) => character.repeat(64)
   // Keep fixture dates in the past because Prisma's @updatedAt uses the database
   // execution clock when corruption scenarios update the stored record.
@@ -49,35 +53,12 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     probe: { width: 1080, height: 1920, duration: 2, fps: 30 },
   })
 
-  const cleanup = async () => {
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2ArtifactRenderOperation.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
-    await client.v2ColorPipelineCompilation.deleteMany({ where: { workspaceId } })
-    await client.v2MediaColorProbe.deleteMany({ where: { workspaceId } })
-    await client.v2PublicOperationControlCommand.deleteMany({ where: { workspaceId } })
-    await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
-    await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-    await client.v2ProjectVersion.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2AssetUseDecision.deleteMany({ where: { workspaceId } })
-    await client.v2MaterializationAuthorization.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ApiAdministrationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2ApiCredential.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     await client.v2Workspace.create({
       data: {
         id: workspaceId,
-        slug: 'operation-integration',
+        slug: `operation-integration-${run}`,
         name: 'Operation Integration',
         status: 'active',
         createdAt: now,
@@ -160,12 +141,12 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     let controlCommandSequence = 0
     const cancelOperation = (controlInput) => repository.cancel({
       ...controlInput,
-      commandId: `operation-control-cancel-${++controlCommandSequence}`,
+      commandId: `operation-control-cancel-${++controlCommandSequence}-${run}`,
       authenticationAudit: authenticationAuditFor(controlInput.workspaceId),
     })
     const retryOperation = (controlInput) => repository.retry({
       ...controlInput,
-      commandId: `operation-control-retry-${++controlCommandSequence}`,
+      commandId: `operation-control-retry-${++controlCommandSequence}-${run}`,
       authenticationAudit: authenticationAuditFor(controlInput.workspaceId),
     })
     const checkpoints = new PrismaArtifactRenderCheckpointRepository(client)
@@ -251,7 +232,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     )
     const differentCredentialAudit = createApiAccessAuditContext({
       ...authenticationAudit,
-      credentialId: 'operation-integration-credential-other',
+      credentialId: `operation-integration-credential-other-${run}`,
     })
     await assert.rejects(
       repository.findReplay({
@@ -501,7 +482,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
 
     const exhaustedOperation = createQueuedPublicOperation({
       ...operation,
-      id: 'operation-integration-exhausted',
+      id: `operation-integration-exhausted-${run}`,
       maxAttempts: 1,
       createdAt: '2026-01-01T15:32:00.000Z',
     })
@@ -535,7 +516,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
 
     const scheduledOperation = createQueuedPublicOperation({
       ...operation,
-      id: 'operation-integration-scheduled-retry',
+      id: `operation-integration-scheduled-retry-${run}`,
       maxAttempts: 2,
       createdAt: '2026-01-01T15:34:00.000Z',
     })
@@ -602,7 +583,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
 
     const cancelQueuedOperation = createQueuedPublicOperation({
       ...operation,
-      id: 'operation-integration-cancel-queued',
+      id: `operation-integration-cancel-queued-${run}`,
       createdAt: '2026-01-01T15:36:00.000Z',
     })
     await repository.createOrReplay({
@@ -636,7 +617,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
 
     const cancelRunningOperation = createQueuedPublicOperation({
       ...operation,
-      id: 'operation-integration-cancel-running',
+      id: `operation-integration-cancel-running-${run}`,
       createdAt: '2026-01-01T15:37:00.000Z',
     })
     await repository.createOrReplay({
@@ -717,7 +698,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     )
     const cancelRetryOperation = createQueuedPublicOperation({
       ...operation,
-      id: 'operation-integration-cancel-retry',
+      id: `operation-integration-cancel-retry-${run}`,
       createdAt: '2026-01-01T15:38:01.000Z',
     })
     await repository.createOrReplay({
@@ -766,7 +747,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     {
       const cancelRaceOperation = createQueuedPublicOperation({
         ...operation,
-        id: 'operation-integration-cancel-race',
+        id: `operation-integration-cancel-race-${run}`,
         createdAt: '2026-01-01T15:39:10.000Z',
       })
       await repository.createOrReplay({
@@ -945,7 +926,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       await repository.createOrReplay({
         operation: createQueuedPublicOperation({
           ...operation,
-          id: `operation-integration-list-${suffix}`,
+          id: `operation-integration-list-${suffix}-${run}`,
           createdAt: '2026-01-01T15:45:00.000Z',
         }),
         authenticationAudit,
@@ -963,7 +944,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     })
     assert.deepEqual(
       firstListPage.map((record) => record.operation.id),
-      ['operation-integration-list-b'],
+      [`operation-integration-list-b-${run}`],
     )
     const secondListPage = await repository.list({
       workspaceId,
@@ -978,7 +959,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     })
     assert.deepEqual(
       secondListPage.map((record) => record.operation.id),
-      ['operation-integration-list-a'],
+      [`operation-integration-list-a-${run}`],
     )
     assert.deepEqual(
       await repository.list({ workspaceId: 'different-workspace-id', limit: 10 }),
@@ -1077,52 +1058,51 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     )
     // Controlled repository equivalent: distinct immutable inputs of one version.
     // This proves transaction fencing, not a public API physical-render journey.
-    const projectId = 'operation-cas-project'
+    const projectId = `operation-cas-project-${run}`
     const { stableSerialize, calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
-    const versionId = 'operation-cas-version'
-    const editPlanId = 'operation-cas-edit-plan'
-    await client.v2Project.create({ data: { id: projectId, workspaceId, name: 'CAS project',
-      status: 'draft', objective: 'discovery', format: '9:16', locale: 'pt-BR',
-      createdByType: 'api-client', createdById: clientId, createdAt: now, updatedAt: now } })
-    for (const [kind, id] of [['brief', 'operation-cas-brief'], ['policies', 'operation-cas-policies'], ['edit-plan', editPlanId]]) {
-      await client.v2ProjectSnapshot.create({ data: { id, workspaceId, projectId, kind,
-        schemaVersion: 1, contentJson: '{}', contentHash: calculateCanonicalHash({}), createdAt: now } })
-    }
-    await client.v2ProjectVersion.create({ data: { id: versionId, workspaceId, projectId, sequence: 1,
-      briefSnapshotId: 'operation-cas-brief', policiesSnapshotId: 'operation-cas-policies', editPlanSnapshotId: editPlanId,
-      baseHash: sha('a'), createdBy: clientId, createdAt: now } })
-    await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: versionId } })
-    await client.v2ProjectMediaAsset.create({ data: { id: 'ba45b6ce-d839-4db1-aa91-3e51a2582631', workspaceId,
-      projectId, artifactId, role: 'source-master', originalFileName: 'source.mp4', createdAt: now } })
+    // The project and its head come from the real creation (creation Command, then one explicit output variant): a Version cannot be
+    // inserted by hand. The source artifact is linked to it the way an ingest links it.
+    const casActor = testActor({ workspaceId, clientId, credentialId, environment: 'sandbox' })
+    const sealed = await seedSealedProject(client, { workspaceId, actor: casActor,
+      prefix: 'operation-cas', ids: { project: projectId }, name: 'CAS project', objective: 'discovery', at: () => now })
+    // A proxy render is admitted only over a head whose output is consumable: one observed recording, adopted and played by a child
+    // Version. The recording is the source of the controlled renders below (persistRecording links it to the project).
+    const recording = await persistRecording(client, { workspaceId, projectId, actor: casActor, slug: `operation-cas-${run}-source` })
+    const head = await commitSealedChild(client, { workspaceId, projectId, actor: casActor, suffix: `operation-cas-${run}-ingested`,
+      mutatePlan: planPlayingRecordings([recording]), adopt: [recording.names.sourceArtifactId] })
+    const versionId = head.version.id
+    const editPlanId = head.editPlanSnapshot.id
+    const casArtifactId = recording.names.sourceArtifactId
+    const casManifestId = recording.names.sourceManifestId
     const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
     const { createColorPipelineCompilation } = await import('../../src/v2/domain/color-pipeline-compilation.ts')
     const { PrismaColorPipelineCompilationRepository } = await import('../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts')
     const colorMetadata = { colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709', range: 'limited', bitDepth: 8 }
-    const probe = createMediaColorProbe({ id: 'operation-cas-color-probe', workspaceId, artifactId, manifestId,
+    const probe = createMediaColorProbe({ id: `operation-cas-color-probe-${run}`, workspaceId, artifactId: casArtifactId, manifestId: casManifestId,
       detection: { state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
       producer: { provider: 'ffprobe', version: '7.1.1', binaryDigest: sha('b') }, createdAt: now.toISOString() })
-    await client.v2MediaColorProbe.create({ data: { id: probe.id, workspaceId, artifactId, manifestId,
+    await client.v2MediaColorProbe.create({ data: { id: probe.id, workspaceId, artifactId: casArtifactId, manifestId: casManifestId,
       schemaVersion: probe.schemaVersion, state: 'ready', metadataJson: stableSerialize(colorMetadata), pixelFormat: 'yuv420p',
       hdrMode: 'sdr', reasonsJson: '[]', producerProvider: 'ffprobe', producerVersion: probe.producer.version,
       producerBinaryDigest: probe.producer.binaryDigest, createdAt: now, probeHash: probe.probeHash } })
-    const compilation = createColorPipelineCompilation({ id: 'operation-cas-color-compilation', workspaceId, projectId,
-      sourceArtifactId: artifactId, sourceManifestId: manifestId, probe, outputMetadata: colorMetadata,
+    const compilation = createColorPipelineCompilation({ id: `operation-cas-color-compilation-${run}`, workspaceId, projectId,
+      sourceArtifactId: casArtifactId, sourceManifestId: casManifestId, probe, outputMetadata: colorMetadata,
       stages: ['technical', 'match', 'creative-lut', 'output'].map((kind) => ({ id: `cas-${kind}`, kind, version: 'v1',
         enabled: ['technical', 'output'].includes(kind), input: colorMetadata, output: colorMetadata,
         implementation: { provider: 'ffmpeg-zscale', version: 'v1', parameters: { mode: 'identity' }, parametersHash: calculateCanonicalHash({ mode: 'identity' }) } })),
       createdByClientId: clientId, createdAt: now.toISOString() })
     await new PrismaColorPipelineCompilationRepository(client).persist({ compilation,
       idempotencyKey: 'cas-color', requestFingerprint: calculateCanonicalHash(compilation) }, authenticationAudit)
-    const colorPipelineBindings = [{ sourceArtifactId: artifactId, sourceManifestId: manifestId, compilationId: compilation.id,
+    const colorPipelineBindings = [{ sourceArtifactId: casArtifactId, sourceManifestId: casManifestId, compilationId: compilation.id,
       compilationHash: compilation.compilationHash, pipelineHash: compilation.pipeline.pipelineHash }]
     const admitProxy = async (label, hash, createdAt) => repository.createOrReplay({
-      operation: createQueuedPublicOperation({ id: `operation-cas-${label}`, workspaceId, clientId, projectId,
-        type: 'project-proxy-render', target: { type: 'media-artifact', id: `operation-cas-output-${label}`, manifestId: `operation-cas-manifest-${label}` },
+      operation: createQueuedPublicOperation({ id: `operation-cas-${label}-${run}`, workspaceId, clientId, projectId,
+        type: 'project-proxy-render', target: { type: 'media-artifact', id: `operation-cas-output-${label}-${run}`, manifestId: `operation-cas-manifest-${label}-${run}` },
         maxAttempts: 3, createdAt }), authenticationAudit,
       context: { kind: 'project-proxy-render', projectId, projectVersionId: versionId, editPlanSnapshotId: editPlanId,
-        sourceArtifactId: artifactId, sourceManifestId: manifestId, colorPipelineBindings, inputHash: sha(hash),
-        outputArtifactId: `operation-cas-output-${label}`, outputManifestId: `operation-cas-manifest-${label}`, originalFileName: `${label}.mp4` },
-      idempotencyKey: `operation-cas-${label}`, requestFingerprint: sha(hash),
+        sourceArtifactId: casArtifactId, sourceManifestId: casManifestId, colorPipelineBindings, inputHash: sha(hash),
+        outputArtifactId: `operation-cas-output-${label}-${run}`, outputManifestId: `operation-cas-manifest-${label}-${run}`, originalFileName: `${label}.mp4` },
+      idempotencyKey: `operation-cas-${label}-${run}`, requestFingerprint: sha(hash),
     })
     const old = await admitProxy('old', '1', '2026-01-01T16:00:00.000Z')
     const oldClaim = await repository.claimNext({ operationId: old.operation.id,
@@ -1161,7 +1141,6 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     assert.equal(retriedLatest.operation.status, 'retrying')
     assert.equal(await projectStatus(), 'rendering-proxy')
   } finally {
-    await cleanup()
     await client.$disconnect()
   }
 })

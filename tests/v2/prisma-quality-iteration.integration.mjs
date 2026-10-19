@@ -55,47 +55,21 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
   const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
   const { PrismaProxyReviewRepository } = await import('../../src/v2/infrastructure/prisma/proxy-review-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
+  const { commitSealedChild, persistRecording, planPlayingRecordings, testActor } = await import('./helpers/pg-output-world.mjs')
+  const { seedReviewProject } = await import('./helpers/review-edit-world.mjs')
 
   const client = new PrismaClient()
   const rightsRepository = new PrismaAssetRightsRepository(client)
   const suffix = randomUUID().slice(0, 8)
   const workspaceId = `quality-workspace-${suffix}`
   const projectId = `quality-project-${suffix}`
-  const projectVersionId = `quality-version-${suffix}`
   const selectedArtifactId = `quality-asset-${suffix}`
   const createdAt = new Date('2026-07-26T23:45:00.000Z')
   let server
   let serverLogs = ''
   let primaryError
-  const cleanup = async () => {
-    const where = { workspaceId }
-    await client.v2QualityIterationAssetSelection.deleteMany({ where })
-    await client.v2QualityIteration.deleteMany({ where })
-    await client.v2AssetSelection.deleteMany({ where })
-    await client.v2ProxyReviewDecision.deleteMany({ where })
-    await client.v2ProxyReview.deleteMany({ where })
-    await client.v2PublicEventOutbox.deleteMany({ where })
-    await client.v2ProjectProxyRenderOperation.deleteMany({ where })
-    await client.v2PublicOperation.deleteMany({ where })
-    await client.v2AssetUseDecision.deleteMany({ where })
-    await client.v2MediaArtifact.updateMany({ where, data: { currentRightsSnapshotId: null } })
-    await client.v2AssetRightsChange.deleteMany({ where })
-    await client.v2AssetRightsSnapshot.deleteMany({ where })
-    await client.v2MediaArtifactManifest.deleteMany({ where })
-    await client.v2ProjectMediaAsset.deleteMany({ where })
-    await client.v2MediaArtifact.deleteMany({ where })
-    await client.v2Project.updateMany({ where, data: { currentVersionId: null } })
-    await client.v2ProjectVersion.deleteMany({ where })
-    await client.v2ProjectSnapshot.deleteMany({ where })
-    await client.v2Project.deleteMany({ where })
-    await client.v2GovernanceAlert.deleteMany({ where })
-    await client.v2GovernanceAdmission.deleteMany({ where })
-    await client.v2ApiClient.deleteMany({ where })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     await client.v2Workspace.create({
       data: {
         id: workspaceId,
@@ -117,80 +91,21 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
       environment: 'production',
       scopes: ['projects:read', 'projects:write'],
     })
-    await client.v2Project.create({
-      data: {
-        id: projectId,
-        workspaceId,
-        name: 'Quality iteration E2E',
-        status: 'reviewing-proxy',
-        objective: 'discovery',
-        format: '9:16',
-        locale: 'pt-BR',
-        createdByType: 'api-client',
-        createdById: issued.client.id,
-        createdAt,
-        updatedAt: createdAt,
-      },
-    })
-    const snapshots = [
-      {
-        id: `quality-brief-${suffix}`,
-        kind: 'brief',
-        schemaVersion: 1,
-        content: { schemaVersion: 1, objective: 'discovery' },
-      },
-      {
-        id: `quality-edit-plan-${suffix}`,
-        kind: 'edit-plan',
-        schemaVersion: 2,
-        content: {
-          schemaVersion: 2,
-          id: `quality-plan-${suffix}`,
-          state: 'compiled',
-          fps: 30,
-          durationFrames: 300,
-        },
-      },
-      {
-        id: `quality-policies-${suffix}`,
-        kind: 'policies',
-        schemaVersion: 1,
-        content: { schemaVersion: 1, state: 'configured' },
-      },
-    ]
-    for (const snapshot of snapshots) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id: snapshot.id,
-          workspaceId,
-          projectId,
-          kind: snapshot.kind,
-          schemaVersion: snapshot.schemaVersion,
-          contentJson: stableSerialize(snapshot.content),
-          contentHash: calculateVersionHash(snapshot.content),
-          createdAt,
-        },
-      })
-    }
-    const projectVersionHash = calculateVersionHash({ projectId, projectVersionId })
-    await client.v2ProjectVersion.create({
-      data: {
-        id: projectVersionId,
-        workspaceId,
-        projectId,
-        sequence: 1,
-        briefSnapshotId: snapshots[0].id,
-        editPlanSnapshotId: snapshots[1].id,
-        policiesSnapshotId: snapshots[2].id,
-        baseHash: projectVersionHash,
-        createdBy: issued.client.id,
-        createdAt,
-      },
-    })
-    await client.v2Project.update({
-      where: { id: projectId },
-      data: { currentVersionId: projectVersionId },
-    })
+    // The project is the sealed world the product builds (creation Command, then one explicit 9:16 output variant as its head
+    // Version); everything below hangs off that Version. The project is under review when its proxies are rendered.
+    const actor = testActor({ workspaceId, clientId: issued.client.id, credentialId: issued.credential.id, environment: 'production',
+      scopes: ['projects:read', 'projects:write'] })
+    await seedReviewProject(client, { workspaceId, actor, prefix: 'quality', ids: { project: projectId },
+      name: 'Quality iteration E2E', aspectRatio: '9:16', status: 'reviewing-proxy' })
+    // The iteration scores the output of its Version, and the one persisted consumption reader admits only an output the State
+    // materialized (the empty variant is blocked with `empty-project`): the project plays one observed 10 s recording, and the
+    // Version that adopts it is the head the proxies, the review and the iterations hang off.
+    const recording = await persistRecording(client, { workspaceId, projectId, actor, slug: `quality-${suffix}-recording`, durationFrames: 300 })
+    const head = await commitSealedChild(client, { workspaceId, projectId, actor, suffix: `quality-${suffix}-ingested`,
+      mutatePlan: planPlayingRecordings([recording]), adopt: [recording.names.sourceArtifactId] })
+    const projectVersionId = head.version.id
+    const projectVersionHash = head.version.baseHash
+    const editPlanSnapshotId = head.editPlanSnapshot.id
     await client.v2MediaArtifact.create({
       data: {
         id: selectedArtifactId,
@@ -313,7 +228,7 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
           workspaceId,
           projectId,
           projectVersionId,
-          editPlanSnapshotId: snapshots[1].id,
+          editPlanSnapshotId,
           sourceArtifactId: selectedArtifactId,
           sourceManifestId,
           colorPipelineBindingsJson: stableSerialize([]),
@@ -332,7 +247,7 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
         inputHash,
         format: '9:16',
         sourceSha256: '1'.repeat(64),
-        editPlanHash: snapshots[1].contentHash ?? calculateVersionHash(snapshots[1].content),
+        editPlanHash: head.editPlanSnapshot.contentHash,
         expectedDurationMs: 10_000,
         uploadReceivedAt: createdAt.toISOString(),
         renderCompletedAt: new Date(createdAt.getTime() + 1_000).toISOString(),
@@ -734,7 +649,6 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
         new Promise((resolve) => setTimeout(resolve, 5_000)),
       ])
     }
-    await cleanup().catch((error) => cleanupErrors.push(error))
     await client.$disconnect().catch((error) => cleanupErrors.push(error))
     if (cleanupErrors.length) throw new AggregateError(
       [...(primaryError ? [primaryError] : []), ...cleanupErrors], 'Quality iteration fixture failed with cleanup errors',

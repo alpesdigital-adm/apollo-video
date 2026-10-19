@@ -18,6 +18,10 @@ const credentialId = 'block-generation-int-credential'
 const hash = (character) => character.repeat(64)
 const at = (second) => new Date(Date.parse('2029-03-01T00:00:00.000Z') + second * 1_000).toISOString()
 
+// The outbox ids of this run are its own: the rows of a run stay in the database (the sealed rows are append-only) and the quality job
+// runs many suites against one database, so a fixed id collided with the suite that used the same one first.
+const EVENT_RUN = (await import('node:crypto')).randomUUID().slice(0, 8)
+
 test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation on PostgreSQL', {
   skip: !process.env.V2_DATABASE_URL && 'V2_DATABASE_URL is required',
   timeout: 480_000,
@@ -29,41 +33,8 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
   await mkdir(artifactRoot, { recursive: true })
   await mkdir(workRoot, { recursive: true })
 
-  const cleanup = async () => {
-    await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-    await client.v2SyntheticCriticIssue.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticCriticMeasurement.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticCriticEvaluator.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticCriticReport.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticCacheSubmissionClaim.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticBlockGeneration.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.updateMany({ where: { workspaceId }, data: { currentRightsSnapshotId: null, rightsRevision: 0 } })
-    await client.v2AssetRightsChange.deleteMany({ where: { workspaceId } })
-    await client.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactLineage.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     const { createProjectService } = await import('../../src/v2/application/create-project.ts')
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
@@ -89,7 +60,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
     const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
     const { PrismaMediaArtifactRepository } = await import('../../src/v2/infrastructure/prisma/media-artifact-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
     const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
     const { PrismaProviderJobRepository } = await import('../../src/v2/infrastructure/prisma/provider-job-repository.ts')
     const { PrismaProviderResultArtifactRepository } = await import('../../src/v2/infrastructure/prisma/provider-result-artifact-repository.ts')
@@ -143,12 +114,12 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     let entity = 0
     let event = 0
     const project = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client), clock: () => new Date(at(0)),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(at(0)),
       createId: (kind) => `${kind}-blockgen-${++entity}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(600_000 + ++event).padStart(12, '0')}`,
-    })({ workspaceId, name: 'Blocos incrementais', objective: 'awareness', format: '9:16', actor, idempotency: { clientId, key: 'blockgen-project' } })
-    const projectId = project.project.id
-    const projectVersionId = project.version.id
+      createEventId: () => `${EVENT_RUN}-0000-4000-8000-${String(600_000 + ++event).padStart(12, '0')}`,
+    })({ workspaceId, name: 'Blocos incrementais', objective: 'awareness', actor, idempotencyKey: 'blockgen-project' })
+    const projectId = project.projectAtCreation.id
+    const projectVersionId = project.creationVersion.id
 
     await client.v2MediaArtifact.create({
       data: {
@@ -648,7 +619,6 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     assert.equal(providerCalls.length, callsBeforeRevocation, 'revoked consent must cause zero provider calls')
     assert.equal(await client.v2SyntheticBlockGeneration.count({ where: { workspaceId } }), generationsBefore, 'revoked consent must cause zero cache hits or new generations')
   } finally {
-    await cleanup()
     await client.$disconnect()
     await rm(root, { recursive: true, force: true })
   }

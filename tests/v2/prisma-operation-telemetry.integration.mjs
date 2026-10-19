@@ -9,11 +9,6 @@ test('operation telemetry persists idempotently and summarizes only the requeste
   const repository = new PrismaOperationTelemetryRepository(client)
   const workspaceId = 'telemetry-integration-workspace'
   const otherWorkspaceId = 'telemetry-integration-other'
-  const cleanup = async () => {
-    await client.v2OperationTelemetryAlert.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-    await client.v2OperationTelemetryEvent.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-    await client.v2Workspace.deleteMany({ where: { id: { in: [workspaceId, otherWorkspaceId] } } })
-  }
   const lifecycle = {
     schemaVersion: 'public-operation-telemetry/v1', event: 'operation.failed', occurredAt: '2026-08-02T10:00:00.000Z',
     traceId: 'trace-telemetry-integration', jobId: 'job-telemetry-integration', workspaceId,
@@ -32,7 +27,6 @@ test('operation telemetry persists idempotently and summarizes only the requeste
     workspaceId, operationType: lifecycle.operationType, observed: 1, threshold: 1,
   }
   try {
-    await cleanup()
     await client.v2Workspace.createMany({ data: [
       { id: workspaceId, slug: 'telemetry-integration', name: 'Telemetry Integration' },
       { id: otherWorkspaceId, slug: 'telemetry-integration-other', name: 'Telemetry Integration Other' },
@@ -52,7 +46,6 @@ test('operation telemetry persists idempotently and summarizes only the requeste
     assert.equal(await client.v2OperationTelemetryEvent.count({ where: { workspaceId } }), 2)
     assert.equal(await client.v2OperationTelemetryAlert.count({ where: { workspaceId } }), 1)
   } finally {
-    await cleanup()
     await client.$disconnect()
   }
 })

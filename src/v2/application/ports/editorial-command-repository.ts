@@ -1,45 +1,56 @@
 import type { EditCommand } from '../../domain/edit-command.ts'
 import type { MediaTranscript } from '../../domain/media-transcript.ts'
 import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
-import type { ProjectVersion } from '../../domain/project-version.ts'
+import type { ProjectVersionV3 } from '../../domain/project-version.ts'
+import type { CreationOutputVersionBundleV2, OperationalOutputParentV3, OperationalOutputVersionBundleV3, BuildOperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
+import type { EditorialSourceBindingBodyV1, SealedOutputNormalizationV3 } from '../../domain/output-materialization.ts'
+import type { EditorialCutPayloadV3 } from '../../domain/editorial-cut-impact.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
-import type { EditorialCutEditPlan, RemoveSpokenContentPayload } from '../apply-editorial-cut-command.ts'
-import type { EditorialExclusionRange, SourceTimeRange } from '../recovery-project-acceptance.ts'
+import type { EditorialMaterializedPlanV3 } from '../../domain/editorial-cut-impact.ts'
+import type { SourceTimeRange } from '../recovery-project-acceptance.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
-import type { EditorialCutImpactV1 } from '../../domain/editorial-cut-impact.ts'
+import type { EditorialCutImpactV2 } from '../../domain/editorial-cut-impact.ts'
 import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface EditorialCommandContext {
   projectId: string
   workspaceId: string
-  currentVersion: Readonly<ProjectVersion>
+  currentVersion: OperationalOutputParentV3['version']
+  parent: OperationalOutputParentV3
+  /** The Creation fork of a copy whose children only configured it: the authority the cut binds is that fork's derivation. */
+  forkRoot?: Readonly<CreationOutputVersionBundleV2>
+  sourceBindingFacts: Omit<EditorialSourceBindingBodyV1,'id'|'parentVersionId'|'parentStateId'|'parentStateHash'|'resultVersionId'|'createdAt'>
+  normalizations: readonly SealedOutputNormalizationV3[]
   transcriptId: string
   transcript: Readonly<MediaTranscript>
   sourceArtifactId: string
   sourceDurationSeconds: number
   sourceFps: number
   currentDurationFrames: number
-  proxyVariantId: string
+  variantId: string
   outputReferences: readonly Readonly<CommandImpactOutputReference>[]
 }
 
 export interface EditorialCommandResult {
-  command: Readonly<EditCommand<RemoveSpokenContentPayload>>
-  version: Readonly<ProjectVersion>
-  editPlan: Readonly<EditorialCutEditPlan>
-  exclusions: readonly Readonly<EditorialExclusionRange>[]
+  command: Readonly<EditCommand<EditorialCutPayloadV3>>
+  version: Readonly<ProjectVersionV3>
+  editPlan: Readonly<EditorialMaterializedPlanV3>
+  // The persisted Command3 payload is the authority: no labels/matchedText survive the seal.
+  exclusions: EditorialCutPayloadV3['exclusions']
   retainedSourceRanges: readonly Readonly<SourceTimeRange>[]
-  impact: Readonly<EditorialCutImpactV1>
+  impact: Readonly<EditorialCutImpactV2>
   invalidations: readonly Readonly<CommandArtifactInvalidationV1>[]
+  outputBundle: Readonly<OperationalOutputVersionBundleV3>
   replayed: boolean
 }
 
 export interface EditorialCommandCommit {
-  command: Readonly<EditCommand<RemoveSpokenContentPayload>>
+  proposal: Readonly<BuildOperationalOutputVersionBundleV3>
+  command: Readonly<EditCommand<EditorialCutPayloadV3>>
   authenticationAudit: Readonly<ApiAccessAuditContext>
   requestFingerprint: string
   snapshot: Readonly<ProjectSnapshot>
-  version: Readonly<ProjectVersion>
+  version: Readonly<ProjectVersionV3>
   event: Readonly<PublicEvent>
   sourceEvidence: Readonly<{
     transcriptId: string
@@ -59,6 +70,7 @@ export interface EditorialCommandRepository {
     workspaceId: string
     projectId: string
     transcriptId: string
+    variantId: string
   }): Promise<Readonly<EditorialCommandContext> | null>
   commitOrReplay(bundle: EditorialCommandCommit): Promise<EditorialCommandResult>
 }

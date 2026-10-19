@@ -334,7 +334,12 @@ O agregado público corrente é versionado e deriva somente da persistência V2:
 versão atual, operação pública durável mais recente, pendências abertas de
 review e outputs concluídos da versão corrente. Ausência é representada como
 `null`, zero ou lista vazia; nunca como registro sintético. `completed` sem
-`total` apresenta fase e estado indeterminado, sem percentual ou progressbar.
+`total` apresenta fase e estado indeterminado, sem percentual ou progressbar
+na defesa sintética do contrato/port/UI. A constraint canônica PostgreSQL exige
+completed/total/unit medidos; esse objeto parcial não é um estado PG operável.
+Os pacotes W34/W35 v2 retiram a fixture impossível da prova PG/browser e
+exigem rejeição SQL 23514 com readback inalterado e zero efeito em contagens.
+A cobertura sem total permanece isolada e não afirma observação de browser.
 Eventos de projeto, operação, progresso e annotation invalidam a consulta, que roda sem cache e cancela requests superados. O workspace vem da sessão autenticada e o cliente confere a identidade do evento antes de invalidar. Mudanças de fase/contagem são publicadas na transação do worker protegido por lease; heartbeat sem mudança não gera avanço. O feed com projects:read exclui operações sem projeto.
 A retomada W35–W36 comprovou localmente estados por workers reais e transporte
 outbox → HTTP → refetch → card em Chromium, com upstream editorial e mídia

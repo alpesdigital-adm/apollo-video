@@ -10,17 +10,19 @@ import { stableSerialize } from '../../application/version-hash.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createMediaTranscript } from '../../domain/media-transcript.ts'
-import { createProjectVersion } from '../../domain/project-version.ts'
+import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { renderOutputReferences } from '../../domain/output-variant-references.ts'
+import { childCommandOf } from '../../domain/project-output-state-transition.ts'
+import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import {
   createSourceTranscriptArtifactInvalidations,
   parseSourceTranscriptReplacementImpact,
 } from '../../domain/source-transcript-replacement.ts'
 import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
-import {
-  editCommandExternalActorAuditData,
-  hydrateEditCommandExternalActorAudit,
-} from './edit-command-actor-audit.ts'
+import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
+import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 type StoredCommand = Prisma.V2EditCommandGetPayload<{
   include: {
@@ -68,19 +70,7 @@ function hydrateTranscript(row: {
 }
 
 function version(row: NonNullable<StoredCommand['resultVersion']>) {
-  return createProjectVersion({
-    id: row.id, workspaceId: row.workspaceId, projectId: row.projectId,
-    sequence: row.sequence, parentVersionId: row.parentVersionId ?? undefined,
-    snapshotRefs: {
-      brief: row.briefSnapshotId,
-      treatment: row.treatmentSnapshotId ?? undefined,
-      story: row.storySnapshotId ?? undefined,
-      editPlan: row.editPlanSnapshotId,
-      policies: row.policiesSnapshotId,
-    },
-    baseHash: row.baseHash, createdBy: row.createdBy,
-    commandId: row.commandId ?? undefined, createdAt: row.createdAt.toISOString(),
-  })
+  return hydrateProjectVersionRowV3(row)
 }
 
 function hydrateStoredCommand(row: StoredCommand, replayed: boolean): SourceTranscriptReplacementResult {
@@ -124,6 +114,7 @@ function hydrateStoredCommand(row: StoredCommand, replayed: boolean): SourceTran
     retimedTranscript?.sourceTranscriptId !== payload.replacementTranscriptId ||
     retimedTranscript.sourceTranscriptHash !== payload.replacementTranscriptHash
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored replacement EditPlan is inconsistent')
+  if (row.commandHash !== command.commandHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored source transcript replacement command seal is invalid')
   return Object.freeze({ command, version: version(row.resultVersion), editPlan, impact, invalidations: Object.freeze(storedInvalidations), replayed })
 }
 
@@ -152,24 +143,25 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
   }
 
   async readContext(input: { workspaceId: string; projectId: string; replacementTranscriptId: string }) {
-    const project = await this.client.v2Project.findFirst({
-      where: { id: input.projectId, workspaceId: input.workspaceId },
-      include: { currentVersion: { include: { editPlanSnapshot: true } } },
-    })
-    if (!project?.currentVersion) return null
-    const editPlan = parseRecord(project.currentVersion.editPlanSnapshot.contentJson, 'current EditPlan')
+    const project = await this.client.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId } })
+    if (!project?.currentVersionId) return null
+    const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersionId })
+    if (!parent) return null
+    const currentVersionId = parent.version.id
+    const editPlanSnapshot = operationalBundlePlanV3(parent)
+    const editPlan = parseRecord(editPlanSnapshot.contentJson, 'current EditPlan')
     const currentTranscriptId = (editPlan.retimedTranscript as Record<string, unknown> | undefined)?.sourceTranscriptId
     if (typeof currentTranscriptId !== 'string') throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan has no source transcript identity')
     const [current, replacement, proxyOutputs, finalOutputs] = await Promise.all([
       this.client.v2MediaTranscript.findFirst({ where: { id: currentTranscriptId, workspaceId: input.workspaceId, projectId: input.projectId } }),
       this.client.v2MediaTranscript.findFirst({ where: { id: input.replacementTranscriptId, workspaceId: input.workspaceId, projectId: input.projectId } }),
       this.client.v2ProjectProxyRenderOperation.findMany({
-        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true },
+        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+        select: { outputArtifactId: true, outputVariantId: true },
       }),
       this.client.v2ProjectFinalExportOperation.findMany({
-        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true, outputAspectRatio: true },
+        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+        select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
       }),
     ])
     if (!current || !replacement) return null
@@ -177,36 +169,27 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
     if (selectedTranscriptHash !== undefined && selectedTranscriptHash !== current.transcriptHash) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan transcript hash is inconsistent')
     }
-    const currentVersion = createProjectVersion({
-      id: project.currentVersion.id, workspaceId: project.currentVersion.workspaceId,
-      projectId: project.currentVersion.projectId, sequence: project.currentVersion.sequence,
-      parentVersionId: project.currentVersion.parentVersionId ?? undefined,
-      snapshotRefs: {
-        brief: project.currentVersion.briefSnapshotId,
-        treatment: project.currentVersion.treatmentSnapshotId ?? undefined,
-        story: project.currentVersion.storySnapshotId ?? undefined,
-        editPlan: project.currentVersion.editPlanSnapshotId,
-        policies: project.currentVersion.policiesSnapshotId,
-      },
-      baseHash: project.currentVersion.baseHash, createdBy: project.currentVersion.createdBy,
-      commandId: project.currentVersion.commandId ?? undefined,
-      createdAt: project.currentVersion.createdAt.toISOString(),
-    })
     return Object.freeze({
-      currentVersion, editPlan: Object.freeze(editPlan), editPlanHash: project.currentVersion.editPlanSnapshot.contentHash,
+      parent, editPlan: Object.freeze(editPlan), editPlanHash: editPlanSnapshot.contentHash,
       currentTranscript: Object.freeze({ id: current.id, transcriptHash: current.transcriptHash, sourceArtifactId: current.sourceArtifactId }),
       replacementTranscript: Object.freeze({
         id: replacement.id, transcriptHash: replacement.transcriptHash,
         sourceArtifactId: replacement.sourceArtifactId, transcript: hydrateTranscript(replacement),
       }),
-      outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersion.id, variantId: project.format ?? '9:16' })),
-        ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: currentVersion.id, variantId: output.outputAspectRatio })),
-      ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
+      // A transcript replacement is project-wide: the renders of EVERY output of the sealed State go stale, each attributed to its own.
+      outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: currentVersionId, proxies: proxyOutputs, finals: finalOutputs }),
     })
   }
 
-  async commitOrReplay(bundle: SourceTranscriptReplacementCommit, serializationAttempt = 1): Promise<Readonly<SourceTranscriptReplacementResult>> {
+  async commitOrReplay(input: SourceTranscriptReplacementCommit, serializationAttempt = 1): Promise<Readonly<SourceTranscriptReplacementResult>> {
+    const sealed = childCommandOf<SourceTranscriptReplacementPayload>(input.bundle)
+    const authenticationAudit = sealed.audit
+    if (!authenticationAudit) throw new DomainError('AUTH_INVALID', 'Source transcript replacement requires an authenticated external actor')
+    // Local view with the names the transaction below was written against.
+    const bundle = { command: sealed.command, requestFingerprint: sealed.requestFingerprint, version: input.bundle.version, event: input.event, sourceEvidence: input.sourceEvidence }
+    if (bundle.command.type !== 'replace-source-transcript' || bundle.version.commandId !== bundle.command.id || bundle.version.parentVersionId !== bundle.command.baseVersionId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Source transcript replacement Version does not belong to its Command')
+    }
     try {
       return await this.client.$transaction(async (transaction) => {
         const key = { workspaceId_projectId_idempotencyKey: {
@@ -218,7 +201,7 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
         })
         if (existing) {
           if (existing.type !== 'replace-source-transcript' || existing.requestFingerprint !== bundle.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different source transcript replacement')
-          if (hydrateEditCommandExternalActorAudit(existing).contextHash !== bundle.authenticationAudit.contextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Transcript replacement replay belongs to another authentication context')
+          if (hydrateEditCommandExternalActorAudit(existing).contextHash !== authenticationAudit.contextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Transcript replacement replay belongs to another authentication context')
           return hydrateStoredCommand(existing, true)
         }
         const [project, currentTranscript, replacementTranscript] = await Promise.all([
@@ -231,7 +214,8 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
           project.currentVersion.id !== bundle.command.baseVersionId ||
           project.currentVersion.baseHash !== bundle.command.baseHash ||
           bundle.version.parentVersionId !== project.currentVersion.id ||
-          bundle.version.sequence !== project.currentVersion.sequence + 1
+          bundle.version.sequence !== project.currentVersion.sequence + 1 ||
+          input.bundle.state.document.parentStateHash !== project.currentVersion.outputStateHash
         ) throw new DomainError('VERSION_CONFLICT', 'Project changed before source transcript replacement commit')
         const currentPlan = parseRecord(project.currentVersion.editPlanSnapshot.contentJson, 'current EditPlan')
         const currentRetimedTranscript = currentPlan.retimedTranscript as Record<string, unknown> | undefined
@@ -240,37 +224,12 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
           (currentRetimedTranscript.sourceTranscriptHash !== undefined && currentRetimedTranscript.sourceTranscriptHash !== currentTranscript.transcriptHash)
         ) throw new DomainError('VERSION_CONFLICT', 'Current EditPlan transcript changed before commit')
         const [proxyOutputs, finalOutputs] = await Promise.all([
-          transaction.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true } }),
-          transaction.v2ProjectFinalExportOperation.findMany({ where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true, outputAspectRatio: true } }),
+          transaction.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true, outputVariantId: true } }),
+          transaction.v2ProjectFinalExportOperation.findMany({ where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true } }),
         ])
-        const currentOutputs = [
-          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: project.format ?? '9:16' })),
-          ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
-        ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
+        const currentOutputs = renderOutputReferences({ state: input.bundle.state, sourceVersionId: bundle.command.baseVersionId, proxies: proxyOutputs, finals: finalOutputs })
         if (stableSerialize(currentOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before source transcript impact commit')
-        await transaction.v2EditCommand.create({ data: {
-          id: bundle.command.id, workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
-          baseVersionId: bundle.command.baseVersionId, baseHash: bundle.command.baseHash,
-          type: bundle.command.type, scopeJson: stableSerialize(bundle.command.scope), payloadJson: stableSerialize(bundle.command.payload),
-          reason: bundle.command.reason, actorType: bundle.command.author.type, actorId: bundle.command.author.id,
-          delegatedUserId: bundle.command.author.delegatedUserId, idempotencyKey: bundle.command.idempotencyKey,
-          ...editCommandExternalActorAuditData(bundle.authenticationAudit, bundle.command.workspaceId, bundle.command.author),
-          requestFingerprint: bundle.requestFingerprint, createdAt: new Date(bundle.command.createdAt),
-        } })
-        await transaction.v2ProjectSnapshot.create({ data: {
-          id: bundle.snapshot.id, workspaceId: bundle.snapshot.workspaceId, projectId: bundle.snapshot.projectId,
-          kind: bundle.snapshot.kind, schemaVersion: bundle.snapshot.contentSchemaVersion,
-          contentJson: bundle.snapshot.contentJson, contentHash: bundle.snapshot.contentHash,
-          createdAt: new Date(bundle.snapshot.createdAt),
-        } })
-        await transaction.v2ProjectVersion.create({ data: {
-          id: bundle.version.id, workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId,
-          sequence: bundle.version.sequence, parentVersionId: bundle.version.parentVersionId,
-          briefSnapshotId: bundle.version.snapshotRefs.brief!, treatmentSnapshotId: bundle.version.snapshotRefs.treatment,
-          storySnapshotId: bundle.version.snapshotRefs.story, editPlanSnapshotId: bundle.version.snapshotRefs.editPlan,
-          policiesSnapshotId: bundle.version.snapshotRefs.policies, baseHash: bundle.version.baseHash,
-          createdBy: bundle.version.createdBy, commandId: bundle.command.id, createdAt: new Date(bundle.version.createdAt),
-        } })
+        await commitProjectVersionWithOutputState(transaction, input.bundle)
         const invalidations = createSourceTranscriptArtifactInvalidations({ impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt })
         if (invalidations.length > 0) await transaction.v2CommandArtifactInvalidation.createMany({ data: invalidations.map((item) => ({
           id: item.id, workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
@@ -291,16 +250,17 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
           resourceType: bundle.event.resource.type, resourceId: bundle.event.resource.id,
           dataJson: stableSerialize(bundle.event.data),
         } })
+        await settleDeferredOutputGuards(transaction)
         const stored = await transaction.v2EditCommand.findUniqueOrThrow({
           where: { id: bundle.command.id },
           include: { baseVersion: { include: { editPlanSnapshot: true } }, resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true },
         })
         return hydrateStoredCommand(stored, false)
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
-      if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(bundle, serializationAttempt + 1)
+      if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(input, serializationAttempt + 1)
       if (isPrismaCode(error, 'P2002')) {
-        const existing = await this.findIdempotentResult({ workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, idempotencyKey: bundle.command.idempotencyKey, actorContextHash: bundle.authenticationAudit.contextHash })
+        const existing = await this.findIdempotentResult({ workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, idempotencyKey: bundle.command.idempotencyKey, actorContextHash: authenticationAudit.contextHash })
         if (existing) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different source transcript replacement')
           return Object.freeze({ ...existing.result, replayed: true })

@@ -23,7 +23,7 @@ export function runNextProjectDirectorOperationService(dependencies: {
   directorRuns: DirectorRunRepository
   clock?: () => Date
   createId: (
-    kind: 'director-run' | 'edit-command' | 'project-version' | 'project-snapshot',
+    kind: 'director-run' | 'edit-command' | 'project-version' | 'project-snapshot' | 'project-output-state' | 'output-materialization',
   ) => string
   createEventId: () => string
   compileBrief: (input: {

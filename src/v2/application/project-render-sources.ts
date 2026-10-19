@@ -1,10 +1,55 @@
 import { assertDomain } from '../domain/errors.ts'
+import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
+import { FINAL_CAPTION_CERTIFICATION_POLICY_SHA256 } from '../domain/final-caption-certification.ts'
 import type {
   ProjectProxyRenderSource,
   ProjectRenderSourceAsset,
 } from './ports/project-proxy-render-repository.ts'
 import type { RenderColorPipelineBinding } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
+
+const SEAL_HASH_PATTERN = /^[a-f0-9]{64}$/
+
+/**
+ * The State variant an operation's context names (`outputVariantId`, written at enqueue from the sealed consumption). A context
+ * without it is a legacy row, written before the column existed: it is read with the sole-output rule only (a State with several
+ * outputs is then refused, never guessed). The workers read through it, so the output a render was made for is never re-chosen.
+ */
+export function contextVariantSelection(context: object): Readonly<{ variantId?: string }> {
+  const value = (context as { outputVariantId?: unknown }).outputVariantId
+  return typeof value === 'string' && value.length > 0 ? { variantId: value } : {}
+}
+
+/**
+ * The stable State variant a source was read for (the consumption it was sealed to). A consumer attributes what it persists
+ * (the operation context, the completion of a render) to this, never to an aspect ratio.
+ */
+export function sourceOutputVariantId(source: Readonly<Pick<ProjectProxyRenderSource, 'outputConsumption'>>): string {
+  const variantId = source.outputConsumption?.seal?.variantId
+  assertDomain(typeof variantId === 'string' && variantId.length > 0, 'INVALID_RENDER_INPUT', 'Render input is not sealed to an output variant')
+  return variantId
+}
+
+/** The consumption seal a render input hash is built over. A source without it was not read through the consumption verdict. */
+function requireConsumptionSealHash(value: unknown): string {
+  assertDomain(typeof value === 'string' && SEAL_HASH_PATTERN.test(value), 'INVALID_RENDER_INPUT',
+    'Render input is not sealed to an output consumption verdict')
+  return value as string
+}
+
+/** Enqueue and worker share the exact pre-render identity. The policies are input,
+ * never an output receipt hash: no MP4 -> receipt -> input hash cycle.
+ * `outputConsumptionSealHash` seals the exact Version, State, variant revision and materialization the final export consumes
+ * (the persisted `final` verdict): another State, revision or materialization is another input.
+ * The final-caption certification policy (W65b) is pinned here by its digest: an operation queued under another policy fails the
+ * worker's recomputation instead of being certified under rules nobody approved it with. */
+export function projectFinalRenderInputHash(input: Readonly<Record<string, unknown>>): string {
+  requireConsumptionSealHash(input.outputConsumptionSealHash)
+  return calculateVersionHash({
+    ...input, kind: 'project-final-export/v2', assEmissionPolicy: ASS_EMISSION_POLICY,
+    captionCertificationPolicySha256: FINAL_CAPTION_CERTIFICATION_POLICY_SHA256,
+  })
+}
 
 export function projectRenderSourcesFingerprint(
   sources: readonly Readonly<ProjectRenderSourceAsset>[],
@@ -46,6 +91,7 @@ export function projectProxyRenderInputHash(input: {
 }): string {
   const source = input.source
   const base = {
+    assEmissionPolicy: ASS_EMISSION_POLICY,
     projectId: source.projectId,
     projectVersionId: source.projectVersionId,
     editPlanSnapshotId: source.editPlanSnapshotId,
@@ -56,17 +102,19 @@ export function projectProxyRenderInputHash(input: {
     renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
     colorPipelineBindings: input.colorPipelineBindings,
     format: source.format,
+    // The persisted consumption verdict this source was read through: Version, State, variant revision and materialization.
+    outputConsumptionSealHash: requireConsumptionSealHash(source.outputConsumption?.sealHash),
   }
   return calculateVersionHash(source.unchangedReuse
     ? {
-        kind: 'project-proxy-render/v3',
+        kind: 'project-proxy-render/v6',
         ...base,
         unchangedReuse: source.unchangedReuse,
       }
     : source.rangeReuse ? {
-        kind: 'project-proxy-render/v2',
+        kind: 'project-proxy-render/v5',
         ...base,
         rangeReuse: source.rangeReuse,
       }
-    : { kind: 'project-proxy-render/v1', ...base })
+    : { kind: 'project-proxy-render/v4', ...base })
 }

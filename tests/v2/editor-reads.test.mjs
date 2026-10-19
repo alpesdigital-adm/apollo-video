@@ -7,6 +7,7 @@ import {
   createLatestReadFence,
   parseRetryAfter,
   RATE_LIMIT_FALLBACK_WAIT_MS,
+  workspaceReviewReadTargets,
 } from '../../src/app/_operator/editor-reads.ts'
 
 /**
@@ -571,4 +572,32 @@ test('snapshot counts each read by name and copies what it hands out', async () 
   first.workspace.issued = 99
   assert.equal(reads.snapshot().workspace.issued, 1)
   assert.deepEqual(reads.snapshot(), { workspace: { issued: 1, deduplicated: 1, dropped: 0 } })
+})
+test('workspace review reads stay absent in a source-only draft and become exact after publication', async () => {
+  const availability = { schemaVersion: 'project-review-availability/v1', requestedVersionId: 'version-head-1',
+    annotations: { state: 'unavailable', reason: 'no-proxy' }, proxyReview: { state: 'unavailable', reason: 'no-report' } }
+  const calls = []
+  const run = async (projection, manual = null) => {
+    const targets = workspaceReviewReadTargets('version-head-1', projection, manual)
+    await Promise.all(Object.entries(targets).filter(([, id]) => id).map(async ([kind, id]) => {
+      calls.push({ kind, id })
+    }))
+  }
+  await run(availability)
+  assert.deepEqual(calls, [])
+  const published = { ...availability,
+    annotations: { state: 'available', sourceVersionId: 'version-head-1', proxyArtifactId: 'proxy-1', proxyHash: 'a'.repeat(64), stale: false },
+    proxyReview: { state: 'available', sourceVersionId: 'version-head-1', reviewId: 'review-1', proxyArtifactId: 'proxy-1', reviewHash: 'b'.repeat(64) } }
+  await run(published)
+  assert.deepEqual(calls, [{ kind: 'annotationsVersionId', id: 'version-head-1' }, { kind: 'proxyReviewVersionId', id: 'version-head-1' }])
+  await run(published, 'version-manual-1')
+  assert.equal(calls.at(-2).id, 'version-manual-1', 'poll must preserve a manual version')
+  assert.equal(calls.at(-1).id, 'version-head-1')
+  assert.throws(() => workspaceReviewReadTargets('version-head-1', { ...published, requestedVersionId: 'version-other-1' }, null), /conflito/)
+  assert.throws(() => workspaceReviewReadTargets('version-head-1', { ...published,
+    proxyReview: { ...published.proxyReview, sourceVersionId: 'version-other-1' } }, null), /conflito/)
+  const stale = { ...published, annotations: { ...published.annotations, sourceVersionId: null, stale: true } }
+  await run(stale)
+  assert.equal(calls.at(-2).id, 'version-head-1', 'null fallback source is not an inferred source version')
+  assert.throws(() => workspaceReviewReadTargets(null, published, null), /conflito/)
 })

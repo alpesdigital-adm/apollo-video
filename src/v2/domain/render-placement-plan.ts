@@ -9,13 +9,22 @@ import {
   type ProtectedPlacementRegion,
 } from './responsive-output.ts'
 import type { PerceptionTimeline } from './perception-timeline.ts'
+import type { CaptionProjection } from './caption-canvas-projection.ts'
+import type { FaceEvidenceForSource } from './caption-face-clearance.ts'
 import {
   createSubtitleAnchorPlan,
   validateSubtitleAnchorPlan,
   type SubtitleAnchorCueV1,
+  type SubtitleAnchorPlan,
   type SubtitleAnchorPlanV1,
+  type SubtitleAnchorPlanV2,
   type SubtitleAnchorPolicyV1,
 } from './subtitle-anchor-plan.ts'
+import {
+  createSubtitleAnchorPlanV3,
+  validateSubtitleAnchorPlanV3,
+  type SubtitleAnchorPlanV3,
+} from './subtitle-anchor-plan-v3.ts'
 import { deriveSubtitleRegion, type SubtitleRegionV1 } from './subtitle-region.ts'
 import { SUBTITLE_STYLE_REGISTRY, type SubtitlePresetId } from './subtitle-system.ts'
 
@@ -42,8 +51,7 @@ export interface RenderPlacementV1 {
   timeRange: Readonly<{ startFrame: number; endFrame: number }>
 }
 
-export interface RenderPlacementPlanV1 {
-  schemaVersion: 'render-placement-plan/v1'
+interface RenderPlacementPlanBase {
   outputSpecId: string
   outputPresetHash: string
   format: OutputAspectRatio
@@ -55,11 +63,26 @@ export interface RenderPlacementPlanV1 {
    * placements below — the only two trustworthy descriptions of what is on screen. `null` when the
    * render carries no cues (or no subtitles at all), which is itself evidence.
    */
-  subtitleAnchorPlan: Readonly<SubtitleAnchorPlanV1> | null
+  subtitleAnchorPlan: Readonly<SubtitleAnchorPlan> | null
   placements: readonly Readonly<RenderPlacementV1>[]
   issues: readonly Readonly<PlacementIssue>[]
   placementPlanHash: string
 }
+
+export type RenderPlacementPlanV1 = Readonly<RenderPlacementPlanBase & {
+  schemaVersion: 'render-placement-plan/v1'
+  subtitleAnchorPlan: Readonly<SubtitleAnchorPlanV1> | null
+}>
+export type RenderPlacementPlanV2 = Readonly<RenderPlacementPlanBase & {
+  schemaVersion: 'render-placement-plan/v2'
+  subtitleAnchorPlan: Readonly<SubtitleAnchorPlanV2>
+}>
+/** W65: the anchor of every cue is decided from the three-state face clearance of each band on this canvas. */
+export type RenderPlacementPlanV3 = Readonly<RenderPlacementPlanBase & {
+  schemaVersion: 'render-placement-plan/v3'
+  subtitleAnchorPlan: Readonly<SubtitleAnchorPlanV3>
+}>
+export type RenderPlacementPlan = RenderPlacementPlanV1 | RenderPlacementPlanV2 | RenderPlacementPlanV3
 
 const SHA256 = /^[a-f0-9]{64}$/
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
@@ -122,8 +145,22 @@ export function createRenderPlacementPlan(input: Readonly<{
     cues: readonly Readonly<SubtitleAnchorCueV1>[]
     perceptionTimeline?: Readonly<PerceptionTimeline>
     policy?: Partial<SubtitleAnchorPolicyV1>
+    /** Legacy (`subtitle-anchor-plan/v2`): facial coverage is declared unknown and every cue is suppressed. */
+    faceSafety?: Readonly<{ status: 'unknown'; reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' }>
+    /**
+     * W65 (`subtitle-anchor-plan/v3`): the render's caption projection and the trusted face evidence per source. Exactly one
+     * of `faceSafety` and `faceClearance` is given. A `null` projection (a source dimension is unknown) makes every band
+     * unknown; the plan then says so instead of guessing.
+     */
+    faceClearance?: Readonly<{
+      projection: Readonly<CaptionProjection> | null
+      projectionUnavailableReason?: string
+      evidence: readonly FaceEvidenceForSource[]
+      perceptionSourceArtifactId?: string | null
+    }>
+    ocrEvidence?: Readonly<{ envelopeId: string; envelopeHash: string; inputVersionId: string; timeMapHash: string }>
   }>
-}>): Readonly<RenderPlacementPlanV1> {
+}>): Readonly<RenderPlacementPlan> {
   assertDomain(OUTPUT_ASPECT_RATIOS.includes(input.format), 'INVALID_RENDER_INPUT', 'Placement plan format is not registered')
   const preset = readOutputFormatPreset(input.format)
   assertDomain(
@@ -185,22 +222,52 @@ export function createRenderPlacementPlan(input: Readonly<{
   const orderedPlacements = Object.freeze(placements.toSorted((left, right) => left.zIndex - right.zIndex))
   // Decided *after* the solver, so the evidence is the geometry this plan actually reserved for the
   // CTA and the logo, not the geometry someone hoped for.
-  const subtitleAnchorPlan = subtitleRegion && input.subtitleAnchor && input.subtitleAnchor.cues.length
-    ? createSubtitleAnchorPlan({
-        spec: preset.spec,
-        format: input.format,
-        canvas: input.canvas,
-        fps: input.subtitleAnchor.fps,
-        durationFrames: input.durationFrames,
-        region: subtitleRegion,
-        cues: input.subtitleAnchor.cues,
-        ...(input.subtitleAnchor.perceptionTimeline ? { perceptionTimeline: input.subtitleAnchor.perceptionTimeline } : {}),
-        placements: orderedPlacements,
-        ...(input.subtitleAnchor.policy ? { policy: input.subtitleAnchor.policy } : {}),
-      })
+  if (input.subtitleAnchor) {
+    assertDomain(
+      input.subtitleAnchor.faceSafety === undefined || input.subtitleAnchor.faceClearance === undefined,
+      'INVALID_RENDER_INPUT', 'A subtitle anchor takes exactly one of an unknown-face declaration and a face clearance',
+    )
+  }
+  const anchorInput = input.subtitleAnchor
+  const subtitleAnchorPlan = subtitleRegion && anchorInput && anchorInput.cues.length
+    ? anchorInput.faceClearance
+      ? createSubtitleAnchorPlanV3({
+          spec: preset.spec,
+          format: input.format,
+          canvas: input.canvas,
+          fps: anchorInput.fps,
+          durationFrames: input.durationFrames,
+          region: subtitleRegion,
+          cues: anchorInput.cues,
+          ...(anchorInput.perceptionTimeline ? { perceptionTimeline: anchorInput.perceptionTimeline } : {}),
+          perceptionSourceArtifactId: anchorInput.faceClearance.perceptionSourceArtifactId ?? null,
+          placements: orderedPlacements,
+          ...(anchorInput.policy ? { policy: anchorInput.policy } : {}),
+          ...(anchorInput.ocrEvidence ? { ocrEvidence: anchorInput.ocrEvidence } : {}),
+          projection: anchorInput.faceClearance.projection,
+          ...(anchorInput.faceClearance.projectionUnavailableReason ? { projectionUnavailableReason: anchorInput.faceClearance.projectionUnavailableReason } : {}),
+          faceEvidence: anchorInput.faceClearance.evidence,
+        })
+      : createSubtitleAnchorPlan({
+          spec: preset.spec,
+          format: input.format,
+          canvas: input.canvas,
+          fps: anchorInput.fps,
+          durationFrames: input.durationFrames,
+          region: subtitleRegion,
+          cues: anchorInput.cues,
+          ...(anchorInput.perceptionTimeline ? { perceptionTimeline: anchorInput.perceptionTimeline } : {}),
+          placements: orderedPlacements,
+          ...(anchorInput.policy ? { policy: anchorInput.policy } : {}),
+          faceSafety: anchorInput.faceSafety!,
+          ...(anchorInput.ocrEvidence ? { ocrEvidence: anchorInput.ocrEvidence } : {}),
+        })
     : null
   const body = Object.freeze({
-    schemaVersion: 'render-placement-plan/v1' as const,
+    schemaVersion: subtitleAnchorPlan?.schemaVersion === 'subtitle-anchor-plan/v3'
+      ? 'render-placement-plan/v3' as const
+      : subtitleAnchorPlan?.schemaVersion === 'subtitle-anchor-plan/v2'
+        ? 'render-placement-plan/v2' as const : 'render-placement-plan/v1' as const,
     outputSpecId: preset.spec.id,
     outputPresetHash: preset.presetHash,
     format: input.format,
@@ -211,7 +278,7 @@ export function createRenderPlacementPlan(input: Readonly<{
     placements: orderedPlacements,
     issues: Object.freeze([...(solved?.issues ?? [])]),
   })
-  const plan = Object.freeze({ ...body, placementPlanHash: calculateCanonicalHash(body) })
+  const plan = Object.freeze({ ...body, placementPlanHash: calculateCanonicalHash(body) }) as Readonly<RenderPlacementPlan>
   validateRenderPlacementPlan(plan)
   return plan
 }
@@ -221,8 +288,15 @@ export function createRenderPlacementPlan(input: Readonly<{
  * the preset identity from the registry, the subtitle region from the resolved preset, and the
  * plan hash from the plan body itself.
  */
-export function validateRenderPlacementPlan(plan: Readonly<RenderPlacementPlanV1>): void {
-  assertDomain(plan.schemaVersion === 'render-placement-plan/v1', 'INVALID_RENDER_INPUT', 'Placement plan schema version is unsupported')
+export function validateRenderPlacementPlan(plan: Readonly<RenderPlacementPlan>): void {
+  assertDomain(plan.schemaVersion === 'render-placement-plan/v1' || plan.schemaVersion === 'render-placement-plan/v2' || plan.schemaVersion === 'render-placement-plan/v3',
+    'INVALID_RENDER_INPUT', 'Placement plan schema version is unsupported')
+  assertDomain(plan.schemaVersion === 'render-placement-plan/v3'
+    ? plan.subtitleAnchorPlan?.schemaVersion === 'subtitle-anchor-plan/v3'
+    : plan.schemaVersion === 'render-placement-plan/v2'
+      ? plan.subtitleAnchorPlan?.schemaVersion === 'subtitle-anchor-plan/v2'
+      : !['subtitle-anchor-plan/v2', 'subtitle-anchor-plan/v3'].includes(String(plan.subtitleAnchorPlan?.schemaVersion)),
+  'INVALID_RENDER_INPUT', 'Placement and anchor plan versions are inconsistent')
   assertDomain(OUTPUT_ASPECT_RATIOS.includes(plan.format), 'INVALID_RENDER_INPUT', 'Placement plan format is not registered')
   const preset = readOutputFormatPreset(plan.format)
   assertDomain(plan.outputSpecId === preset.spec.id && plan.outputPresetHash === preset.presetHash, 'INVALID_RENDER_INPUT', 'Placement plan output identity drifted from the registry')
@@ -243,10 +317,12 @@ export function validateRenderPlacementPlan(plan: Readonly<RenderPlacementPlanV1
   }
   if (plan.subtitleAnchorPlan) {
     assertDomain(plan.subtitleRegion !== null, 'INVALID_RENDER_INPUT', 'A subtitle anchor plan requires the subtitle region it was decided against')
-    validateSubtitleAnchorPlan(plan.subtitleAnchorPlan, {
+    const expectedAnchor = {
       region: plan.subtitleRegion!, safeArea: preset.spec.safeArea, outputSpecId: plan.outputSpecId,
       format: plan.format, canvas: plan.canvas, durationFrames: plan.durationFrames,
-    })
+    }
+    if (plan.subtitleAnchorPlan.schemaVersion === 'subtitle-anchor-plan/v3') validateSubtitleAnchorPlanV3(plan.subtitleAnchorPlan, expectedAnchor)
+    else validateSubtitleAnchorPlan(plan.subtitleAnchorPlan, expectedAnchor)
   }
   const seenIds = new Set<string>()
   const seenZ = new Set<number>()
