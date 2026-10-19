@@ -573,6 +573,29 @@ test('FIRST-read sentinel that is not an exact sentinel of the requested PID is 
   }
 })
 
+// CI job 118192911424 also logged a membership-read ENOENT. Membership is only read
+// AFTER a strict first stat, so it can never be a first-sight stat assertion.
+test('cgroup membership-read of a task that vanished after a strict first stat is a reported disappearance with no later read', async () => {
+  for (const code of ['ENOENT', 'ESRCH']) {
+    const calls = []
+    const io = { async readFile(path) {
+      calls.push(path)
+      if (path.endsWith('/cgroup.procs')) return '9\n'
+      if (path.endsWith('/stat')) return cgroupStat(9, '80', 8, 'Z')
+      throw Object.assign(new Error('PRIVATE_GONE'), { code, errno: -3 })
+    } }
+    const snapshot = await readCgroupSnapshot(cgroupScope, Date.now() + 1000, io)
+    assert.equal(snapshot.length, 0); assert.equal(snapshot.statUnavailableRechecks.length, 0)
+    assert.equal(snapshot.disappearanceReads.length, 1)
+    const gone = snapshot.disappearanceReads[0]
+    assert.equal(gone.stage, 'membership-read'); assert.equal(gone.outcome, 'read-disappearance-reported')
+    assert.equal(gone.readErrorCode, code); assert.equal(gone.terminalityEstablished, false)
+    assert.deepEqual(gone.knownBefore, { pid: 9, ppid: 8, processGroupId: 8, sessionId: 8, state: 'Z', starttime: '80' })
+    assert.doesNotMatch(JSON.stringify(gone), /PRIVATE_GONE/)
+    assert.deepEqual(calls, [cgroupProcsRead, '/proc/9/stat', '/proc/9/cgroup'], 'No stat-after once membership vanished')
+  }
+})
+
 test('cgroup disappearance and read denial stay distinct from malformed stat and never claim terminality', async () => {
   for (const code of ['ENOENT', 'ESRCH', 'EACCES', 'EIO']) {
     const original = Object.assign(new Error('PRIVATE_READ_MESSAGE'), { code, errno: code === 'EACCES' ? -13 : -5 })

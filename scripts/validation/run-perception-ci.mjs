@@ -95,14 +95,51 @@ export function parseLinuxProcessStat(text) {
   }
 }
 
-export async function readLinuxProcessIdentity(pid) {
+export const LINUX_STAT_RECHECK_MS = 500
+
+// A task caught between the release of its signal handler and the removal of
+// its /proc entry answers with the kernel's lock_task_sighand-failed tuple
+// (ppid 0, pgrp/session -1). That tuple is neither an identity nor a terminality
+// proof, so the first sight of it must not be fatal NOR trusted: the task is
+// re-read from scratch ONCE inside one bounded window (wall + monotonic).
+//  - ENOENT/ESRCH       -> null, exactly like a first-read disappearance;
+//  - strict valid stat of the same PID and claimed starttime -> that identity;
+//  - sentinel again, anything else, or window exceeded -> the INITIAL error.
+export async function readLinuxProcessIdentity(pid, io = { readFile }) {
   assert.ok(Number.isSafeInteger(pid) && pid > 0)
+  const path = `/proc/${pid}/stat`
+  let initial, claim
   try {
-    const identity = parseLinuxProcessStat(await readFile(`/proc/${pid}/stat`, 'utf8'))
+    const identity = parseLinuxProcessStat(await io.readFile(path, 'utf8'))
     assert.equal(identity.pid, pid, 'Linux stat PID mismatch')
     return identity
+  } catch (error) {
+    if (['ENOENT', 'ESRCH'].includes(error.code)) return null
+    claim = error.linuxStatDiagnostic?.unavailableObservation
+    if (!(claim?.schemaVersion === 'linux-task-sighand-unavailable/v1' && claim.pid === pid &&
+        claim.identityEstablished === false && claim.terminalityEstablished === false)) throw error
+    initial = error
   }
-  catch (error) { if (['ENOENT', 'ESRCH'].includes(error.code)) return null; throw error }
+  const startedAt = Date.now(), startedMonotonic = performance.now()
+  try {
+    const value = await io.readFile(path, { encoding: 'utf8', signal: AbortSignal.timeout(LINUX_STAT_RECHECK_MS) })
+    const finishedAt = Date.now(), finishedMonotonic = performance.now()
+    assert.ok(finishedAt >= startedAt && finishedAt - startedAt < LINUX_STAT_RECHECK_MS &&
+      finishedMonotonic - startedMonotonic < LINUX_STAT_RECHECK_MS, 'Linux stat sentinel recheck deadline exhausted')
+    const verified = parseLinuxProcessStat(value)
+    assert.equal(verified.pid, pid, 'Linux stat PID mismatch')
+    assert.equal(identityKey(verified), identityKey({ pid, starttime: claim.starttime }), 'Linux stat sentinel recheck PID recycled')
+    return verified
+  } catch (recheckError) {
+    if (['ENOENT', 'ESRCH'].includes(recheckError.code)) return null
+    try {
+      initial.linuxStatRecheckDiagnostic = { schemaVersion: 'linux-stat-unavailable-recheck/v1', requestedPid: pid,
+        allocatedMs: LINUX_STAT_RECHECK_MS, outcome: 'inconclusive', terminalityEstablished: false,
+        readErrorCode: ['EACCES', 'EPERM', 'EIO', 'ABORT_ERR', 'ERR_ASSERTION'].includes(recheckError.code) ? recheckError.code : null,
+        recheckStatDiagnostic: recheckError.linuxStatDiagnostic ?? null }
+    } catch { /* Never mask an immutable original Error. */ }
+    throw initial
+  }
 }
 
 export function parseLinuxProcessCredentials(text) {

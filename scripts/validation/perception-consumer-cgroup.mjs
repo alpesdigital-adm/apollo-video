@@ -33,6 +33,7 @@ export const CGROUP_ENVIRONMENT = Object.freeze([
 const safeError = (error) => { const message = String(error?.message ?? ''); return {
   name: error.name, code: error.code ?? null, messageSha256: digest(message), messageBytes: Buffer.byteLength(message),
   ...(error.linuxStatDiagnostic ? { linuxStatDiagnostic: error.linuxStatDiagnostic } : {}),
+  ...(error.linuxStatRecheckDiagnostic ? { linuxStatRecheckDiagnostic: error.linuxStatRecheckDiagnostic } : {}),
   ...(error.cgroupSnapshotDiagnostic ? { cgroupSnapshotDiagnostic: error.cgroupSnapshotDiagnostic } : {}) } }
 
 export function assertCgroupScope(scope) {
