@@ -733,6 +733,25 @@ export async function runDashboardRuntimeJourney(input) {
       throw error
     }
   }
+  // The document that a FULL navigation is about to replace stops polling first, the way it does when a user leaves the tab: the event feed
+  // poller (useProjectEventFeed) only polls while its document is visible. A poll still in flight when the new document commits is
+  // cancelled by the browser together with the old document, and Chromium does not always tell the page object about it, which leaves that
+  // request pending for good and fails every later barrier (a ghost that no barrier may excuse: ERR_ABORTED stays a failure). Nothing is
+  // excused here. The barrier is drained before this, it still fails on anything pending, and the old document merely cannot START a
+  // request in the 100 ms between that drain and the commit. A document restored from the back/forward cache is visible again.
+  const leaveDocument = async (opened) => {
+    if (opened.url() === 'about:blank') return
+    await opened.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })
+      document.dispatchEvent(new Event('visibilitychange'))
+      window.addEventListener('pageshow', (event) => {
+        if (!event.persisted) return
+        delete document.visibilityState; delete document.hidden
+        document.dispatchEvent(new Event('visibilitychange'))
+      }, { once: true })
+    })
+  }
   const drainWorkspaceBootstrap = async (opened, navigationId, id) => {
     const prefix = `/v1/projects/${id}`
     const requiredPaths = ['/workspace', '/policy-overrides', '/proof-needs', '/proof-integrity-runs', '/proof-mode-runs']
@@ -1133,8 +1152,10 @@ export async function runDashboardRuntimeJourney(input) {
         evidence.foregroundObservations ??= []
         evidence.foregroundObservations.push({ stage, layout, before: visibilityBefore, after: await page.evaluate(() => document.visibilityState) })
         await drainBrowserResponses({ label: 'before-dashboard-navigation' })
+        await page.setViewportSize(viewport)
+        await leaveDocument(page)
         const dashboardNavigation = beginBrowserNavigation(page, stage, layout, '/')
-        await page.setViewportSize(viewport); await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
+        await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
         const card = page.locator(`article[data-project-id="${id}"]`)
         try { await card.waitFor({ state: 'visible' }) } catch (error) {
           evidence.domFailure = { stage, layout, url: page.url(), visibility: await page.evaluate(() => document.visibilityState), text: await page.locator('body').innerText() }
