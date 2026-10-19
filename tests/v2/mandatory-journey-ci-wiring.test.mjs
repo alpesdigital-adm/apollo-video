@@ -835,7 +835,7 @@ const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/transformation-critic-media.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/visual-montage-render.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/wave10-combined-journey.integration.mjs', reason: PHASE_1_3 },
-  { file: 'tests/v2/wave9-combined-journeys.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/wave9-combined-journeys.integration.mjs', reason: PHASE_1_3, citedBy: ['docs/quality/w66r-reframe-trajectory.md'] },
   // W66 PostgreSQL proofs: opt-in by APOLLO_RUN_W66_* variables, run only by the local supervisor
   // (frozen source and inputs, disposable cluster, backend accounting). CI seeds are not yet canonical,
   // so wiring them waits for the writer cutover; the supervised results are the proof until then.

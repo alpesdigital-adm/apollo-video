@@ -12,7 +12,7 @@ foi medido e **o que não foi**.
 | `createReframePlan` recebia observações do chamador; plano sem persistência (`plan: null`, sempre `review-required`) | Observações **do servidor** (`face-source-evidence-stream/v1` projetado pelos clipes do EditPlan), plano **selado pela política** e persistido por (Versão, variante) |
 | Variante = proporção (`'9:16'`); duas saídas 9:16 colidiam | Variante = id estável do State (`requireOutputVariant`); proporção como variante é recusada (`output-variant-unknown`) |
 | Override do crop: conjunto v1 por proporção | `apply-variant-reframe-override` v2: Command por variante + faixa semiaberta de um clipe, `set`/`reset`, cadeia por `previousOverrideId` |
-| Render com um crop estático ou `reframePlan` montado à mão | Render lê o plano persistido da **sua** variante; `reframeRecordHash` entra no hash do RenderInput; issues entram no critic da **sua** saída |
+| Render com um crop estático ou `reframePlan` montado à mão; o crop virava uma tira num quadro 16:9 | Render lê o plano persistido da **sua** variante e o crop **preenche o canvas**; `reframeRecordHash` entra no hash do RenderInput; issues entram no critic da **sua** saída |
 
 ## 2. Política: constantes e hash
 
@@ -66,6 +66,21 @@ produtor, fonte, relógio); cada observação carrega o hash do envelope de onde
 - O caminho é conferido frame a frame contra as observações; frame cujo crop interpolado esconde um sujeito vira `TRACKING_LIMIT_EXCEEDED`.
 - Um clipe que exigiria mais de 600 keyframes vira `fallback` com violação `KEYFRAME_BUDGET_EXCEEDED`.
 
+## 4b. Composição: um range reenquadrado PREENCHE o canvas
+
+Defeito achado na revisão: o renderer cortava o clipe, escalava e preenchia (`pad`) até o quadro de trabalho 16:9 da maior fonte e o punha sobre uma cópia
+borrada. Um crop 404x720 virava uma tira de ~171x304 (~10% de 540x960) e, agora que o plano persistido é aplicado, um plano só **tirava** imagem. A regra
+passa a ser (`REFRAME_COMPOSITION_ID = reframe-fills-canvas/v1`, em `render-reframe-plan.ts`), e é a mesma nos quatro lugares onde a geometria existe:
+
+- **Renderer** (`ffmpeg-editorial-composition-graph.ts`): um clipe sob range ativo (`plan`/`manual`) é cortado e escalado pelo fator cover
+  (`scale=W:H:force_original_aspect_ratio=increase,crop=W:H`): sem quadro de trabalho, sem `pad`, sem fundo borrado. Um clipe sem range ativo mantém a
+  composição de sempre, feita clipe a clipe quando outro clipe da linha do tempo é reenquadrado (termina em `setsar=1`: o `concat` recusa SAR diferentes).
+  Sem nenhum clipe reenquadrado o grafo é o histórico, literalmente (teste dourado em `reframe-composition-fill.test.mjs`).
+- **Projeção de legenda** (`caption-canvas-projection.ts`): a similaridade de um clipe reenquadrado é o cover; o id da composição entra na identidade da
+  projeção só quando há clipe reenquadrado.
+- **Mapa de elementos do render** (`review-system.ts`): um clipe reenquadrado é o canvas inteiro e não tem elemento de fundo.
+- **Hash de entrada do render**: um render feito de plano persistido nomeia `reframeComposition`; mudar a regra nunca passa por o mesmo render.
+
 ## 5. Issue -> estado da variante
 
 Decidido por `reframeVariantDisposition` (política: `issueDisposition`); o critic (`critiqueOutputFormat`) traduz cada issue em `REFRAME_*` na
@@ -113,86 +128,79 @@ Command `apply-variant-reframe-override` (tipo novo e fechado no registro; filho
 ## 8. Método da prova no mp4 renderizado (GT)
 
 `tests/v2/helpers/reframe-gt-oracle.mjs` (puro; aritmética testada sem FFmpeg em `tests/v2/reframe-gt-oracle.test.mjs`) e
-`tests/v2/reframe-trajectory-render.integration.mjs` (FFmpeg, via harness).
+`tests/v2/reframe-trajectory-render.integration.mjs` (FFmpeg; **no CI**, passo "Run reframe trajectory goldens on the rendered mp4", e no harness).
 
-- **GT**: um gerador decide, por frame, onde está cada sujeito, **desenha** os sujeitos no vídeo-fonte (1280x720, 30 fps, retângulos coloridos
-  + fiduciais brancos a cada 48 px) e produz, dos mesmos frames, as linhas do detector. **O detector é um STAND-IN rotulado** (`GT-STAND-IN` nas
-  linhas de evidência): suas caixas são as do gerador, escritas pelo decoder V9 de tensor bruto num envelope selado de produtor aceito.
-  Não é um detector e nada diz sobre um detector em vídeo real. Daí em diante tudo é o produto: stream de evidência -> ROI -> plano selado ->
-  keyframes -> `FfmpegEditorialProxyRenderer` -> mp4.
-- **Medição**: o mp4 é decodificado frame a frame. A janela de crop de cada frame é recuperada **dos fiduciais** (ajuste linear
-  `x_canvas = escala * x_fonte + deslocamento`), não do RenderInput, e então comparada com a aritmética do RenderInput (mesma quantização de pixel
-  par da expressão do FFmpeg). Para cada frame: o sujeito GT está dentro do crop medido com a margem de segurança (menos 3 px de tolerância de
-  quantização/medição), a caixa decodificada do sujeito bate com a do gerador (tolerância 6 px de fonte), e a velocidade/aceleração do crop
-  medido (janelas de 15 frames, para que um passo de 2 px não pareça movimento) ficam dentro da política; o RenderInput é medido exatamente por
-  `measureReframeTrajectory`.
+**Um erro meu, registrado.** A primeira versão do oráculo media dentro de uma banda 16:9 e foi **adaptada ao layout** (`foregroundMapping`
+codificava "tira dentro da banda"); quando o primeiro run tropeçou nisso, o oráculo foi ajustado ao que o renderer produzia em vez de apontar
+o defeito: o crop de um reframe nunca preenchia o canvas (uma tira de ~171x304 num canvas de 540x960). A revisão rejeitou, com razão. O oráculo
+foi reescrito para **não saber nada do layout** e para exigir o que um reframe **especifica**; o defeito foi corrigido no renderer (seção 4b).
+
+- **GT**: um gerador decide, por frame, onde está cada sujeito, **desenha** os sujeitos num vídeo-fonte 1280x720 a 30 fps (textura de xadrez fina,
+  que um borrão não reproduz; fiduciais brancos com espaçamentos irregulares, de modo que poucos deles se identificam sozinhos) e produz, dos
+  mesmos frames, as linhas do detector. **O detector é um STAND-IN rotulado** (`GT-STAND-IN` nas linhas de evidência): suas caixas são as do
+  gerador, escritas pelo decoder V9 de tensor bruto num envelope selado de produtor aceito. Não é um detector e nada diz sobre um detector em
+  vídeo real. Daí em diante tudo é o produto: stream de evidência -> ROI -> plano selado -> keyframes -> `FfmpegEditorialProxyRenderer` -> mp4.
+- **Expectativa** (da especificação, não do layout): um range reenquadrado mostra a janela de crop **preenchendo** o canvas da variante (cover);
+  um range sem reframe (`fallback`) mostra o quadro inteiro como sempre mostrou.
+- **Medição, em coordenadas do FRAME DE SAÍDA, sem dica de layout**: (1) onde está a imagem nítida (textura) e **quanto do canvas ela cobre**, por
+  largura e por altura; (2) a escala (ajuste linear dos fiduciais); (3) a janela da fonte que a imagem mostra; (4) a caixa de cada sujeito em
+  pixels do canvas e em pixels da fonte. Asserções por frame de um range reenquadrado: cobertura >= 98% da largura **e** da altura, escala igual à do
+  cover do crop (2%), sujeito a <= 8 px de canvas de onde a especificação o põe, sujeito dentro do crop com a margem de segurança (menos 3 px de
+  tolerância), caixa decodificada a <= 6 px de fonte da do gerador, e velocidade/aceleração do crop medido (janelas de 15 frames, para que um
+  passo de 2 px não pareça movimento) dentro da política; o RenderInput é medido exatamente por `measureReframeTrajectory`. Cobertura e escala são
+  razões **estruturais**: nenhuma issue do plano as desculpa.
 - **Cenas**: uma pessoa lenta; sujeito em movimento (0,2/s); sujeito que reverte; duas pessoas afastadas; só tela; corte entre dois clipes;
-  sujeito rápido demais; e a variante 16:9 da mesma evidência.
+  sujeito rápido demais; **uma linha do tempo com um clipe reenquadrado e outro não** (o segundo mantém a composição de sempre: comparado
+  pixel a pixel com o mesmo clipe renderizado sozinho, diferença média absoluta 1,18 a 1,20 níveis, limite 2); e a variante 16:9.
 - **Controles negativos** (o oráculo falha quando deve): crop estático perde o sujeito em movimento; trajetória com salto de 0,4 em 5 frames
-  excede o limite de velocidade.
-- **Achado de geometria** (pré-existente, não alterado): o canvas vertical é um **banda 16:9** com o crop em tira dentro dela (tarja preta do
-  estágio) sobre um fundo borrado (`foregroundScale = 1` em toda a produção, ver `caption-canvas-projection.ts`). O sujeito está dentro do crop e
-  a medição lê só a banda; mas na saída 9:16 a tira nítida ocupa ~0,42 da escala. Decidir a composição (para o crop preencher o canvas)
-  é trabalho de outro escopo.
+  excede o limite de velocidade; e, no teste unitário, a composição de antes da correção **reprova** em todo frame reenquadrado.
 
 ## 9. Provas executadas
 
 Contagens e ids literais; "N" é 1 por cena (stand-in determinístico: sem dispersão a reportar, indício e não amostra).
 
-| Prova | Comando / harness | Resultado |
+| Prova | Harness | Resultado |
 | --- | --- | --- |
-| GT no mp4 (9 testes, 8 cenas + controles) | harness, run `w66r-gt-2-4e383d43` | 9 de 9 passaram |
-| GT, 1ª tentativa | run `w66r-gt-1-74890e9d` | 1 de 9 (8 falhas): o oráculo lia o canvas inteiro e o fundo borrado, não a banda 16:9; corrigido no oráculo, nenhum limite relaxado |
-| PG + API (2 testes, `tests/v2/reframe-trajectory.pg.integration.mjs`) | harness (tsx), run `w66r-pg-5-15203dbf` | 2 de 2 passaram |
-| PG, tentativas anteriores | `w66r-pg-1-55aef31c`, `w66r-pg-2-f3ceaf31`, `w66r-pg-3-5881803a`, `w66r-pg-4-6a2bb5cd` | falhas de fixture/expectativa, e um defeito do produto achado e corrigido: o GET de overrides de outro workspace respondia 200 (agora 404 `PROJECT_NOT_FOUND`; proporção como variante = 428) |
-| GT + PG na árvore final (código de `81c7ba4f`; só documentação depois) | harness, run `w66r-final-1-a01a7a28` | GT 9 de 9; PG 2 de 2 |
+| **GT ANTES da correção** (oráculo final, composição antiga), 9 testes | `w66r-gt-before-3-661d89f4` | **3 de 9**: as 6 cenas 9:16 reenquadradas falham, com cobertura mínima **31,9% da largura x 31,8% da altura**, `foreground-does-not-fill-canvas` e `scale-differs-from-cover` em 150 de 150 frames, sujeito ~198 px de canvas fora de onde a especificação o põe; passam as duas cenas sem reframe e a 16:9 (cobertura 99,9% x 99,8%) |
+| GT antes, tentativas com bugs do oráculo (não de produto) | `w66r-gt-before-1-fc0e7b7c`, `w66r-gt-before-2-48dcf674` | a cena só-tela falhava por uma linha de fundo saturado lida como imagem; corrigido no oráculo (lê sujeitos 3 px para dentro da borda), teste unitário acrescentado |
+| **GT DEPOIS da correção**, 10 testes | `w66r-after-2-c24995ad` | **10 de 10**; cobertura mínima **99,6% x 99,8%**; erro máximo do sujeito no canvas 2,1 px; janela medida vs RenderInput 0,32 px; velocidade medida 0,269 e aceleração 0,713 (limites 0,35 e 0,8); cena rápida demais: 29 frames perdem o sujeito, todos dentro de issue localizada; clipe sem reframe vs sozinho 1,2 níveis |
+| GT depois, 1ª tentativa | `w66r-after-1-6d13fcf3` | 8 de 10: a cena mista quebrava o `concat` (SAR 5120:5121 vs 1:1 no clipe composto): **defeito real achado pelo GT**, corrigido (`setsar=1`); o teste da cena rápida contava os frames desculpados contra o erro máximo: corrigido no juiz |
+| PG + API (2 testes, `tests/v2/reframe-trajectory.pg.integration.mjs`), com GET por Versão nomeada (404 de outro workspace e de projeto inexistente; proporção e variante desconhecida = 428 `output-variant-unknown`), direitos revogados no override (422 `ASSET_RIGHTS_BLOCKED`, nada escrito, liberado quando os direitos voltam) e impacto de Versão inteira | `w66r-after-1-6d13fcf3` | 2 de 2 |
+| Pixels e PG do W65 | `w66r-after-1-6d13fcf3` | `caption-placement-pixels` 11/11 **sem asserção alterada**, `prisma-caption-placement` 1/1, `prisma-final-caption-certification` 1/1, `prisma-final-caption-source-evidence` 1/1 |
+| Regressão FFmpeg | `w66r-after-1-6d13fcf3` | `render-geometry-render` 3/3, `reframe-plan-render` 1/1, `format-quality-critic` 1/1, `transcript-rate-render` 2/2, `wave10` 2/2; `wave9` 2/3 (a 3ª mudou de causa, ver seção 10; `w66r-after-2-c24995ad`: 3/3) |
+| Final export (precisa de build do Next) | `w66r-last-1-720fe008` | `w66r-last-1-720fe008` (com `--build`): **2 de 2** (na 1ª rodada, `w66r-after-1-6d13fcf3`, sem build do Next, o 2º teste falhava por falta de `.next`: ambiente, não produto) |
+| `npm test` completo | `w66r-last-1-720fe008` | `w66r-final-2-0bf01d0e` (HEAD `9b38a332`): **3611 testes, 3598 passaram, 0 falharam, 13 pulados** (os mesmos pulados de antes: só-Linux/YuNet e um teste de PG isolado). Junto, no mesmo run: GT 10 de 10 e PG 2 de 2. O `npm test` de `w66r-last-1-720fe008` (3611, 1 falha) foi **contaminado por mim**: a rodada de mutação ainda estava viva e aplicou a mutação do GET de plano durante o run; a falha é exatamente o teste que a mutação deve quebrar. Repetido com a árvore limpa no run acima. |
 
-Medidas do run `w66r-gt-2-4e383d43` (150 frames por cena, todos decodificados): nas 7 cenas rastreadas ou de fallback sem issue de falha, **0 frame
-falhou**; erro máximo da janela medida contra o RenderInput 0,86 px de fonte (limite 3), erro máximo de posição do sujeito 3,06 px (limite 6),
-folga mínima da margem 88,4 px; velocidade medida máxima 0,269 e aceleração medida máxima 0,713 (limites 0,35 e 0,8), RenderInput exato
-0,333 e excesso de aceleração 1,9e-16. Na cena rápida demais, 29 frames perdem o sujeito e **todos** estão dentro de uma issue localizada
-(57 frames sinalizados, 0 falha sem sinalização). Controles: crop estático = 39 frames falhando sem issue; salto = 2,4/s exato, 0,80/s medido.
+## 10. Mutação, regressão e fixtures alteradas
 
-Os ids das execuções de regressão, de mutação e do `npm test` completo estão na seção 10.
+**Mutação** (a regra quebrada com Edit temporário, o teste falha; restaurada, passa; `git status` limpo depois de cada uma):
 
-## 10. Mutação, regressão e `npm test`
-
-**Mutação** (a regra quebrada com Edit temporário, o teste falha; restaurada, passa; `git status` limpo depois de cada uma). Cada mutação foi
-aplicada também contra a prova no mp4/PG pelo harness.
-
-| Regra | Quebra | Teste unitário (domínio) | Prova renderizada / PG |
+| Regra | Quebra | Unitário | Renderizado / PG |
 | --- | --- | --- | --- |
-| Nunca interpolar através de um corte | a amostra seguinte passa a valer mesmo fora do clipe (`server-reframe-roi.ts`) | 9 de 10 passam; falha "ROI ... never across a cut" (caixa de 0,105 em vez de uma só) | run `w66r-gt-mut-a-a6dbfeaf`: 8 de 9; falha a cena de dois clipes (a cena guarda uma terceira posição nos frames cortados) |
-| Limite de velocidade/aceleração | o rastreador sem os dois `clampMagnitude` (`reframe-plan.ts`) | 6 de 10 passam; 4 falham (`Reframe tracking acceleration exceeds its limit`) | run `w66r-gt-mut-b-e76d1237`: 5 de 9; falham as cenas em movimento, a que reverte e a rápida demais |
-| O override nunca muda a observação nem o plano do servidor | o plano do servidor passa a ser decidido já com os overrides (`variant-reframe-plan.ts`) | 9 de 10 passam; falha o teste de precedência (plano do servidor igual) | run `w66r-pg-mut-c-a7c6ce6a`: o arquivo falha (`A manual reframe segment does not name its override`, guarda do planejador) |
+| Nunca interpolar através de um corte | a amostra seguinte vale mesmo fora do clipe | 9 de 10 (`reframe-trajectory-domain`) | `w66r-gt-mut2-a-b95929ab`: 9 de 10, falha a cena de dois clipes |
+| Limite de velocidade/aceleração | o rastreador sem os dois `clampMagnitude` | 6 de 10 | `w66r-gt-mut2-b-0e71fd80`: 6 de 10 (4 falham) |
+| O override nunca muda a observação nem o plano do servidor | plano do servidor decidido com os overrides | 9 de 10 | `w66r-pg-mut2-c-6865e0f9`: o arquivo falha (guarda do planejador) |
+| **O crop preenche o canvas** | o clipe reenquadrado volta pelo quadro de trabalho | `reframe-composition-fill` 2 falhas | `w66r-gt-mut2-f-0c08cd15`: **3 de 10** (as cenas 9:16 reenquadradas falham pela cobertura) |
+| Clipes unidos têm pixels quadrados | sem `setsar=1` no clipe composto | 1 falha | `w66r-gt-mut2-g-dc2020cc`: 9 de 10, a cena mista falha no `concat` |
+| GET de plano checa projeto/workspace/variante com Versão nomeada | volta a pular a checagem | `plan-project-reframe-service` 1 falha ("Missing expected rejection") | (unitário) |
+| Impacto honesto (Versão inteira da variante) | volta a ser a faixa editada | 3 falhas (registro e impacto) | (unitário) |
 
-Restaurado: domínio 10 de 10 (`reframe-trajectory-domain.test.mjs`), GT no mp4 9 de 9 (run `w66r-gt-3-1835ab38`, antes das mutações, sobre a árvore
-que foi restaurada byte a byte) e PG 2 de 2 (`w66r-pg-5-15203dbf`).
+**Asserções pré-existentes alteradas, e por quê** (nenhuma foi afrouxada; cada uma descrevia o layout antigo ou o desenho anterior):
 
-**Regressão no harness** (run `w66r-regress-1-02aaf67b`, 7 passos, todos verdes): `reframe-plan-render` 1/1, `render-geometry-render` 3/3,
-`caption-placement-pixels` 11/11, `format-quality-critic` 1/1, `transcript-rate-render` 2/2, `wave9-combined-journeys` 3/3,
-`wave10-combined-journey` 2/2.
-
-**Fixtures alteradas, e por quê** (nenhuma asserção de comportamento foi afrouxada):
-
-- `wave9`/`wave10` `reframePlanFor` e `project-final-export` `reframeFor`: o plano passa a nomear a **variante estável** a que o render está
-  selado (a geometria do render confere `reframePlan.variantId` com `sourceOutputVariantId(source)`, não com a proporção); duas asserções de
-  `wave9` que comparavam `variantId` a `'9:16'`/`'16:9'` comparam agora com o id estável.
-- `proxy-source-rights` e `command-impact`: os clientes Prisma falsos ganham `v2VariantReframePlan.findFirst -> null` (a leitura do plano
-  persistido da Versão); sem plano, o render é o que sempre foi.
-- `project-output-state-transition` e `renderable-compile-output-state`: os testes que fixavam a lista de tipos do guard SQL e a CHECK de
-  `edit_commands.type` contra o registro leem a primeira definição (com os tipos de então) **e** a definição em vigor (a migração W66r, com o
-  registro de hoje); `public-operation-contracts`: o inventário passa de 391 para 394 capacidades.
-- `reframe-plan.test.mjs`: os testes de domínio ficam como estavam; os dois de fronteira de aplicação/contrato foram reescritos para o serviço
-  e o contrato v3 (a assinatura do serviço e a versão da capacidade mudaram por desenho).
-- `mvp-production-formats.test.mjs`: só o nome importado (`createReframePlan` -> `createResponsiveReframePlan`, que colidia com o planejador).
-
-**`npm test` completo**, pelo harness (binários de FFmpeg fixados), um único passo, run `w66r-full-1-e9d691e6`: **3600 testes, 3587 passaram, 0 falharam,
-13 pulados** (no log: testes só de Linux de pidfd/perception, a ponte YuNet e um teste que exige PostgreSQL isolado). Nenhuma das falhas
-conhecidas de binário de FFmpeg apareceu sob o harness. Uma execução anterior de `npm test` **fora do harness e sem o lock** (o escritor não tinha rodado pelo harness) achou 7
-regressões minhas (fixtures dos clientes Prisma falsos, o plano de `project-final-export` com `variantId` de proporção, e três pins de lista de tipos/
-capacidades); todas corrigidas e cobertas acima. Gates estáticos no fim: `tsc --noEmit`, `lint`, `lint:code`, `lint:whitespace`, `db:v2:validate`
-(321 tabelas, 1436 índices, 1119 FKs), `api:v1:validate` (394 capacidades, 713 schemas, 795 exemplos) e `api:parity:validate`, todos com saída 0.
+- `caption-canvas-projection.test.mjs`, "the reframe crop window reproduces ... the expression": afirmava a **tira** (largura visível do crop no quadro de
+  trabalho e a borda esquerda da tira); passa a afirmar o **preenchimento** (imagem = canvas inteiro; a borda esquerda do crop está na borda esquerda do
+  canvas). Teste novo: um clipe reenquadrado e um não, na mesma projeção, cada um com a sua geometria, e a identidade da projeção.
+- `wave9-combined-journeys.integration.mjs`: o bloqueio duro da saída 9:16 vinha de um "apresentador com pillarbox" que deixava `subject-face` fora da
+  imagem; com o canvas preenchido a geometria não pode mais pôr um sujeito protegido fora dela. O bloqueio passa a ser o que o plano da própria saída 9:16
+  reporta (`REFRAME_SUBJECTS_DO_NOT_FIT`, `reframeIssues` na fonte falsa), localizado nela como antes: `SUBJECT_NOT_VISIBLE` deixa de existir nas duas
+  saídas, o 16:9 não reporta nada `REFRAME_*`, e a decisão por variante é a mesma. (Antes: `reframePlanFor` com `variantId` estável e as duas asserções
+  de `variantId`, ver `4e59a6b7`.)
+- `edit-command-registry.test.mjs`: `apply-variant-reframe-override` sai da lista `partial-range` e entra na `full-timeline` (um render feito de plano é
+  sempre completo); teste novo do impacto.
+- `wave10`, `reframe-plan-render`, `render-geometry-render`, `caption-placement-pixels`, os PG do W65 e do export final: **nenhuma asserção alterada**.
+- Anteriores: `proxy-source-rights` e `command-impact` (clientes falsos com `v2VariantReframePlan`), `project-final-export` (`variantId` estável),
+  os pins SQL de `project-output-state-transition` e `renderable-compile-output-state` (primeira definição e a em vigor), `public-operation-contracts`
+  (391 -> 394), `reframe-plan.test.mjs` (fronteira de aplicação e contrato v3; os testes de domínio ficam), `mvp-production-formats` (só o nome importado).
 
 ## 11. Limites e lacunas abertas
 
@@ -201,9 +209,11 @@ capacidades); todas corrigidas e cobertas acima. Gates estáticos no fim: `tsc -
 - O plano não é carregado por Commands que não são de reframe: um plano é pedido por Versão (e o override exige o plano da Versão base).
 - Uma única fonte de vídeo por linha do tempo; sem identidade de trilha (o pareamento entre amostras é por IoU/distância, não por pessoa).
 - A aceleração é limitada na grade de keyframes, com isenção na borda do quadro e nos degraus manuais; a borda de uma faixa manual é um degrau de 1 frame.
-- O crop manual é só de pan (mesmo tamanho do máximo); clipe em fallback aparece inteiro; mais de 600 keyframes por clipe viram fallback.
+- O crop manual é só de pan (mesmo tamanho do máximo); clipe em fallback aparece inteiro (na composição de sempre: banda 16:9 sobre fundo borrado); mais de
+  600 keyframes por clipe viram fallback.
+- O cover de um crop com a proporção do canvas é exato a menos de ~1 px (404x720 em 540x960 corta ~1 px); um crop de outra proporção é cortado no centro.
 - Motivos de recusa do override (`HIDES_CRITICAL_SUBJECT`, `reframe-plan-required`, `reframe-plan-stale`) ficam internos: o apresentador público
   de erros só publica o conjunto fechado de motivos de consumo, então a API responde 422/428 genéricos (o serviço de aplicação os expõe).
 - A paridade da aprovação do export final (`approvedReframePlanHash`) está provada em teste unitário (`project-final-export.test.mjs`), não em PG.
-- A composição vertical (seção 8) não foi alterada.
-- Os testes de PG e de FFmpeg desta nota rodam só no harness local supervisionado (declarados em `KNOWN_UNRUN_SUITES`), não no CI hospedado.
+- Os testes de PG desta nota rodam só no harness local supervisionado (declarados em `KNOWN_UNRUN_SUITES`); o de FFmpeg está no CI hospedado, onde
+  roda sobre o `ffmpeg-static` do CI (não o do harness), o que não foi observado.
