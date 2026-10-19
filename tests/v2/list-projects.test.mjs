@@ -272,11 +272,11 @@ test('T-FR-236 aligns both workspace capabilities on visible project and operati
 
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
   for (const [id, version] of [
-    ['apollo.projects.workspace.read', '13.1.0'],
-    ['apollo.projects.workspace.current.read', '12.1.0'],
+    ['apollo.projects.workspace.read', '13.2.0'],
+    ['apollo.projects.workspace.current.read', '12.2.0'],
   ]) {
     assert.equal(capabilities.get(id).version, version)
-    assert.equal(capabilities.get(id).outputSchemaRef, 'apollo://schemas/project-workspace/v14')
+    assert.equal(capabilities.get(id).outputSchemaRef, 'apollo://schemas/project-workspace/v15')
   }
   assert.equal(getPublicSchema('apollo://schemas/project-workspace/v6').ref, 'apollo://schemas/project-workspace/v6')
   const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))

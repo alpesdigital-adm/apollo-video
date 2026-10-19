@@ -10,7 +10,9 @@ import { enqueueProjectDirectorRunService } from '../../src/v2/application/enque
 import { runNextProjectDirectorOperationService } from '../../src/v2/application/run-project-director-operation-worker.ts'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
-import { PrismaDirectorRunRepository } from '../../src/v2/infrastructure/prisma/director-run-repository.ts'
+import { PrismaDirectorRunRepository, parseDirectorQualityReport } from '../../src/v2/infrastructure/prisma/director-run-repository.ts'
+import { assertDirectorRunEvidenceConsistency } from '../../src/v2/domain/director-perception-evidence.ts'
+import { serverPerceptionSnapshotId } from '../../src/v2/domain/server-perception-snapshot.ts'
 import { childCommandOf } from '../../src/v2/domain/project-output-state-transition.ts'
 import { ingestedRecordings, ingestedWorld, recompiledChild, worldActor } from './helpers/output-world.mjs'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
@@ -354,6 +356,8 @@ function fixture(options = {}) {
     },
     createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}`,
     compileBrief: createEvidenceBoundBriefCompiler(),
+    ...(options.faceWindows ? { faceWindows: options.faceWindows } : {}),
+    ...(options.materializeSnapshot ? { materializeSnapshot: options.materializeSnapshot } : {}),
   })
   return { repository, service }
 }
@@ -1550,4 +1554,230 @@ test('a review patch that edits a caption drops the transcript words it no longe
   assert.equal(editedCue.text, 'Texto revisado')
   assert.equal(editedCue.sourceWordIndices, undefined, 'the reviewer\'s text is not the transcript words\'')
   assert.deepEqual(otherCue.sourceWordIndices, second.sourceWordIndices, 'an untouched cue keeps its words')
+})
+
+// ---------------------------------------------------------------------------------------------------------------------
+// W64 - the Director decides on the evidence it holds, states how much that is, and asks for what it lacks.
+// ---------------------------------------------------------------------------------------------------------------------
+
+function fakeFaceRequester({ refuse, explode } = {}) {
+  const operations = new Map()
+  const calls = []
+  return {
+    calls, operations,
+    async request(input) {
+      calls.push(input)
+      if (explode) throw new Error('database unavailable')
+      if (refuse) throw new DomainError(refuse, 'refused by the admission')
+      const known = operations.get(input.idempotencyKey)
+      if (known) return { operationId: known, replayed: true }
+      const operationId = `operation-face-${operations.size + 1}`
+      operations.set(input.idempotencyKey, operationId)
+      return { operationId, replayed: false }
+    },
+  }
+}
+
+const evidenceOf = (run, decisionId) => run.decisions.find((decision) => decision.id === decisionId).perceptionEvidence
+const modalityOf = (evidence, modality) => evidence.modalities.find((item) => item.modality === modality)
+
+test('W64 with no perception at all the plan is review - never the old flag, never auto-apply - and every gated decision carries its evidence ids', async () => {
+  const { repository, service } = fixture()
+  const { run } = await service(request())
+  const report = run.qualityReport
+  assert.equal(report.schemaVersion, 'director-quality-report/v4')
+  assert.equal(report.status, 'review-required')
+  assert.equal(report.faceSafety.status, 'unknown')
+  assert.equal(report.hardChecks.subtitlesFaceSafe, false, 'face safety is still claimed by nobody')
+  // all six decisions were graded by policy v2 and say so; only crop, caption and insert stand on perception
+  assert.ok(run.decisions.every((decision) => decision.bandPolicy.policyHash === CONFIDENCE_BAND_POLICY_V2_SHA256))
+  assert.deepEqual(run.decisions.filter((decision) => decision.perceptionEvidence).map((decision) => [decision.id, decision.decisionType]).toSorted(),
+    [['decision-insert-selection', 'insert'], ['decision-layout-inset', 'crop'], ['decision-subtitle-bottom', 'caption']])
+  const crop = run.decisions.find((decision) => decision.id === 'decision-layout-inset')
+  const caption = run.decisions.find((decision) => decision.id === 'decision-subtitle-bottom')
+  const insert = run.decisions.find((decision) => decision.id === 'decision-insert-selection')
+  // absent evidence is review for the draft types and never auto-apply
+  assert.deepEqual([crop.perceptionEvidence.tier, crop.confidenceBand], ['absent', 'review'])
+  assert.deepEqual([caption.perceptionEvidence.tier, caption.confidenceBand], ['absent', 'review'])
+  assert.deepEqual(caption.perceptionEvidence.modalities.map((item) => [item.modality, item.tier, item.reasonCode]), [
+    ['transcript-word', 'partial', 'CONFIDENCE_NOT_MEASURED'], ['face', 'absent', 'NO_PRODUCER_RUN'], ['ocr', 'absent', 'NO_PRODUCER_RUN']])
+  // nothing is proposed beyond the master, so the omitted insert needs no evidence and is the one decision that auto-applies
+  assert.deepEqual([insert.perceptionEvidence.tier, insert.confidenceBand, insert.perceptionEvidence.modalities.length], ['high', 'auto-apply', 0])
+  // the evidence ids: the snapshot every decision and the report name is the one the run's perception names
+  const snapshotId = serverPerceptionSnapshotId(run.perception.serverSnapshot.snapshotHash)
+  assert.equal(report.perceptionEvidence.snapshot.id, snapshotId)
+  assert.equal(report.perceptionEvidence.snapshot.snapshotHash, run.perception.serverSnapshot.snapshotHash)
+  for (const decision of [crop, caption, insert]) {
+    assert.equal(decision.perceptionEvidence.snapshot.id, snapshotId)
+    assert.ok(decision.evidenceRefs.includes(snapshotId), `${decision.id} names the snapshot among its evidence`)
+    assert.equal(report.perceptionEvidence.decisions.find((entry) => entry.decisionId === decision.id).evidenceHash, decision.perceptionEvidence.evidenceHash)
+  }
+  // the log carries the same ids
+  const logged = repository.lastBundle.decisionLog.entries.find((entry) => entry.id === 'decision-subtitle-bottom')
+  assert.ok(logged.evidence.some((item) => item.ref === snapshotId))
+  // the critic distinguishes the tiers: the historical code for absent face, one review warning per non-auto decision, no hard issue
+  const codes = report.issues.map((issue) => [issue.code, issue.targetId])
+  assert.ok(codes.some(([code]) => code === 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED'))
+  assert.ok(!codes.some(([code]) => code === 'FACE_EVIDENCE_PARTIAL_REVIEW_REQUIRED'))
+  assert.deepEqual(codes.filter(([code]) => code === 'DECISION_EVIDENCE_REVIEW_REQUIRED').map(([, target]) => target).toSorted(),
+    ['decision-layout-inset', 'decision-subtitle-bottom'])
+  assert.equal(report.issues.filter((issue) => issue.severity === 'hard').length, 0)
+  // the report's coverage and modalities are the perception timeline's own, kind by kind
+  for (const entry of report.perceptionEvidence.coverage) {
+    const stated = run.perception.timeline.coverage.find((item) => item.kind === entry.kind)
+    assert.deepEqual([entry.state, entry.examinedMs, entry.reasonCode], [stated.state, stated.observedMs, stated.reasonCode ?? null], entry.kind)
+  }
+  assert.equal(report.perceptionEvidence.modalities.find((item) => item.modality === 'face').tier, 'absent')
+  assert.equal(report.perceptionEvidence.rights.certain, true)
+  assert.equal(report.perceptionEvidence.faceWindows.status, 'not-configured')
+  assert.equal(report.perceptionEvidence.faceWindows.reasonCode, 'FACE_REQUESTER_NOT_CONFIGURED')
+  assert.deepEqual(report.perceptionEvidence.faceWindows.entries.map((entry) => [entry.startSourceFrame, entry.endSourceFrame, entry.state]),
+    [[0, 115, 'deferred'], [145, 275, 'deferred'], [305, 420, 'deferred']])
+  // the stored bytes read back through the strict parser, and a tampered tier does not
+  const stored = repository.lastBundle.snapshots.find((item) => item.kind === 'quality-report')
+  const parse = (contentJson) => parseDirectorQualityReport({ contentJson, contentHash: stored.contentHash, contentSchemaVersion: 4, objective: run.objective, rubricRef: run.rubricRef })
+  assert.equal(parse(stored.contentJson).perceptionEvidence.evidenceHash, report.perceptionEvidence.evidenceHash)
+  const forged = JSON.parse(stored.contentJson)
+  forged.perceptionEvidence.modalities.find((item) => item.modality === 'face').tier = 'high'
+  assert.throws(() => parse(JSON.stringify(forged)), (error) => error.code === 'PERSISTENCE_CONFLICT')
+  assertDirectorRunEvidenceConsistency({ evidence: report.perceptionEvidence, baseVersionId: run.perception.inputVersionId, perception: run.perception, decisions: run.decisions })
+  // a decision graded under another band than its tier gives is refused by the consistency check
+  assert.throws(() => assertDirectorRunEvidenceConsistency({ evidence: report.perceptionEvidence, baseVersionId: run.perception.inputVersionId, perception: run.perception,
+    decisions: run.decisions.map((decision) => decision.id === 'decision-layout-inset' ? { ...decision, confidenceBand: 'auto-apply' } : decision) }),
+  (error) => error.code === 'PERSISTENCE_CONFLICT')
+})
+
+test('W64 the Director asks for the face windows its plan needs, never waits for them, and a window requested is pending evidence, not absent evidence', async () => {
+  const requester = fakeFaceRequester()
+  const { repository, service } = fixture({ faceWindows: requester })
+  const { run } = await service(request())
+  assert.deepEqual(requester.calls.map((call) => [call.sourceArtifactId, call.window.startSourceFrame, call.window.endSourceFrame]),
+    [['artifact-source3', 0, 115], ['artifact-source3', 145, 275], ['artifact-source3', 305, 420]], 'the windows the three source spans need, widened by the sample gap')
+  assert.ok(requester.calls.every((call) => /^dfw-[a-f0-9]{56}$/.test(call.idempotencyKey)), 'a deterministic key')
+  assert.equal(new Set(requester.calls.map((call) => call.idempotencyKey)).size, 3)
+  assert.ok(requester.calls.every((call) => call.workspaceId === 'workspace-1' && call.projectId === 'project-1' && call.authenticationAudit.clientId === 'client-1'),
+    'asked as the actor of the run')
+  const windows = run.qualityReport.perceptionEvidence.faceWindows
+  assert.deepEqual([windows.status, windows.requiredCount, windows.requestedCount, windows.satisfiedCount, windows.refusedCount], ['planned', 3, 3, 0, 0])
+  assert.deepEqual(windows.entries.map((entry) => entry.operationId), ['operation-face-1', 'operation-face-2', 'operation-face-3'])
+  // what was asked for is pending: the face tier is absent FOR THAT REASON, over exactly the ranges that were asked for
+  const face = modalityOf(evidenceOf(run, 'decision-layout-inset'), 'face')
+  assert.deepEqual([face.tier, face.reasonCode, face.pendingMs, face.pendingMs === face.rangeMs], ['absent', 'FACE_EVIDENCE_PENDING', face.rangeMs, true])
+  assert.equal(modalityOf(evidenceOf(run, 'decision-subtitle-bottom'), 'face').reasonCode, 'FACE_EVIDENCE_PENDING')
+  assert.equal(run.decisions.find((decision) => decision.id === 'decision-layout-inset').confidenceBand, 'review')
+  assert.match(run.decisions.find((decision) => decision.id === 'decision-subtitle-bottom').reason, /FACE_EVIDENCE_PENDING/)
+  // replay of the same run asks nothing
+  const replay = await service(request())
+  assert.equal(replay.replayed, true)
+  assert.equal(requester.calls.length, 3)
+  assert.equal(stableSerialize(replay.run.qualityReport), stableSerialize(run.qualityReport))
+  void repository
+})
+
+test('W64 asking again for the same plan is the same operations: a run refused at commit leaves requests the next attempt replays', async () => {
+  const requester = fakeFaceRequester()
+  const { repository, service } = fixture({ faceWindows: requester })
+  const commit = repository.commitWithCanonicalSnapshots.bind(repository)
+  repository.commitWithCanonicalSnapshots = async () => { throw new DomainError('PERSISTENCE_CONFLICT', 'raced before commit') }
+  await assert.rejects(service(request({ idempotency: { key: 'director-attempt-1' } })), (error) => error.code === 'PERSISTENCE_CONFLICT')
+  assert.equal(requester.operations.size, 3)
+  repository.commitWithCanonicalSnapshots = commit
+  const { run } = await service(request({ idempotency: { key: 'director-attempt-2' } }))
+  assert.equal(requester.calls.length, 6, 'both attempts asked')
+  assert.equal(requester.operations.size, 3, 'and the second created nothing: the same keys are the same operations')
+  assert.deepEqual(requester.calls.slice(0, 3).map((call) => call.idempotencyKey), requester.calls.slice(3).map((call) => call.idempotencyKey))
+  // the second attempt's report says what the admission answered: every window was a replay of an operation that already existed
+  const entries = run.qualityReport.perceptionEvidence.faceWindows.entries
+  assert.deepEqual(entries.map((entry) => [entry.state, entry.replayed]), [['requested', true], ['requested', true], ['requested', true]])
+  assert.deepEqual(entries.map((entry) => entry.operationId), ['operation-face-1', 'operation-face-2', 'operation-face-3'], 'the very operations the first attempt created')
+})
+
+test('W64 a refused request is reported and the run goes on; any other failure is not swallowed; a stale base asks for nothing', async () => {
+  const refusing = fakeFaceRequester({ refuse: 'PRECONDITION_REQUIRED' })
+  const refused = await fixture({ faceWindows: refusing }).service(request())
+  const windows = refused.run.qualityReport.perceptionEvidence.faceWindows
+  assert.deepEqual([windows.requestedCount, windows.refusedCount], [0, 3])
+  assert.ok(windows.entries.every((entry) => entry.state === 'refused' && entry.reasonCode === 'PRECONDITION_REQUIRED' && entry.operationId === null))
+  const face = modalityOf(evidenceOf(refused.run, 'decision-layout-inset'), 'face')
+  assert.deepEqual([face.tier, face.reasonCode], ['absent', 'FACE_EVIDENCE_REQUEST_FAILED'])
+  assert.equal(refused.run.qualityReport.status, 'review-required')
+
+  const exploding = fakeFaceRequester({ explode: true })
+  await assert.rejects(fixture({ faceWindows: exploding }).service(request()), /database unavailable/)
+
+  const stale = fakeFaceRequester()
+  await assert.rejects(fixture({ faceWindows: stale }).service(request({ baseHash: 'c'.repeat(64), idempotency: { key: 'director-stale-w64' } })),
+    (error) => error instanceof DomainError && error.code === 'VERSION_CONFLICT')
+  assert.equal(stale.calls.length, 0, 'a stale base is refused before anything is asked for')
+})
+
+test('W64 rights are integral: one insert whose rights are revoked, expired or unknown blocks the plan and names it', async () => {
+  const insertPlan = { selectedInsert: true, head: insertHead, offered: insertWorld.adoptable }
+  const approved = fixture(insertPlan)
+  const ok = await approved.service(request({ baseHash: insertHead.version.baseHash }))
+  assert.equal(ok.run.qualityReport.perceptionEvidence.rights.certain, true)
+  assert.deepEqual(ok.run.qualityReport.perceptionEvidence.rights.sources.map((source) => [source.artifactId, source.certain]),
+    [['artifact-selected-insert-1', true], ['artifact-source3', true]])
+  const insertDecision = ok.run.decisions.find((decision) => decision.id === 'decision-insert-selection')
+  assert.deepEqual([insertDecision.perceptionEvidence.tier, insertDecision.confidenceBand], ['high', 'auto-apply'], 'an insert on certain rights is the one thing that can auto-apply')
+  assert.deepEqual(modalityOf(insertDecision.perceptionEvidence, 'rights').envelopeIds, ['rights-snapshot-insert-1'])
+  const base = { ...insertPlan, idempotency: { key: 'director-insert-rights' } }
+  const cases = {
+    revoked: [{ state: 'present', snapshotId: 'rights-revoked', snapshotHash: 'e'.repeat(64), status: 'revoked', consentStatus: 'not-required' }, 'RIGHTS_STATUS_REVOKED'],
+    expired: [{ state: 'present', snapshotId: 'rights-expired', snapshotHash: 'e'.repeat(64), status: 'approved', consentStatus: 'not-required', expiresAt: '2026-07-18T21:59:59.000Z' }, 'RIGHTS_EXPIRED'],
+    consentPending: [{ state: 'present', snapshotId: 'rights-consent', snapshotHash: 'e'.repeat(64), status: 'approved', consentStatus: 'pending' }, 'CONSENT_STATUS_PENDING'],
+    missing: [{ state: 'missing' }, 'RIGHTS_UNKNOWN'],
+  }
+  for (const [name, [insertRights, reasonCode]] of Object.entries(cases)) {
+    await assert.rejects(fixture({ ...base, insertRights }).service(request({ baseHash: insertHead.version.baseHash, idempotency: { key: `director-insert-${name}` } })),
+      (error) => error instanceof DomainError && error.code === 'INVALID_RENDER_INPUT' &&
+        error.details.gateFailures.includes('rights-compliance') &&
+        error.details.uncertainRights.includes(`artifact-selected-insert-1:${reasonCode}`) && error.details.blockedDecisions.includes('decision-insert-selection'), name)
+  }
+  // a source the context does not list is unknown, which is not certain
+  const unlisted = fixture(insertPlan)
+  const readContext = unlisted.repository.readContext.bind(unlisted.repository)
+  unlisted.repository.readContext = async (input) => {
+    const context = await readContext(input)
+    return { ...context, timelineSourceRights: context.timelineSourceRights.filter((entry) => entry.artifactId !== 'artifact-selected-insert-1') }
+  }
+  await assert.rejects(unlisted.service(request({ baseHash: insertHead.version.baseHash, idempotency: { key: 'director-insert-unlisted' } })),
+    (error) => error.code === 'INVALID_RENDER_INPUT' && error.details.uncertainRights.includes('artifact-selected-insert-1:RIGHTS_UNKNOWN'))
+  // and the master alone being approved is not enough when the context lists no other source: a controlled context states the master only
+  const masterOnly = fixture({ ...insertPlan })
+  const masterContext = masterOnly.repository.readContext.bind(masterOnly.repository)
+  masterOnly.repository.readContext = async (input) => { const { timelineSourceRights: _dropped, ...rest } = await masterContext(input); return rest }
+  await assert.rejects(masterOnly.service(request({ baseHash: insertHead.version.baseHash, idempotency: { key: 'director-insert-master-only' } })),
+    (error) => error.code === 'INVALID_RENDER_INPUT' && error.details.uncertainRights.length === 1)
+})
+
+test('W64 a caller\'s observation set changes nothing: it is not an input of the Director, and a Director given one decides exactly as without', async () => {
+  const clean = await fixture().service(request())
+  const poisoned = fixture()
+  const readContext = poisoned.repository.readContext.bind(poisoned.repository)
+  const observationSet = { schemaVersion: 'reframe-observations/v1', id: 'caller-observations-1', observations: [{ id: 'face-everywhere', kind: 'face', startFrame: 0, endFrame: 300 }] }
+  poisoned.repository.readContext = async (input) => ({ ...await readContext(input), observationSet, observations: observationSet.observations,
+    perception: { observationSet }, faceCoverage: 'complete', faceSafety: { status: 'verified' } })
+  const result = await poisoned.service({ ...request(), observationSet, observations: observationSet.observations, faceSafe: true })
+  assert.equal(stableSerialize(result.run.decisions), stableSerialize(clean.run.decisions))
+  assert.equal(stableSerialize(result.run.qualityReport), stableSerialize(clean.run.qualityReport))
+  assert.equal(stableSerialize(result.run.perception), stableSerialize(clean.run.perception))
+  assert.equal(result.run.qualityReport.perceptionEvidence.evidenceHash, clean.run.qualityReport.perceptionEvidence.evidenceHash)
+  assert.equal(result.run.qualityReport.faceSafety.status, 'unknown')
+  assert.ok(result.run.decisions.filter((decision) => decision.perceptionEvidence).every((decision) => decision.perceptionEvidence.tier !== 'high' || decision.id === 'decision-insert-selection'))
+  assert.equal(modalityOf(evidenceOf(result.run, 'decision-layout-inset'), 'face').tier, 'absent')
+})
+
+test('W64 the result Version is materialized after the commit and never before it; a failure there is not the run\'s failure; a replay asks nothing', async () => {
+  const materialized = []
+  const { repository, service } = fixture({ materializeSnapshot: async (input) => { materialized.push(input); throw new Error('storage hiccup') } })
+  const first = await service(request())
+  assert.deepEqual(materialized, [{ workspaceId: 'workspace-1', projectId: 'project-1', projectVersionId: first.version.id }])
+  assert.equal(repository.currentVersion.id, first.version.id, 'the run is sealed whatever the materialization did')
+  assert.equal((await service(request())).replayed, true)
+  assert.equal(materialized.length, 1)
+  const refused = []
+  const failing = fixture({ materializeSnapshot: async (input) => { refused.push(input) } })
+  await assert.rejects(failing.service(request({ baseHash: 'c'.repeat(64), idempotency: { key: 'director-stale-materialize' } })), (error) => error.code === 'VERSION_CONFLICT')
+  assert.equal(refused.length, 0)
 })

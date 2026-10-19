@@ -735,6 +735,140 @@ const directorQualityReportReadSchemaV1 = {
     },
   },
 } as const
+// W64. The perception evidence section of `director-quality-report/v4`: the snapshot the critic assessed, the two policies that graded it
+// (by hash), the tier of every perception kind, the rights verdicts, the face windows the plan needed and what was asked for, and a digest
+// of every crop, caption and insert decision. See `docs/quality/w64-director-perception.md`.
+const evidenceTierSchema = { enum: ['high', 'partial', 'absent'] } as const
+const evidenceReasonCodeSchema = { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' } as const
+const evidenceMsSchema = { type: 'integer', minimum: 0 } as const
+const evidenceModalityAssessmentSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['modality', 'tier', 'reasonCode', 'rangeMs', 'examinedMs', 'denseMs', 'pendingMs', 'confidence', 'confidenceBasis',
+    'ceilingApplied', 'envelopeIds', 'envelopeCount', 'observationIds', 'observationCount', 'observationIdsHash'],
+  properties: {
+    modality: { enum: ['transcript-word', 'speaker', 'silence', 'face', 'object', 'shot', 'motion', 'ocr', 'image-insert', 'rights'] },
+    tier: evidenceTierSchema, reasonCode: evidenceReasonCodeSchema,
+    rangeMs: evidenceMsSchema, examinedMs: evidenceMsSchema, denseMs: evidenceMsSchema, pendingMs: evidenceMsSchema,
+    confidence: { anyOf: [{ type: 'null' }, { type: 'number', minimum: 0, maximum: 1 }] },
+    confidenceBasis: { enum: ['producer-reported', 'deterministic-measurement', 'policy-prior', 'none'] },
+    ceilingApplied: { type: 'boolean' },
+    envelopeIds: { type: 'array', maxItems: 64, items: { type: 'string', minLength: 1, maxLength: 128 } },
+    envelopeCount: evidenceMsSchema,
+    observationIds: { type: 'array', maxItems: 64, items: { type: 'string', minLength: 1, maxLength: 128 } },
+    observationCount: evidenceMsSchema, observationIdsHash: sha256Schema,
+  },
+} as const
+const directorPerceptionEvidenceReportSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'snapshot', 'policy', 'coverage', 'modalities', 'rights', 'faceWindows', 'decisions', 'evidenceHash'],
+  properties: {
+    schemaVersion: { const: 'director-perception-evidence/v1' },
+    snapshot: {
+      type: 'object', additionalProperties: false, required: ['id', 'snapshotHash', 'projectVersionId', 'timelineHash', 'durationMs'],
+      properties: { id: idSchema, snapshotHash: sha256Schema, projectVersionId: idSchema, timelineHash: sha256Schema, durationMs: { type: 'integer', minimum: 1 } },
+    },
+    policy: {
+      type: 'object', additionalProperties: false, required: ['bandPolicy', 'rubric'],
+      properties: {
+        bandPolicy: { type: 'object', additionalProperties: false, required: ['schemaVersion', 'policyHash'],
+          properties: { schemaVersion: { const: 'confidence-band-policy/v2' }, policyHash: sha256Schema } },
+        rubric: { type: 'object', additionalProperties: false, required: ['schemaVersion', 'rubricHash'],
+          properties: { schemaVersion: { const: 'director-evidence-rubric/v1' }, rubricHash: sha256Schema } },
+      },
+    },
+    coverage: {
+      type: 'array', minItems: 9, maxItems: 9,
+      items: {
+        type: 'object', additionalProperties: false, required: ['kind', 'state', 'examinedMs', 'durationMs', 'reasonCode'],
+        properties: {
+          kind: { enum: ['transcript-word', 'speaker', 'silence', 'face', 'object', 'shot', 'motion', 'ocr', 'image-insert'] },
+          state: { enum: ['absent', 'partial', 'complete'] }, examinedMs: evidenceMsSchema, durationMs: { type: 'integer', minimum: 1 },
+          reasonCode: { anyOf: [{ type: 'null' }, evidenceReasonCodeSchema] },
+        },
+      },
+    },
+    modalities: { type: 'array', minItems: 9, maxItems: 9, items: evidenceModalityAssessmentSchema },
+    rights: {
+      type: 'object', additionalProperties: false, required: ['certain', 'sources'],
+      properties: {
+        certain: { type: 'boolean' },
+        sources: {
+          type: 'array', maxItems: 64,
+          items: {
+            type: 'object', additionalProperties: false, required: ['artifactId', 'certain', 'reasonCode', 'snapshotId', 'snapshotHash'],
+            properties: { artifactId: idSchema, certain: { type: 'boolean' }, reasonCode: evidenceReasonCodeSchema,
+              snapshotId: { anyOf: [{ type: 'null' }, idSchema] }, snapshotHash: { anyOf: [{ type: 'null' }, sha256Schema] } },
+          },
+        },
+      },
+    },
+    faceWindows: {
+      type: 'object', additionalProperties: false,
+      required: ['schemaVersion', 'status', 'reasonCode', 'requiredCount', 'satisfiedCount', 'requestedCount', 'refusedCount', 'deferredCount',
+        'requestLimit', 'entries', 'entriesTruncated'],
+      properties: {
+        schemaVersion: { const: 'director-face-window-requests/v1' },
+        status: { enum: ['planned', 'not-configured', 'timeline-unsupported'] },
+        reasonCode: { anyOf: [{ type: 'null' }, evidenceReasonCodeSchema] },
+        requiredCount: evidenceMsSchema, satisfiedCount: evidenceMsSchema, requestedCount: evidenceMsSchema,
+        refusedCount: evidenceMsSchema, deferredCount: evidenceMsSchema, requestLimit: { type: 'integer', minimum: 1 },
+        entriesTruncated: { type: 'boolean' },
+        entries: {
+          type: 'array', maxItems: 300,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['sourceArtifactId', 'startSourceFrame', 'endSourceFrame', 'state', 'operationId', 'idempotencyKey', 'replayed', 'reasonCode'],
+            properties: {
+              sourceArtifactId: idSchema, startSourceFrame: evidenceMsSchema, endSourceFrame: { type: 'integer', minimum: 1 },
+              state: { enum: ['satisfied', 'requested', 'refused', 'deferred'] },
+              operationId: { anyOf: [{ type: 'null' }, idSchema] },
+              idempotencyKey: { anyOf: [{ type: 'null' }, { type: 'string', minLength: 1, maxLength: 128 }] },
+              replayed: { anyOf: [{ type: 'null' }, { type: 'boolean' }] },
+              reasonCode: { anyOf: [{ type: 'null' }, evidenceReasonCodeSchema] },
+            },
+          },
+        },
+      },
+    },
+    decisions: {
+      type: 'array', maxItems: 64,
+      items: {
+        type: 'object', additionalProperties: false, required: ['decisionId', 'decisionType', 'tier', 'band', 'confidence', 'evidenceHash', 'reasonCodes'],
+        properties: {
+          decisionId: idSchema, decisionType: { enum: ['crop', 'caption', 'insert'] }, tier: evidenceTierSchema,
+          band: { enum: ['auto-apply', 'review', 'block'] }, confidence: { type: 'number', minimum: 0, maximum: 1 },
+          evidenceHash: sha256Schema, reasonCodes: { type: 'array', maxItems: 16, items: evidenceReasonCodeSchema },
+        },
+      },
+    },
+    evidenceHash: sha256Schema,
+  },
+} as const
+const directorQualityReportReadSchemaV3 = {
+  ...directorQualityReportReadSchema,
+  properties: {
+    ...directorQualityReportReadSchema.properties,
+    qualitySnapshot: {
+      ...directorQualityReportReadSchema.properties.qualitySnapshot,
+      properties: { ...directorQualityReportReadSchema.properties.qualitySnapshot.properties, contentSchemaVersion: { enum: [3, 4] } },
+    },
+    report: {
+      ...directorQualityReportReadSchema.properties.report,
+      properties: {
+        ...directorQualityReportReadSchema.properties.report.properties,
+        schemaVersion: { enum: ['director-quality-report/v3', 'director-quality-report/v4'] },
+        desiredActionRef: { type: 'object', additionalProperties: true, description: 'The canonical desired action every consumer of the run shares.' },
+        perceptionEvidence: directorPerceptionEvidenceReportSchema,
+      },
+      // v4 states the perception its plan stood on; v3, born before the rubric, cannot.
+      allOf: [{
+        if: { type: 'object', properties: { schemaVersion: { const: 'director-quality-report/v4' } }, required: ['schemaVersion'] },
+        then: { required: ['perceptionEvidence'], properties: { perceptionEvidence: {} } },
+        else: { not: { required: ['perceptionEvidence'], properties: { perceptionEvidence: {} } } },
+      }],
+    },
+  },
+} as const
 const workspaceLutSchema = {
   type: 'object', additionalProperties: false, required: ['id', 'workspaceId', 'status', 'currentVersion'],
   properties: {
@@ -25428,6 +25562,12 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
       properties: { qualityReport: directorQualityReportReadSchema },
     }),
   ),
+  defineSchema('director-quality-report-read', 3, 'Read Director quality with the perception evidence tiers its plan stood on',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['qualityReport'],
+      properties: { qualityReport: directorQualityReportReadSchemaV3 },
+    }),
+  ),
   defineSchema('create-director-budget-request', 1, 'Create versioned limits for one Director run before paid work', {
     type: 'object', additionalProperties: false, required: ['runId', 'limits'],
     properties: { runId: idSchema, limits: directorBudgetUsageSchema },
@@ -29069,8 +29209,10 @@ function derivedSchema(
   from: string,
   to: Readonly<{ id: string; version: number; title: string }>,
   patch: (body: SchemaNode) => void,
+  /** Schemas this module derived itself and the source may be one of (a version of a version). */
+  derived: readonly PublicSchemaDefinition[] = [],
 ): PublicSchemaDefinition {
-  const source = PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS.find((definition) => definition.ref === from)
+  const source = [...PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS, ...derived].find((definition) => definition.ref === from)
   assertDomain(source !== undefined, 'INVALID_PUBLIC_SCHEMA', 'Derived public schema has no source', { from })
   const { $schema: _dialect, $id: _id, title: _title, ...contract } = source!.schema as SchemaNode
   const body = structuredClone(contract) as SchemaNode
@@ -29143,6 +29285,14 @@ const workspaceOutputsSchema = {
 }
 
 const variantIdProperty = (description: string) => ({ ...idSchema, description })
+
+const PROJECT_WORKSPACE_V14 = derivedSchema('apollo://schemas/project-workspace/v13', {
+  id: 'project-workspace', version: 14, title: 'Project workspace with the outputs of the current Version',
+}, (body) => {
+  const data = schemaNode(body, 'properties', 'data')
+  data.required = [...(data.required as string[]), 'outputs']
+  schemaNode(data, 'properties').outputs = workspaceOutputsSchema
+})
 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   ...PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS,
@@ -29221,13 +29371,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       description: 'Aspect ratio preset of the export. It must equal the aspect ratio of the output named by variantId; it never selects the output.',
     }
   }),
-  derivedSchema('apollo://schemas/project-workspace/v13', {
-    id: 'project-workspace', version: 14, title: 'Project workspace with the outputs of the current Version',
+  PROJECT_WORKSPACE_V14,
+  // W64. A Director run graded by confidence-band-policy/v2 types its crop, caption and insert decisions, and a decision of those types
+  // is `review` whenever its evidence is not high - so they appear among a run's uncertainties. A published schema never changes under
+  // its ref: this is the version whose uncertainty `type` names them.
+  derivedSchema('apollo://schemas/project-workspace/v14', {
+    id: 'project-workspace', version: 15, title: 'Project workspace with evidence-gated Director uncertainty types',
   }, (body) => {
-    const data = schemaNode(body, 'properties', 'data')
-    data.required = [...(data.required as string[]), 'outputs']
-    schemaNode(data, 'properties').outputs = workspaceOutputsSchema
-  }),
+    const runs = schemaNode(body, 'properties', 'data', 'properties', 'directorRuns', 'items', 'properties')
+    const uncertainty = schemaNode(runs, 'uncertainties', 'items', 'properties', 'type')
+    uncertainty.enum = [...(uncertainty.enum as string[]), 'crop', 'caption', 'insert']
+  }, [PROJECT_WORKSPACE_V14]),
 ])
 
 const schemasByRef = new Map(PUBLIC_SCHEMAS.map((definition) => [definition.ref, definition]))
