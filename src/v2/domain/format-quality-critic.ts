@@ -225,7 +225,7 @@ export function critiqueOutputFormat(input: Readonly<{
       SUBJECTS_DO_NOT_FIT: `The subjects cannot be framed together in ${input.format}; no crop shows them all.`,
       TRACKING_LIMIT_EXCEEDED: `The ${input.format} crop cannot follow the subject within its speed and acceleration limits.`,
       PERCEPTION_UNCERTAIN: `The ${input.format} crop rests on evidence that is absent, refused or under the confidence floor.`,
-      NO_SUBJECT_OBSERVATION: `No subject was observed in this stretch of ${input.format}; it is shown uncropped.`,
+      NO_SUBJECT_OBSERVATION: `No subject was observed in this stretch of ${input.format}; its crop is carried over from the nearest framed subject, or the whole clip is shown when none was framed in it.`,
     }
     add({
       code: `REFRAME_${issue.code}` as FormatQualityCode, severity: issue.severity, message: messages[issue.code],

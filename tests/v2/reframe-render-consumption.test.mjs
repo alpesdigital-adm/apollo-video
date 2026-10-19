@@ -36,6 +36,10 @@ test('W66r the reframe issues of one variant block or warn only that variant, lo
   const reviewReport = critique(review, { width: 540, height: 960 }, '9:16', 'preset-9x16')
   assert.deepEqual([reviewReport.status, reviewReport.exportAllowed, reviewReport.issues.map((issue) => [issue.code, issue.severity])],
     ['warning', true, [['REFRAME_NO_SUBJECT_OBSERVATION', 'warning']]])
+  // the message says what the plan really does with a stretch where no subject was seen: the crop is carried over inside a clip that has a
+  // framed subject, and only a clip with none is shown whole - it never claims the stretch is shown uncropped
+  assert.match(reviewReport.issues[0].message, /carried over from the nearest framed subject, or the whole clip is shown when none was framed in it/)
+  assert.doesNotMatch(reviewReport.issues[0].message, /uncropped/)
   // an issue of another output, or outside the rendered timeline, is not evidence about these frames
   assert.throws(() => critiqueOutputFormat({ outputSpecId: 'preset-16x9', format: '16:9', proxyHash: PROXY_SHA, map: map({ width: 960, height: 540 }),
     reframeIssues: blocked.issues }), /another output/)

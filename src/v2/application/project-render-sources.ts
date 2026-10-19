@@ -1,4 +1,5 @@
 import { assertDomain } from '../domain/errors.ts'
+import { REFRAME_COMPOSITION_ID } from '../domain/render-reframe-plan.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
 import { FINAL_CAPTION_CERTIFICATION_POLICY_SHA256 } from '../domain/final-caption-certification.ts'
 import type {
@@ -47,6 +48,8 @@ export function projectFinalRenderInputHash(input: Readonly<Record<string, unkno
   requireConsumptionSealHash(input.outputConsumptionSealHash)
   return calculateVersionHash({
     ...input, kind: 'project-final-export/v2', assEmissionPolicy: ASS_EMISSION_POLICY,
+    // W66r. A render made from a persisted reframe plan names the geometry that laid its crop on the canvas; one made without a plan does not.
+    ...(typeof input.reframeRecordHash === 'string' ? { reframeComposition: REFRAME_COMPOSITION_ID } : {}),
     captionCertificationPolicySha256: FINAL_CAPTION_CERTIFICATION_POLICY_SHA256,
   })
 }
@@ -106,7 +109,7 @@ export function projectProxyRenderInputHash(input: {
     outputConsumptionSealHash: requireConsumptionSealHash(source.outputConsumption?.sealHash),
     // W66r. The persisted reframe plan changes the pixels, so another plan is another input. Absent when none was persisted, which keeps the
     // identity of every render made before plans existed.
-    ...(source.reframeRecordHash ? { reframeRecordHash: source.reframeRecordHash } : {}),
+    ...(source.reframeRecordHash ? { reframeRecordHash: source.reframeRecordHash, reframeComposition: REFRAME_COMPOSITION_ID } : {}),
   }
   return calculateVersionHash(source.unchangedReuse
     ? {

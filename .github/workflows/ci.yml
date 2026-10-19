@@ -376,6 +376,9 @@ jobs:
       - name: Run editorial renderer goldens
         run: npm run test:integration:editorial-renderer
 
+      - name: Run reframe trajectory goldens on the rendered mp4
+        run: npm run test:integration:reframe-trajectory
+
       - name: Run transcript retiming worker goldens
         run: npm run test:integration:transcript-rate
 

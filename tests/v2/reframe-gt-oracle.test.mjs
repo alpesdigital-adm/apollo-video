@@ -281,6 +281,21 @@ test('W66r GT blocked and reviewable scenes: every frame the crop cannot keep is
   assert.ok(fastVerdict.failingFrames > 0, 'the crop really loses the subject here')
 })
 
+test('W66r GT one timeline with a reframed clip and an unreframed one: the first fills the canvas, the second keeps its band', () => {
+  const scene = SCENES['reframed-then-whole']
+  const record = planFor('reframed-then-whole')
+  assert.deepEqual(record.renderPlan.ranges.map((range) => [range.clipId, range.source]), [['clip-a', 'plan'], ['clip-b', 'fallback']])
+  assert.deepEqual([record.disposition, record.issues.map((issue) => [issue.code, issue.startFrame, issue.endFrame])], ['blocked', [['SUBJECTS_DO_NOT_FIT', 75, 150]]])
+  const verdict = judge(scene, measure(scene, record.renderPlan, specification), record)
+  assert.equal(verdict.unflaggedFailingFrames, 0, JSON.stringify([verdict.firstUnflaggedFailure, verdict.reasonCounts]))
+  assert.equal(verdict.reframedFrames, 75, 'only the first clip is held to the fill')
+  assert.ok(verdict.minCoverage.width >= TOLERANCE.coverage && verdict.minCoverage.height >= TOLERANCE.coverage)
+  assert.equal(verdict.allSubjectsVisibleEveryFrame, true)
+  // the same timeline laid out the way the composition did BEFORE the fix fails on the reframed clip only
+  const old = judge(scene, measure(scene, record.renderPlan, oldComposition), record)
+  assert.equal(old.reasonCounts['foreground-does-not-fill-canvas'], 75)
+})
+
 test('W66r GT the 16:9 variant of the same evidence is its own plan: the whole frame fills its canvas', () => {
   const vertical = planFor('one-person'), wide = planFor('one-person', SPECS.wide)
   assert.notEqual(vertical.renderPlan.reframePlanHash, wide.renderPlan.reframePlanHash)

@@ -845,7 +845,8 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         artifactId,
         { width: sourceProbe.width, height: sourceProbe.height },
       ])),
-      clips: input.clips,
+      // A clip under an active reframe range is laid on the canvas by the cover rule: the map says so, it does not describe a band.
+      clips: input.clips.map((clip) => (reframeRangeByClipId.has(clip.id) ? Object.freeze({ ...clip, reframed: true }) : clip)),
       subtitleCues: input.subtitleCues,
       ctaOverlays: input.ctaOverlays,
       composition: input.composition,

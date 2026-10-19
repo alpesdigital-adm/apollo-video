@@ -4,6 +4,14 @@ import { readOutputFormatPreset } from './output-format-registry.ts'
 import { OUTPUT_ASPECT_RATIOS, type NormalizedBounds, type OutputAspectRatio } from './output-spec.ts'
 
 /**
+ * How a reframed range is laid on the canvas (W66r): the crop window is scaled by the COVER factor and centred, so the picture the plan chose
+ * FILLS the variant canvas. There is no staging band and no blurred backdrop for a reframed range; a clip that is not reframed keeps the
+ * composition it always had. The renderer, the caption projection and the render element map all read this one rule, and a render made from
+ * a persisted plan carries its name in its input hash, so changing the rule can never be mistaken for the same render.
+ */
+export const REFRAME_COMPOSITION_ID = 'reframe-fills-canvas/v1' as const
+
+/**
  * Reframe geometry the renderer receives inside a materialized `RenderInput`.
  *
  * A range is a **half-open** `[startFrame, endFrame)` interval of one clip carrying at least one

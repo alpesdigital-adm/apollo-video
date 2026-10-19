@@ -26061,7 +26061,7 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
       { properties: { action: { const: 'set' } }, required: ['crop'] },
     ],
   }),
-  defineSchema('variant-reframe-override-impact', 1, 'Manual reframe impact limited to one variant and one half-open range', variantReframeOverrideImpactSchemaV1),
+  defineSchema('variant-reframe-override-impact', 1, 'Manual reframe impact limited to one variant: the whole timeline of its proxy, rendered in full', variantReframeOverrideImpactSchemaV1),
   defineSchema('variant-reframe-override-applied', 1, 'Applied content-addressed manual reframe, its immutable result version and the reframe plan the result version carries for the variant', successSchema({
     type: 'object', additionalProperties: false, required: ['command', 'version', 'reframeOverride', 'plan', 'impact', 'replayed'], properties: {
       command: { type: 'object', additionalProperties: true }, version: { type: 'object', additionalProperties: true },

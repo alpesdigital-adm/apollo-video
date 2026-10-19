@@ -618,9 +618,12 @@ export function createSubtitleSegmentOverrideCommandImpact(input: {
 /**
  * W66r — impact of one manual reframe scoped to a single range of a single clip of a single output variant.
  *
- * Partial-range and variant-scoped like the subtitle exception: the invalidated region is the half-open range the editor framed
- * (clamped to the compiled timeline) and `affectedVariantIds`, `affectedArtifacts` and `minimalRenders` only ever mention the
- * target variant, so a 9:16 reframe cannot invalidate the 16:9 export. A manual reframe moves only what is drawn (`visual`).
+ * Variant-scoped like the subtitle exception, but NOT partial: it is a full-timeline impact of ONE output. `affectedVariantIds` and
+ * `affectedArtifacts` only ever mention the target variant, so a 9:16 reframe cannot invalidate the 16:9 export. A render made from a reframe
+ * plan is always a full render of its output (the bytes of an earlier proxy were drawn under another trajectory, and the renderer refuses a
+ * trajectory combined with a reused range), so the stale region and the render it asks for are both the whole timeline of that variant, and
+ * never the range the editor framed. That range (validated here against the compiled timeline) is in the Command's payload and in the override
+ * row, which is where it belongs. A manual reframe moves only what is drawn (`visual`).
  */
 export function createVariantReframeOverrideCommandImpact(input: {
   commandId: string
@@ -653,7 +656,7 @@ export function createVariantReframeOverrideCommandImpact(input: {
     'INVALID_ARGUMENT',
     'Reframe override range must sit inside the compiled timeline',
   )
-  const affectedRanges = canonicalCommandImpactRanges([input.range])
+  const affectedRanges = canonicalCommandImpactRanges([{ startFrame: 0, endFrame: input.durationFrames }])
   const affectedArtifacts = normalizeCommandImpactOutputReferences(
     input.outputReferences.filter((output) => output.variantId === input.variantId),
   )
@@ -882,13 +885,18 @@ export function parseCommandImpact(value: unknown): Readonly<CommandImpactV1> {
     )
   }
   if (impact.commandType === 'apply-variant-reframe-override') {
-    // A manual reframe is scoped to exactly one variant and one contiguous half-open range and moves only what is drawn.
+    // A manual reframe is scoped to exactly one variant and moves only what is drawn. Its impact is the whole timeline of that variant, and so
+    // is its render: a render made from a plan never reuses another's bytes. Anything narrower stored under this type is a defect.
     assertDomain(
       impact.renderSemanticsChanged === true &&
         impact.affectedVariantIds.length === 1 &&
         impact.affectedRanges.length === 1 &&
+        impact.affectedRanges[0]!.startFrame === 0 &&
         impact.minimalRenders.length === 1 &&
         impact.minimalRenders[0]!.variantId === impact.affectedVariantIds[0] &&
+        impact.minimalRenders[0]!.ranges.length === 1 &&
+        impact.minimalRenders[0]!.ranges[0]!.startFrame === 0 &&
+        impact.minimalRenders[0]!.ranges[0]!.endFrame === impact.affectedRanges[0]!.endFrame &&
         impact.affectedArtifacts.every((artifact) => artifact.variantId === impact.affectedVariantIds[0]) &&
         impact.changeKinds.length === 1 && impact.changeKinds.every((kind) => kind === 'reframe-override:set' || kind === 'reframe-override:reset') &&
         impact.dependencyTypes.length === 1 && impact.dependencyTypes[0] === 'visual',

@@ -152,6 +152,19 @@ export function buildEditorialCompositionPrefix(input: Readonly<PreparedEditoria
       t: ((clip.sourceOutFrame - clip.sourceInFrame + 1) / input.fps).toFixed(6) })
   })
   const filters: string[] = []
+  // W66r. A clip whose reframe range is active is laid on the canvas by itself, in one step: its crop window is scaled by the cover factor and
+  // centred, so the subject-following crop FILLS the canvas (no staging band, no blurred backdrop). When any clip is reframed every other clip is
+  // composed the way it always was (staging frame, then a foreground over a blurred copy) but one clip at a time, so the join is of canvas-sized
+  // frames. A render with no reframed clip keeps the historical graph verbatim.
+  const composeEachClip = reframeRangeByClipId.size > 0
+  const foregroundScale = input.compositionLayout?.foregroundScale ?? 1
+  const verticalPosition = input.compositionLayout?.verticalPosition ?? 0.5
+  const composeOnCanvas = (from: string, to: string, tag: string): readonly string[] => [
+    `[${from}]split=2[background0${tag}][foreground0${tag}]`,
+    `[background0${tag}]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=28[background${tag}]`,
+    `[foreground0${tag}]scale=${width}:${height}:force_original_aspect_ratio=decrease,scale=iw*${foregroundScale.toFixed(4)}:ih*${foregroundScale.toFixed(4)}[foreground${tag}]`,
+    `[background${tag}][foreground${tag}]overlay=(W-w)/2:max(0\\,min(H-h\\,H*${verticalPosition.toFixed(4)}-h/2)):shortest=1,format=yuv420p[${to}]`,
+  ]
   composition.clips.forEach((clip, index) => {
     const videoIndex = renderSources.length + index
     const audioIndex = sourceIndex.get(
@@ -173,17 +186,25 @@ export function buildEditorialCompositionPrefix(input: Readonly<PreparedEditoria
     // Real-time clips keep the historical filtergraph verbatim. Retimed clips
     // rescale PTS, then re-sample to the output fps and hard-trim to the exact
     // timeline span so rounding never accumulates across the concat.
-    filters.push(
+    const head =
       `[${videoIndex}:v:0]trim=start_frame=0:end_frame=${clip.sourceOutFrame - clip.sourceInFrame},` +
       (rate === 1
         ? `setpts=PTS-STARTPTS,${cropFilter}`
-        : `setpts=(PTS-STARTPTS)/${rate.toFixed(6)},${cropFilter}`) +
-      `scale=${stagingWidth}:${stagingHeight}:force_original_aspect_ratio=decrease,` +
-      `pad=${stagingWidth}:${stagingHeight}:(ow-iw)/2:(oh-ih)/2:color=black,` +
+        : `setpts=(PTS-STARTPTS)/${rate.toFixed(6)},${cropFilter}`)
+    const tail =
       `fps=${outputFps},` +
       (rate === 1 ? '' : `trim=start_frame=0:end_frame=${timelineSpan},setpts=PTS-STARTPTS,`) +
-      `setsar=1,format=yuv420p[v${index}]`,
-    )
+      `setsar=1,format=yuv420p`
+    const staged =
+      `scale=${stagingWidth}:${stagingHeight}:force_original_aspect_ratio=decrease,` +
+      `pad=${stagingWidth}:${stagingHeight}:(ow-iw)/2:(oh-ih)/2:color=black,`
+    if (reframeRange) {
+      filters.push(`${head}scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},${tail}[v${index}]`)
+    } else if (composeEachClip) {
+      filters.push(`${head}${staged}${tail}[staged${index}]`, ...composeOnCanvas(`staged${index}`, `v${index}`, String(index)))
+    } else {
+      filters.push(`${head}${staged}${tail}[v${index}]`)
+    }
     const duration = (audioEnd - audioStart) / rate
     const before = composition.transitions?.find((transition) => transition.toClipId === clip.id)
     const after = composition.transitions?.find((transition) => transition.fromClipId === clip.id)
@@ -214,12 +235,15 @@ export function buildEditorialCompositionPrefix(input: Readonly<PreparedEditoria
     filters.push('[joineda][musicbed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixeda]')
     filters.push('[mixeda]alimiter=limit=0.794328:attack=5:release=50:level=false:latency=true[outa]')
   } else filters.push('[joineda]alimiter=limit=0.794328:attack=5:release=50:level=false:latency=true[outa]')
-  filters.push(`[joinedv]split=2[background0][foreground0]`)
-  filters.push(`[background0]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=28[background]`)
-  const foregroundScale = input.compositionLayout?.foregroundScale ?? 1
-  const verticalPosition = input.compositionLayout?.verticalPosition ?? 0.5
-  filters.push(`[foreground0]scale=${width}:${height}:force_original_aspect_ratio=decrease,scale=iw*${foregroundScale.toFixed(4)}:ih*${foregroundScale.toFixed(4)}[foreground]`)
-  filters.push(`[background][foreground]overlay=(W-w)/2:max(0\\,min(H-h\\,H*${verticalPosition.toFixed(4)}-h/2)):shortest=1,format=yuv420p[composed]`)
+  if (composeEachClip) {
+    // every clip is already a canvas-sized frame
+    filters.push('[joinedv]null[composed]')
+  } else {
+    filters.push(`[joinedv]split=2[background0][foreground0]`)
+    filters.push(`[background0]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=28[background]`)
+    filters.push(`[foreground0]scale=${width}:${height}:force_original_aspect_ratio=decrease,scale=iw*${foregroundScale.toFixed(4)}:ih*${foregroundScale.toFixed(4)}[foreground]`)
+    filters.push(`[background][foreground]overlay=(W-w)/2:max(0\\,min(H-h\\,H*${verticalPosition.toFixed(4)}-h/2)):shortest=1,format=yuv420p[composed]`)
+  }
   // Placement overlays land on the composed frame, under the caption layer: a logo or insert
   // never hides a subtitle the Director already positioned.
   const composedLabel = placementPlan && placementInputs.length ? 'placed' : 'composed'

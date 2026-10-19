@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { planProjectReframeService, readVariantReframePlanService, variantReframePlanRowId } from '../../src/v2/application/plan-project-reframe.ts'
+import { DomainError } from '../../src/v2/domain/errors.ts'
 import { parseVariantReframePlanRecord } from '../../src/v2/domain/variant-reframe-plan.ts'
 import { SOURCE, SPECS, SAFE_AREA } from './helpers/reframe-trajectory-fixtures.mjs'
 import { sealedSourceWindow } from './helpers/face-source-envelope-v3.mjs'
@@ -80,6 +81,28 @@ test('W66r real sealed windows produce a persisted, content-addressed plan for t
   assert.equal(read.projectVersionId, 'version-1')
   assert.equal(read.plan.recordHash, first.plan.recordHash)
   assert.equal((await readVariantReframePlanService({ plans: repository })({ workspaceId: 'workspace-1', projectId: 'project-1', variantId: SPECS.wide.variantId, projectVersionId: 'version-other' })).plan, null)
+})
+
+test('W66r reading a plan checks the project, the workspace and the variant WHICHEVER Version is named', async () => {
+  const repository = memoryRepository()
+  await service(repository, readerOf(cleanWindows()))(request())
+  const read = readVariantReframePlanService({ plans: repository })
+  const named = { workspaceId: 'workspace-1', projectId: 'project-1', variantId: SPECS.vertical.variantId, projectVersionId: 'version-1' }
+  assert.ok((await read(named)).plan, 'a Version of this project, with this variant, has its plan')
+  repository.reads.length = 0
+  // a project the store does not know in this workspace (another workspace's project) is not found, with a Version named or not: never an empty plan
+  await assert.rejects(read({ ...named, workspaceId: 'workspace-2', projectId: 'project-other' }), (error) => error.code === 'PROJECT_NOT_FOUND')
+  await assert.rejects(read({ workspaceId: 'workspace-2', projectId: 'project-other', variantId: SPECS.vertical.variantId }), (error) => error.code === 'PROJECT_NOT_FOUND')
+  assert.deepEqual(repository.reads.map((call) => [call.workspaceId, call.projectId, call.variantId]),
+    [['workspace-2', 'project-other', SPECS.vertical.variantId], ['workspace-2', 'project-other', SPECS.vertical.variantId]], 'the context is read first, with or without a Version')
+  // a variant the store refuses (an aspect ratio is not one) is refused even when a Version is named, and nothing is read from that Version
+  const strict = memoryRepository({ throws: new DomainError('PRECONDITION_REQUIRED', 'Requested stable variant is not an exact State member', { reason: 'output-variant-unknown' }) })
+  let headReads = 0
+  const readHead = strict.readHead
+  strict.readHead = async (input) => { headReads += 1; return readHead(input) }
+  await assert.rejects(readVariantReframePlanService({ plans: strict })({ ...named, variantId: '9:16' }),
+    (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'output-variant-unknown')
+  assert.equal(headReads, 0)
 })
 
 test('W66r new evidence appends to the chain of the Version instead of replacing the plan the renders consumed', async () => {

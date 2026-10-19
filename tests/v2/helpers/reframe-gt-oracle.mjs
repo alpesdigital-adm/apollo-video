@@ -84,6 +84,19 @@ export const SCENES = Object.freeze({
     sourceFrames: 150, clips: [{ clipId: 'clip-1', sourceInFrame: 0, sourceOutFrame: 150, timelineInFrame: 0, timelineOutFrame: 150 }],
     subjectsAtSource: (frame) => [{ id: 'A', kind: 'face', color: 'A', box: face(0.05 + 0.5 * Math.min(frame, 48) / 30) }],
   },
+  // One timeline, two kinds of clip: clip A has one person (the plan reframes it: the crop fills the canvas) and clip B plays the frames where
+  // two people stand too far apart for any crop (the plan leaves it unreframed: it keeps the composition it always had, the whole frame in its
+  // band). Clip B's source frames [100, 175) are those of the 'two-people-far-apart' scene, so the same pixels can be rendered on their own.
+  'reframed-then-whole': {
+    sourceFrames: 200, clips: [
+      { clipId: 'clip-a', sourceInFrame: 0, sourceOutFrame: 75, timelineInFrame: 0, timelineOutFrame: 75 },
+      { clipId: 'clip-b', sourceInFrame: 100, sourceOutFrame: 175, timelineInFrame: 75, timelineOutFrame: 150 },
+    ],
+    subjectsAtSource: (frame) => (frame < 75
+      ? [{ id: 'A', kind: 'face', color: 'A', box: face(0.3) }]
+      : frame < 100 ? [{ id: 'A', kind: 'face', color: 'A', box: face(0.46) }]
+        : [{ id: 'A', kind: 'face', color: 'A', box: face(0.05) }, { id: 'B', kind: 'face', color: 'B', box: face(0.85) }]),
+  },
   // The subject is at the far left of source frames [0, 75) (clip A), in the middle of [75, 100) (trimmed away) and at the far right of
   // [100, 175) (clip B): the cut jumps across the frame, and the trimmed frames hold a third position that interpolating across the cut
   // would drag into the plan (the sample after clip A's last one is not clip A's).

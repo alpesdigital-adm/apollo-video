@@ -134,6 +134,19 @@ function decodeFrames(path, width, height, onFrame) {
   })
 }
 
+/** Copies of the decoded frames at `indices`. */
+async function grabFrames(path, canvas, indices) {
+  const wanted = new Set(indices)
+  const grabbed = new Map()
+  await decodeFrames(path, canvas.width, canvas.height, (buffer, index) => { if (wanted.has(index)) grabbed.set(index, Buffer.from(buffer)) })
+  return grabbed
+}
+const meanAbsoluteDifference = (left, right) => {
+  let total = 0
+  for (let index = 0; index < left.length; index += 1) total += Math.abs(left[index] - right[index])
+  return total / left.length
+}
+
 const probeStream = (path) => JSON.parse(execFileSync(ffprobePath, [
   '-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries', 'stream=width,height,nb_read_frames,r_frame_rate', '-of', 'json', path,
 ], { encoding: 'utf8', windowsHide: true })).streams[0]
@@ -318,6 +331,30 @@ test('W66r GT a subject faster than the policy allows: the variant is blocked, a
   assert.ok(judged.verdict.maxWindowError <= TOLERANCE.window)
   assertFillsCanvas(judged.verdict, name)
   for (const range of exact) assert.ok(range.maxSpeed <= speedLimit + 1e-6, 'the plan never exceeds the speed limit even where it cannot keep up')
+})
+
+test('W66r GT one timeline with a reframed clip and an unreframed one: the first fills the canvas, the second keeps exactly the composition it always had', { timeout: 15 * 60_000 }, async () => {
+  const name = 'reframed-then-whole'
+  const built = recordFor(name, SPECS.vertical)
+  assert.deepEqual(built.record.renderPlan.ranges.map((range) => [range.clipId, range.source]), [['clip-a', 'plan'], ['clip-b', 'fallback']])
+  assert.equal(built.record.disposition, 'blocked')
+  const judged = await renderAndJudge({ name, format: '9:16', renderPlan: built.record.renderPlan, issues: built.record.issues })
+  report('mixed', { name, spec: SPECS.vertical, ...built, ...judged })
+  assert.equal(judged.verdict.unflaggedFailingFrames, 0, JSON.stringify([judged.verdict.firstUnflaggedFailure, judged.verdict.reasonCounts]))
+  assert.equal(judged.verdict.reframedFrames, 75, 'only the first clip is held to the fill')
+  assertFillsCanvas(judged.verdict, name)
+  assert.equal(judged.verdict.allSubjectsVisibleEveryFrame, true, 'both people are on every frame of the unreframed clip')
+  // The unreframed clip is the same pixels as when it is rendered alone (no clip of that timeline is reframed: the historical graph),
+  // up to what an encoder does to two different files.
+  const alone = recordFor('two-people-far-apart', SPECS.vertical)
+  assert.deepEqual(alone.record.renderPlan.ranges.map((range) => range.source), ['fallback'])
+  const aloneRender = await renderPlanned({ name: 'two-people-far-apart', format: '9:16', renderPlan: alone.record.renderPlan })
+  const picks = [0, 25, 49, 74]
+  const own = await grabFrames(aloneRender.outputPath, judged.canvas, picks)
+  const inMixed = await grabFrames(judged.rendered.outputPath, judged.canvas, picks.map((index) => 75 + index))
+  const differences = picks.map((index) => meanAbsoluteDifference(own.get(index), inMixed.get(75 + index)))
+  console.log(`W66R-GT-CONTROL ${JSON.stringify({ control: 'unreframed-clip-alone-vs-in-a-reframed-timeline', frames: picks, meanAbsoluteDifference: differences })}`)
+  for (const difference of differences) assert.ok(difference < 2, `the unreframed clip changed: mean absolute difference ${difference} levels`)
 })
 
 test('W66r GT the 16:9 variant of the same evidence is its own plan: the whole frame, the subject visible on every frame', { timeout: 15 * 60_000 }, async () => {

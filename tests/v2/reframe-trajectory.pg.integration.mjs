@@ -113,6 +113,32 @@ const overrideService = (db) => applyVariantReframeOverrideService({
 })
 const refusedWith = (code, reason) => (error) => error.code === code && error.details?.reason === reason
 
+/**
+ * The rights of the recording's source are revoked (audited, by the production service) while `work` runs, and restored after it, whatever it
+ * does: the render source then has no approved current rights, and nothing may be planned or framed over it.
+ */
+async function whileRightsRevoked(db, owner, w, work) {
+  const rights = new PrismaAssetRightsRepository(db)
+  const setRights = setAssetRightsService({ repository: rights, clock: () => new Date(), createId: () => randomUUID() })
+  const sourceArtifactId = w.recording.names.sourceArtifactId
+  const current = await rights.findCurrent(owner.workspaceId, sourceArtifactId)
+  const clone = (value) => JSON.parse(JSON.stringify(value))
+  const keys = ['owner', 'license', 'status', 'allowedUses', 'prohibitedUses', 'allowedMarkets', 'allowedLocales', 'allowedSyntheticOperations', 'expiresAt', 'sourceNote']
+  const consentKeys = ['status', 'allowedUses', 'allowedMarkets', 'allowedLocales', 'allowedSyntheticOperations', 'expiresAt', 'documentArtifactId']
+  const original = { ...Object.fromEntries(keys.filter((key) => current.snapshot[key] !== undefined).map((key) => [key, clone(current.snapshot[key])])),
+    consent: Object.fromEntries(consentKeys.filter((key) => current.snapshot.consent[key] !== undefined).map((key) => [key, clone(current.snapshot.consent[key])])) }
+  const actor = { type: 'system', id: 'controlled-fixture' }
+  await setRights({ workspaceId: owner.workspaceId, artifactId: sourceArtifactId, baseRevision: current.revision, draft: { ...original, status: 'revoked' }, actor })
+  try {
+    assert.equal((await rights.findCurrent(owner.workspaceId, sourceArtifactId)).snapshot.status, 'revoked')
+    return await work()
+  } finally {
+    const revoked = await rights.findCurrent(owner.workspaceId, sourceArtifactId)
+    await setRights({ workspaceId: owner.workspaceId, artifactId: sourceArtifactId, baseRevision: revoked.revision, draft: original, actor })
+    assert.equal((await rights.findCurrent(owner.workspaceId, sourceArtifactId)).snapshot.status, original.status, 'the rights are the approved ones again')
+  }
+}
+
 const headOf = async (db, projectId) => {
   const row = await db.v2Project.findUniqueOrThrow({ where: { id: projectId }, include: { currentVersion: true } })
   return { id: row.currentVersion.id, baseHash: row.currentVersion.baseHash, sequence: row.currentVersion.sequence, editPlanSnapshotId: row.currentVersion.editPlanSnapshotId }
@@ -199,28 +225,29 @@ test('W66r PG reframe plan: no evidence decides no crop; evidence persists and r
       assert.deepEqual([foreign.status, foreign.payload.error.code], [404, 'PROJECT_NOT_FOUND'], JSON.stringify(foreign.payload))
       const foreignRead = await planRead(w, w.verticalVariantId, {}, other.token)
       assert.equal(foreignRead.status, 404)
+      // reading a plan checks the project, the workspace and the variant WHICHEVER Version is named: another workspace is not found (it does not
+      // have an empty plan), a project that does not exist is not found, and an aspect ratio is not a variant with or without a Version
+      const foreignNamed = await planRead(w, w.verticalVariantId, { projectVersionId: head.id }, other.token)
+      assert.deepEqual([foreignNamed.status, foreignNamed.payload.error?.code], [404, 'PROJECT_NOT_FOUND'], JSON.stringify(foreignNamed.payload))
+      const noProject = await callRoute(reframePlansRoute.GET, '/v1/projects/w66r-no-such-project/reframe-plans', { token: owner.token, params: { projectId: 'w66r-no-such-project' },
+        search: `?variantId=${encodeURIComponent(w.verticalVariantId)}&projectVersionId=${head.id}` })
+      assert.deepEqual([noProject.status, noProject.payload.error?.code], [404, 'PROJECT_NOT_FOUND'])
+      const aspectNamed = await planRead(w, '9:16', { projectVersionId: head.id })
+      assert.deepEqual([aspectNamed.status, aspectNamed.payload.error?.details?.reason], [428, 'output-variant-unknown'], JSON.stringify(aspectNamed.payload))
+      const aspectHead = await planRead(w, '9:16')
+      assert.deepEqual([aspectHead.status, aspectHead.payload.error?.details?.reason], [428, 'output-variant-unknown'])
+      const unknownNamed = await planRead(w, 'variant-does-not-exist', { projectVersionId: head.id })
+      assert.deepEqual([unknownNamed.status, unknownNamed.payload.error?.details?.reason], [428, 'output-variant-unknown'])
       assert.equal((await planRows(db, w)).length, rowsBefore)
 
       // --- revoked rights stop planning: the render source no longer has approved current rights; restored rights plan again
-      const rights = new PrismaAssetRightsRepository(db)
-      const setRights = setAssetRightsService({ repository: rights, clock: () => new Date(), createId: () => randomUUID() })
-      const sourceArtifactId = w.recording.names.sourceArtifactId
-      const current = await rights.findCurrent(owner.workspaceId, sourceArtifactId)
-      const clone = (value) => JSON.parse(JSON.stringify(value))
-      const keys = ['owner', 'license', 'status', 'allowedUses', 'prohibitedUses', 'allowedMarkets', 'allowedLocales', 'allowedSyntheticOperations', 'expiresAt', 'sourceNote']
-      const consentKeys = ['status', 'allowedUses', 'allowedMarkets', 'allowedLocales', 'allowedSyntheticOperations', 'expiresAt', 'documentArtifactId']
-      const original = { ...Object.fromEntries(keys.filter((key) => current.snapshot[key] !== undefined).map((key) => [key, clone(current.snapshot[key])])),
-        consent: Object.fromEntries(consentKeys.filter((key) => current.snapshot.consent[key] !== undefined).map((key) => [key, clone(current.snapshot.consent[key])])) }
-      await setRights({ workspaceId: owner.workspaceId, artifactId: sourceArtifactId, baseRevision: current.revision, draft: { ...original, status: 'revoked' },
-        actor: { type: 'system', id: 'controlled-fixture' } })
-      const blocked = await planCall(w, { ...base, variantId: w.verticalVariantId })
-      assert.deepEqual([blocked.status, blocked.payload.error.code], [422, 'ASSET_RIGHTS_BLOCKED'], JSON.stringify(blocked.payload))
-      const blockedWide = await planCall(w, { ...base, variantId: w.wideVariantId })
-      assert.equal(blockedWide.payload.error?.code, 'ASSET_RIGHTS_BLOCKED')
-      assert.equal((await planRows(db, w)).length, rowsBefore, 'a blocked source writes no plan')
-      const revoked = await rights.findCurrent(owner.workspaceId, sourceArtifactId)
-      await setRights({ workspaceId: owner.workspaceId, artifactId: sourceArtifactId, baseRevision: revoked.revision, draft: original, actor: { type: 'system', id: 'controlled-fixture' } })
-      assert.equal((await rights.findCurrent(owner.workspaceId, sourceArtifactId)).snapshot.status, original.status, 'the rights are the approved ones again')
+      await whileRightsRevoked(db, owner, w, async () => {
+        const blocked = await planCall(w, { ...base, variantId: w.verticalVariantId })
+        assert.deepEqual([blocked.status, blocked.payload.error.code], [422, 'ASSET_RIGHTS_BLOCKED'], JSON.stringify(blocked.payload))
+        const blockedWide = await planCall(w, { ...base, variantId: w.wideVariantId })
+        assert.equal(blockedWide.payload.error?.code, 'ASSET_RIGHTS_BLOCKED')
+        assert.equal((await planRows(db, w)).length, rowsBefore, 'a blocked source writes no plan')
+      })
       const restored = await planCall(w, { ...base, variantId: w.verticalVariantId })
       assert.deepEqual([restored.status, restored.payload.data.replayed, restored.payload.data.plan.recordHash], [200, true, fullPlan.recordHash])
 
@@ -295,6 +322,11 @@ test('W66r PG variant override: a Command on one variant and one range; the othe
       assert.deepEqual(data.reframeOverride.crop, subject)
       assert.equal(data.reframeOverride.variantId, w.verticalVariantId)
       assert.equal(data.reframeOverride.action, 'set')
+      // the impact is honest: a render made from a plan is always a full render, so the stale region and the render asked for are the WHOLE
+      // timeline of the target variant (never the framed range), and only of that variant
+      assert.deepEqual(data.impact.affectedRanges, [{ startFrame: 0, endFrame: 150 }])
+      assert.deepEqual(data.impact.minimalRenders.map((render) => [render.variantId, render.ranges]), [[w.verticalVariantId, [{ startFrame: 0, endFrame: 150 }]]])
+      assert.deepEqual(data.impact.affectedVariantIds, [w.verticalVariantId])
       // the plan of the OTHER variant is carried unchanged to the new Version: the same record
       const wideAfter = await planRead(w, w.wideVariantId, { projectVersionId: data.version.id })
       assert.equal(wideAfter.payload.data.plan.recordHash, widePlan.recordHash)
@@ -402,6 +434,21 @@ test('W66r PG variant override: a Command on one variant and one range; the othe
       assert.equal(wideFirst.reframeRecordHash, widePlan.recordHash, 'the other output renders with ITS plan, untouched by the override')
       assert.equal(wideFirst.reframePlan.variantId, w.wideVariantId)
       assert.notEqual(hashOf(wideFirst), hashOf(first))
+      // --- revoked rights refuse an override: the Command is a write over a render source the workspace may no longer use
+      const head4 = await headOf(db, w.projectId)
+      const versionsBeforeRights = await db.v2ProjectVersion.count({ where: { projectId: w.projectId } })
+      const rightsBody = { baseVersionId: head4.id, baseHash: head4.baseHash, variantId: w.verticalVariantId, clipId, startFrame: 100, endFrame: 130, crop: subject }
+      await whileRightsRevoked(db, owner, w, async () => {
+        const refused = await overrideCall(w, rightsBody, `w66r-${run}-revoked`)
+        assert.deepEqual([refused.status, refused.payload.error?.code], [422, 'ASSET_RIGHTS_BLOCKED'], JSON.stringify(refused.payload))
+        await assert.rejects(overrideService(db)({ ...rightsBody, workspaceId: owner.workspaceId, projectId: w.projectId, actor: owner.actor, idempotencyKey: `w66r-${run}-revoked-svc` }),
+          (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
+        assert.equal(await db.v2ProjectVersion.count({ where: { projectId: w.projectId } }), versionsBeforeRights, 'a refused Command writes no Version')
+        assert.equal((await headOf(db, w.projectId)).id, head4.id)
+      })
+      // with the rights back, the very same request is admitted
+      const admitted = await overrideCall(w, rightsBody, `w66r-${run}-rights-back`)
+      assert.equal(admitted.status, 201, JSON.stringify(admitted.payload))
       note('render-input', { version: setVersionId, vertical: hashOf(first).slice(0, 16), verticalAgain: hashOf(again).slice(0, 16), wide: hashOf(wideFirst).slice(0, 16), reframeRecordHash: first.reframeRecordHash.slice(0, 16) })
     } finally {
       await db.$disconnect()

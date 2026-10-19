@@ -137,13 +137,12 @@ export function readVariantReframePlanService(dependencies: { plans: VariantRefr
       assertDomain(typeof value === 'string' && ID.test(value), 'INVALID_ARGUMENT', `${field} is invalid`)
     }
     assertDomain(input.projectVersionId === undefined || ID.test(input.projectVersionId), 'INVALID_ARGUMENT', 'projectVersionId is invalid')
-    // Without a named Version the head is read through the planner's own context, which also refuses a variant the State does not carry.
-    let projectVersionId = input.projectVersionId
-    if (projectVersionId === undefined) {
-      const context = await dependencies.plans.readContext({ workspaceId: input.workspaceId, projectId: input.projectId, variantId: input.variantId })
-      if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Reframe project was not found')
-      projectVersionId = context.version.id
-    }
+    // The planner's own context is read first WHICHEVER Version is named: it is what says the project exists in THIS workspace (another
+    // workspace's project is not found, it does not have an empty plan) and that the variant is an exact member of the State (an aspect ratio
+    // is not one). A named Version then only chooses which record of that variant is read; one that is not the project's has none.
+    const context = await dependencies.plans.readContext({ workspaceId: input.workspaceId, projectId: input.projectId, variantId: input.variantId })
+    if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Reframe project was not found')
+    const projectVersionId = input.projectVersionId ?? context.version.id
     const stored = await dependencies.plans.readHead({ workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId, variantId: input.variantId })
     return Object.freeze({ variantId: input.variantId, projectVersionId, plan: stored ? presentVariantReframePlan(stored) : null })
   }
