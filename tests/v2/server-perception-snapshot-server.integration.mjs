@@ -71,6 +71,7 @@ test('W63a real Next server: the snapshot route, its published schema and the Op
       const reader = await token('reader', world.workspaceId, ['projects:read'])
       const noScope = await token('noscope', world.workspaceId, ['artifacts:read'])
       const stranger = await token('stranger', other.workspaceId, ['projects:read'])
+      const writer = await token('writer', world.workspaceId, ['projects:write'])
 
       const port = await freePort()
       const base = `http://127.0.0.1:${port}`
@@ -102,6 +103,16 @@ test('W63a real Next server: the snapshot route, its published schema and the Op
       const ajv = addFormats(new Ajv2020({ strict: false, allErrors: true }))
       const validate = ajv.compile(await schemaResponse.json())
 
+      // W64: the route is READ-ONLY. Before anything has written the snapshot of this Version the answer is a typed 404, and the read
+      // wrote nothing; a Director commit (or an explicit materialization) is what writes it.
+      const before = await call(route, reader)
+      assert.equal(before.status, 404, JSON.stringify(before.body))
+      assert.equal(before.body.error.code, 'SNAPSHOT_NOT_MATERIALIZED')
+      assert.equal(await db.v2ServerPerceptionSnapshot.count({ where: { workspaceId: world.workspaceId } }), 0, 'a GET writes nothing')
+      assert.equal((await call(route, reader)).status, 404, 'and still nothing the second time')
+      await built.service()({ workspaceId: world.workspaceId, projectId: world.projectId })
+      assert.equal(await db.v2ServerPerceptionSnapshot.count({ where: { workspaceId: world.workspaceId } }), 1)
+
       const full = await call(route, reader)
       assert.equal(full.status, 200, JSON.stringify(full.body))
       assert.equal(validate(full.body), true, ajv.errorsText(validate.errors))
@@ -123,13 +134,21 @@ test('W63a real Next server: the snapshot route, its published schema and the Op
       assert.equal(foreign.status, 404)
       assert.equal(JSON.stringify(foreign.body).includes(full.body.data.snapshot.snapshotHash), false)
       assert.equal((await call(`${route}?kinds=lighting`, reader)).status, 422)
+      assert.equal(await db.v2ServerPerceptionSnapshot.count({ where: { workspaceId: world.workspaceId } }), 1, 'reads, hot or refused, never wrote a second row')
+
+      // W64: a caller's observation set is not an input of the Director's entrance - it is refused before anything is read or queued
+      const directorRun = await fetch(`${base}/v1/projects/${world.projectId}/director-runs`, { method: 'POST', signal: AbortSignal.timeout(30_000),
+        headers: { authorization: `Bearer ${writer}`, 'content-type': 'application/json', 'idempotency-key': `w64-observations-${world.suffix}` },
+        body: JSON.stringify({ baseVersionId: world.versionId, baseHash: 'a'.repeat(64), observationSet: { id: 'caller-observations' } }) })
+      assert.equal(directorRun.status, 422)
+      assert.equal(await db.v2PublicOperation.count({ where: { workspaceId: world.workspaceId, type: 'project-director-run' } }), 0)
 
       const openapi = await call('/v1/openapi.json', null)
       assert.equal(openapi.status, 200)
       const operation = openapi.body.paths['/v1/projects/{projectId}/perception/snapshot']?.get
       assert.ok(operation, 'the OpenAPI document lists the path')
       assert.equal(operation['x-apollo-capability-id'], 'apollo.projects.perception.snapshot.read')
-      assert.equal(operation['x-apollo-capability-version'], '1.0.0')
+      assert.equal(operation['x-apollo-capability-version'], '2.0.0')
       assert.deepEqual(operation['x-apollo-required-scopes'], ['projects:read'])
       assert.deepEqual(operation.parameters.map((parameter) => parameter.name).filter((name) => name !== 'projectId').sort(),
         ['fromMs', 'kinds', 'toMs', 'versionId'])

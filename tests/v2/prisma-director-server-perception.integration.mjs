@@ -63,7 +63,9 @@ test('W63a PostgreSQL Director: its perception is the server snapshot, written o
       assert.equal(perception.summary.visualCoverage, 'partial')
 
       // the Director wrote the snapshot, once, in its commit; the public read finds the same bytes
-      const stored = await db.v2ServerPerceptionSnapshot.findMany({ where: { workspaceId }, include: { coverage: true } })
+      // W64: the commit writes the snapshot of the Version it DIRECTED exactly once; the Version it created is materialized after the commit
+      // (best effort), so the workspace holds one row per Version, and the oracle is scoped to the input Version it always was about.
+      const stored = await db.v2ServerPerceptionSnapshot.findMany({ where: { workspaceId, projectVersionId: world.versionId }, include: { coverage: true } })
       assert.equal(stored.length, 1)
       assert.equal(stored[0].snapshotHash, perception.serverSnapshot.snapshotHash)
       assert.equal(stored[0].projectVersionId, world.versionId)
@@ -73,7 +75,8 @@ test('W63a PostgreSQL Director: its perception is the server snapshot, written o
       assert.equal(api.id, stored[0].id)
       assert.equal(api.snapshot.snapshotHash, perception.serverSnapshot.snapshotHash)
       assert.equal(api.createdAt, created, 'the API found the Director\'s row; it wrote nothing')
-      assert.equal(await db.v2ServerPerceptionSnapshot.count({ where: { workspaceId } }), 1)
+      assert.equal(await db.v2ServerPerceptionSnapshot.count({ where: { workspaceId, projectVersionId: world.versionId } }), 1)
+      assert.equal(await db.v2ServerPerceptionSnapshot.count({ where: { workspaceId } }), 2, 'and one more for the Version the run created')
       const record = await snapshots.findByHash({ workspaceId, projectId: world.projectId, projectVersionId: world.versionId,
         snapshotHash: perception.serverSnapshot.snapshotHash })
       assert.equal(stableSerialize(perception.timeline), stableSerialize(record.snapshot.timeline), 'the run\'s timeline IS the snapshot\'s')
