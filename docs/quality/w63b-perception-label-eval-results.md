@@ -12,12 +12,19 @@ Numbers are in `docs/quality/w63b-evaluation-results.json` (full per-clip observ
 | | |
 | --- | --- |
 | freeze commit (pre-registration, thresholds, both manifest hashes) | `942066853fb56a2e53afa1a398743d4603642afe` |
-| head when the evaluation ran | `6f300e090216cb668305f06aa9448e0e33e9ef68` (the runner was not frozen; no frozen file changed after the freeze) |
+| head when the evaluation ran | `6f300e090216cb668305f06aa9448e0e33e9ef68` (the runner `w63b-evaluate.mjs` was committed at this head and the tree was clean when the run started; the runner is not a frozen file, see "Runner provenance") |
 | evaluation corpus manifest SHA-256 | `5eec7cf55412728fe088188efbc9f2bf509d2073b457fdf861453dfc94c41a10` (33 clips, generated once) |
 | development corpus manifest SHA-256 | `8d33baca02f4ce4d8ae63ffcfc27b10512dc0c0ecf5b840ac85d1bdcfdfe3cd7` |
 | evaluation attempts | one: harness run `w63b-eval1-18515a95` (success, post-flight clean: cluster stopped, zero backends). It was not repeated. |
-| development runs (harness/oracle debugging only) | `w63b-devsmoke1-824c9e7c` (4 clips + robustness), `w63b-devfull1-7938bd80` (33 clips + robustness). Between them only `w63b-evaluate.mjs` changed (freeze-check scope; the evidence-order robustness case, because the evidence reader uses the latest envelope per version). No metric, rule or threshold changed. |
+| development runs (harness/oracle debugging only) | `w63b-devsmoke1-824c9e7c` (4 clips + robustness) and `w63b-devfull1-7938bd80` (33 clips + robustness). **Both ran a runner that was not yet committed**: `devfull1` recorded head `94206685` but executed the working-tree runner that became `6f300e09` (its R3 output has that shape), and `devsmoke1` ran an earlier uncommitted edit. See "Runner provenance". |
 | tools | FFmpeg 6.1.1 (ffmpeg-static, sha256 `04e13079...94ad00`), system FFprobe 8.1.1, Tesseract 5.5.3 (`c66f0f12...f420`), `por`+`eng` traineddata, Node 24.10.0 |
+
+## Runner provenance and what changed after the freeze
+
+- **The runner was not frozen.** The freeze (`docs/quality/w63b-freeze.json`) covers the generator, the corpus spec and textures, the comparison code (`w63b-metrics.mjs`), the thresholds and the pre-registration; it does not cover `w63b-evaluate.mjs`. The message of commit `4a80e485` ("frozen comparison code and evaluation runner") overstates this: only the comparison code was frozen, and that commit message cannot be amended.
+- **Why this does not affect the verdicts.** `6f300e09` is the only commit that touched the runner after the freeze, and it changed three things: the scope of the runner's dirty-tree check (it now looks at the frozen files instead of the whole `scripts/validation` directory), the robustness case R3(b), and the R5 replay row-count check (`rows === 1` instead of a range that allowed the second OCR run R3 used to create). None of them is read by any stratum verdict: verdicts come from `w63b-metrics.mjs`, `w63b-thresholds.mjs` and the producers' output, and those files hash-match the freeze. The evaluation run executed the committed `6f300e09` runner with a clean tree.
+- **Provenance gap, now closed for future runs.** The recorded `head` of a run did not prove which runner executed (the dev run above is the example). From the next run on the runner writes, into `results.json` under `provenance`, HEAD, the SHA-256 of `w63b-evaluate.mjs` and `w63b-provenance.mjs` as read from disk, and the full `git status --porcelain`; it refuses to start when either file differs from HEAD (modified, staged or untracked). The evaluation split was not re-run for this, so the published results carry no `provenance` block; the head/clean-tree statement above is the evidence for that run. `tests/v2/w63b-label-metrics.test.mjs` tests the provenance fields (clean, unrelated untracked file, modified, staged, untracked runner).
+- **R3(b) was rewritten after it failed on the development split.** The first version assembled the evidence of the version with a second OCR run, in forward and reversed order, expecting both OCR envelopes to be used. On the development split the evidence reader returned one OCR envelope (it takes the latest per version), so the case could not test what it claimed, and the same effect made R4 tamper with an envelope the reader no longer read. The rewrite hands the assembler this version's evidence plus another version's (rejected and listed) in both orders and requires one snapshot hash. **What is no longer tested: reordering among accepted envelopes** (several accepted OCR or temporal envelopes of one version), because the product admits only one per version; the property is covered by the W63a domain tests with synthetic envelopes, not by this evaluation.
 
 ## Verdicts per stratum (evaluation split)
 
@@ -83,6 +90,16 @@ pre-registration).
    temporal values alone.
 6. **A later producer run supersedes.** The evidence reader takes the latest OCR and temporal envelope of a version; a second run is not added
    to the first (observed on the development split and confirmed in `server-perception-evidence-reader.ts`).
+
+## Product implications (recommendations; no product change was made)
+
+These come from the validator's review of the results. They are recommendations for later waves, not behaviour changed or implemented here.
+
+1. **Keep OCR `partial` and unverified.** The snapshot already states that OCR covers sampled frames only; the results show that on busy backgrounds the content is also unreliable (many spurious words, truncated readings). Nothing should present OCR text as verified.
+2. **The Director must not act on raw OCR text without corroboration.** Suggested conditions before a text is used for a decision: the same reading on at least two consecutive samples; a plausible text region (box size and position, not a scatter of small boxes); low trust when the number of words in a sample spikes (the textured clips produced 5.5-8 spurious words per sample against 0 on flat backgrounds); and the existing rule that OCR is untrusted content, never an instruction.
+3. **Prefer the Portuguese reading when `por` and `eng` disagree on diacritics.** The adapter keeps both readings when their text differs and 44-63 % of units carried more than one candidate; the consumer should resolve a disagreement that differs only by diacritics (`Ultima`/`Última`, `Tributagao`/`Tributação`) towards the Portuguese reading, and drop the duplicate word the confidence ordering leaves.
+4. **Carry a per-sample confidence.** Per-word confidence exists; a per-sample summary (word count, mean confidence, share of words in agreeing languages) would let a consumer apply recommendation 2 without re-deriving it.
+5. **Do not infer inserts from shot scores.** The appear/vanish pairs of a 1280x720 insert scored about 0.107-0.111 and of a 480x270 insert about 0.014-0.015, below or near the noise of real footage; `image-insert` must stay `absent` until an insert source exists.
 
 ## What this does not show
 

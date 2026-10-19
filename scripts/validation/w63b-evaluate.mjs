@@ -23,6 +23,7 @@ import { commitSealedChild, planPlayingRecordings } from '../../tests/v2/helpers
 import { seedPerceptionProducerContext } from '../../tests/v2/helpers/perception-producer-pg-world.mjs'
 import { aggregateOcr, aggregateTemporal, evaluateClaims, evaluateOcr, evaluateOcrClock, evaluateTemporal, judge } from './w63b-metrics.mjs'
 import { OCR_SAMPLE_INTERVAL_FRAMES } from './w63b-corpus-spec.mjs'
+import { assertRunnerClean, collectProvenance } from './w63b-provenance.mjs'
 import { STRATA } from './w63b-thresholds.mjs'
 
 const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
@@ -307,6 +308,7 @@ async function main() {
   const manifestBytes = await readFile(join(corpusDir, 'manifest.json'))
   const manifest = JSON.parse(manifestBytes.toString('utf8'))
   if (manifest.split !== split) throw new Error(`manifest is for ${manifest.split}`)
+  const provenance = assertRunnerClean(await collectProvenance({ root, git, files: [fileURLToPath(import.meta.url), fileURLToPath(new URL('./w63b-provenance.mjs', import.meta.url))] }))
   const skipFreeze = process.argv.includes('--no-freeze-check')
   if (skipFreeze && split === 'evaluation') throw new Error('the evaluation split is never run without the freeze check')
   const frozen = await checkFreeze(split, corpusDir, manifestBytes)
@@ -361,7 +363,7 @@ async function main() {
   const strata = phase === 'robustness' ? {} : aggregateStrata(reports.filter((report) => report.stratum !== 'robustness-pts-gap'))
   const summary = {
     schemaVersion: 'w63b-results/v1', split, runId, startedAt, finishedAt: new Date().toISOString(), phase,
-    head: await git('rev-parse', 'HEAD'), freezeCommit: frozen.freezeCommit, freezeProblemsIgnored: skipFreeze ? frozen.problems : [],
+    head: provenance.head, provenance, freezeCommit: frozen.freezeCommit, freezeProblemsIgnored: skipFreeze ? frozen.problems : [],
     manifestSha256: frozen.manifestSha, preregVersion: frozen.freeze.preregVersion, frozenFiles: frozen.freeze.files,
     tools: { ffmpegSha256: manifest.toolchain.ffmpegSha256, tesseract: tesseractVersion, tesseractExe: process.env.APOLLO_OCR_TESSERACT ? await fileSha(process.env.APOLLO_OCR_TESSERACT) : null,
       ocrFfmpegSha256: process.env.APOLLO_OCR_FFMPEG ? await fileSha(process.env.APOLLO_OCR_FFMPEG) : null, ffprobeSha256: process.env.APOLLO_OCR_FFPROBE ? await fileSha(process.env.APOLLO_OCR_FFPROBE) : null, node: process.version },

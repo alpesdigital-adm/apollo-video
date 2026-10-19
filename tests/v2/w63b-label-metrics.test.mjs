@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
+import { promisify } from 'node:util'
 
 import { assembleServerPerceptionSnapshot, queryServerPerceptionSnapshot } from '../../src/v2/domain/server-perception-snapshot.ts'
 import { createTemporalProducerEnvelope } from '../../src/v2/domain/temporal-producer-envelope.ts'
@@ -9,6 +15,7 @@ import {
   aggregateOcr, aggregateTemporal, characterErrorRate, clockOf, detectFadeRuns, detectHardCuts, evaluateClaims, evaluateOcr, evaluateOcrClock,
   evaluateTemporal, judge, levenshtein, normalizeText,
 } from '../../scripts/validation/w63b-metrics.mjs'
+import { assertRunnerClean, collectProvenance } from '../../scripts/validation/w63b-provenance.mjs'
 import { STRATA } from '../../scripts/validation/w63b-thresholds.mjs'
 import { assemblyBase, FPS, ocrEnvelope, sha, temporalAnalysis, wholeClips } from './helpers/perception-snapshot-fixtures.mjs'
 
@@ -278,5 +285,56 @@ test('W63b every stratum without criteria is informational and every other crite
     const empty = judge(id, { ocr: {}, temporal: {}, claims: {}, clock: [] })
     if (Object.keys(stratum.criteria).filter((key) => key !== 'fadeIouMin').length === 0) assert.equal(empty.verdict, 'informational')
     else assert.equal(empty.verdict, 'fail', `${id}: absent measurements fail closed`)
+  }
+})
+
+test('W63b provenance: a result names HEAD, the SHA-256 of the runner as run and the full git status, and a dirty runner refuses to start', async () => {
+  const exec = promisify(execFile)
+  const root = await mkdtemp(join(tmpdir(), 'w63b-provenance-'))
+  const git = async (...args) => (await exec('git', args, { cwd: root, windowsHide: true })).stdout.trim()
+  try {
+    await git('init', '-q')
+    await git('config', 'user.email', 'w63b@example.invalid')
+    await git('config', 'user.name', 'w63b')
+    const runner = join(root, 'runner.mjs')
+    const helper = join(root, 'helper.mjs')
+    await writeFile(runner, 'export const a = 1\n')
+    await writeFile(helper, 'export const b = 1\n')
+    await git('add', '.')
+    await git('commit', '-q', '-m', 'init')
+    const clean = await collectProvenance({ root, git, files: [runner, helper] })
+    assert.equal(clean.head, await git('rev-parse', 'HEAD'))
+    assert.deepEqual(clean.status, [])
+    assert.equal(clean.treeClean, true)
+    assert.equal(clean.files[0].sha256, createHash('sha256').update('export const a = 1\n').digest('hex'))
+    assert.deepEqual(clean.files.map((entry) => [entry.file, entry.dirty]), [['runner.mjs', false], ['helper.mjs', false]])
+    assert.doesNotThrow(() => assertRunnerClean(clean))
+    // an unrelated untracked file is recorded in the status but does not stop a run
+    await writeFile(join(root, 'other.txt'), 'x')
+    const other = await collectProvenance({ root, git, files: [runner, helper] })
+    assert.deepEqual(other.status, ['?? other.txt'])
+    assert.equal(other.treeClean, false)
+    assert.doesNotThrow(() => assertRunnerClean(other))
+    // a modified runner (the first status line starts with a space that a trimming git() drops) refuses to start
+    await writeFile(runner, 'export const a = 2\n')
+    const dirty = await collectProvenance({ root, git, files: [runner, helper] })
+    assert.equal(dirty.files[0].dirty, true)
+    assert.equal(dirty.files[0].sha256, createHash('sha256').update('export const a = 2\n').digest('hex'), 'the hash is of the bytes on disk')
+    assert.ok(dirty.status.some((line) => line.endsWith('runner.mjs')))
+    assert.throws(() => assertRunnerClean(dirty), /refusing to run: runner.mjs/)
+    await git('add', 'runner.mjs')
+    assert.equal((await collectProvenance({ root, git, files: [runner, helper] })).files[0].dirty, true, 'staged but uncommitted is still not HEAD')
+    await git('commit', '-q', '-m', 'second')
+    const committed = await collectProvenance({ root, git, files: [runner, helper] })
+    assert.doesNotThrow(() => assertRunnerClean(committed))
+    assert.equal(committed.head, await git('rev-parse', 'HEAD'))
+    // an untracked runner is not HEAD either
+    const loose = join(root, 'loose.mjs')
+    await writeFile(loose, 'x')
+    const untracked = await collectProvenance({ root, git, files: [loose] })
+    assert.equal(untracked.files[0].dirty, true)
+    assert.throws(() => assertRunnerClean(untracked), /refusing to run: loose\.mjs/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
   }
 })
