@@ -10,7 +10,7 @@ import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-
 
 // Under tsx a static named import of a TypeScript module is not visible to Node (the module runs as CommonJS), so these are dynamic.
 const { calculateCanonicalHash, stableSerialize } = await import('../../src/v2/domain/canonical-hash.ts')
-const { PERCEPTION_KINDS } = await import('../../src/v2/domain/perception-timeline.ts')
+const { createPerceptionTimeline, PERCEPTION_KINDS } = await import('../../src/v2/domain/perception-timeline.ts')
 const { serverPerceptionSnapshotId } = await import('../../src/v2/domain/server-perception-snapshot.ts')
 
 /**
@@ -304,10 +304,16 @@ test('W63a PostgreSQL server perception snapshot: the table is append-only, refu
 
       // a row forged AT INSERT, internally consistent for the database but not what the assembler would seal: the reader refuses it
       const genuine = JSON.parse((await db.v2ServerPerceptionSnapshot.findUniqueOrThrow({ where: { id: stored.id } })).snapshotJson)
-      const forge = async (label, mutate, over = {}) => {
+      const forge = async (label, mutate, { resealTimeline = false, ...over } = {}) => {
         const body = structuredClone(genuine)
         delete body.snapshotHash
         mutate(body)
+        if (resealTimeline) {
+          // the timeline's own hash is made consistent again, so only the rule under test can refuse the row
+          body.timeline = JSON.parse(JSON.stringify(createPerceptionTimeline({ durationMs: body.timeline.durationMs, origin: 'server',
+            observations: body.timeline.observations, coverage: body.timeline.coverage.map((entry) => ({ kind: entry.kind, ranges: entry.ranges,
+              ...(entry.reasonCode ? { reasonCode: entry.reasonCode } : {}) })) })))
+        }
         const snapshotHash = calculateCanonicalHash(body)
         const json = stableSerialize({ ...body, snapshotHash })
         const parent = { data: { id: serverPerceptionSnapshotId(snapshotHash), workspaceId: world.workspaceId, projectId: world.projectId,
@@ -334,7 +340,7 @@ test('W63a PostgreSQL server perception snapshot: the table is append-only, refu
       // an observation whose provenance names an envelope the snapshot does not list
       await forge('observation-from-nowhere', (body) => {
         body.timeline.observations.find((item) => item.kind === 'ocr').provenance.envelopeHash = 'b'.repeat(64)
-      })
+      }, { resealTimeline: true })
       // a snapshot about another EditPlan than the columns say
       await forge('plan-differs-from-columns', (body) => { body.editPlan.snapshotHash = 'a'.repeat(64) })
     } catch (error) {

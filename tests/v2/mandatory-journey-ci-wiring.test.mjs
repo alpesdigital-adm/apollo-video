@@ -756,6 +756,7 @@ const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/prisma-server-perception-snapshot.integration.mjs', reason: W63A_SNAPSHOT_PG, citedBy: ['docs/quality/w63a-server-perception-snapshot.md'] },
   { file: 'tests/v2/prisma-director-server-perception.integration.mjs', reason: W63A_SNAPSHOT_PG, citedBy: ['docs/quality/w63a-server-perception-snapshot.md'] },
   { file: 'tests/v2/server-perception-snapshot-http.integration.mjs', reason: W63A_SNAPSHOT_PG, citedBy: ['docs/quality/w63a-server-perception-snapshot.md'] },
+  { file: 'tests/v2/server-perception-snapshot-server.integration.mjs', reason: W63A_SNAPSHOT_PG, citedBy: ['docs/quality/w63a-server-perception-snapshot.md'] },
   {
     file: 'tests/v2/prisma-face-producer-http.integration.mjs',
     reason: 'W61 diagnostic face HTTP requires the licensed, hash-pinned development video/landing/lineage, YuNet model/license and local Python/OpenCV runtime; local result face-http-resume-v1-39bfb5da SHA256 1fa3c5960fdc2ce7bb9d7ee4cd72bc1c51fff76b10e878cfec0787f828be2fb9 is a controlled proof, not CI coverage or approved facial quality. Face producer integration is wired only for three offline audit/fixture cases; its PG and runner cases are likewise local, with faceSafety unknown and holdout closed.',

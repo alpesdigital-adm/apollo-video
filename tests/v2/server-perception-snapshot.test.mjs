@@ -237,11 +237,21 @@ test('W63a a tampered envelope is refused: the hash, a measurement or a sample c
   const good = assembleServerPerceptionSnapshot(assemblyBase({ extra: { ocr: [ocr] } }))
   const stored = JSON.parse(JSON.stringify(good))
   stored.timeline.observations[0].provenance.envelopeHash = sha('9')
-  assert.throws(() => verifyServerPerceptionSnapshot(stored), /hash|listed input|timeline/i)
-  const resealed = { ...stored, snapshotHash: undefined }
-  delete resealed.snapshotHash
-  resealed.snapshotHash = calculateCanonicalHash(resealed)
-  assert.throws(() => verifyServerPerceptionSnapshot(resealed), /listed input|timeline/i)
+  assert.throws(() => verifyServerPerceptionSnapshot(stored), /hash/i)
+  // Re-sealed all the way (the timeline's hash and the snapshot's are consistent again): only the binding of the observation to a
+  // listed input can refuse it, which is what this isolates.
+  const reseal = (mutate) => {
+    const body = JSON.parse(JSON.stringify(good))
+    delete body.snapshotHash
+    mutate(body)
+    const timeline = createPerceptionTimeline({ durationMs: body.timeline.durationMs, observations: body.timeline.observations, origin: 'server',
+      coverage: body.timeline.coverage.map((entry) => ({ kind: entry.kind, ranges: entry.ranges, ...(entry.reasonCode ? { reasonCode: entry.reasonCode } : {}) })) })
+    body.timeline = JSON.parse(JSON.stringify(timeline))
+    return { ...body, snapshotHash: calculateCanonicalHash(body) }
+  }
+  assert.ok(verifyServerPerceptionSnapshot(reseal(() => {})), 'the control re-seal is accepted')
+  assert.throws(() => verifyServerPerceptionSnapshot(reseal((body) => { body.timeline.observations[0].provenance.envelopeHash = sha('9') })), /not bound to a listed input/)
+  assert.throws(() => verifyServerPerceptionSnapshot(reseal((body) => { body.timeline.observations[0].provenance.envelopeId = 'envelope-elsewhere' })), /not bound to a listed input/)
 })
 
 test('W63a evidence about another version, plan, workspace, source or clock is rejected with its reason', () => {
