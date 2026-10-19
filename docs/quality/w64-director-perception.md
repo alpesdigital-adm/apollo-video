@@ -135,7 +135,30 @@ Os arquivos do reframe (`reframe-plan.ts` e família) não foram tocados (W66r);
 Testes de unidade (`npm test`, sem banco): `director-evidence-rubric.test.mjs` (12), `run-project-director.test.mjs` (42, 7 novos),
 `w64-caller-observations.test.mjs` (3), `server-perception-snapshot-read.test.mjs` (4).
 
-RUNS_PLACEHOLDER
+PostgreSQL (harness `run-local-pg-s2d.mjs`, cluster descartável por invocação, lock global, pós-voo limpo em todas):
+
+| run id | o que | resultado |
+| --- | --- | --- |
+| `w64-pg1-1ba518b1` | 1ª execução da suíte nova + W63a Director | 3/4 e 0/1: a falha da nova foi vazamento de fila (operação de rosto enfileirada por um teste, reivindicada pelo worker do teste seguinte; corrigido cancelando-as ao fim); a da W63a, contagem de linhas 1 → 2 (a Version criada ganha o seu snapshot; oráculo escopado à Version dirigida) |
+| `w64-pg2-62ea0e45` | suíte nova 4/4; `prisma-director-server-perception` 1/1; `prisma-server-perception-snapshot` 5/5; `server-perception-snapshot-http` (tsx) 1/1 | 11/11, `success: true` |
+| `w64-mut-rights-2b660e49` | **mutante sobrevivente**: re-verificação de direitos do commit desligada; a prova de direitos passou (outro guard do commit recusa com o mesmo código) | 4/4 passam: a prova não isolava a regra |
+| `w64-mut-rights2-ab1975d4` | mesma mutação, depois de a prova passar a exigir a mensagem e os detalhes do guard do Diretor | 3/4, a de direitos falha: mutante morto |
+| `w64-final-d660e7eb` (`--build`) | suíte nova 4, W63a Director 1, snapshot PG 5, snapshot HTTP 1, **servidor Next real 1**, `prisma-director-ocr` 6 (OCR real) | 18/18, 0 pulados |
+| `w64-reg-96c0bbda` (`--build`, com as variáveis que habilitam as suítes) | `director-copy-editorial-cut.pg` 1, `multi-output-project-wide.pg` 1, `prisma-manual-edit` 1 | 3/3 (as três ficaram *puladas* na `w64-final-d660e7eb` por falta da variável; só esta rodada conta) |
+
+Mutação (editar a regra, rodar as suítes de domínio, restaurar e conferir `git status` limpo; 59 testes de domínio/Diretor na base):
+
+| regra quebrada | resultado |
+| --- | --- |
+| tier `absent` deixa de ter resposta própria (pode virar `auto-apply`) | 3 falhas |
+| banda de `rights` deixa de ser integral (`>= 0,9`) | 1 falha |
+| gate de direitos do critic: `every` → `some` | 1 falha |
+| modalidade `rights`: um source certo basta | 1 falha |
+| teto do rosto removido (rosto pode ser `high`) | 2 falhas |
+| (PG) re-verificação de direitos no commit desligada | sobreviveu na 1ª forma da prova; morto depois (ver acima) |
+
+Gates: `typecheck`, `lint`, `lint:code`, `lint:whitespace`, `db:v2:validate` (320 tabelas, 1429 índices, 1112 FKs: **nenhuma migração**), `api:v1:validate` (392 capabilities, 709 schemas),
+`api:parity:validate` e `npm test` completo (3641 testes, 3628 passam, 0 falham, 13 pulados — os pulados já existiam).
 
 ## Asserções alteradas (todas explicadas; nenhuma enfraquecida)
 
