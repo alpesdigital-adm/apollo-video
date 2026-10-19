@@ -289,7 +289,9 @@ test('W64 PostgreSQL Director: rights revoked between claim and commit refuse th
         return director.commitWithCanonicalSnapshots(scope, prepare)
       }
       const before = await rowsBefore()
-      await assert.rejects(service(racing)(request(`w64-run-c1-${world.suffix}`)), (error) => error instanceof DomainError && error.code === 'ASSET_RIGHTS_BLOCKED')
+      await assert.rejects(service(racing)(request(`w64-run-c1-${world.suffix}`)), (error) => error instanceof DomainError && error.code === 'ASSET_RIGHTS_BLOCKED' &&
+        // refused by the Director's own commit-time re-verification (every source of the plan), not by a guard further down the commit
+        /no longer has certain rights/.test(error.message) && error.details.artifactId === world.sourceId && error.details.reasonCode === 'RIGHTS_UNKNOWN')
       assert.deepEqual(await rowsBefore(), before, 'a refused run writes no Version, run, Command, snapshot or perception row')
       // unknown rights at claim are a block too: the critic refuses the plan before any commit is attempted
       await assert.rejects(service(director)(request(`w64-run-c2-${world.suffix}`)), (error) => error.code === 'INVALID_RENDER_INPUT' && error.details.gateFailures.includes('rights-compliance') &&

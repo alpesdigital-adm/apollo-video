@@ -1690,9 +1690,9 @@ ${editorialDiagnostic}`)
     assert.equal(qualityRead.data.qualityReport.objective, 'discovery')
     assert.equal(qualityRead.data.qualityReport.objectiveVersion, 1)
     assert.equal(qualityRead.data.qualityReport.rubricRef, 'awareness-discovery/v1')
-    assert.equal(qualityRead.data.qualityReport.qualitySnapshot.contentSchemaVersion, 3)
+    assert.equal(qualityRead.data.qualityReport.qualitySnapshot.contentSchemaVersion, 4)
     assert.match(qualityRead.data.qualityReport.qualitySnapshot.contentHash, /^[a-f0-9]{64}$/)
-    assert.equal(qualityRead.data.qualityReport.report.schemaVersion, 'director-quality-report/v3')
+    assert.equal(qualityRead.data.qualityReport.report.schemaVersion, 'director-quality-report/v4')
     assert.equal(qualityRead.data.qualityReport.report.status, 'review-required')
     assert.equal(qualityRead.data.qualityReport.report.hardChecks.subtitlesFaceSafe, false)
     assert.deepEqual(qualityRead.data.qualityReport.report.faceSafety, {
@@ -1701,7 +1701,7 @@ ${editorialDiagnostic}`)
     const persistedQualitySnapshot = await client.v2ProjectSnapshot.findUniqueOrThrow({
       where: { id: storedAsyncOperation.projectDirectorRun.directorRun.qualitySnapshotId },
     })
-    assert.equal(persistedQualitySnapshot.schemaVersion, 3)
+    assert.equal(persistedQualitySnapshot.schemaVersion, 4)
     assert.equal(JSON.parse(persistedQualitySnapshot.contentJson).status, 'review-required')
     assert.equal(
       qualityRead.data.qualityReport.report.desiredActionRef.id,
