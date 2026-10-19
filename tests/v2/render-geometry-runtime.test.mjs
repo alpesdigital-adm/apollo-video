@@ -265,7 +265,8 @@ test('T-FR-165 every format issue is bound to the geometry that produced its fra
     proxyHash: sha('1'), map: renderElementMap(sha('1'), clipped),
     placementPlanHash, reframePlanHash,
   })
-  assert.equal(report.schemaVersion, 'format-quality-report/v2')
+  assert.equal(report.schemaVersion, 'format-quality-report/v3')
+  assert.equal(report.mp4Evidence, null, 'no MP4 critic ran for this render')
   assert.equal(report.status, 'blocked')
   assert.equal(report.placementPlanHash, placementPlanHash)
   assert.equal(report.reframePlanHash, reframePlanHash)
