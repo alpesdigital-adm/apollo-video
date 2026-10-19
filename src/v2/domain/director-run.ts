@@ -141,6 +141,11 @@ export type DirectorPerceptionSnapshot = Readonly<{
     sampledTimelineFrames: readonly number[]
     emptyTextTimelineFrames: readonly number[]
   }>
+  /**
+   * W63a. The server perception snapshot this timeline IS (same bytes: its `timeline` is the snapshot's), named by its content hash.
+   * Absent on a run that predates it. Evidence input only: it grants no face safety and decides nothing.
+   */
+  serverSnapshot?: Readonly<{ schemaVersion: 'server-perception-snapshot/v1'; snapshotHash: string }>
 }>)
 
 export interface DirectedSubtitleCue {

@@ -18,9 +18,6 @@ type StoredSnapshot = V2ServerPerceptionSnapshot & { coverage: V2ServerPerceptio
 function conflict(message: string): never {
   throw new DomainError('PERSISTENCE_CONFLICT', `Stored server perception snapshot failed validation: ${message}`)
 }
-function isPrismaCode(error: unknown, code: string) {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === code
-}
 
 /** The nine per-kind rows the snapshot's own timeline implies: what the database must hold next to the JSON. */
 function coverageRows(snapshot: Readonly<ServerPerceptionSnapshot>) {
@@ -68,54 +65,63 @@ function hydrate(row: StoredSnapshot): Readonly<PersistedServerPerceptionSnapsho
   })
 }
 
-export class PrismaServerPerceptionSnapshotRepository implements ServerPerceptionSnapshotRepository {
-  constructor(private readonly client: PrismaClient) {}
-
-  private async find(client: PrismaClient | Prisma.TransactionClient, where: {
-    workspaceId: string; projectId: string; projectVersionId: string; snapshotHash: string
-  }) {
-    return client.v2ServerPerceptionSnapshot.findFirst({ where, include: { coverage: true } })
+/**
+ * Writes the snapshot and its nine coverage rows inside the caller's transaction, once: the same content for the same Version is a
+ * no-op (`ON CONFLICT DO NOTHING`), so any number of concurrent writers leave exactly one row. Returns whether this call wrote it.
+ * The nine-kinds guard is a deferred constraint: the caller settles it (`SET CONSTRAINTS ALL IMMEDIATE`) when its own writes are done.
+ */
+export async function insertServerPerceptionSnapshot(
+  transaction: Prisma.TransactionClient, snapshot: Readonly<ServerPerceptionSnapshot>, createdAt: Date,
+): Promise<boolean> {
+  verifyServerPerceptionSnapshot(snapshot)
+  if (snapshot.editPlan.snapshotHash === null || snapshot.sources.some((source) => source.sha256 === null)) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'A server perception snapshot is stored only with its EditPlan hash and every source hash verified')
   }
+  const inserted = await transaction.v2ServerPerceptionSnapshot.createMany({ skipDuplicates: true, data: [{
+    id: serverPerceptionSnapshotId(snapshot.snapshotHash), workspaceId: snapshot.workspaceId, projectId: snapshot.projectId,
+    projectVersionId: snapshot.projectVersionId, editPlanSnapshotId: snapshot.editPlan.snapshotId,
+    editPlanSnapshotHash: snapshot.editPlan.snapshotHash, durationFrames: snapshot.timeBase.durationFrames,
+    durationMs: snapshot.timeBase.durationMs, schemaVersion: snapshot.schemaVersion,
+    snapshotJson: stableSerialize(snapshot), snapshotHash: snapshot.snapshotHash,
+    timelineHash: snapshot.timeline.timelineHash, createdAt,
+  }] })
+  if (inserted.count === 0) return false
+  await transaction.v2ServerPerceptionSnapshotCoverage.createMany({ data: coverageRows(snapshot) })
+  return true
+}
+
+/** Reads and re-verifies the stored snapshot of this content for this Version, or null when none is stored. */
+export async function readServerPerceptionSnapshot(
+  client: PrismaClient | Prisma.TransactionClient,
+  where: { workspaceId: string; projectId: string; projectVersionId: string; snapshotHash: string },
+) {
+  const row = await client.v2ServerPerceptionSnapshot.findFirst({ where, include: { coverage: true } })
+  return row ? hydrate(row) : null
+}
+
+export class PrismaServerPerceptionSnapshotRepository implements ServerPerceptionSnapshotRepository {
+  private readonly client: PrismaClient
+  constructor(client: PrismaClient) { this.client = client }
 
   async findByHash(input: { workspaceId: string; projectId: string; projectVersionId: string; snapshotHash: string }) {
-    const row = await this.find(this.client, input)
-    return row ? hydrate(row) : null
+    return readServerPerceptionSnapshot(this.client, input)
   }
 
   async persistIfAbsent(input: { snapshot: Readonly<ServerPerceptionSnapshot>; createdAt: string }) {
-    // A stored snapshot is fully bound: the sealed EditPlan and the bytes of every source the timeline plays.
     const snapshot = verifyServerPerceptionSnapshot(input.snapshot)
-    if (snapshot.editPlan.snapshotHash === null || snapshot.sources.some((source) => source.sha256 === null)) {
-      throw new DomainError('PERSISTENCE_CONFLICT', 'A server perception snapshot is stored only with its EditPlan hash and every source hash verified')
-    }
     if (!Number.isFinite(Date.parse(input.createdAt))) throw new DomainError('INVALID_ARGUMENT', 'Snapshot creation time is invalid')
     const where = { workspaceId: snapshot.workspaceId, projectId: snapshot.projectId,
       projectVersionId: snapshot.projectVersionId, snapshotHash: snapshot.snapshotHash }
-    const existing = await this.find(this.client, where)
-    if (existing) return Object.freeze({ record: hydrate(existing), created: false })
-    try {
-      await this.client.$transaction(async (transaction) => {
-        await transaction.v2ServerPerceptionSnapshot.create({ data: {
-          id: serverPerceptionSnapshotId(snapshot.snapshotHash), workspaceId: snapshot.workspaceId, projectId: snapshot.projectId,
-          projectVersionId: snapshot.projectVersionId, editPlanSnapshotId: snapshot.editPlan.snapshotId,
-          editPlanSnapshotHash: snapshot.editPlan.snapshotHash!, durationFrames: snapshot.timeBase.durationFrames,
-          durationMs: snapshot.timeBase.durationMs, schemaVersion: snapshot.schemaVersion,
-          snapshotJson: stableSerialize(snapshot), snapshotHash: snapshot.snapshotHash,
-          timelineHash: snapshot.timeline.timelineHash, createdAt: new Date(input.createdAt),
-        } })
-        await transaction.v2ServerPerceptionSnapshotCoverage.createMany({ data: coverageRows(snapshot) })
-        // The nine-kinds guard is a deferred constraint: settle it here, so a refusal is this call's error and not a lost COMMIT.
-        await settleDeferredOutputGuards(transaction)
-      })
-    } catch (error) {
-      if (!isPrismaCode(error, 'P2002')) throw error
-      // Another writer sealed the very same content first: that row is the answer.
-      const winner = await this.find(this.client, where)
-      if (!winner) throw error
-      return Object.freeze({ record: hydrate(winner), created: false })
-    }
-    const stored = await this.find(this.client, where)
+    const existing = await readServerPerceptionSnapshot(this.client, where)
+    if (existing) return Object.freeze({ record: existing, created: false })
+    const created = await this.client.$transaction(async (transaction) => {
+      const wrote = await insertServerPerceptionSnapshot(transaction, snapshot, new Date(input.createdAt))
+      // The nine-kinds guard is a deferred constraint: settle it here, so a refusal is this call's error and not a lost COMMIT.
+      await settleDeferredOutputGuards(transaction)
+      return wrote
+    })
+    const stored = await readServerPerceptionSnapshot(this.client, where)
     if (!stored) conflict('the row disappeared after it was written')
-    return Object.freeze({ record: hydrate(stored!), created: true })
+    return Object.freeze({ record: stored!, created })
   }
 }

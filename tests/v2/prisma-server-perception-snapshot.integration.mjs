@@ -103,7 +103,9 @@ test('W63a PostgreSQL server perception snapshot: fuses the sealed evidence, sta
       assert.equal(row.timelineHash, first.snapshot.timelineHash)
       assert.equal(row.coverage.length, 9)
       assert.deepEqual(row.coverage.map((entry) => entry.kind).toSorted(), [...PERCEPTION_KINDS].toSorted())
-      assert.equal(calculateCanonicalHash(JSON.parse(row.snapshotJson).timeline), first.snapshot.timelineHash)
+      const { timelineHash, ...timelineBody } = JSON.parse(row.snapshotJson).timeline
+      assert.equal(timelineHash, first.snapshot.timelineHash)
+      assert.equal(calculateCanonicalHash(timelineBody), timelineHash)
       assert.equal(row.createdAt.toISOString(), '2026-10-19T12:00:00.000Z')
 
       // range clipping: the part before the first OCR sample is examined by nobody, and OCR says so
@@ -178,7 +180,8 @@ test('W63a PostgreSQL server perception snapshot: another Version, workspace or 
       await assert.rejects(built.service()({ ...ask, projectVersionId: `missing-${randomUUID()}` }), { code: 'PROJECT_NOT_FOUND' })
       // ... and that workspace's own snapshot contains none of this one's evidence
       const foreign = await built.service()({ workspaceId: other.workspaceId, projectId: other.projectId })
-      const ours = new Set(v1.snapshot.inputs.map((input) => input.envelopeHash))
+      // (the words' hash is the content hash of an identical fixture transcript, so only sealed producer rows are compared)
+      const ours = new Set(v1.snapshot.inputs.filter((input) => input.kind !== 'transcript').map((input) => input.envelopeHash))
       assert.equal(foreign.snapshot.inputs.some((input) => ours.has(input.envelopeHash)), false)
       assert.deepEqual(foreign.snapshot.inputs.map((input) => input.kind), ['transcript'], 'only the words of its own EditPlan')
       assert.ok(foreign.result.coverage.filter((entry) => entry.kind !== 'transcript-word').every((entry) => entry.state === 'absent'))

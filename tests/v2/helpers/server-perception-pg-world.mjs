@@ -44,6 +44,14 @@ function actor(world, scopes, label) {
 
 export async function seedSnapshotWorld(db, options = {}) {
   const world = await seedPerceptionProducerContext(db, { durationFrames: 120, ...options })
+  return produceSnapshotEvidence(db, world)
+}
+
+/**
+ * The three producers over a world whose head Version plays one 120-frame recording (`world.versionId`, `world.sourceId`,
+ * `world.sourceSha256`, `world.clientId`, `world.suffix`, `world.projectId`): each runs through admission, claim and the fenced publish.
+ */
+export async function produceSnapshotEvidence(db, world) {
   const operations = new PrismaPublicOperationRepository(db)
   const writer = actor(world, ['projects:write'], 'writer')
   const createOperationId = () => `w63a-operation-${randomUUID()}`

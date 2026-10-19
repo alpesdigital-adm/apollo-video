@@ -62,7 +62,8 @@ function retimedWords(plan: Record<string, unknown>) {
  * envelope of each source is the one used, like the Director's own.
  */
 export class PrismaServerPerceptionEvidenceReader implements ServerPerceptionEvidenceReader {
-  constructor(private readonly client: PrismaClient) {}
+  private readonly client: PrismaClient
+  constructor(client: PrismaClient) { this.client = client }
 
   async readForVersion(input: { workspaceId: string; projectId: string; projectVersionId: string | null; now: Date }) {
     const project = await this.client.v2Project.findFirst({
