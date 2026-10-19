@@ -230,7 +230,7 @@ test('export matrix controlled fixture hydrates unknown perception, quality and 
   assert.equal(matrixMediaBinaries({}).ffprobe, ffprobeStatic)
 })
 
-test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserves five-cell export mechanics through a controlled port', {
+test('T-F2-GATE/F2.028 admits the real API per burned caption without a global facial authority and preserves five-cell export mechanics through a controlled port', {
   skip: process.env.APOLLO_EXPORT_MATRIX_E2E !== '1' && 'set APOLLO_EXPORT_MATRIX_E2E=1 with an isolated database',
   timeout: 300_000,
 }, async (t) => {
@@ -253,7 +253,6 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
   assert.equal(isAbsolute(ffprobeBin), true)
 
   // This suite runs under tsx, where a static named import of a .ts module from an .mjs loses its names: it arrives dynamically.
-  const { ASS_EMISSION_POLICY } = await import('../../src/v2/domain/ass-emission-policy.ts')
   const { assetRightsRevision, evaluateAssetUse } = await import('../../src/v2/domain/asset-rights.ts')
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
   const { createMediaArtifactManifestV2 } = await import('../../src/v2/domain/media-artifact.ts')
@@ -282,11 +281,12 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
   } = await import('../../src/v2/infrastructure/repository-factory.ts')
   const { createLocalMediaUploadStorageFromEnvironment } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
   const { createFfmpegEditorialProxyRendererFromEnvironment } = await import('../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts')
+  const { FfmpegCaptionPixelCritic } = await import('../../src/v2/infrastructure/media/ffmpeg-caption-pixel-critic.ts')
   const { LocalProjectLutRenderMaterializer } = await import('../../src/v2/infrastructure/media/local-project-lut-render-materializer.ts')
   const { createExportMatrixCapacityProviderFromEnvironment } = await import('../../src/v2/infrastructure/export-matrix-capacity.ts')
   const { createPreflightCommitTokenIssuerFromEnvironment } = await import('../../src/v2/infrastructure/security/preflight-commit-token.ts')
   const { createProtectedPayloadCipherFromEnvironment } = await import('../../src/v2/infrastructure/security/recipe-parameter-cipher.ts')
-  const { projectRenderSourcesFingerprint } = await import('../../src/v2/application/project-render-sources.ts')
+  const { projectFinalRenderInputHash, projectRenderSourcesFingerprint } = await import('../../src/v2/application/project-render-sources.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
   const { PrismaProjectFinalExportRepository } = await import('../../src/v2/infrastructure/prisma/project-final-export-repository.ts')
@@ -554,29 +554,41 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
     const preflight = await preflightResponse.json()
     assert.equal(preflightResponse.status, 201, `${JSON.stringify(preflight)}\n${serverLogs.slice(-4_000)}`)
     assert.equal(validators.preflightCreated(preflight), true, JSON.stringify(validators.preflightCreated.errors))
-    assert.equal(preflight.data.preflight.allowed, false)
+    // W65b (final-caption-certification/v1): nothing grants a global facial safety, and nothing needs to. The stored Director report is the
+    // honest one (review-required, face unknown) and the proxy review of each project is approved; that is the only reservation the report
+    // carries, so the real admission accepts it and the preflight answers what it exists to answer: five ready cells with no blocker and the
+    // commit token. The final then certifies each burned caption itself (its own proofs), so a blocked preflight is not the outcome here.
+    assert.equal(preflight.data.preflight.allowed, true, JSON.stringify(preflight.data.preflight.blockers))
     assert.equal(preflight.data.preflight.definition.cells.length, 5)
     assert.equal(new Set(preflight.data.preflight.definition.cells.map((cell) => cell.outputFileName)).size, 5)
-    assert.equal(preflight.data.preflight.cells.filter((cell) => cell.blockers.includes('CELL_NOT_READY')).length, 5)
-    assert.equal(preflight.data.commitToken, undefined, 'unknown facial clearance cannot issue a commit token')
+    assert.deepEqual(preflight.data.preflight.blockers, [])
+    assert.deepEqual(preflight.data.preflight.cells.flatMap((cell) => cell.blockers), [])
+    assert.equal(preflight.data.preflight.cells.filter((cell) => cell.ready && cell.rightsAllowed).length, 5)
+    assert.equal(typeof preflight.data.commitToken, 'string')
+    assert.ok(preflight.data.commitToken.length >= 80)
 
+    // A commit that does not present the preflight's own token still starts nothing: the token is the only way in.
     const deniedCommitBody = matrixDeniedCommitBody()
     assert.equal(validators.commitRequest(deniedCommitBody), true, JSON.stringify(validators.commitRequest.errors))
+    assert.notEqual(deniedCommitBody.commitToken, preflight.data.commitToken)
     const deniedCommit = await fetch(`${baseUrl}/v1/export-matrix-preflights/${preflight.data.preflightId}/commit`, {
       method: 'POST', headers: { authorization, 'content-type': 'application/json' },
       body: JSON.stringify(deniedCommitBody),
     })
     const deniedCommitPayload = await deniedCommit.json()
-    assert.equal(deniedCommit.status, 428, JSON.stringify(deniedCommitPayload))
+    assert.equal(deniedCommit.status, 403, JSON.stringify(deniedCommitPayload))
     assert.equal(validators.errorResponse(deniedCommitPayload), true, JSON.stringify(validators.errorResponse.errors))
-    assert.equal(deniedCommitPayload.error.code, 'PRECONDITION_REQUIRED')
+    assert.equal(deniedCommitPayload.error.code, 'PREFLIGHT_TOKEN_INVALID')
     assert.equal(await client.v2ExportMatrix.count({ where: { workspaceId } }), 0)
     assert.equal(await client.v2PublicOperation.count({ where: { workspaceId, type: 'project-final-export' } }), 0)
     assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId } }), 0)
 
     // This port exists only in this test process. It checks PostgreSQL lineage,
     // source bytes and exact scope before letting the application exercise
-    // export mechanics. The stored reports remain review-required/unknown.
+    // export mechanics on the fixture's own media. The stored reports remain
+    // review-required/unknown. (The real admission above is not the thing this
+    // port replaces any more; it keeps the cells on this synthetic source and
+    // pins its identity on every read.)
     const sourceReader = new PrismaProjectProxyRenderRepository(client)
     const realProjects = new PrismaProjectFinalExportRepository(client)
     async function readControlledSource(input, immutable) {
@@ -711,7 +723,8 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
       return Object.freeze({
         async render(input) {
           const result = await renderer.render(input)
-          const ass = await readFile(join(renderWorkRoot, input.operationId, 'captions.ass'), 'utf8').catch(() => '')
+          // The renderer works under <artifact root>/.work/<operation id>; a path that did not exist read as an empty file and made 'no dialogue' vacuous.
+          const ass = await readFile(join(artifactRoot, '.work', input.operationId, 'captions.ass'), 'utf8').catch(() => '')
           const plan = input.placementPlan
           renderTrace.push(Object.freeze({
             renderKind: input.renderKind, format: input.format,
@@ -735,6 +748,9 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
         artifacts: createMediaArtifactPersistenceRepository(workerEnvironment),
         storage: createLocalMediaUploadStorageFromEnvironment(workerEnvironment),
         renderer: trace ? tracedRenderer(renderer) : renderer,
+        // W65b: a final that burns a caption is refused before the encode without a pixel critic to confirm it on the delivered MP4. The
+        // composition root wires this very critic (repository-factory.ts) on the worker's own FFmpeg; the failing worker never reaches it.
+        captionPixelCritic: new FfmpegCaptionPixelCritic({ ffmpegPath }),
         renderElementMaps: createRenderElementMapRepository(),
         colorPipelines: createColorPipelineCompilationRepository(),
         colorPlans: createProjectColorPlanRepository(),
@@ -783,9 +799,8 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
       quality: retryDetail.outputQuality,
     } : null
     const recomputedInputHash = retryDetail && retrySource && retryOutputSpec
-      ? calculateVersionHash({
-        kind: 'project-final-export/v2', projectId: retryDetail.projectId,
-        assEmissionPolicy: ASS_EMISSION_POLICY,
+      ? projectFinalRenderInputHash({
+        projectId: retryDetail.projectId,
         projectVersionId: retryDetail.projectVersionId, projectVersionHash: retryDetail.projectVersionHash,
         editPlanSnapshotId: retrySource.editPlanSnapshotId, editPlanHash: retrySource.editPlanHash,
         directorRunId: retrySource.directorRunId, qualitySnapshotId: retrySource.qualitySnapshotId,
@@ -897,19 +912,33 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
     assert.equal(new Set(ready.data.matrix.cells.map((cell) => cell.outputArtifactId)).size, 5)
     assert.equal(new Set(ready.data.matrix.cells.map((cell) => cell.outputManifestId)).size, 5)
 
-    // The Director's captions are no longer stripped: every one of the five finals reached the real renderer with its cues and
-    // the unknown-face review plan for them, on the canvas of its own OutputSpec. That plan suppresses a cue while facial coverage
-    // is unknown (the same decision the approved proxy was drawn from), so the ASS file holds the CTA events only.
-    assert.equal(renderTrace.length, 5, stableSerialize(renderTrace))
-    assert.deepEqual(renderTrace.map((trace) => trace.format).toSorted(), [...FORMATS].toSorted())
-    for (const trace of renderTrace) {
+    // The Director's captions are no longer stripped, and they are not all suppressed either (W65b, final-caption-certification/v1):
+    // every one of the five finals reached the real renderer with its cues and the placement plan for them (anchor plan v3, policy
+    // omit-and-list), on the canvas of its own OutputSpec. A cue that sits in a certified band is BURNED (one ASS dialogue); a cue
+    // that cannot be certified is OMITTED and listed (`suppressed`, no dialogue). A final that burns at least one cue is rendered a
+    // second time, a control encode of the same input without the burned cues, so the pixel critic can measure the delivered MP4
+    // against it; a final that burns nothing needs no control.
+    const deliverables = renderTrace.filter((trace) => trace.cues >= 1)
+    const controls = renderTrace.filter((trace) => trace.cues === 0)
+    assert.equal(deliverables.length, 5, stableSerialize(renderTrace))
+    assert.deepEqual(deliverables.map((trace) => trace.format).toSorted(), [...FORMATS].toSorted())
+    for (const trace of deliverables) {
       assert.equal(trace.renderKind, 'final', stableSerialize(trace))
-      assert.ok(trace.cues >= 1, stableSerialize(trace))
-      assert.equal(trace.anchorSchema, 'subtitle-anchor-plan/v2', stableSerialize(trace))
+      assert.equal(trace.anchorSchema, 'subtitle-anchor-plan/v3', stableSerialize(trace))
       assert.equal(trace.decided, trace.cues, stableSerialize(trace))
       assert.equal(trace.canvas, trace.outputCanvas, stableSerialize(trace))
       assert.equal(trace.dialogues, trace.cues - trace.suppressed + trace.ctas, stableSerialize(trace))
     }
+    const burnedFormats = deliverables.filter((trace) => trace.suppressed < trace.cues).map((trace) => trace.format).toSorted()
+    assert.ok(burnedFormats.length >= 1 && burnedFormats.length < deliverables.length,
+      `the fixture burns some cues and omits others, so both paths are exercised: ${stableSerialize(renderTrace)}`)
+    assert.deepEqual(controls.map((trace) => trace.format).toSorted(), burnedFormats, stableSerialize(renderTrace))
+    for (const trace of controls) {
+      assert.equal(trace.renderKind, 'final', stableSerialize(trace))
+      assert.equal(trace.canvas, trace.outputCanvas, stableSerialize(trace))
+      assert.equal(trace.dialogues, 0, stableSerialize(trace))
+    }
+    assert.equal(renderTrace.length, deliverables.length + controls.length, stableSerialize(renderTrace))
     t.diagnostic(`final render trace: ${stableSerialize(renderTrace)}`)
 
     const formatCritics = await client.v2ProjectFinalExportOperation.findMany({
