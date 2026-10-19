@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-13",
+  "updatedAt": "2026-10-19",
   "audit": {
     "delivered": 380,
     "total": 1259,
     "source": "TODO.md"
   },
-  "evidenceBaseCommit": "252f6bd851b03d3c2728a4820f17b8df71d71bb0",
+  "evidenceBaseCommit": "67bb41aa4d39f25a94537e494d0f8f5676d0fcec",
   "coverage": {
     "unit": "todo-section",
     "total": 250,
@@ -37,11 +37,11 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "PR81 aguarda regressao integral da propria SHA. CI5250 Quality falhou no agregador de cleanup do caso intencional sem filho admitido; Perception SUCCESS, Compose ainda em progresso nesta observacao. Correcao tests-only vincula instancia/runId e fatos exatos desse caso, exigindo root admitido e close real nos demais. Dois puros e lint passaram localmente; Linux da nova fonte permanece pendente. CI dd74 e request368 do CI835 permanecem historicos, sem causa atribuida ao transporte."
+          "text": "Fora de main: PR #81 (codex/w61-70-integration para main) aberto. CI verde no head 67bb41aa (CI 39264414164, Dashboard runtime validation 39264414165, Media library validation 39264414176); o CI de main é o próximo gate. Os FAILs históricos (CI5250, CI dd74, request368 do CI835) seguem preservados nas evidências; CI verde não é validação de mídia nem aceite."
         },
         {
           "kind": "implementation",
-          "text": "Detector apto, cobertura multimodal do master, critic independente dos pixels finais e W35 final positivo continuam pendentes. Fechar integracao real API/workers/PostgreSQL/outputs e regressao completa da propria SHA; faceSafety unknown nao concede aceite editorial ou facial."
+          "text": "Não existe detector qualificado para segurança facial: faceSafety global permanece unknown (o V9 foi aceito só como decisão de qualidade com escopo primeiro plano e orador, ver W62). Cobertura multimodal do master, critic independente dos pixels finais (W67) e W35 final positivo continuam pendentes."
         },
         {
           "kind": "validation",
@@ -830,9 +830,63 @@
           "ref": "Apollo/w61-70-20261008/ci5250-close-aggregate-focused-v1-faace5de/result.json",
           "scope": "PASS2/2zero skips, SHA7a05110bb168cd4bfc0947fe5c3068d47609794b41049bc02ee8cbfa02a4e413; source5250/FP23e53002 igual/noDB/zero observados/close antes primeira amostra/scratch removido/postflight vazio. Agregador test-only distingue instancia/runId exatos do cancelamento pre-admissao, rejeita troca/duplicata/contradicao/no-root indevido/admitido sem close. Nao fabrica close e nao promove processTreeTerminal ou inventoryInconclusive. Lint focal e214e62a98f4533cd9eb55ae8c85676f8f3258fa4396b1c8bac02fe1f47d86aa PASS. Linux ainda pendente.",
           "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/ci62ce-terminal-logs-v1-f2fcb45d/result.json",
+          "scope": "SHA4faf4d27561db9e939787ec5977f8efb065395dde51c1014d8cf1c2d4348ba69 PASS/FP23e53002 igual/noDB/10observados0vivos/scratchgone/postflight[]. Manifest1332c92bbab82a4393c671d3ea8e63fefce9716c4ede28185b65a83cd81d303e:10files4210044B autenticados. Central38495693643 Quality/Compose/Perception, dashboard38495693251 e media38495693265 SUCCESS no head62ce2db3/checkoutd181a150. Unit2929total2923PASS6SKIP0FAIL/publicAPI12/dashboard6; semZIP/media visual/merge.",
+          "role": "implementation"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414164",
+          "scope": "W61: CI central no head 67bb41aa (jobs Perception, Quality and security, Isolated Compose): SUCCESS, head SHA e conclusão conferidos pela API do GitHub. Cobre o código integrado deste recorte na suíte da CI; não é prova de mídia visual, implantação nem aceite.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414165",
+          "scope": "W61: Dashboard runtime validation no head 67bb41aa: SUCCESS (head SHA e conclusão conferidos pela API do GitHub). Inclui a jornada do dashboard que segue a regra W65b de omitir e listar; não é aceite visual.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414176",
+          "scope": "W61: Media library validation no head 67bb41aa: SUCCESS (head SHA e conclusão conferidos pela API do GitHub).",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w69-dev-mergefinal-unit-ece97b02/result.json",
+          "scope": "Suíte unitária completa (node --test, concorrência 3) no worktree do merge W65b: 3566 testes, 3553 pass, 0 fail, 13 skipped, exit 0 em 143,6 s; log SHA-256 5614919546d220eb47765fbe330f4925163f3e0dc9a2acd78072fad2b80000a2 (482362 B). SHA do código não gravado no recibo.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/fullb1-152e9047/summary.json",
+          "scope": "Sol1, harness S2d sobre o plano de CI no worktree de integração (cabeça anterior a 67bb41aa, 18/10): 39 passos registrados, todos exit 0; 104 testes contados, 104 pass, 0 fail, 0 skipped; success true, postflight limpo.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/fullb2b-68d2e197/summary.json",
+          "scope": "Sol1, harness S2d no worktree de integração (cabeça anterior a 67bb41aa, 19/10): 52 passos registrados, todos exit 0; 109 testes contados, 106 pass, 0 fail, 3 skipped (runtime-safety-workers: 8 testes, 5 pass, 3 skipped); success true, postflight limpo.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/fullb3b-f0b3800a/summary.json",
+          "scope": "Sol1, harness S2d no worktree de integração (cabeça anterior a 67bb41aa, 19/10): success false, preservado e não reclassificado. 28 passos; os passos 069 library-journey e 070 wave24 falharam; 39 testes contados, 34 pass, 2 fail, 3 skipped. A regressão da SHA final é a CI verde de 67bb41aa.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/w070-cefe3734/summary.json",
+          "scope": "Sol1: passo 070 do plano de CI (jornada sintética Wave 24, não a W70 deste programa) 25/25 pass em PostgreSQL supervisionado, após build e migrate exit 0; success true, postflight limpo.",
+          "role": "controlled-e2e"
         }
       ],
-      "nextAction": "Publicar a correcao focal do agregador e comprovar o caso Linux na propria SHA. Preservar FAIL5250 e resultados anteriores; nenhuma ausencia de processo substitui close de filho admitido. Fechar integracao W66, detector apto, critic dos pixels finais e W35 final positivo antes de promocao, merge, deploy ou aceite.",
+      "nextAction": "Integrar em main (PR #81) e confirmar o CI de main. Depois fechar a percepção fail-closed de ponta a ponta: detector com paridade Linux (W62), faces e temporal consumidos pelo Diretor (W64) e a jornada W70 com o master real. faceSafety só deixa de ser unknown com detector qualificado em corpus independente.",
       "notes": "Checkpoint 08/10: percepção manual 2/2 PG e negativo API final-export review-required→422 passaram. Run perception-combined-v2-a63b87a4: 5/5 PG com bootstrap, runner Tesseract real, replay/isolamento/rights/retry/tamper; postflight confirmou processos encerrados, zero backends e cluster local parado. Um caso retry duplicado foi removido depois; alteração da restauração do hash para HTTP aguarda novo run. O recorte aceita apenas source único, CFR/fps iguais e orientação zero. Parser canônico e resolvedor de autoridade rejeitam OCR como prova facial; positivo antigo de exportação permanece pendente e não foi pulado. Diagnóstico sanitizado por etapa implementado e testes isolados passaram; causa histórica do retry não foi estabelecida. PR78 segurança integrado em main 12b928c379ee2b59c1bb99ee29ca5aa0cec83f46. CI main 37854671199 cancelado por limite35m após API12/12; PR79 ajusta orçamento40m, checks pendentes. Runtime ainda fora de main; nenhuma promoção TODO, implantação ou aceite. Novo run perception-http-16d5050c passou bootstrap, worker 3/3 e HTTP 1/1 sem skips em build fresco: POST concorrente/replay/mismatch, GET queued e envelope OCR real, isolamento/cancel/retry e schemas Ajv. Postflight confirmou zero backends, PIDs terminais, cluster parado e scratch removido. Commit runtime 32ad0b13; prova cobre este recorte, não a wave inteira. PR79 passou4/4 e foi integrado em main54dd897f2b5af6b889a09f456ab6f01289d7dd72; mainCI37862692874, dashboard37862692784 e media37862692701 estão em execução. Branch pacote incorporou workflow em70a37426. Brain não gravou nova decisão por HTTP502/embedding401; documentação versionada preserva o checkpoint. Corpus V5 auditado 180/180; avaliação YuNet 640 em 120 imagens de desenvolvimento/calibração não atingiu qualidade, com holdout fechado. Dashboard e Media CI do main passaram; Quality ainda em execução na última consulta. CI merged-main 37862692874 concluiu success no SHA 54dd897f: Quality e Compose, além Dashboard/Media verdes. Esse main contém segurança/timeout; runtime W61–W64 permanece no branch. Estágio de prova controlada refere-se somente aos recortes runner/PG/HTTP citados, não à totalidade da wave, implantação ou aceite. Construção permanece parcial no branch. Registro operacional: persistencia Brain pendente por HTTP 502 / embedding_provider_error:openai:401; nenhuma memoria gravada, credencial alterada ou nova tentativa prevista sem sinal de recuperacao. Evidencias continuam no repositorio e no arquivo privado de cada run. Produtor facial diagnostico passou PG/runner real 4/4 apos corrigir claim retrying via transicao oficial do dominio e audit incompleto dos controles da fixture. Falhas anteriores permanecem arquivadas; HTTP facial proprio passou 1/1 sem skips em build Next fresco, com POST autenticado, replay concorrente, worker diagnostico YuNet em video development licenciado e GET selado; SHA256 do result 1a1ba6d017fe1acab99cddd18c9b3e16e11c96dbc1554114f3cc42015075a5dc. Quatro amostras/quatro caixas, faceSafety unknown e postflight com zero backends/16 PIDs terminais. Isso comprova apenas a mecanica diagnostica; modelos V5/V6/V7 seguem reprovados e holdout fechado. Mesmo patch de claim aplicado a OCR/temporal, com typecheck e gate de arquitetura verdes; este run prova retry facial. Nenhum holdout aberto ou autoridade facial concedida. CI proposto em 11/10: OCR e temporal reais em PostgreSQL isolado terão job dedicado com provenance de binários e supervisão serial; ainda não executado. tests/v2/prisma-face-producer-http.integration.mjs permanece fora do CI por insumos development privados/licenciados/pinados e runtime Python/OpenCV. Prova local face-http-resume-v1-39bfb5da SHA1fa3c5960fdc2ce7bb9d7ee4cd72bc1c51fff76b10e878cfec0787f828be2fb9 não substitui CI. Face producer PG/runner também local; CI executa somente três casos offline de fixture/audit, sem detector apto ou holdout. Historico do blocker substituido em13/10: PR81 permanece aberto e bloqueado. CI dcc0 terminou: central38187207475 FAIL, Compose local/S3 PASS, Quality FAIL no replay do fake de extracao, percepcao FAIL na fixture de rotacao, dashboard38187207482 FAIL na barra do seed; Media38187207444 PASS controlado. Depois desse head, W9 local3/3, W10local2/2, extracao11/11 e temporal1/1 passaram em fontes posteriores fingerprintadas, sem substituir CI. Dashboard v4 passou as assercoes mas registrou GETworkspace409/console por color bindings vazios no seed: correcoes tests-only compilam antes INSERT e exigem workspace200/ledger browser aguardado sem erros; build a37 passou; dashboardv5 FAIL antes do primeiro estado por quatro capturas de corpo HTTP200, cleanup conclusivo. Ledger de requests/hidratacao e novo run pendentes. W66 continua isolado36/36puros+16/16PG; W69 fisico FAIL60fps concat frame6, policy nao aprovada. Teste composto Linux/oito suites, regressao da nova SHA e CI integral continuam obrigatorios. FAILs historicos Windows depth11/face79e1/EACCESowned vivo permanecem preservados; namespace Linux isolado ainda sem prova. Nenhum selo editorial/facial/deploy/aceite. Atualizacao0146: dashboardv6 tambem FAIL, agora com duas404 prematuras reais e22RSC aborts sem causa comprovada; projecao workspacev13/RR e manifests ainda sem gates. W69v5 completou diagnostico803 e continua FAIL fisico; nenhum CI novo ou runtime promovido. Historico da nextAction substituida em13/10: CI127e terminal: Compose e Media SUCCESS; Quality FAIL no guard Incomplete Linux process identity depois de1661 testes sem resumo; Perception passou namespace composto9runs/OCR mas FAIL na fixture matrix90/tag270; Dashboard FAIL23ERR_ABORTED. Diagnostico proc/stat preserva guard e passou6/6; rotacao passou2/2 local com binarios reais, matrizCCW90 obrigatoria e tagCW270 opcional coerente, sem alterar adapter. Nova SHA Linux obrigatoria. HTTP local b053 FAIL antes browser: GET reutiliza socket cujo peer servidor havia fechado; request joinunknown/resetAuthorfalse, imports tardios sao hipotese nao medida. Preparar dependencias antes rede sem retry/keepalive/waiver; Chrome157 ainda nao executado. W35final positivo, W66cutover16/fullbundle, W69clock/publicacao e W62-W67qualificacao continuam pendentes. Sem merge/deploy/aceite ou promocao TODO. Historico do blocker1 arquivado apos revisao13/10: Envelope OCR passou em worker/PG/HTTP. Produtor facial diagnóstico passou auditoria offline, PG real e HTTP real com build fresco; modelos V5/V6/V7 falharam desenvolvimento/calibração, holdout fechado e faceSafety unknown. Fencing de publicação passou em três modalidades sob PostgreSQL local, mas regressão final/exportação positiva real, detector apto e critic de pixels finais continuam pendentes. CI Compose revelou exigência indevida de editorial-reuse para master próprio. Correção escrita distingue rendering para source-master/source-audio de editorial-reuse para selected-insert, recusa associação ambígua e preserva releitura após locks. Análise OCR/temporal/face do master exige editing concedido pelo ingest; admission/claim/publish revalidam com clock PG após espera. Reader é diagnóstico, não autorização futura. Focados de direitos/command-impact passaram 31/31 sem skips; novo SHA ainda exige regressão, PG e CI. O teste controlado da etapa de direitos do ingest não substitui ingest E2E. Historico do blocker0 arquivado apos revisao13/10: PR81 permanece bloqueado. Namespace Linux CI127e gate05b48d80 comprovou nove runs distintos no escopo infrastructure-controlled-mechanics; infrastructureAcceptance permanece pending e as oito suites nao estao integralmente comprovadas. Ultimo checkpoint CIeae: central/Compose em progresso, Quality TERMINALFAIL no job115331009601 teacher-screen-journey.e2e.mjs926 lut-selection422ASSET_RIGHTS_BLOCKED (fixture registerRecording sem direitos para camera master/screen insert), Perception FAIL nos nomes PG acima63bytes, Dashboard FAIL e Media SUCCESS controlado. Nomes PG corrigidos passaram4/4puros, sem PostgreSQL; exigir nova prova PG/CI na propria SHA. Preparacao HTTP passou4/4, mas CfTreal a5a7f1bc observou Chrome157.0.8090.0 e falhou em quatro RSC prefetch sem EOF; cleanup conclusivo nao aprova a jornada nem identifica o cancelador. AppShell prefetchfalse e prova clique/Enter/back/forward estao preparados, sem build ou jornada dessa mudanca. Detector apto, W35 final positivo, critic de pixels, regressao completa e aceite continuam pendentes. Nenhuma promocao TODO, merge, deploy ou selo editorial/facial. Historico movido do blocker0/nextAction em13/10 apos CI1e03 terminal: PR81 bloqueado pela regressao integral e dashboard CfT157 Linux da propria SHA. CI9f4caebb terminou com Compose/Perception/Media SUCCESS e Quality FAILURE no renderer synthetic-presenter apos60132ms, limite60s preservado e fase interna ainda nao observada. Dashboard falhou antes do browser: EACCES no environ do bootstrap proprio; compiler0 e close posterior nao aprovam a observacao. Deltas apenas diagnosticos serializam fatos ja coletados do observer e fase do renderer sem mudar guards, timeout ou rethrow. Wave20 WindowsFAIL de browser-server.close>5s permanece historico; Compose verde nao o apaga. Nenhum merge, deploy ou aceite. NextAction anterior: Fila W61: publicar os tres paths diagnosticos revisados e seus checks; no CI exato obter environmentDenials/terminalEnvironmentRechecks do build e phase/code do renderer antes de corrigir causas ainda desconhecidas. Nao ampliar60s/5s/120s, excluir EACCES ou aceitar compiler0 como inventario conclusivo. Archive9f central/media332files81093528B, manifesto v2 SHA892650103fcb1e1172e7497673cccb26c053798a1990a112f868964a54a975e3; ZIPdigest somente informado. Compose/percepcao verdes limitados a essa SHA. Detector/critic/W35final e dependencias W62-W69 continuam gates de aceite. Checkpoint vigente CI1e03d8d0: Compose, Perception e Media SUCCESS no escopo controlado; Quality FAIL em parse-stat/PGRP_FORMAT_OR_RANGE no stat-after PID6038,50fields/invalidNumeric0/commvalid, knownBefore R/ppid5936/pgrp2091/session2091/start31557. A tupla after nao foi arquivada; a fonte Linux documenta sentinel0/-1/-1, mas nao comprova a causa deste FAIL. Dashboard FAIL CFT_OBJECT_CHECKSUM_HEADERS antes do browser; as ocorrencias reais checksum tambem nao foram registradas no FAIL, portanto repeticao HTTP ainda nao e causa medida. Correcoes focalCfT2paths passaram16/16puros locais, receipt8e1f6f3e5906a2ccb68f315d5614d719abc77f2c2ac73fc80e18d847038084e5, FP a8cab4eba87785ea555df7f30ace9bf7f6e62197a782f79b1b5069c27ca3630b igual/ownerexit0/cleanupconclusivo. Proc/stat4paths v2 passou64total/62PASS/0FAIL/2LinuxSKIP, receipt9f05fcbd22bca3643d465d42fef235a328afe32050a4440c65a3ffb5128fd5c8, FP192ab76eigual/terminalclean; v1FAIL por contador da fixture apos await permanece preservado. Parser estrito, erro inicial e bounds conservados; uma tentativa estatica de recheck sob500ms exige PID/starttime e membership, desaparecimento nao comprova terminalidade. Essas provas locais nao aprovam Linux, aquisicao/browserCI, produto final ou infraestrutura. W66 PG2 parcial: migration PASS e fixture FAIL por probe env nao pinado; schema/client audit intactos, fonte isolada e root2->ingest3 ainda pendentes. Nao alegar FFprobe8real a partir desse FAIL. Nenhuma promocao de estado/TODO/contagem, deploy ou aceite. Historico substituido no checkpoint dd74: blocker0=PR81 bloqueado pela regressao integral da propria SHA. CI47a terminou com Compose e Perception SUCCESS, Quality FAIL antes dos testes por30CRLF no status e Dashboard FAIL por processo chrome_crashpad4344 sem atribuicao pelo consumer. O patch canônico exige registry/scope/inodes/PID-starttime e pidfd retido para membro reparentado;3puras passaram, Linux real ainda pendente. Nenhuma excecao por nome/UID/baseline, nem relaxamento de transporte. NextAction=Fila W61: publicar o slice canônico cgroup4 com a correcao byte-only dos30CRLF e provar Quality/Dashboard Linux na propria SHA. A atribuicao de membro reparentado exige registry/scopo/inodes/PID-starttime e pidfd retido, sem excecao por nome/UID/baseline; os3puros locais nao substituem Linux. Preservar CI47a Compose/Perception SUCCESS e Quality/Dashboard FAIL, transportes/EOF/cleanup obrigatorios. Detector apto, critic dos pixels finais, cobertura multimodal e W35 final positivo continuam separados; sem promocao TODO/merge/deploy/aceite. Historico do checkpoint5250: blocker0=PR81 aguarda regressao integral na propria SHA. CI dd74 terminou com Compose, Perception, Dashboard e Media SUCCESS; Quality falhou em duas unidades antes do PostgreSQL publico. Correcao focal preserva teto de500ms e sinais somente apos admissao real;6puros PASS/1LinuxSKIP, sem transferencia a Linux. Artifacts dos jobs verdes ainda aguardam revisao no escopo correspondente; request368 do CI835 permanece sem causa atribuida. NextAction=Publicar o recorte de deadline/sinais e provar os dois casos no CI Linux da propria SHA, sem repetir os testes locais verdes. Autenticar evidencias pequenas dos jobs dd74; preservar FAILs e request368 sem causa. Detector apto, critic dos pixels finais, W35 final positivo e integracao das dependencias W62-W69 continuam gates; sem merge/deploy/aceite."
     },
     {
@@ -850,20 +904,20 @@
         "b73740a47fce-1",
         "9a30a9b79c59-1"
       ],
-      "state": "em-construcao",
-      "construction": "in-progress",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Detector continua sem qualificacao. Metadata e creditos das60 imagens development foram confrontados individualmente e admitidos para benchmark privado por reviewer operacional AGENT, sem autoridade humana ou aceite. Piloto411d4fb7 falhou OWNER_DEADLINE no preflight30s antes de worker/native/inferencia; etapa interna ainda nao medida. Fonte/GT, criterio de qualidade, calibration e holdout permanecem separados e fechados conforme protocolo."
+          "text": "faceSafety global permanece unknown. O proprietário aceitou em 17/10/2026 o detector V9 (Open Model Zoo face-detection-0204, FP32, OpenVINO em CPU): 50 de 67 rostos (74,6%), 10 falsos positivos, IoU mediana 0,808 em 60 imagens de desenvolvimento (corpus adaptativo; holdout e calibration selados), com escopo primeiro plano e orador (docs/quality/w62-v9-owner-acceptance.md). É decisão de qualidade, não qualificação de faceSafety nem aceite da wave. A taxa em vídeo não está medida; V1 a V8 permanecem reprovados nos recibos."
         },
         {
           "kind": "validation",
-          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+          "text": "Prova controlada: runtime V9, worker, migração 20261018120000_face_window_v9_profile e janelas de rosto em PostgreSQL supervisionado (face-window 3/3 em mergem1 e w62renew) e CI verde no head 67bb41aa. Faltam a medição em vídeo real (jornada W70) e a execução do detector em Linux, que é o gate de implantação abaixo."
         },
         {
           "kind": "deployment",
@@ -871,11 +925,15 @@
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite global permanece separado; novos MP4s exigem revisão vinculada aos próprios hashes."
+          "text": "O aceite da wave e de qualquer MP4 permanece separado. A decisão de 17/10 sobre o V9 vale como qualidade e escopo do detector; não é aceite da wave, de faceSafety nem de artefato."
         },
         {
           "kind": "deployment",
-          "text": "V9 runtime: execução supervisionada de paridade em Linux (60 imagens de desenvolvimento contra os tensores da V9, sem ajuste de parâmetros) é obrigatória antes de qualquer implantação; sem o recibo o registro não autentica Linux e o worker recusa partir. Também pendentes: execução supervisionada das suítes PostgreSQL e da migração 20261018120000_face_window_v9_profile, medição em vídeo real (jornada W70) e passos de CI. Detalhes em docs/quality/w62-v9-runtime.md."
+          "text": "Gate de implantação: sem o recibo de paridade em Linux do V9 (execução supervisionada das 60 imagens de desenvolvimento no runtime Linux de produção, comparadas byte a byte com os tensores da V9, sem ajuste de parâmetros) o registro não autentica Linux e o worker recusa partir. Detalhes em docs/quality/w62-v9-runtime.md."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "A licença do YuNet (D5) é decisão do proprietário e segue aberta; o diagnóstico YuNet é isolado do perfil V9."
         }
       ],
       "evidence": [
@@ -1004,10 +1062,82 @@
           "ref": "docs/quality/w62-v9-runtime.md",
           "scope": "Runtime do detector V9 aceito pelo proprietário (OpenVINO face-detection-0204; primeiro plano e orador): envelope v2 com saídas brutas, modelo de primeiro plano, área de legenda em 3 estados, worker, persistência e contrato público, no branch claude/w62-v9-runtime. Testes offline passam; suítes PostgreSQL escritas e não executadas; sem execução em Linux nem em vídeo real. Não é qualificação.",
           "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w62-development-prepare-scope-v1-7bb47ede/result.json",
+          "scope": "SHA41f5d28fb9de608f7d3d1feb7d9ffac7bcf21ae6e87d4fcf2e528ecc56bed892 PASS diagnostico metadata-only,25.6715s/30,2610facts autenticados514271987B; inventory22.4109s/readHash19.7619s. NoJob/native/pixels/infer; closeEOF16snapshots2observados0vivos/noDB/scratchgone/postflight[]. Medicao desta corrida, nao causa retroativa411.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w62-development-pilot-v2-c3096f98/result.json",
+          "scope": "SHA46ecaf1c2d7ba0a8fcc9f06bf76bc62b57be977029f8976834534b1db0f7a0c1 FAIL DETECTOR_FACE_BOX_INVALID/seq49/item1a08289e9fcda126.3563pins pre/post/FPfa39 igual. Inner08bea4c4cb78bcb0d587ca443599b2039da2ca83030db37d0d23d72c1b31a769 CPU/f32/2threads1stream,45started44protocolcompleted,11images/60/25matches67GT/2false detections observados; nao benchmark completo. Contencao workerexit125/Job0/EOF/threadsstopped/innerterminaltrue,7snapshots3observados0vivos/outercloseEOF/noDB/scratchretido. postflightErrors original contem failed owned execution retains scratch evidence/false!==true; nao e postflight limpo. Addendum d9c8b4dbad3f8ebaec82577719b362c41aad32e57899087db11b7893f536d2d4 comprova5knownausentes, semnovoJob/inventario/sinais; outcomes preservados.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w62-single-output-diagnostic-v1-90368ea9/result.json",
+          "scope": "SHA6b27f2b04f67590eadb2f06f79fc5a9c593c94e73e221d47f233a16df55648de FAIL OWNER_DEADLINE antesJob/worker/infer0/rawausente.3565pins pre/post/FP74c0igual/19snapshots2dead/closeEOF/noDB; scratchretido/postflightErrorretencao preservado. Addendumd19b3a91040b9236acc2c9ed2cd9f036ae25c53db0950ba5da63e0029075a8de known4ausentes,semnovo inventario/sinais/outcomechange. Dez contratos receipt591ea9097567a109b5f40a6e2d579e77d8e8cfaf127d99a59f79cd800f97c25f PASS/73ms/zeroobservados/clean; nao comprovam inferencia.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w62-single-output-diagnostic-v1-1cd128a1/result.json",
+          "scope": "SHA0cebb10b8468e8231a1886b0e9bba6af416366fb68cfd87de56f77d865891f3e FAIL DETECTOR_FACE_BOX_INVALID em uma unica inferencia fria, index11/ID1a08289e9fcda126/seq4. startedInferenceCalls1/completedInferenceCalls0 pelo protocolo; inferencia real e tensorraw5600B observados, sem qualificacao nem transferencia a sequencia45calls.3565pins pre/post preservados. Workerexit125/Job0/EOF/threads0/handles0 historicos e outerclose preservados; postflight inclui erro de retencao, scratchFAILretido, nao cleanupglobalPASS.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w62-single-output-diagnostic-v1-1cd128a1/single-output-raw.bin",
+          "scope": "5600B SHA1528fc7b5ea4715badf4e1fe5b08bed4bec418e38e4773be7073a34d3ba1ed99, float32 little-endian [1,1,200,7], output literal da chamada fria seq4 vinculado a runtime/input/runId. Arquivo na raiz do evidenceRoot, nao na subpasta do core; nenhuma reparacao ou decode/inferencia nova nesta atualizacao documental.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w62-single-output-diagnostic-v1-1cd128a1/single-output-evidence.json",
+          "scope": "SHA475816bacc898e1e03b6a3c533a923d5097c00c0e1876b79b38cd708b92bc7c0, archive/readback observado-pendente-owner na raiz. Vincula single-output-diagnostic/owner-receipt.json SHA7e07401bf53d01ada44262d18fed89d3120f55ffe393ac18111b95491d5eb6c1 e owner-ledger.jsonl SHA20e45de807a52a0adae86b7f04bd8a4852a31e4d3002b7af5e994ad03dd3612d; estes dois ficam na subpasta single-output-diagnostic. Raw autentico nao converte erro primario em PASS.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w62-single-output-diagnostic-v1-1cd128a1/single-output-offline-analysis-v1.json",
+          "scope": "SHA3bcd2ea6c7cc2aaa8230381e0b460d99df18f612d18280ec336a22f8d81ce0d0 interpreta somente bytes ja registrados, zero nova inferencia. Slot0 unico com score>=0.50: imageId0/label0/confidence0.9982193112373352, XYXY[0.0778939425945282,0.47356584668159485,0.4041025638580322,1.0008918046951294], todos finitos; ymax>1 viola bounds precongelados. failureFree=false encerra configuracao0204/V8 FAIL, sem clipping, tuning, GT/IoU alterados ou candidato qualificado. Chamada fria nao prova reproducao causal do piloto45calls.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w62-single-output-diagnostic-v1-1cd128a1/known-terminal-addendum-v1.json",
+          "scope": "SHAf82836243c4bee1bfb7fe0a84c83c6fd1cdc7d0b355ec11854a478e9140048dd confirma apenas5PIDs/identidades conhecidas ausentes, currentPresent[], sem novo inventario descendente/global, sinais, HTTP ou inferencia. Original successfalse/outcome unchanged, Job0/innerterminal historicos e ownerexecclose preservados. Scratchretido e erro de retencao postflight preservados; nao reclassifica FAIL como PASS.",
+          "role": "implementation"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/quality/w62-v9-owner-acceptance.md",
+          "scope": "Decisão de qualidade do proprietário (17/10/2026): aceita o V9 (face-detection-0204, 74,6% em JPEG de desenvolvimento) com escopo primeiro plano e orador. Não é qualificação de faceSafety, aceite da wave nem de MP4; a execução de paridade em Linux continua bloqueando a implantação.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/mergem1-130639f8/summary.json",
+          "scope": "PostgreSQL supervisionado no worktree do merge W65b (migrate deploy exit 0, com as migrações 20261018120000_face_window_v9_profile e 20261018180000_face_source_window_v1): face-source-window 3/3, regressão face-window W62 3/3, caption-placement 1/1, final-source-evidence 1/1, final-caption-certification-regression 1/1, caption-pixels 11/11, face-tables-drift exit 0; success true, postflight limpo, zero skips. SHA do código não gravado no recibo.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/w62renew-52f3eb1d/summary.json",
+          "scope": "PostgreSQL supervisionado no worktree do merge: w62-default 3/3; na segunda execução da suíte (passo lease-gone-still-reported) 2/3, e o head fence falhou com \"publisher never reached the PostgreSQL lock wait (Producer operation is not held by the current fenced attempt)\". É a falha da lease de 10 s, preservada; a correção (a suíte renova a lease antes da corrida) entrou em 54388797. success false no recibo.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414164",
+          "scope": "W62: CI central no head 67bb41aa (jobs Perception, Quality and security, Isolated Compose): SUCCESS, head SHA e conclusão conferidos pela API do GitHub. Cobre o código integrado deste recorte na suíte da CI; não é prova de mídia visual, implantação nem aceite.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Medir fase/custo do preflight development com PreflightCost existente, preservando30/900s e o FAIL antes de inferencia. Apos causa corrigida e fonte/config congeladas, executar93calls/60imagens com as mesmas quotas/IoU/score/pins/rights; nao repetir LOAD-only nem reduzir criterio. O review operacional da licenca nao qualifica faceSafety, GT ou produto.",
-      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Scripts, adapter e protocolos de aquisição preservados em f8a6ba07. V1–V4 falhas históricas mantidas; V5 run2/run3 encerraram por prazo e retomaram mesmos critérios/IDs com PIDs terminais, sem tuning por modelo. CPU/RAM passaram no spike local; qualidade não. Os cinco negativos com FP foram inspecionados qualitativamente como animais (macaco, papagaio, dois gatos e cachorro), sem mudar GT/seleção. Relatório documenta limites do derivado CVDF, 36/180 comparações com original e ausência de GT de vídeo/olhos. Inspeção qualitativa pós-hoc de seis misses grandes revelou truncamento/oclusão/perfil e diferenças de extensão de caixas; resultado original permanece reprovado. Não confundir caixa ampla/IoU com segurança dos pixels. Nova pesquisa de modelos suspensa durante integração diagnóstica. Historico da nextAction substituida em13/10: Load nativo e readback FP32 comprovados somente no escopo do receipt058f/addendum99ad; original outerFAIL permanece. Nenhuma inferencia/pixel/GT executada e candidateAptfalse/faceSafetyunknown/holdoutsealed. Antes de qualquer desenvolvimento medido, revisar configuracao congelada, direitos concretos e prova do owner na fonte usada. Nao ampliar corpus/inferencia nesta rodada; prioridade atual e fechar CI cgroup. Preservar V5/V7 reprovados e todos os FAIL de setup/deadline. Historico substituido no checkpoint dd74: blocker0=Candidatos YuNet 640/960 e Intel retail0004 reprovaram a rubrica pré-registrada de localização. Intel: recall 43/67 e 37/58, cinco imagens com caixas inválidas contadas como falha. Holdout 60 imagens fechado. Produtor facial diagnóstico unknown em construção; nenhum modelo aprovado para segurança facial. NextAction=Fila W62: validar offline o parser url/acquireLicensePage contra os9HTML preservados, sem nova consulta ou grant automatico. A coleta development60 falhou no item9 com HTML_CONTENT_LENGTH_LIMIT antes de ler body; nao foi medido se o header era excessivo ou malformado. Preservar FAIL/partials/scratch e addendum limitado a13identidades conhecidas ausentes. Nova fonte precisa pins/prova mecanica propria antes de outro HTTP; cap512KiB e budgets intactos. Depois direitos concretos e GT humano independente permitem preparar piloto development-only; candidato nunca e GT, load-only nao qualifica modelo, candidateAptfalse/faceSafetyunknown/holdoutsealed e V5/V7 reprovados permanecem."
+      "nextAction": "Fila W62: gerar o recibo de paridade Linux do V9 em execução supervisionada (60 imagens de desenvolvimento, byte a byte contra os tensores da V9, sem ajuste de parâmetros), que é gate de implantação; depois medir o V9 em vídeo real na jornada W70. Qualquer faceSafety diferente de unknown exige corpus independente; o holdout segue selado.",
+      "notes": "Detector V9 aceito pelo proprietário em 17/10/2026 como decisão de qualidade com escopo primeiro plano e orador (docs/quality/w62-v9-owner-acceptance.md); não é aceite da wave. V1 a V8 e a cronologia anterior (08 a 13/10) estão nos recibos privados e em git: git show 67bb41aa:docs/quality/project-status.json."
     },
     {
       "id": "W63",
@@ -1030,7 +1160,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "OCR e produtor temporal passaram worker real, PostgreSQL e HTTP no branch. Recorte temporal até 300 frames/10 s, source único CFR/fps iguais/rotação zero; medidas brutas não provam semântica de corte/câmera. Avaliação externa, master longo e agregação no Diretor permanecem pendentes."
+          "text": "OCR e produtor temporal têm prova controlada (worker real, PostgreSQL e HTTP) e estão no head integrado, fora de main (CI verde em 67bb41aa). Recorte temporal até 300 frames/10 s, source único, CFR/fps iguais, rotação zero; medidas brutas não provam semântica de corte ou câmera. Faltam avaliação externa, master longo e a timeline canônica que funde faces, OCR, shots e motion; o consumer do Diretor ainda não agrega o temporal (W64)."
         },
         {
           "kind": "validation",
@@ -1057,9 +1187,15 @@
           "ref": "Apollo/w61-70-20261008/w64-temporal-http-fixed-ee4db7ec/result.json",
           "scope": "Runner FFmpeg real, envelope persistido, HTTP POST/GET schemas/isolamento/replay/spoof/cancel: 1/1, sem skips; postflight limpo.",
           "role": "controlled-e2e"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414164",
+          "scope": "W63: CI central no head 67bb41aa (jobs Perception, Quality and security, Isolated Compose): SUCCESS, head SHA e conclusão conferidos pela API do GitHub. Cobre o código integrado deste recorte na suíte da CI; não é prova de mídia visual, implantação nem aceite.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Integrar consumo temporal no Diretor e ampliar janela do master com PTS original, preservando medidas brutas, gaps e limites; avaliação externa ainda necessária.",
+      "nextAction": "Fila W63: avaliação externa com labels independentes (OCR de texto pequeno e multilíngue, hard cut, crossfade, motion) e janela do master longo com PTS original, preservando medidas brutas, gaps e limites; depois a timeline canônica que funde faces (W62), OCR, shots e motion para o Diretor consumir (W64).",
       "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Adapter temporal isolado commit b17001ef: goldens controlados e negativos passaram após revisão de pins, threads, prazo/abort e domínio PTS; ainda sem labels externos ou persistência. Núcleo temporal: run w64-temporal-producer-4837afc0 passou 1/1 PG sem skips, bootstrap e constraints, claim/fence/rights/outbox; SHA 765b8f0d673578c207bc72b49fe938a1549eda7e68ffa3cc726d56296a80fa9. Postflight confirmou três PIDs encerrados, zero backends, cluster parado e scratch removido. Esta prova não executou adapter/runner/browser; API em construção. Runner temporal real PG passou 2/2 no run w64-temporal-video-6621d218. Primeiro HTTP falhou em assert 400 vs contrato 422; correção apenas no teste, runtime inalterado. Run focado w64-temporal-http-fixed-ee4db7ec passou 1/1 sem skips; SHA 2f45bd9c40a6ea37bc9069a67468ebdd1d3b8b1e9d7da0b6ed74e2eb03f587bc. Build, tsc, lint, contratos e baseline passaram (384 capabilities, 675 schemas, 743 exemplos; schemas históricos preservados). Estágio de prova controlada refere-se somente aos recortes runner/PG/HTTP citados, não à totalidade da wave, implantação ou aceite. Construção permanece parcial no branch."
     },
     {
@@ -1086,7 +1222,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Consumer OCR server-owned implementado no branch e provado com PostgreSQL e runner Tesseract real. Snapshot v2 e policy v2 preservam observações, amostras vazias e review. Faces, agregação multimodal, prova HTTP do consumer e decisões/editorial completas permanecem pendentes."
+          "text": "Consumer OCR server-owned provado em PostgreSQL com runner Tesseract real (snapshot v2, policy v2). A cobertura facial ainda não chega ao Diretor: ele não pede face-source-windows (POST /v1/projects/{projectId}/face-source-windows existe como produtor) e faceCoverage é fixo em absent (src/v2/application/run-project-director.ts:234). Agregação multimodal, prova HTTP do consumer e decisões por variante seguem pendentes."
         },
         {
           "kind": "validation",
@@ -1113,9 +1249,15 @@
           "ref": "Apollo/w61-70-20261008/w64-director-ocr-5002ece4/result.json",
           "scope": "Consumer OCR no Diretor: PG e runner real, negativos scoped/replay e cleanup. Não comprova percepção facial, HTTP do consumer ou decisões multimodais completas.",
           "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414164",
+          "scope": "W64: CI central no head 67bb41aa (jobs Perception, Quality and security, Isolated Compose): SUCCESS, head SHA e conclusão conferidos pela API do GitHub. Cobre o código integrado deste recorte na suíte da CI; não é prova de mídia visual, implantação nem aceite.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Agregar evidências temporais e faciais validadas ao consumer com cobertura por modalidade, depois provar HTTP e decisões por variante.",
+      "nextAction": "Fila W64: o Diretor pede face-source-windows para o corte que decidiu e consome faceCoverage no TreatmentPlan, no EditPlan, no decisions log e no critic (hoje fixo em absent em run-project-director.ts:234); depois agregar o temporal (W63) e provar HTTP e decisões por variante.",
       "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Run w64-director-ocr-5002ece4: 1/1 PG sem skip com OCR real, PUT manual ignorado, hash/rights negativos, refs/snapshot/review persistidos, replay adulterado e parent stale. SHA do relatório 3d5db0f69cccd5a9e567b606dc24a8910d34da63b061c9b31ec847f1c7943759; 11 PIDs terminais, zero backends e cluster parado. Unit25/25, typecheck e API registry passaram. Prova parcial, sem face-safe ou aceite da wave."
     },
     {
@@ -1135,20 +1277,20 @@
         "3c5a68e99d79-1",
         "a4aa3d1b7ac4-1"
       ],
-      "state": "em-construcao",
-      "construction": "in-progress",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Finalização atômica current-version e corrida concorrente W65 passaram em PG controlado; cancel-first e lease takeover tiveram ordem observada. Snapshot histórico executou worker/PG/FFmpeg e assertions 2/2 com supressão no frame inspecionado. As identidades observadas terminaram e houve zero backends, mas o coletor CIM falhou: a execução permanece operacionalmente inconclusiva; o smoke posterior não a reclassifica. Browser, critic independente e aceite visual do MP4 final permanecem pendentes. Unknown suprime cues e não comprova placement facial seguro."
+          "text": "As janelas de rosto por tempo da fonte (W65b, envelope v3) não são pedidas automaticamente: o Diretor ainda não pede face-source-windows nem consome faceCoverage (W64; fixo em absent em run-project-director.ts:234). Sem pedido, a cue sem evidência é omitida e listada, não posicionada."
         },
         {
           "kind": "validation",
-          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+          "text": "As provas do W65 e do W65b usam detector de teste (stand-in): nenhum pixel passou pelo OpenVINO. PostgreSQL controlado e pixels de MP4 de prova cobrem o gate do final por cue queimada e a evidência por tempo da fonte (renderer 1.16.0, proxy 1.17.0, final 1.14.0); placement facial real, browser e o critic independente dos pixels finais (W67) seguem sem prova."
         },
         {
           "kind": "deployment",
@@ -1156,7 +1298,7 @@
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite global permanece separado; novos MP4s exigem revisão vinculada aos próprios hashes."
+          "text": "Pergunta Q1 ao proprietário: a regra de omitir e listar (a cue não certificável sai do proxy e do final, o proxy exige reconhecer o aviso e o critic devolve warning com exportAllowed). Aceite da wave e dos MP4s permanece separado e exige revisão vinculada aos próprios hashes."
         }
       ],
       "evidence": [
@@ -1201,10 +1343,76 @@
           "ref": "Apollo/w61-70-20261008/process-smoke-42c5c68a/result.json",
           "scope": "Smoke do supervisor de processos corrigido, SHA256 dfdd0a67921e2aefcddd9c9b44fd362028fb7dc44b2b326423f0c93914b85ce6; valida observação/cleanup de filhos para runs posteriores, sem mudar o status operacional do snapshot anterior.",
           "role": "integration"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/quality/w65-caption-placement-v3.md",
+          "scope": "Nota do W65: posicionamento de legenda por variante (subtitle-anchor-plan/v3). Desenho e limites; não prova pixels sozinha.",
+          "role": "implementation"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/quality/w65b-final-caption-certification.md",
+          "scope": "Nota do W65b parte 1: gate do final por cue queimada (final-caption-certification/v1). Desenho, regra de omitir e listar e o que ficou sem prova.",
+          "role": "implementation"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/quality/w65b-source-keyed-face-evidence.md",
+          "scope": "Nota do W65b parte 2: evidência facial chaveada pelo tempo da fonte (face-producer-envelope/v3), projeção pelos clipes, unknown em taxa diferente de 1, fps fracionário ou mapa inconsistente.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w65b-pg-runs/w65b-f1d-ac6d6574/summary.json",
+          "scope": "PostgreSQL supervisionado (parte 1): final-caption-certification 1/1, migrate exit 0; success true, postflight limpo. Detector de teste (stand-in).",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w65b-pg-runs/w65b-p2d-099f4015/summary.json",
+          "scope": "PostgreSQL supervisionado (parte 2) em w65b-final-gate-source-evidence: 7 passos exit 0, face-source-window 3/3, caption-placement 1/1, final-source-evidence 1/1, final-caption-certification-regression 1/1, caption-pixels 11/11; success true, postflight limpo, zero skips. Detector de teste (stand-in).",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w65b-p2-evidence-03/w65b-final-source-evidence-proof.json",
+          "scope": "Prova de pixels de três finais com frames PNG: F0 controle (frame 30 sem rosto, frame 90 com rosto em tela), F1 (frame 30 cue livre na banda inferior; frame 90 cue sobre o rosto movida para fora da face), F2 (frame 30 cue coberta pela evidência e queimada; frame 90 cue não certificável omitida). Detector de teste (stand-in).",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w65b-p2-evidence-03-cert/w65b-final-caption-certification-proof.json",
+          "scope": "Prova de pixels do gate por cue queimada, frame 60 de quatro finais: A cue queimada, B e D sem cue, C cue omitida; os bytes de C e D são idênticos (identicalBytesCvsD true). Detector de teste (stand-in).",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/mergem1-130639f8/summary.json",
+          "scope": "PostgreSQL supervisionado no worktree do merge W65b (migrate deploy exit 0, com as migrações 20261018120000_face_window_v9_profile e 20261018180000_face_source_window_v1): face-source-window 3/3, regressão face-window W62 3/3, caption-placement 1/1, final-source-evidence 1/1, final-caption-certification-regression 1/1, caption-pixels 11/11, face-tables-drift exit 0; success true, postflight limpo, zero skips. SHA do código não gravado no recibo.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w69-physical-suites-v1-50e66c8e/summary.json",
+          "scope": "Treze suítes físicas com FFmpeg real em 56ae9a00 (árvore limpa), todas passed, 0 fail, 0 skipped: collector 1, sidecar 14, editorial-renderer 9, subtitle-anchor 6, subtitle-styles 1, style-tokens 1, proof-mode-goldens 12, transcript-rate 2, output-formats 1, render-geometry 3, wave9 3, wave10 2, subtitle-vtt-native 1.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414164",
+          "scope": "W65: CI central no head 67bb41aa (jobs Perception, Quality and security, Isolated Compose): SUCCESS, head SHA e conclusão conferidos pela API do GitHub. Cobre o código integrado deste recorte na suíte da CI; não é prova de mídia visual, implantação nem aceite.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414165",
+          "scope": "W65: Dashboard runtime validation no head 67bb41aa: SUCCESS. A jornada do dashboard segue a regra W65b (proxy real com cues não certificadas espera em reviewing-proxy com avisos listados); não é aceite visual.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Fila W65: repetir PostgreSQL/CI na propria SHA dos nomes completos de run+contender<=63bytes; quatro puros de nomes passaram sem DB e nao substituem latches reais. Preservar o snapshot operacionalmente inconclusivo e corridas cancel/finalizacao/takeover delimitadas. Comprovar API/browser e critic independente por variante, depois revisar cada MP4 final com hash proprio; unknown/supressao nao provam placement facial seguro.",
-      "notes": "Recorte parcial no branch: finalização atômica com fence/rights/replay, snapshot histórico sem alterar head, cues sem resolução recebem v2 unknown/suppressed e disabled envia zero cues. Renderer recusa cue sem decisão v2 antes de qualquer FFmpeg; ASS perdeu fallback bottom. Reuse antigo sem receita atual, manifest/map íntegros e mapa sem subtitle é recusado também na transação de admissão; identidade de versão declarada não é SHA do binário nem prova de pixels. TSC exit0, worker 22/22, goldens mecânicos ASS 6/6 e renderer completo 9/9 com bins explícitos. Falhas anteriores preservadas: fixture color metadata; MAX_PATH do ffprobe-static com bytes/hash existentes (cópia curta autenticada no teste); snapshot-path exibiu caption pelo bypass corrigido; corrida antiga falhou no retorno void de pg_stat_clear_snapshot antes dos contenders, corrigida antes da prova cancel-first/takeover; suíte renderer invocada sem FFMPEG_BIN falhou por ENOENT antes de passar com bin explícito. Snapshot-safety assertions passaram, supervisor daquela execução não; smoke novo não reclassifica o run antigo. Nenhum TODO promovido. Historico da nextAction substituida em13/10: Preservar a falha operacional do snapshot anterior; comprovar API/browser e critic independente por variante, depois revisar cada MP4 final com hash próprio. A corrida cancel/finalização e o supervisor corrigido já têm provas delimitadas."
+      "nextAction": "Fila W65: ligar o Diretor às janelas de rosto da fonte (W64) e repetir a prova com o detector real em OpenVINO no lugar do stand-in; obter a resposta do proprietário à Q1 (omitir e listar); depois comprovar API e browser (W68) e o critic dos pixels finais por variante (W67), revisando cada MP4 final com hash próprio.",
+      "notes": "W65b: a evidência de rosto é chaveada pelos quadros da FONTE (envelope v3) e projetada pelos clipes do plano; taxa diferente de 1, fps fracionário ou mapa inconsistente resultam em unknown. Os direitos são reavaliados no uso, no locale do projeto consumidor. Cue não certificável é omitida e listada (proxy com aviso a reconhecer; critic: warning/exportAllowed). Receitas: renderer 1.16.0, proxy 1.17.0, final 1.14.0. Cronologia anterior: git show 67bb41aa:docs/quality/project-status.json."
     },
     {
       "id": "W66",
@@ -1220,20 +1428,20 @@
         "da5a414c29b3-1",
         "72babc1df6c4-1"
       ],
-      "state": "em-construcao",
-      "construction": "in-progress",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "isolated",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Root2, variante3, ingest3, select4 e restore5 passaram em PostgreSQL controlado com readbacks/rights/replay. API de servico criacao/variante e replay apos ingest possuem provas limitadas. GrupoB fork com conteudo/duplicacao e continuidade editorial ainda em implementacao; quatro asserts antigos nao estao fechados. Cutover completo16writers/hydrators/consumers/API/HTTP/UI e renderer/critic/final continuam pendentes. Gap do driver COMMIT permanece distinto do produto fail-closed por flush+readback."
+          "text": "Lacunas nomeadas pelo Sol1 no código integrado: (1) quality-iteration e cleanup-mask sem variantId recusam saída múltipla; (2) o decision-log usa a final mais nova de qualquer output; (3) o mvp-core-gate usa o formato 9:16; (4) há um único status de projeto para todos os outputs; (5) o reuse não exclui os proxies de localização."
         },
         {
           "kind": "validation",
-          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+          "text": "O final de duas saídas (9:16 e 16:9) não está provado em PostgreSQL. A prova controlada cobre o estado de output por versão (root, variante, ingest, select, restore e fork) em PostgreSQL e a CI verde no head 67bb41aa; o critic final por saída é do W67."
         },
         {
           "kind": "deployment",
@@ -1382,10 +1590,28 @@
           "ref": "Apollo/w61-70-20261008/w66-operational-pg-v1-01a55725/result.json",
           "scope": "SHAb7fef4a863108a05d73670d53276bc55605f5dec9685ca8fc7effa2827ea8dc2:1/1 operacional controlado, novo replay publico apos ingest preserva bytes/IDs e0efeitos; estrangeiro/tamper rejeitados. Migrate/test0/closeEOF/23snapshots6conhecidos terminais/PGzero/stopped55591free/cleanup limpo, FPba2aa08c igual. Servico criacao/variante passou separadamente em7ccc0335; nao HTTP/UI nem duplicacao.",
           "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w66-operational-pure-v1-39b9ae99/result.json",
+          "scope": "SHAab9eb5aabc8539773cb3be9e1dc22ce6a6d324e86933baf5038cfda4d74a7ea3:5/5 zero skips445ms. Cues reais de palavras/segmentos,240fps, alinhamento valido indisponivel explicitamente suprimido, overlap legitimo preservado e corrupcao rejeitada. FP04d7e5b4 igual, closeEOF/noDB/zeroobservados/terminal antes primeira snapshot/scratchgone/postflight[]. Null/pending em disco preservado com confirmacao stdout do owner. Sem legenda renderizada.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w66-operational-pg-v1-3c44b30d/result.json",
+          "scope": "SHAf3b6e0058e85c4c127f4967fc0dc58224bb29b62fe3f58d61449a17ace3049b6:1/1 zero skips79.35s, B1 fork3 nao vazio com clips/cues persistidos antes dos seals e remap tipado; source imutavel, fresh IDs/State/revision/canonical, replay0efeitos. Revogacao real rejeita/zeroefeitos/restauracao usa snapshot auditado seq1 com pointer revision3. Target normalization executions0/approvals0/copiedBytes0; consumo render/critic/final blocked. Migrate/test0, closeEOF,41/41snapshots6observados0vivos, FP04d7e5b4 igual,PG2zerosunknown0/clusterstopped55591free/postmasterdead/scratchgone/postflight[]. Disknull/pending preservado, stdoutownerconfirmado em prazo. Manifest1e24e1ef5f6543acc47d115a2f6671a43246c94fc852284412e549d16690f467 autentica15files519776B. Quarto editorial/cut16/HTTP/UI/aceite ainda pendentes.",
+          "role": "implementation"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414164",
+          "scope": "W66: CI central no head 67bb41aa (jobs Perception, Quality and security, Isolated Compose): SUCCESS, head SHA e conclusão conferidos pela API do GitHub. Cobre o código integrado deste recorte na suíte da CI; não é prova de mídia visual, implantação nem aceite.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Fechar GrupoB tipado source2/3, remap de conteudo/lineage/rights, persistencia e readback do fork; provar os quatro contratos de duplicacao, incluindo continuidade editorial, sem scope relabeling/approval herdada. Depois integrar consumers/API e completar corte16. Reutilizar PG operacional verde e cliente intacto; novos guards recebem negativos reais/rollback. Nenhum contrato controlado promove a wave ou aceite.",
-      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: contrato versionado de revisão obrigatória, sem geometria autorizada; autenticação, base, source e rights preservados. Validação de contratos e 10 testes unitários passaram. Set v2/projeção geométrica são apenas especificados: falta schema/Command/RenderInput/PG, e o overlay puro não comprova runtime nem conclusão da capability. Em 11/10, schema isolado SHA3ad3b21d6ca5d6fc0f8988bc6175154eeb4657c38aaba7c325d30904ef61fedc e SQL SHAa41baf5c5871d90e59adaad0309f19636fc31cf737d4c012933fe22924f38ac6 passaram revisão estrutural inicial e Prisma validate 5.22; oito testes de domínio passaram. São provas estáticas/isoladas, não migration executada. Permanecem ajustes de ordem canônica/normalização e todo o cutover; guards append-only exigem substituir resets destrutivos de fixtures sem relaxar integridade. Checkpoint11/10 atual:31/31 puros e golden anteriores preservados no recibo v4; cliente Prisma5.22 gerado no checkout isolado com autoinstall proibido. Primeira migration falhou por sintaxe; nenhum teste PG executado. Notas de8/10 testes acima sao historicas, nao estado atual. A tentativa v5 posterior aplicou migration e passou12/12 no contrato isolado; FAILs v1-v4 permanecem historicos e nenhum implica ativacao dos writers. Checkpoint atual substitui apenas o estado do draft isolado: manifesto v7 fecha36puros/16PG e non-outputfacts/autor-time; resultados v1-v6 permanecem historicos. Pendencias de origens/lifecycle/cutover e caller intent continuam abertas, sem promocao do TODO. Historico do blocker substituido em13/10: Draft W66 isolado:36/36puros e contrato PostgreSQL16/16zero skips passaram no manifesto privado2f391bf3e00845cd05e2fb428a208eaf6820b68f657b759bad966628b6d2d0bb,14paths ancorados. Nova policy canônica e autoridade historica preservam hashes antigos; State/Version resultVersion exato, crop-only, siblings/plan semantics/overlays/issues preservados para create/revise, non-output snapshot facts/scopes/hashes/schema1 e author/time vs Command selados. Esses arquivos nao estao integrados neste checkout/PR. Falta fork-with-content/ingest/director/inherit/restore com fatos tipados, rights/lifecycle transacionais, COMMIT diferido observavel e cutover15builders/16writers/hydrators/consumers/API. Contract0 e audit-only, upgrade historico nao implementado. CreationCommandv1 nao sela intencao original de brief/policies; fatos persistidos nao suprem caller intent. Sem fallback formato/ancestor/Stateemptyautomatic. Historico da nextAction substituida em13/10: Completar persistencia real das origens: CreationCommandv2 com payload explicito preservando fingerprint/idempotencia historicos, ProjectForkDerivation imutavel e bijecao tipada de conteudo/novas identidades, ingest/director/inherit/restore e rights/lifecycle. O freeze89ceff3259916ccd48fc7b6dcf075bb2c86a7b2019c462936c475bc5bcb62372 passou18/18puros sem skips no receipt74ae42b8b79b9103ab0a59576102f3e8d35d5737280f8f888196cdec47751311, w66-fork-derivation-pure-v1-12eac109; FPda8bf84f igual,3observadas terminais/noDB/scratch removido/postflight vazio. Continua isolado, sem migracao/16writers/aceite: provar COMMIT diferido observavel e executar cutover coerente de writers/hydrators/consumers/API. Os contratos36puros/16PG e origens anteriores permanecem historicos delimitados; nenhum fallback de formato ou aprovacao herdada. Historico do blocker0 arquivado apos revisao13/10: W66 permanece isolado/not-integrated. Baseline36puros/16PG e origens anteriores sao historicos delimitados. Bundlev2 teve42casos:40PASS e dois novos FAIL de fixture frozen; v3 passou somente esses dois apos clone, sem transformar v2 em PASS. O conjunto15sources/bundle esta em revisao fechada, sem PrismaCLI/schema/migration/PG dessa nova versao e sem cutover dos16writers/hydrators/consumers. Origem/intencao, fork/ingest/director/inherit/restore, direitos/lifecycle transacionais e COMMIT diferido real continuam gates. Contract0 audit-only; nenhum fallback de formato, State vazio automatico, autoridade herdada ou rehash historico. Historico da nextAction anterior a revisao concluida13/10: Fila W66: concluir revisao do conjunto15sources e origens/bundle; executar schemaCLI/migration/PG da propria fonte, provar COMMIT diferido e corridas de direitos/lifecycle, entao cortar coerentemente15builders/16writers/hydrators/consumers/API. Preservar40PASS do v2 e dois novos PASS do v3 como runs separados, baseline36/16 e origens/fork anteriores como historico. Nenhum cutover, contract0 operacional ou promocao TODO antes gates. Historico substituido no checkpoint dd74: blocker0=Bundle de criacao/fork comprovado isoladamente no PostgreSQL, ainda sem cutover dos16writers/hydrators/consumers/API. O driver Prisma5.22 resolve a promessa em dois COMMITs invalidados por constraints deferidas; o flush obrigatorio e o readback real fecham a resposta do produto, sem corrigir o driver. Integrar as origens e direitos/lifecycle transacionais coerentes antes promover runtime. NextAction=Fila W66: primeiro caminho operacional3 controlado root2→variante3→ingestFFmpeg3→publicacao/readback passou1/1 no PG9ee7ea940, receipt75cc69ee0b0423e22b93a867a5d8735b94a436326b355fb2b9a756e48771e85e. Owner confirmou stdout apos IO6561terminal; marker em disco permanece null/pending. Lease revogada e UPDATE de target comprovaram rollback; target exige P2010/23514 do guard imutavel, nao prova fence posterior. Client3 reutilizado apos auditoria exata; generation90FAIL e PG1-8FAIL preservados. Agora concluir consumidores/select/restore e corte16/API/geometry-clock/materializacao integrada, mantendo direitos/lineage reais, flushALL e readback. 101puros e bundle2PG14/14 historicos nao substituem esses gates; omitFlushdriverFAILED separado do produto fail-closed, sem promocao TODO/aceite."
+      "nextAction": "Fila W66: fechar as cinco lacunas (variantId obrigatório em quality-iteration e cleanup-mask, decision-log e mvp-core-gate por output, status de projeto por output, reuse sem proxies de localização) e provar em PostgreSQL o final de duas saídas; só então a jornada W70 em 9:16 e 16:9.",
+      "notes": "Estado de output selado por ProjectVersion (variantes, overlay, fork) integrado no head, fora de main. As cinco lacunas acima são as do Sol1 em 19/10/2026; nenhuma é aceite. Cronologia anterior: git show 67bb41aa:docs/quality/project-status.json e docs/quality/w66-version-overlay-integration-v1.md."
     },
     {
       "id": "W67",
@@ -1409,7 +1635,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Protocolo e inventário local v2 foram preparados, mas quotas pré-registradas de múltiplas faces falharam (development 0/2; evaluation 1/2). Seleção e aquisição v2 encerradas em STOP, sem download, pixels, inferência ou render. Critic por formato e dependências W65–W66 permanecem pendentes."
+          "text": "W65 e W66 já estão no head integrado (fora de main), então o critic por formato não depende mais delas. O que falta é do próprio W67: corpus independente com GT adjudicado antes do run (a tentativa v2 parou em STOP por quotas de múltiplas faces, development 0/2 e evaluation 1/2; o lote v3 é só metadata, sem direitos individuais verificados) e o critic sobre os frames do MP4 renderizado de cada formato."
         },
         {
           "kind": "validation",
@@ -1486,7 +1712,7 @@
           "scope": "Metadata-only W67v3 PASS:14sinteticos receipt6f598837a8b0eddf28a03e6bea24e39d45c7b06a5f1f1055b4e245b8bf3cc320; extracao922IDs permitidos receipt184abdd768cc95c91f4696150a5910fc71975509e450cf0365ac13cc2febb6d8, FP44c0c4910c26f068630c9b576ace09baf4feaa807cd392f65c1fce4ff28e1a21 igual somente4dependencias explicitas, nao checkout inteiro. Lote418bcfd484b63316740885182b985566a1292a6a2fdc7d0777af63157daadd9d/4962863B, manifest4b81fc0cdb665c4a60e9b1f1a1d38507a835b5fab5b689a5a870b095eee0762b.365candidatos177devsingle/15devmultiple/147evalsingle/26evalmultiple;8selecionados porrank fixo,557rejeitados com motivos. Rawrefs/flags/headextras preservados, rightsCurrentunverified/eyesKnownfalse/completudeunknown; nenhum GT fora922 desserializado, nenhuma aquisicao/rede/decode/inferencia.2identidades observadas terminais/noDB/scratch/postflight limpos. Isso e preparo anterior a direitos e adjudicacao humana, nao corpus qualificado."
         }
       ],
-      "nextAction": "Autenticar lote v3 metadata-only e verificar direitos individuais atuais dos8rankados; adquirir somente apos owner/pins/licencas/gates, preservar hashes/derivative correspondence e obter adjudicacao humana identificada. Quotas originais/splits/IoU imutaveis; headextras/olhos incompletos nao podem ser ocultados. Lotes anteriores STOP e holdout W62 fechado preservados; nenhum corpus/pixels qualificados.",
+      "nextAction": "Fila W67: autenticar o lote v3 metadata-only e verificar os direitos individuais atuais dos 8 ranqueados; adquirir somente após owner, pins, licenças e gates, preservando hashes e correspondência de derivados, com adjudicação humana identificada (quotas originais, splits e IoU imutáveis; head extras e olhos incompletos não se ocultam; holdout W62 fechado). Depois o critic sobre os frames do MP4 de cada formato, com sample IDs, hash do output e versão de calibration no QualityReport; falha no vertical reprova só o 9:16.",
       "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Inventário local de partida SHA256 4d273863096f75a6aa3c86944657496359b757e7c9d78c5f6c6389f69c935b2d. A checagem de direitos usa HTML preservado, não consulta atual ao Flickr. Tentativa v2 parou corretamente por quotas antes de criar seleção ou obter pixels; nenhuma tarefa de produto foi promovida."
     },
     {
@@ -1513,7 +1739,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W65–W67."
+          "text": "Execução não iniciada. W65 e W66 estão no head integrado (fora de main); o W67 (critic independente dos pixels finais) segue na fila e bloqueia o ciclo issue, override, recompilação e critic."
         },
         {
           "kind": "validation",
@@ -1536,7 +1762,7 @@
           "role": "planned-not-started"
         }
       ],
-      "nextAction": "Fila W68 apos W65-W67: issue do critic -> override/Command explicito pela API -> recompile materializado -> leitura/UI da propria revisao, com fences, rastreabilidade e prova real. Nenhuma execucao ou capability integrada alegada; registrar evidencia por ID antes promocao.",
+      "nextAction": "Fila W68 depois do critic do W67: issue por frame, range e elemento, override como Command por variante e range (base version, reset para o nível herdado), recompilação do proxy e do final da variante e critic repetido com pixels novos, provados em browser real com API, PostgreSQL e worker em 9:16 e 16:9. Nenhuma capability integrada é alegada; registrar a evidência por ID antes de promover.",
       "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Historico da nextAction substituida em13/10: Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID."
     },
     {
@@ -1552,20 +1778,20 @@
         "dce77836c7bd-1",
         "3372d6445ac4-1"
       ],
-      "state": "em-construcao",
-      "construction": "in-progress",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "isolated",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "implementation",
-          "text": "W69 permanece isolado e nao ativado. Contratos/IO41PASS e collector trace/replay dos seis vetores nao fecham binder/materializacao: State/revision/composition, sources/rights, font selection, graph/binario/libass e clocks pre-libass/MP4 precisam autoridade real. Emissao ASS representavel por intervalo e pixels finais continuam bloqueios, sem epsilon, expected alterado ou restricao global FPS/rate. Prova fisica v2/v5 FAIL preservada; collector com ASS vazio comprova somente processos/trace/replay, nao legenda positiva nem pixels. Publication atomica receipt/manifests/catalog/outbox/success sob head/rights/attempt/lease/cancel e integracao W66 permanecem pendentes; nenhum retrofit de cache/policy falhada."
+          "text": "Sidecars SRT/VTT e o relógio materializado (ass-frame-clock/v3, receita de sidecar 1.2.0) estão integrados no head, fora de main; legenda queimada acima de 90 fps é recusada na validação (decisão de 17/10). Faltam o sidecar de cue editada por override e recompilação (W68) e o sidecar das duas saídas reais 9:16 e 16:9 (jornada W70)."
         },
         {
           "kind": "validation",
-          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+          "text": "Prova controlada: 13 suítes físicas com FFmpeg real em 56ae9a00 (todas passed), suíte unitária completa (3566 testes, 0 fail, 13 skipped) e CI verde no head 67bb41aa. Faltam a matriz de pixels da libass no FFmpeg pinado (8.1.1), que não faz parte destes recibos, e o sidecar sobre o MP4 final revisado de cada saída real (jornada W70)."
         },
         {
           "kind": "deployment",
@@ -1636,10 +1862,34 @@
           "ref": "Apollo/w61-70-20261008/w69-collector-physical-v1-57bacef4/result.json",
           "scope": "PASS1/1 isolado em90.32s, receipt86ae5027701a1ba381f67a4ce087ee479fa92836b4bea47223bfcd6e6fc4040a, freezee83d2bb538cdaaab3b8104d0f9370b46fee6fc897af6d5441a8dc37312d02c0a. Seis requests preflightados antes FFmpeg; seis vetores trace/replay,14capturas (60fps/fragmento rebaseado,30/100fps,rate0.25/4,musica/logo). Manifest8a91980b72c211c05cf2cfdf3c718e64ce74ec6dc72e0d84ae3bfb8062922901,506membros7039577B autenticados; PTS pre-libass e MP4 distintos. ASS vazio: nao prova emissao de legenda, pixels positivos, materializer, State, rights, font selection ou publicacao.15observados terminais/FPc774igual/noDB/scratch removida/postflight vazio. Markers locais pending-owner-confirmation, resultado externo apos fechamento. FAILs7e074402(VUI),a16f4ec7(config policy),966a4b9c(log vazio) preservados; nenhuma transferencia de PASS para FAIL fisico ASSv5.",
           "role": "implementation"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/quality/w69-materialized-subtitle-clock-v2.md",
+          "scope": "Desenho e achados do relógio materializado, do limite de 90 fps para legenda queimada, do sidecar de versão histórica e do estágio final settb/setpts (ass-frame-clock/v3).",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w69-physical-suites-v1-50e66c8e/summary.json",
+          "scope": "Treze suítes físicas com FFmpeg real em 56ae9a00 (árvore limpa), todas passed, 0 fail, 0 skipped: collector 1, sidecar 14, editorial-renderer 9, subtitle-anchor 6, subtitle-styles 1, style-tokens 1, proof-mode-goldens 12, transcript-rate 2, output-formats 1, render-geometry 3, wave9 3, wave10 2, subtitle-vtt-native 1.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w69-dev-mergefinal-unit-ece97b02/result.json",
+          "scope": "Suíte unitária completa (node --test, concorrência 3) no worktree do merge W65b: 3566 testes, 3553 pass, 0 fail, 13 skipped, exit 0 em 143,6 s; log SHA-256 5614919546d220eb47765fbe330f4925163f3e0dc9a2acd78072fad2b80000a2 (482362 B). SHA do código não gravado no recibo.",
+          "role": "implementation"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39264414164",
+          "scope": "W69: CI central no head 67bb41aa (jobs Perception, Quality and security, Isolated Compose): SUCCESS, head SHA e conclusão conferidos pela API do GitHub. Cobre o código integrado deste recorte na suíte da CI; não é prova de mídia visual, implantação nem aceite.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Fila W69: fechar binder e materializacao autentica do prefixo/PTS/timeBase/dependencias e clockMP4; derivar somente intervalos ASS representaveis e comprovar pixels dos vetores6/111/803/adjacentes/fragmento. Integrar selos State/revision/rights/fontes e publicar receipt/manifests/catalog/outbox/success atomicamente sob fences. Puro41 e trace/replay com ASS vazio nao substituem pixels; preservar v2/v5FAIL e nao ativar renderer/recipe/cache/sidecars antes gates.",
-      "notes": "Estimativa 4–6 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Historico do blocker substituido em13/10: W69 nao integrado. Scaffold no checkout de integracao conserva receipt/clock e OutputSpec insuficientes; correcoes clock/encoding/receipt/spec permanecem isoladas. Prova fisica pinada W69v2 FAIL:60fps trim/setpts/fps/concat layer0[6,7) changedFrames[] esperado[6], enquanto lavfi60frame6 passou. FFmpeg8.1.1 SHA09948d4cdd0650da6ff5a87577469f2a218dc2615ae379f8f734d24c49de0f73, libass0.17.4/Arial pinados; floorCS/ceil racional nao autorizam clock real. A corrida parou no caso23;111/803/adjacentes/fragmento posteriores nao foram validados. Diagnostico v3 showinfo pre-libass/raw RGB executado e repetiu o mesmo FAIL: time_base1/1000000, frame5PTS83333/frame6PTS100000/frame7PTS116667; pts_timeText0.1 no frame6. Conversao double para inteiroms recebida por libass permanece inferencia nao medida, sem alegacao PTS99999. Nenhuma policy/seal/reuse aprovado; futura ativacao exige payload materializado e cold render para entradas sem seal, sem retrofit do cachev2. W66 identidades/revisoes/State reais e publication final atomica receipt/manifests/catalog/outbox/success sob head/rights/attempt/lease/cancel continuam pendentes. W10 comprova apenas sidecar negativo com zero efeitos. Diagnostico v5 completou803 sem ENOBUFS e confirmou divergencia fisica: janela8.02-8.03 inclui802+803, janela8.03-8.04 nao acende803. FPS sozinho nao basta; antecipar boundary incluiria frame indevido. Nenhuma ativacao ou reducao de criterios. Historico da nextAction substituida em13/10: Coletor fisico isolado observado e replayado nos seis vetores; integrar autoridade real de materializacao, State/revision/rights, fontes/font selection, graph/binario/libass/PTS e clockMP4 distintos. Derivar emissao representavel e validar pixels antes ativar policy/recipe/cache/sidecars; publicar receipt/manifests/catalog/outbox/success atomicamente sob fences. Contratos41/41 e trace/replay1/1 nao resolvem FAIL fisico ASSv5 nem integram W69. Nenhum epsilon, ajuste de expected ou restricao global de FPS/rate."
+      "nextAction": "Fila W69: provar o sidecar sobre o MP4 final de cada saída depois de override e recompilação (W68) e na jornada W70 de duas saídas (hash do MP4, RenderInput e variante; round-trip por parser independente); reexecutar a matriz de pixels da libass no FFmpeg pinado se o relógio materializado mudar. Legenda queimada permanece limitada a 90 fps.",
+      "notes": "Relógio fechado em ass-frame-clock/v3 (settb=1/taxa,setpts=N): no FFmpeg 6.1.1 do ffmpeg-static o fps= perdia o último quadro. Sidecar 1.2.0 usa o piso exato em milissegundos. Detalhes em docs/quality/w69-materialized-subtitle-clock-v2.md. Cronologia anterior: git show 67bb41aa:docs/quality/project-status.json."
     },
     {
       "id": "W70",
@@ -1663,7 +1913,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W61–W69 completos em seus subescopos aplicáveis."
+          "text": "Execução não iniciada. Pré-requisitos abertos: paridade Linux do detector V9 (W62), Diretor sem janelas de rosto (W64), final de duas saídas em PostgreSQL (W66), critic dos pixels finais (W67) e override com recompilação (W68). A taxa do V9 em vídeo (74,6% foi medido em JPEG) será medida nesta jornada."
         },
         {
           "kind": "validation",
@@ -1686,7 +1936,7 @@
           "role": "planned-not-started"
         }
       ],
-      "nextAction": "Fila W70 apos gates aplicaveis W61-W69: reingerir o master real preservado pelo fluxo V2, briefing/formato antes Direcao e Commands pela API; produzir dois MP4s reais com lineage/quality/receipts proprios, revisar continuidade/cortes/enquadramento/legendas e aceitar visualmente os hashes. Nao iniciar por contagem de puros; implantacao DigitalOcean e aceite do owner seguem separados.",
+      "nextAction": "Fila W70 depois dos subescopos aplicáveis de W61 a W69: reingerir o master real preservado pelo fluxo V2 (briefing e formato antes da Direção; Commands pela API), produzir dois MP4s reais com lineage, quality e receipts próprios, medir o V9 em vídeo do master, revisar continuidade, cortes, enquadramento e legendas e aceitar visualmente os hashes. Não iniciar por contagem de puros; implantação na DigitalOcean e aceite do proprietário seguem separados.",
       "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Historico da nextAction substituida em13/10: Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID."
     },
     {
