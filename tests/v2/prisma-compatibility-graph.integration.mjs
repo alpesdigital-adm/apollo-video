@@ -9,6 +9,8 @@ import {
   PrismaClient,
 } from '../../generated/prisma-v2/index.js'
 import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
+import { variantBodyFor } from './helpers/explicit-project-http.mjs'
+import { seedSealedProject, testActor } from './helpers/pg-output-world.mjs'
 
 async function freePort() {
   return await new Promise((resolve, reject) => {
@@ -299,20 +301,12 @@ test('T-F2-GATE/T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 p
         expectedAuthenticationAudit.authenticationKind,
       actorContextHash: expectedAuthenticationAudit.contextHash,
     }
-    await client.v2Project.create({
-      data: {
-        id: projectId,
-        workspaceId,
-        name: 'Golden compatibility graph',
-        status: 'draft',
-        objective: 'lead-generation',
-        format: '9:16',
-        locale: 'pt-BR',
-        createdByType: 'api-client',
-        createdById: issued.client.id,
-        createdAt,
-        updatedAt: createdAt,
-      },
+    // The project is born the way the product creates it: the creation Command and one explicit 9:16 output. The validation-envelope
+    // service reads its format from the sealed output (the stored column is never filled under contract 6).
+    await seedSealedProject(client, {
+      workspaceId, actor: testActor({ workspaceId, clientId: issued.client.id, credentialId: issued.credential.id, environment: 'production' }),
+      prefix: `compat-${suffix}`, ids: { project: projectId }, name: 'Golden compatibility graph', objective: 'discovery',
+      locale: 'pt-BR', variant: variantBodyFor({ aspectRatio: '9:16' }), at: () => createdAt,
     })
     const batch = createProductionBatch({
       id: batchId,

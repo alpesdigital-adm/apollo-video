@@ -661,7 +661,9 @@ export class PrismaMusicMontageRunRepository implements MusicMontageRunRepositor
           await settleDeferredOutputGuards(transaction);
           return Object.freeze({ run: hydrateRun(row), replayed: false });
         },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        // The compile writes the plan's own Version: the guard that re-reads the bundle needs the same thirty seconds as the other
+        // renderable compile (persistRenderablePlanVersion); the default five seconds expired under load (harness fullb3, step 055).
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 },
       );
     } catch (error) {
       if (

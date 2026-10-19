@@ -649,6 +649,7 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
     const controlledProjects = Object.freeze({
       readApprovedCurrentSource: (input) => readControlledSource(input, false),
       readImmutableApprovedSource: (input) => readControlledSource(input, true),
+      resolveOutputVariantByFormat: (input) => realProjects.resolveOutputVariantByFormat(input),
       convergeOutputIdentity: (input) => realProjects.convergeOutputIdentity(input),
       attachCompletedOutput: (input) => realProjects.attachCompletedOutput(input),
       markExportFailed: (input) => realProjects.markExportFailed(input),
