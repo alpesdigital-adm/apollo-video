@@ -102,3 +102,31 @@ export async function produceSnapshotEvidence(db, world) {
 }
 
 export const coverageOf = (result, kind) => result.result.coverage.find((entry) => entry.kind === kind)
+
+/** The detector stand-in of the world's windows: a box every tenth source frame, nothing on the others. */
+export const faceRowsEveryTenthFrame = (frame) => (frame % 10 === 0 ? FACE_ROWS : [])
+
+/**
+ * `count` DISTINCT windows of the 120-frame recording, each holding at least one sampled frame (a multiple of 5), enumerated by length
+ * and then by start; `skip` lists [start, end) pairs that must not be among them. They overlap each other heavily and, being answered by
+ * the same stand-in, agree on every frame they share - the way re-runs of the same source do.
+ */
+export function distinctFaceWindows(count, { skip = [] } = {}) {
+  const skipped = new Set(skip.map(([start, end]) => `${start}-${end}`))
+  const windows = []
+  for (let length = 5; length <= 60 && windows.length < count; length += 1) {
+    for (let start = 0; start + length <= 120 && windows.length < count; start += 1) {
+      if (skipped.has(`${start}-${start + length}`)) continue
+      windows.push({ startSourceFrame: start, endSourceFrame: start + length })
+    }
+  }
+  assert.equal(windows.length, count, 'the recording holds enough distinct windows')
+  return windows
+}
+
+/** Publishes the windows one after the other through the real admission, worker and repository (the stored rows are returned). */
+export async function publishFaceWindows(faces, windows, label, rowsAt = faceRowsEveryTenthFrame) {
+  const rows = []
+  for (const [index, window] of windows.entries()) rows.push(await faces.publish(`${label}-${index}`, window, rowsAt))
+  return rows
+}

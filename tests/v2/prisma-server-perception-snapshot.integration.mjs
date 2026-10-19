@@ -2,16 +2,24 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
+import Ajv2020 from 'ajv/dist/2020.js'
+import addFormats from 'ajv-formats'
+
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { digest, sha } from './helpers/perception-snapshot-fixtures.mjs'
 import { commitSealedChild } from './helpers/pg-output-world.mjs'
-import { OCR_FRAMES, coverageOf, seedSnapshotWorld } from './helpers/server-perception-pg-world.mjs'
+import { FACE_ROWS, OCR_FRAMES, coverageOf, distinctFaceWindows, publishFaceWindows, seedSnapshotWorld } from './helpers/server-perception-pg-world.mjs'
 import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-world.mjs'
 
 // Under tsx a static named import of a TypeScript module is not visible to Node (the module runs as CommonJS), so these are dynamic.
 const { calculateCanonicalHash, stableSerialize } = await import('../../src/v2/domain/canonical-hash.ts')
 const { createPerceptionTimeline, PERCEPTION_KINDS } = await import('../../src/v2/domain/perception-timeline.ts')
 const { serverPerceptionSnapshotId } = await import('../../src/v2/domain/server-perception-snapshot.ts')
+const { readServerPerceptionSnapshotService } = await import('../../src/v2/application/server-perception-snapshots.ts')
+const { PrismaFaceSourceWindowRepository } = await import('../../src/v2/infrastructure/prisma/face-source-window-repository.ts')
+const { PrismaServerPerceptionEvidenceReader } = await import('../../src/v2/infrastructure/prisma/server-perception-evidence-reader.ts')
+const { getPublicSchema } = await import('../../src/v2/public-api/schema-registry.ts')
+const { publicSchemaDocument } = await import('../../src/v2/public-api/schema-examples.ts')
 
 /**
  * W63a PostgreSQL proof of the server perception snapshot (written for the supervised disposable cluster; not run in hosted CI).
@@ -343,6 +351,84 @@ test('W63a PostgreSQL server perception snapshot: the table is append-only, refu
       }, { resealTimeline: true })
       // a snapshot about another EditPlan than the columns say
       await forge('plan-differs-from-columns', (body) => { body.editPlan.snapshotHash = 'a'.repeat(64) })
+    } catch (error) {
+      primaryError = error
+    } finally {
+      try { await db.$disconnect() } catch (error) { primaryError ??= error }
+      if (primaryError) throw primaryError
+    }
+  })
+
+test('W63a PostgreSQL server perception snapshot: more than 200 face windows are all read, a contradiction past the old cut-off is found, and a source over the cap is refused with its reason',
+  { skip: !process.env.V2_DATABASE_URL, timeout: 900_000 }, async () => {
+    const db = new PrismaClient()
+    let primaryError
+    try {
+      const built = await seedSnapshotWorld(db)
+      const { world } = built
+      const ask = { workspaceId: world.workspaceId, projectId: world.projectId }
+      // 2 windows of the world + 210 more that agree with them + 1 that contradicts them at source frame 115
+      const agreeing = distinctFaceWindows(210, { skip: [[0, 60], [60, 120], [115, 120]] })
+      await publishFaceWindows(built.faces, agreeing, 'w63a-many')
+      const contradicting = await built.faces.publish('w63a-contradiction', { startSourceFrame: 115, endSourceFrame: 120 }, () => FACE_ROWS)
+      const total = 2 + agreeing.length + 1
+
+      const faceRepository = new PrismaFaceSourceWindowRepository(db)
+      const range = { workspaceId: world.workspaceId, projectId: world.projectId, sourceArtifactId: world.sourceId, fromSourceFrame: 0, toSourceFrame: 120 }
+      assert.equal(await faceRepository.countSourceWindows(range), total)
+      // the list the reader used to take (at most 200 windows, oldest window first) never reached the contradicting window
+      const old = await faceRepository.listSourceWindows({ ...range, now: new Date(), limit: 200 })
+      assert.equal(old.length, 200)
+      assert.equal(old.some((item) => item.envelope.id === contradicting.id), false)
+
+      // the reader takes all of them, and the contradiction is found: both windows that disagree are refused, the rest are used
+      const complete = await built.service(() => new Date('2026-10-19T12:00:00.000Z'))(ask)
+      assert.equal(complete.snapshot.inputs.filter((input) => input.kind === 'face').length, total - 2)
+      const refusedFaces = complete.snapshot.rejected.filter((item) => item.kind === 'face')
+      assert.equal(refusedFaces.length, 2)
+      assert.ok(refusedFaces.every((item) => item.reasonCodes.join() === 'EVIDENCE_CONFLICT'))
+      assert.ok(refusedFaces.some((item) => item.envelopeId === contradicting.id && item.envelopeHash === contradicting.envelopeHash))
+      const faceObservations = complete.result.observations.filter((item) => item.kind === 'face')
+      assert.equal(faceObservations.length, 12, 'a box every tenth frame, and none at 115 where the windows disagree and the others say none')
+      assert.equal(faceObservations.some((item) => item.value.sourceFrame === 115), false)
+      assert.equal(coverageOf(complete, 'face').state, 'partial')
+      assert.equal(coverageOf(complete, 'face').reasonCode, 'SAMPLED_FRAMES_ONLY')
+      assert.deepEqual(complete.snapshot.unexaminedSpans, [])
+
+      // what the API publishes is what it returns, with a snapshot of this many inputs
+      const ajv = addFormats(new Ajv2020({ allErrors: true, strict: true }))
+      const document = publicSchemaDocument(getPublicSchema('apollo://schemas/server-perception-snapshot-response/v1'))
+      const validate = ajv.compile({ ...document, required: ['data'], properties: { data: document.properties.data } })
+      assert.equal(validate({ data: JSON.parse(JSON.stringify(complete)) }), true, ajv.errorsText(validate.errors))
+
+      // the keyset pages exactly: a page size that falls inside runs of windows sharing a start gives the very same evidence
+      const smallPages = new PrismaServerPerceptionEvidenceReader(db, { faceWindowPageSize: 7 })
+      const viaSmallPages = await readServerPerceptionSnapshotService({ evidence: smallPages, snapshots: built.snapshots, clock: () => new Date() })(ask)
+      assert.equal(viaSmallPages.snapshot.snapshotHash, complete.snapshot.snapshotHash)
+      const evidence = await smallPages.readForVersion({ ...ask, projectVersionId: null, now: new Date() })
+      assert.equal(evidence.faceWindows.length, total)
+      assert.equal(new Set(evidence.faceWindows.map((window) => window.id)).size, total)
+      assert.equal(evidence.faceWindowRefusals, undefined)
+      assert.equal(await db.v2ServerPerceptionSnapshot.count({ where: { workspaceId: world.workspaceId } }), 1, 'the same evidence is the same row')
+
+      // exactly the cap is read; one window over it is a refusal of the source's face coverage, never a truncation
+      const withCap = (faceWindowCap) => readServerPerceptionSnapshotService({
+        evidence: new PrismaServerPerceptionEvidenceReader(db, { faceWindowCap }), snapshots: built.snapshots, clock: () => new Date() })
+      assert.equal((await withCap(total)(ask)).snapshot.snapshotHash, complete.snapshot.snapshotHash)
+      const over = await withCap(total - 1)(ask)
+      assert.notEqual(over.snapshot.snapshotHash, complete.snapshot.snapshotHash)
+      assert.equal(coverageOf(over, 'face').state, 'absent')
+      assert.equal(coverageOf(over, 'face').reasonCode, 'FACE_WINDOW_LIMIT_EXCEEDED')
+      assert.equal(over.result.observations.filter((item) => item.kind === 'face').length, 0)
+      assert.equal(over.snapshot.inputs.some((input) => input.kind === 'face'), false)
+      assert.deepEqual(over.snapshot.rejected.filter((item) => item.kind === 'face'),
+        [{ kind: 'face', envelopeId: world.sourceId, envelopeHash: world.sourceSha256, reasonCodes: ['FACE_WINDOW_LIMIT_EXCEEDED'] }])
+      assert.deepEqual(over.snapshot.unexaminedSpans, [{ kind: 'face', startMs: 0, endMs: 4_000, reasonCode: 'FACE_WINDOW_LIMIT_EXCEEDED' }])
+      for (const kind of ['transcript-word', 'ocr', 'shot', 'motion']) assert.deepEqual(coverageOf(over, kind), coverageOf(complete, kind), kind)
+      const ranged = await withCap(total - 1)({ ...ask, fromMs: 500, toMs: 1_500, kinds: ['face'] })
+      assert.deepEqual(coverageOf(ranged, 'face').unexaminedReasons, [{ startMs: 500, endMs: 1_500, reasonCode: 'FACE_WINDOW_LIMIT_EXCEEDED' }])
+      assert.equal(validate({ data: JSON.parse(JSON.stringify(over)) }), true, ajv.errorsText(validate.errors))
+      assert.equal(await db.v2ServerPerceptionSnapshot.count({ where: { workspaceId: world.workspaceId } }), 2, 'the refusal is its own content-addressed row')
     } catch (error) {
       primaryError = error
     } finally {

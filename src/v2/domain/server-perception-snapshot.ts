@@ -40,6 +40,9 @@ import {
  */
 export const SERVER_PERCEPTION_SNAPSHOT_SCHEMA = 'server-perception-snapshot/v1' as const
 export const SERVER_PERCEPTION_MAX_OBSERVATIONS = 100_000
+/** What a snapshot lists: at most FACE_WINDOW_SNAPSHOT_CAP face windows plus an OCR and a temporal envelope per source and the words. */
+export const SERVER_PERCEPTION_MAX_INPUTS = 4096
+export const SERVER_PERCEPTION_MAX_REJECTED = 4096
 
 export const PERCEPTION_REASON = Object.freeze({
   noVerifiedDetector: 'NO_VERIFIED_DETECTOR',
@@ -593,6 +596,9 @@ export function assembleServerPerceptionSnapshot(input: ServerPerceptionAssembly
   if (acc.observations.length > SERVER_PERCEPTION_MAX_OBSERVATIONS) {
     invalid(`Perception snapshot would exceed ${SERVER_PERCEPTION_MAX_OBSERVATIONS} observations`)
   }
+  if (acc.inputs.length > SERVER_PERCEPTION_MAX_INPUTS || acc.rejected.length > SERVER_PERCEPTION_MAX_REJECTED) {
+    invalid(`Perception snapshot would list more than ${SERVER_PERCEPTION_MAX_INPUTS} inputs or ${SERVER_PERCEPTION_MAX_REJECTED} rejections`)
+  }
   // Kinds no producer bound to a version exists for. They are absent for a stated reason; nothing fills them.
   const fixedAbsent: Partial<Record<PerceptionKind, string>> = {
     speaker: PERCEPTION_REASON.diarizationUnavailable,
@@ -706,6 +712,7 @@ export function verifyServerPerceptionSnapshot(value: unknown): Readonly<ServerP
   const inputs = new Map<string, PerceptionSnapshotInputRecord>()
   for (const input of stored.inputs) inputs.set(`${input.kind}|${input.envelopeId}|${input.envelopeHash}`, input)
   if (inputs.size !== stored.inputs.length) fail('duplicate input')
+  if (stored.inputs.length > SERVER_PERCEPTION_MAX_INPUTS || !Array.isArray(stored.rejected) || stored.rejected.length > SERVER_PERCEPTION_MAX_REJECTED) fail('too many inputs')
   for (const observation of stored.timeline.observations) {
     const provenance = observation.provenance
     const inputKind = ENVELOPE_INPUT_KINDS[observation.kind]

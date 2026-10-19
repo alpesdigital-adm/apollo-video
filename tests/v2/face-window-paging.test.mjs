@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
-  collectAllFaceWindows, FACE_WINDOW_LIMIT_EXCEEDED, FACE_WINDOW_PAGE_SIZE, FACE_WINDOW_SOURCE_CAP, faceWindowCursorAdvanced,
+  collectAllFaceWindows, collectFaceWindowsOfSources, FACE_WINDOW_LIMIT_EXCEEDED, FACE_WINDOW_PAGE_SIZE, FACE_WINDOW_SNAPSHOT_CAP, faceWindowCursorAdvanced,
 } from '../../src/v2/domain/face-window-paging.ts'
 
 /**
@@ -31,7 +31,7 @@ function store(count, { keyOf = key } = {}) {
 }
 
 test('W63a the declared limits are the ones the reader uses', () => {
-  assert.equal(FACE_WINDOW_SOURCE_CAP, 1000)
+  assert.equal(FACE_WINDOW_SNAPSHOT_CAP, 1000)
   assert.equal(FACE_WINDOW_PAGE_SIZE, 100)
   assert.equal(FACE_WINDOW_LIMIT_EXCEEDED, 'FACE_WINDOW_LIMIT_EXCEEDED')
 })
@@ -90,7 +90,7 @@ test('W63a paging fails closed on a cursor that does not move, a page larger tha
     { code: 'PERSISTENCE_CONFLICT' })
   await assert.rejects(collectAllFaceWindows({ cap: 100, pageSize: 2, count: async () => 4, page: async () => ({ items: [...rows, { id: 'c' }], next: null }) }),
     { code: 'PERSISTENCE_CONFLICT' })
-  for (const bad of [{ cap: 0, pageSize: 10 }, { cap: 10, pageSize: 0 }, { cap: 1.5, pageSize: 10 }]) {
+  for (const bad of [{ cap: -1, pageSize: 10 }, { cap: 10, pageSize: 0 }, { cap: 1.5, pageSize: 10 }]) {
     await assert.rejects(collectAllFaceWindows({ ...bad, count: async () => 0, page: async () => ({ items: [], next: null }) }), { code: 'INVALID_ARGUMENT' })
   }
   await assert.rejects(collectAllFaceWindows({ cap: 10, pageSize: 5, count: async () => -1, page: async () => ({ items: [], next: null }) }), { code: 'PERSISTENCE_CONFLICT' })
@@ -100,4 +100,31 @@ test('W63a paging fails closed on a cursor that does not move, a page larger tha
   assert.equal(faceWindowCursorAdvanced(key(4), key(1)), false)
   assert.equal(faceWindowCursorAdvanced(a, { ...a, createdAt: '2027-01-01T00:00:00.000Z' }), true)
   assert.equal(faceWindowCursorAdvanced(a, { ...a, id: 'other-id' }), true)
+})
+
+test('W63a the cap is one budget for the whole snapshot: sources are taken in id order and each gets what is left', async () => {
+  let stores
+  const run = (cap, ids = ['source-a', 'source-b', 'source-c', 'source-d']) => {
+    stores = { 'source-a': store(300), 'source-b': store(500), 'source-c': store(150), 'source-d': store(0) }
+    return collectFaceWindowsOfSources({ sourceArtifactIds: ids, cap, pageSize: 100,
+      count: (id) => stores[id].count(), page: (id, after, limit) => stores[id].page(after, limit) })
+  }
+  const summary = (reads) => reads.map((read) => [read.sourceArtifactId, read.status, read.status === 'complete' ? read.items.length : read.observed])
+  // 300 + 500 fit in 1000; source-c (150) no longer fits in the 200 that are left and is refused as a whole; source-d has nothing and fits
+  assert.deepEqual(summary(await run(1000)), [['source-a', 'complete', 300], ['source-b', 'complete', 500], ['source-c', 'complete', 150], ['source-d', 'complete', 0]])
+  assert.deepEqual(summary(await run(900)), [['source-a', 'complete', 300], ['source-b', 'complete', 500], ['source-c', 'over-cap', 150], ['source-d', 'complete', 0]])
+  // a refused source spends nothing, so a later one that fits is still read; the order of the ids passed in does not matter
+  assert.deepEqual(summary(await run(700)), [['source-a', 'complete', 300], ['source-b', 'over-cap', 500], ['source-c', 'complete', 150], ['source-d', 'complete', 0]])
+  assert.deepEqual(summary(await run(700, ['source-d', 'source-c', 'source-b', 'source-a', 'source-a'])), summary(await run(700)))
+  // an exhausted budget still reads a source that has no windows, and refuses one that has even one
+  assert.deepEqual(summary(await run(450)), [['source-a', 'complete', 300], ['source-b', 'over-cap', 500], ['source-c', 'complete', 150], ['source-d', 'complete', 0]])
+  const exhausted = await run(300)
+  assert.deepEqual(summary(exhausted), [['source-a', 'complete', 300], ['source-b', 'over-cap', 500], ['source-c', 'over-cap', 150], ['source-d', 'complete', 0]])
+  assert.ok(exhausted.every((read) => read.status === 'over-cap' ? read.reasonCode === 'FACE_WINDOW_LIMIT_EXCEEDED' && !Object.hasOwn(read, 'items') : true))
+  // a refused source costs no window read (the stores are those of the last run, with 300 windows of budget)
+  assert.equal(stores['source-b'].calls.pages.length, 0)
+  assert.equal(stores['source-c'].calls.pages.length, 0)
+  assert.ok(stores['source-a'].calls.pages.length > 0)
+  assert.equal((await collectAllFaceWindows({ cap: 0, pageSize: 10, count: store(0).count, page: store(0).page })).status, 'complete')
+  assert.equal((await collectAllFaceWindows({ cap: 0, pageSize: 10, count: store(1).count, page: store(1).page })).status, 'over-cap')
 })

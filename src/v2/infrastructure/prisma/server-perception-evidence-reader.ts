@@ -4,7 +4,7 @@ import type { ServerPerceptionEvidenceReader } from '../../application/ports/ser
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
-  collectAllFaceWindows, FACE_WINDOW_LIMIT_EXCEEDED, FACE_WINDOW_PAGE_SIZE, FACE_WINDOW_SOURCE_CAP,
+  collectFaceWindowsOfSources, FACE_WINDOW_LIMIT_EXCEEDED, FACE_WINDOW_PAGE_SIZE, FACE_WINDOW_SNAPSHOT_CAP,
 } from '../../domain/face-window-paging.ts'
 import type { FaceProducerEnvelopeV3 } from '../../domain/face-producer-envelope-v3.ts'
 import type { PerceptionProducerEnvelope } from '../../domain/perception-producer-envelope.ts'
@@ -64,9 +64,10 @@ function retimedWords(plan: Record<string, unknown>) {
  * source (face windows, shared by every project that has the source attached) are looked at; the newest sealed OCR and temporal
  * envelope of each source is the one used, like the Director's own.
  *
- * ALL the face windows that overlap what a source plays are read, page by page (keyset); a source with more windows than the cap
- * is refused with FACE_WINDOW_LIMIT_EXCEEDED and contributes none: a partial list is never trusted, and a long source never loses
- * evidence (or the contradiction between two windows) silently.
+ * ALL the face windows that overlap what a source plays are read, page by page (keyset); a source with more windows than the
+ * snapshot has left of its budget (FACE_WINDOW_SNAPSHOT_CAP over all the sources, spent in source-id order) is refused with
+ * FACE_WINDOW_LIMIT_EXCEEDED and contributes none: a partial list is never trusted, and a long source never loses evidence (or the
+ * contradiction between two windows) silently.
  */
 export class PrismaServerPerceptionEvidenceReader implements ServerPerceptionEvidenceReader {
   private readonly client: PrismaClient
@@ -74,7 +75,7 @@ export class PrismaServerPerceptionEvidenceReader implements ServerPerceptionEvi
   private readonly faceWindowPageSize: number
   constructor(client: PrismaClient, options: Readonly<{ faceWindowCap?: number; faceWindowPageSize?: number }> = {}) {
     this.client = client
-    this.faceWindowCap = options.faceWindowCap ?? FACE_WINDOW_SOURCE_CAP
+    this.faceWindowCap = options.faceWindowCap ?? FACE_WINDOW_SNAPSHOT_CAP
     this.faceWindowPageSize = options.faceWindowPageSize ?? FACE_WINDOW_PAGE_SIZE
   }
 
@@ -132,15 +133,20 @@ export class PrismaServerPerceptionEvidenceReader implements ServerPerceptionEvi
         if (!envelope) conflict('Selected temporal envelope disappeared')
         temporal.push(envelope as TemporalProducerEnvelope)
       }
+    }
+    // The face windows of every source, against one budget for the whole snapshot (see FACE_WINDOW_SNAPSHOT_CAP).
+    const rangeOf = (sourceArtifactId: string) => {
       const sourceClips = clips.filter((clip) => clip.sourceArtifactId === sourceArtifactId)
-      const range = { workspaceId: input.workspaceId, projectId: input.projectId, sourceArtifactId,
+      return { workspaceId: input.workspaceId, projectId: input.projectId, sourceArtifactId,
         fromSourceFrame: Math.min(...sourceClips.map((clip) => clip.sourceInFrame)),
         toSourceFrame: Math.max(...sourceClips.map((clip) => clip.sourceOutFrame)) }
-      const collected = await collectAllFaceWindows({ cap: this.faceWindowCap, pageSize: this.faceWindowPageSize,
-        count: () => faceReader.countSourceWindows(range),
-        page: (after, limit) => faceReader.pageSourceWindows({ ...range, now: input.now, after, limit }) })
-      if (collected.status === 'over-cap') faceWindowRefusals.push({ sourceArtifactId, reasonCode: collected.reasonCode })
-      else faceWindows.push(...collected.items.map((item) => item.envelope))
+    }
+    const reads = await collectFaceWindowsOfSources({ sourceArtifactIds: sourceIds, cap: this.faceWindowCap, pageSize: this.faceWindowPageSize,
+      count: (sourceArtifactId) => faceReader.countSourceWindows(rangeOf(sourceArtifactId)),
+      page: (sourceArtifactId, after, limit) => faceReader.pageSourceWindows({ ...rangeOf(sourceArtifactId), now: input.now, after, limit }) })
+    for (const read of reads) {
+      if (read.status === 'over-cap') faceWindowRefusals.push({ sourceArtifactId: read.sourceArtifactId, reasonCode: read.reasonCode })
+      else faceWindows.push(...read.items.map((item) => item.envelope))
     }
 
     const words = retimedWords(plan)

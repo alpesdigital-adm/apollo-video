@@ -222264,7 +222264,7 @@
                 },
                 "inputs": {
                   "type": "array",
-                  "maxItems": 1000,
+                  "maxItems": 4096,
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
@@ -222427,7 +222427,7 @@
                 },
                 "rejected": {
                   "type": "array",
-                  "maxItems": 1000,
+                  "maxItems": 4096,
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
