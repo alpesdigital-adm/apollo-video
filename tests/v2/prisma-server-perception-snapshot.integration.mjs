@@ -350,4 +350,3 @@ test('W63a PostgreSQL server perception snapshot: the table is append-only, refu
       if (primaryError) throw primaryError
     }
   })
-
