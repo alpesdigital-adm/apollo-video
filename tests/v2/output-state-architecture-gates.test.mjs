@@ -6,6 +6,7 @@ import test from 'node:test'
 
 import {
   PENDING_ROWS,
+  REFRAME_PLAN_WRITERS,
   VERSION_BUILDER,
   VERSION_WRITER,
   outputStateArchitectureViolations,
@@ -111,4 +112,30 @@ test('the real source tree satisfies the rule with exactly the declared pending 
   const sources = await Promise.all(files.map(async (path) => ({ rel: relative(root, path).split(sep).join('/'), source: await readFile(path, 'utf8') })))
   assert.deepEqual(outputStateArchitectureViolations(sources), [])
   assert.deepEqual([...PENDING_ROWS].sort(), [...PENDING_ROWS], 'keep the list sorted')
+})
+
+test('a reframe plan record is written by its two repositories alone, in every spelling', () => {
+  assert.deepEqual([...REFRAME_PLAN_WRITERS], [
+    'infrastructure/prisma/variant-reframe-plan-repository.ts', 'infrastructure/prisma/variant-reframe-override-repository.ts',
+  ])
+  for (const source of [
+    'await tx.v2VariantReframePlan.create({ data })',
+    'await this.client.v2VariantReframePlan . createMany ({ data })',
+    'await tx.v2VariantReframePlan.upsert({})',
+    'await tx.v2VariantReframePlan.update({ where, data })',
+    'await tx.v2VariantReframePlan.deleteMany({})',
+    'await tx.$executeRawUnsafe(`INSERT INTO "variant_reframe_plans" (id) VALUES ($1)`)',
+    'await tx.$executeRawUnsafe("update variant_reframe_plans set disposition = $1")',
+    "await insert(tx, 'variant_reframe_plans', { id })",
+  ]) {
+    for (const rel of ['infrastructure/prisma/proxy-review-repository.ts', 'application/plan-project-reframe.ts', 'infrastructure/prisma/subtitle-segment-override-repository.ts']) {
+      const found = outputStateArchitectureViolations([{ rel, source }], none)
+      assert.equal(found.length, 1, `${rel}: ${source}`)
+      assert.match(found[0], /writes a reframe plan record outside its two writers/)
+    }
+    for (const rel of REFRAME_PLAN_WRITERS) assert.deepEqual(outputStateArchitectureViolations([{ rel, source }], none), [], `${rel}: ${source}`)
+  }
+  // Reading and counting are not writing.
+  assert.deepEqual(outputStateArchitectureViolations([{ rel: 'infrastructure/prisma/project-proxy-render-repository.ts',
+    source: 'await tx.v2VariantReframePlan.findFirst({})\nawait tx.v2VariantReframePlan.count({})\n// variant_reframe_plans\n' }], none), [])
 })

@@ -21,6 +21,7 @@ import {
   createManualCommandImpact,
   createReviewPatchCommandImpact,
   createSubtitleSegmentOverrideCommandImpact,
+  createVariantReframeOverrideCommandImpact,
   parseCommandImpact,
 } from '../../src/v2/domain/command-impact.ts'
 import {
@@ -284,6 +285,24 @@ function compareActionImpact(action = 'accept') {
 }
 
 /**
+ * W66r — the manual reframe covers clip-1 frames 30..90 of a 180-frame timeline, for one variant, so the fixture itself proves the type can
+ * invalidate less than the whole timeline and nothing of another output.
+ */
+function variantReframeOverrideImpact() {
+  return createVariantReframeOverrideCommandImpact({
+    commandId: 'edit-command-registry-variant-reframe',
+    baseVersionId,
+    resultVersionId,
+    variantId: '9:16',
+    clipId: 'clip-1',
+    action: 'set',
+    range: { startFrame: 30, endFrame: 90 },
+    durationFrames,
+    outputReferences: outputs,
+  })
+}
+
+/**
  * F1.037 — the exception covers cue-1 only (frames 15..45 of a 180-frame timeline),
  * so the fixture itself proves the type can invalidate less than the whole timeline.
  */
@@ -343,6 +362,7 @@ const IMPACT_FIXTURES = {
   ...OUTPUT_STATE_IMPACTS,
   'attach-media-library-reference': { build: () => createMediaLibraryAttachmentImpact({ commandId: 'command-library', baseVersionId: 'version-base', resultVersionId: 'version-result', preservedEditPlanSnapshotId: 'snapshot-edit', selectionKind: 'asset', selectionId: 'asset-source', parentArtifactId: 'asset-source', sourceSha256: 'a'.repeat(64), rightsSnapshotId: 'rights-source' }), parse: parseMediaLibraryAttachmentImpact },
   'apply-subtitle-segment-override': { build: () => subtitleSegmentOverrideImpact(), parse: parseCommandImpact },
+  'apply-variant-reframe-override': { build: () => variantReframeOverrideImpact(), parse: parseCommandImpact },
   'compile-renderable-plan': { build: () => createRenderableCompileImpact({ commandId: 'command-renderable', baseVersionId: 'version-base', resultVersionId: 'version-result', preservedEditPlanSnapshotId: 'snapshot-edit', renderablePlanSnapshotId: 'renderable-snapshot-1', renderablePlanHash: 'a'.repeat(64) }), parse: parseRenderableCompileImpact },
   'compare-action': { build: () => compareActionImpact(), parse: parseCompareActionImpact },
   'direct-multicam-session': { build: () => multicamDirectionImpact(), parse: parseMulticamDirectionImpact },
@@ -377,7 +397,7 @@ function command(type, overrides = {}) {
 
 test('T-F0-027 the registry is frozen, exhaustive and internally consistent', () => {
   assert.ok(Object.isFrozen(EDIT_COMMAND_POLICIES))
-  assert.equal(EDIT_COMMAND_TYPES.length, 17)
+  assert.equal(EDIT_COMMAND_TYPES.length, 18)
   assert.deepEqual([...EDIT_COMMAND_TYPES], Object.keys(EDIT_COMMAND_POLICIES).toSorted())
 
   for (const type of EDIT_COMMAND_TYPES) {
@@ -478,7 +498,7 @@ test('T-F0-027 every registered type is produced by an application service and v
       discovered.add(literals[0])
     }
   }
-  assert.equal(callSites, 15, 'expected one createEditCommand call site per classic Command type')
+  assert.equal(callSites, 16, 'expected one createEditCommand call site per classic Command type')
   assert.equal(outputFactorySites, 1, 'expected one application call site of the output Command constructor')
   assert.deepEqual(
     [...NOT_YET_PRODUCED_BY_AN_APPLICATION_SERVICE.keys()].filter((type) => discovered.has(type)), [],
@@ -513,7 +533,7 @@ test('T-F0-027 each impact-bearing type produces a document its declared parser 
 test('T-F0-027 partial-range types narrow renders to the edited region', () => {
   assert.deepEqual(
     [...editCommandTypesByRenderPolicy('partial-range')],
-    ['apply-review-patch', 'apply-review-patch-batch', 'apply-subtitle-segment-override', 'manual-edit'],
+    ['apply-review-patch', 'apply-review-patch-batch', 'apply-subtitle-segment-override', 'apply-variant-reframe-override', 'manual-edit'],
   )
   for (const type of editCommandTypesByRenderPolicy('partial-range')) {
     const impact = IMPACT_FIXTURES[type].build()

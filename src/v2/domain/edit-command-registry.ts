@@ -184,6 +184,19 @@ export const EDIT_COMMAND_POLICIES = Object.freeze({
       + '[variantId] and affectedArtifacts is filtered to it; :770 parseCommandImpact refuses a stored '
       + 'document with more than one variant, range or minimal render',
   }),
+  'apply-variant-reframe-override': Object.freeze({
+    // Partial-range like a subtitle exception: a manual reframe moves the crop of one range of one clip inside ONE variant, so the honest
+    // invalidation is the half-open range the editor framed, for that variant's proxy only; the other outputs keep their renders.
+    renderPolicy: 'partial-range',
+    impactSchema: 'command-impact/v1',
+    requiresImpact: true,
+    supportsRenderFreeImpact: false,
+    deferralReason: null,
+    evidence: 'command-impact.ts:625 createVariantReframeOverrideCommandImpact derives affectedRanges from canonicalCommandImpactRanges([range]) '
+      + 'clamped to durationFrames and repeats that single range in minimalRenders for the target variant only; :657 affectedVariantIds is the '
+      + 'literal [variantId] and affectedArtifacts is filtered to it; :884 parseCommandImpact refuses a stored document with more than one '
+      + 'variant, range or minimal render',
+  }),
   'replace-source-transcript': Object.freeze({
     renderPolicy: 'deferred',
     impactSchema: 'source-transcript-replacement-impact/v1',

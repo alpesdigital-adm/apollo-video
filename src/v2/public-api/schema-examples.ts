@@ -26,6 +26,7 @@ import {
 } from '../domain/project-subtitle-configuration.ts'
 import { createSubtitleSegmentOverrideCommandImpact } from '../domain/command-impact.ts'
 import { createSubtitleSegmentOverride } from '../domain/subtitle-segment-override.ts'
+import { REFRAME_SCHEMA_EXAMPLES } from './reframe-examples.ts'
 import { subtitlePresetReference } from '../domain/subtitle-system.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import {
@@ -11324,6 +11325,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       },
       maxVelocityPerSecond: 0.35, maxAccelerationPerSecondSquared: 0.8, safetyMargin: 0.02,
     }],
+    ...REFRAME_SCHEMA_EXAMPLES,
     'apollo://schemas/reframe-plan-request/v2': [{ baseVersionId: 'project-version-reframe-1', format: '9:16' }],
     'apollo://schemas/reframe-plan-request-result/v2': [{ data: {
       schemaVersion: 'reframe-plan-request-result/v2', status: 'review-required', plan: null,

@@ -158,7 +158,7 @@ export function reframeOverrideHidesSubject(input: Readonly<{
   return !reframeCriticalVisible(input.crop, overlapping, input.safeArea, REFRAME_POLICY.tracking.safetyMargin)
 }
 
-export function buildVariantReframePlanRecord(input: Readonly<{
+type RecordFacts = Readonly<{
   workspaceId: string
   projectId: string
   variantId: string
@@ -166,25 +166,46 @@ export function buildVariantReframePlanRecord(input: Readonly<{
   timeline: Readonly<{ fps: number; durationFrames: number }>
   source: Readonly<ReframeRoiSource>
   clips: readonly VariantReframeClip[]
-  stream: Readonly<FaceSourceEvidenceStream>
   overrideHeads: readonly Readonly<VariantReframeOverrideV2>[]
-  observationSetId: string
+}>
+
+const clipFactsOf = (clips: readonly VariantReframeClip[]): readonly Readonly<VariantReframeClipFactsV1>[] => Object.freeze(clips.map((clip) => Object.freeze({
+  clipId: clip.clipId, sourceArtifactId: clip.sourceArtifactId, sourceSha256: clip.sourceSha256, sourceWidth: clip.sourceWidth, sourceHeight: clip.sourceHeight,
+  sourceInFrame: clip.sourceInFrame, sourceOutFrame: clip.sourceOutFrame, timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame,
+  rate: clip.rate, fps: clip.fps,
+})))
+
+/** Projects the sealed evidence stream onto the timeline and decides the plan over it (see `assembleVariantReframePlanRecord`). */
+export function buildVariantReframePlanRecord(input: RecordFacts & Readonly<{
+  stream: Readonly<FaceSourceEvidenceStream>
+  /** Defaults to the address of the evidence and clips it describes, so the same inputs have the same id. */
+  observationSetId?: string
 }>): Readonly<VariantReframePlanRecordV1> {
-  assertDomain(ID.test(input.variantId) && ID.test(input.observationSetId) && OUTPUT_ASPECT_RATIOS.includes(input.spec.aspectRatio),
-    'INVALID_RENDER_INPUT', 'Reframe plan identity is invalid')
-  const clipFacts: readonly Readonly<VariantReframeClipFactsV1>[] = Object.freeze(input.clips.map((clip) => Object.freeze({
-    clipId: clip.clipId, sourceArtifactId: clip.sourceArtifactId, sourceSha256: clip.sourceSha256, sourceWidth: clip.sourceWidth, sourceHeight: clip.sourceHeight,
-    sourceInFrame: clip.sourceInFrame, sourceOutFrame: clip.sourceOutFrame, timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame,
-    rate: clip.rate, fps: clip.fps,
-  })))
+  const observationSetId = input.observationSetId ?? `reframe-observations-${calculateCanonicalHash({
+    kind: 'reframe-observation-set-id/v1', streamHash: input.stream.streamHash, clipMapHash: reframeClipMapHash(input.timeline, clipFactsOf(input.clips)) }).slice(0, 48)}`
+  assertDomain(ID.test(observationSetId), 'INVALID_RENDER_INPUT', 'Reframe plan identity is invalid')
   const observationSet = projectFaceEvidenceToReframeObservations({
-    id: input.observationSetId, fps: input.timeline.fps, durationFrames: input.timeline.durationFrames, source: input.source, stream: input.stream,
+    id: observationSetId, fps: input.timeline.fps, durationFrames: input.timeline.durationFrames, source: input.source, stream: input.stream,
     policy: REFRAME_POLICY,
     clips: input.clips.map((clip) => ({
       id: clip.clipId, sourceArtifactId: clip.sourceArtifactId, sourceInFrame: clip.sourceInFrame, sourceOutFrame: clip.sourceOutFrame,
       timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame, rate: clip.rate, ...(clip.hasStaticCrop ? { crop: true } : {}),
     })),
   })
+  return assembleVariantReframePlanRecord({ ...input, observationSet })
+}
+
+/**
+ * Decides the plan and the render ranges over observations that already exist. A manual Command re-enters here with the observations of
+ * the plan it sits on, UNCHANGED: the evidence is not read again and cannot move, only the overrides on top of it.
+ */
+export function assembleVariantReframePlanRecord(input: RecordFacts & Readonly<{ observationSet: Readonly<ReframeObservationSetV2> }>): Readonly<VariantReframePlanRecordV1> {
+  assertDomain(ID.test(input.variantId) && OUTPUT_ASPECT_RATIOS.includes(input.spec.aspectRatio), 'INVALID_RENDER_INPUT', 'Reframe plan identity is invalid')
+  const observationSet = input.observationSet
+  assertDomain(observationSet.durationFrames === input.timeline.durationFrames && observationSet.fps === input.timeline.fps &&
+    observationSet.sourceSha256 === input.source.sha256 && observationSet.sourceArtifactId === input.source.artifactId,
+  'INVALID_RENDER_INPUT', 'The observations do not describe this timeline and source')
+  const clipFacts = clipFactsOf(input.clips)
   const variant = Object.freeze({
     variantId: input.variantId, outputSpecRevisionId: input.spec.outputSpecRevisionId, specHash: input.spec.specHash,
     aspectRatio: input.spec.aspectRatio, safeArea: Object.freeze({ ...input.spec.safeArea }),

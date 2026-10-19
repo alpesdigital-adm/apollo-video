@@ -16,7 +16,7 @@ test('the shared Version writer is called by a known set of repositories', () =>
     'director-run-repository.ts', 'manual-edit-repository.ts', 'media-library-repository.ts', 'multicam-direction-command-repository.ts',
     'project-color-plan-repository.ts', 'project-lut-selection-repository.ts', 'project-policy-overrides-repository.ts',
     'project-subtitle-configuration-repository.ts', 'renderable-plan-version-commit.ts', 'review-patch-batch-repository.ts', 'review-patch-repository.ts',
-    'source-transcript-replacement-repository.ts', 'subtitle-segment-override-repository.ts',
+    'source-transcript-replacement-repository.ts', 'subtitle-segment-override-repository.ts', 'variant-reframe-override-repository.ts',
   ], 'a new caller of commitProjectVersionWithOutputState must settle the deferred guards too, and be listed here')
 })
 

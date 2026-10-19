@@ -32,6 +32,7 @@ export interface CommandImpactV1 {
     | 'apply-review-patch'
     | 'apply-review-patch-batch'
     | 'apply-subtitle-segment-override'
+    | 'apply-variant-reframe-override'
   baseVersionId: string
   resultVersionId: string
   changeKinds: readonly string[]
@@ -614,6 +615,67 @@ export function createSubtitleSegmentOverrideCommandImpact(input: {
   return Object.freeze({ ...body, impactHash: calculateCanonicalHash(body) })
 }
 
+/**
+ * W66r — impact of one manual reframe scoped to a single range of a single clip of a single output variant.
+ *
+ * Partial-range and variant-scoped like the subtitle exception: the invalidated region is the half-open range the editor framed
+ * (clamped to the compiled timeline) and `affectedVariantIds`, `affectedArtifacts` and `minimalRenders` only ever mention the
+ * target variant, so a 9:16 reframe cannot invalidate the 16:9 export. A manual reframe moves only what is drawn (`visual`).
+ */
+export function createVariantReframeOverrideCommandImpact(input: {
+  commandId: string
+  baseVersionId: string
+  resultVersionId: string
+  variantId: string
+  clipId: string
+  action: 'set' | 'reset'
+  range: Readonly<CommandImpactRange>
+  durationFrames: number
+  outputReferences: readonly Readonly<CommandImpactOutputReference>[]
+}): Readonly<CommandImpactV1> {
+  for (const [field, value] of Object.entries({
+    commandId: input.commandId,
+    baseVersionId: input.baseVersionId,
+    resultVersionId: input.resultVersionId,
+    variantId: input.variantId,
+    clipId: input.clipId,
+  })) assertDomain(validId(value), 'INVALID_ARGUMENT', `${field} is invalid`)
+  assertDomain(input.action === 'set' || input.action === 'reset', 'INVALID_ARGUMENT', 'Reframe override action is invalid')
+  assertDomain(
+    Number.isSafeInteger(input.durationFrames) && input.durationFrames > 0,
+    'INVALID_ARGUMENT',
+    'Reframe override impact requires a compiled timeline',
+  )
+  assertDomain(
+    Number.isSafeInteger(input.range.startFrame) && Number.isSafeInteger(input.range.endFrame) &&
+      input.range.startFrame >= 0 && input.range.endFrame > input.range.startFrame &&
+      input.range.endFrame <= input.durationFrames,
+    'INVALID_ARGUMENT',
+    'Reframe override range must sit inside the compiled timeline',
+  )
+  const affectedRanges = canonicalCommandImpactRanges([input.range])
+  const affectedArtifacts = normalizeCommandImpactOutputReferences(
+    input.outputReferences.filter((output) => output.variantId === input.variantId),
+  )
+  const body = {
+    schemaVersion: 'command-impact/v1' as const,
+    commandId: input.commandId,
+    commandType: 'apply-variant-reframe-override' as const,
+    baseVersionId: input.baseVersionId,
+    resultVersionId: input.resultVersionId,
+    changeKinds: Object.freeze([`reframe-override:${input.action}`]),
+    dependencyTypes: Object.freeze(['visual' as const]),
+    affectedRanges,
+    affectedVariantIds: Object.freeze([input.variantId]),
+    affectedArtifacts,
+    minimalRenders: Object.freeze([
+      Object.freeze({ kind: 'proxy' as const, variantId: input.variantId, ranges: affectedRanges }),
+    ]),
+    renderSemanticsChanged: true,
+  }
+  return Object.freeze({ ...body, impactHash: calculateCanonicalHash(body) })
+}
+
 export function createCommandArtifactInvalidations(input: {
   impact: Readonly<CommandImpactV1>
   createdAt: string
@@ -718,7 +780,7 @@ export function parseCommandImpact(value: unknown): Readonly<CommandImpactV1> {
   const impact = stored as unknown as CommandImpactV1
   assertDomain(
     impact.schemaVersion === 'command-impact/v1' &&
-      ['manual-edit', 'apply-review-patch', 'apply-review-patch-batch', 'apply-subtitle-segment-override']
+      ['manual-edit', 'apply-review-patch', 'apply-review-patch-batch', 'apply-subtitle-segment-override', 'apply-variant-reframe-override']
         .includes(impact.commandType) &&
       validId(impact.commandId) &&
       validId(impact.baseVersionId) &&
@@ -817,6 +879,21 @@ export function parseCommandImpact(value: unknown): Readonly<CommandImpactV1> {
         impact.dependencyTypes.every((dependency) => dependency === 'visual' || dependency === 'content'),
       'PERSISTENCE_CONFLICT',
       'Stored subtitle segment override impact is inconsistent',
+    )
+  }
+  if (impact.commandType === 'apply-variant-reframe-override') {
+    // A manual reframe is scoped to exactly one variant and one contiguous half-open range and moves only what is drawn.
+    assertDomain(
+      impact.renderSemanticsChanged === true &&
+        impact.affectedVariantIds.length === 1 &&
+        impact.affectedRanges.length === 1 &&
+        impact.minimalRenders.length === 1 &&
+        impact.minimalRenders[0]!.variantId === impact.affectedVariantIds[0] &&
+        impact.affectedArtifacts.every((artifact) => artifact.variantId === impact.affectedVariantIds[0]) &&
+        impact.changeKinds.length === 1 && impact.changeKinds.every((kind) => kind === 'reframe-override:set' || kind === 'reframe-override:reset') &&
+        impact.dependencyTypes.length === 1 && impact.dependencyTypes[0] === 'visual',
+      'PERSISTENCE_CONFLICT',
+      'Stored variant reframe override impact is inconsistent',
     )
   }
   const { impactHash, ...body } = impact

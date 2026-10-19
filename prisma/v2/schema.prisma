@@ -142,6 +142,9 @@ model V2Workspace {
   projectSubtitleConfigurationHeads      V2ProjectSubtitleConfigurationHead[]
   subtitleSegmentOverrides               V2SubtitleSegmentOverride[]
   subtitleSegmentOverrideHeads           V2SubtitleSegmentOverrideHead[]
+  variantReframePlans                    V2VariantReframePlan[]
+  variantReframeOverrides                V2VariantReframeOverride[]
+  variantReframeOverrideHeads            V2VariantReframeOverrideHead[]
   semanticReuseRuns                      V2SemanticReuseRun[]
   hierarchicalProcessingRuns             V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks           V2HierarchicalProcessingChunk[]
@@ -798,6 +801,9 @@ model V2Project {
   subtitleConfigurationHeads             V2ProjectSubtitleConfigurationHead[]
   subtitleSegmentOverrides               V2SubtitleSegmentOverride[]
   subtitleSegmentOverrideHeads           V2SubtitleSegmentOverrideHead[]
+  variantReframePlans                    V2VariantReframePlan[]
+  variantReframeOverrides                V2VariantReframeOverride[]
+  variantReframeOverrideHeads            V2VariantReframeOverrideHead[]
   creationCommand                        V2ProjectCreationCommand?
   administrationCommands                 V2ProjectAdministrationCommand[]
   perceptionTimelines                    V2PerceptionTimeline[]
@@ -1067,6 +1073,9 @@ model V2ProjectVersion {
   subtitleConfigurationAsResult    V2ProjectSubtitleConfiguration?     @relation("ProjectSubtitleConfigurationResult")
   subtitleSegmentOverridesAsBase   V2SubtitleSegmentOverride[]         @relation("SubtitleSegmentOverrideBase")
   subtitleSegmentOverrideAsResult  V2SubtitleSegmentOverride?          @relation("SubtitleSegmentOverrideResult")
+  variantReframePlans              V2VariantReframePlan[]
+  variantReframeOverridesAsBase    V2VariantReframeOverride[]          @relation("VariantReframeOverrideBase")
+  variantReframeOverrideAsResult   V2VariantReframeOverride?           @relation("VariantReframeOverrideResult")
   creationCommand                  V2ProjectCreationCommand?
   artifactInvalidationsAsBase      V2CommandArtifactInvalidation[]     @relation("ArtifactInvalidationBaseVersion")
   artifactInvalidationsAsResult    V2CommandArtifactInvalidation[]     @relation("ArtifactInvalidationResultVersion")
@@ -1323,6 +1332,7 @@ model V2EditCommand {
   colorPlan               V2ProjectColorPlan?
   subtitleConfiguration   V2ProjectSubtitleConfiguration?
   subtitleSegmentOverride V2SubtitleSegmentOverride?
+  variantReframeOverride  V2VariantReframeOverride?
   artifactInvalidations   V2CommandArtifactInvalidation[]
   outputStatesAsProducer  V2ProjectOutputState[] @relation("OutputStateProducerCommand")
   outputStateOverlays     V2ProjectOutputStateOverlay[] @relation("OutputStateOverlayCommand")
@@ -3137,6 +3147,93 @@ model V2SubtitleSegmentOverride {
   @@index([workspaceId, projectId, variantId, segmentId, createdAt(sort: Desc)])
   @@index([workspaceId, projectId, baseVersionId])
   @@map("subtitle_segment_overrides")
+}
+
+model V2VariantReframePlan {
+  id               String   @id @db.VarChar(128)
+  workspaceId      String   @db.VarChar(128)
+  projectId        String   @db.VarChar(128)
+  projectVersionId String   @db.VarChar(128)
+  variantId        String   @db.VarChar(128)
+  /// 1, 2, ... per (version, variant); the highest is the plan the render consumes.
+  sequence         Int
+  /// Content address of the whole record: the same inputs are the same row.
+  recordHash       String   @db.Char(64)
+  /// ready | review-required | blocked, derived from the record's issues and re-checked on read.
+  disposition      String   @db.VarChar(16)
+  recordJson       String   @db.Text
+  previousPlanId   String?  @db.VarChar(128)
+  createdAt        DateTime @db.Timestamptz(3)
+
+  workspace       V2Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project         V2Project          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion  V2ProjectVersion   @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  previousPlan    V2VariantReframePlan?  @relation("VariantReframePlanChain", fields: [previousPlanId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  replacedBy      V2VariantReframePlan[] @relation("VariantReframePlanChain")
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectVersionId, variantId, recordHash], map: "variant_reframe_plans_record_key")
+  @@unique([workspaceId, projectVersionId, variantId, sequence], map: "variant_reframe_plans_sequence_key")
+  @@unique([previousPlanId, workspaceId])
+  @@index([workspaceId, projectId, variantId, createdAt(sort: Desc)], map: "variant_reframe_plans_variant_idx")
+  @@map("variant_reframe_plans")
+}
+
+model V2VariantReframeOverrideHead {
+  workspaceId String   @db.VarChar(128)
+  projectId   String   @db.VarChar(128)
+  variantId   String   @db.VarChar(128)
+  clipId      String   @db.VarChar(128)
+  startFrame  Int
+  endFrame    Int
+  overrideId  String   @db.VarChar(128)
+  updatedAt   DateTime @db.Timestamptz(3)
+
+  workspace        V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project          V2Project                @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  reframeOverride  V2VariantReframeOverride @relation(fields: [overrideId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@id([projectId, workspaceId, variantId, clipId, startFrame, endFrame])
+  @@unique([overrideId, workspaceId])
+  @@map("variant_reframe_override_heads")
+}
+
+model V2VariantReframeOverride {
+  id                 String   @id @db.VarChar(128)
+  workspaceId        String   @db.VarChar(128)
+  projectId          String   @db.VarChar(128)
+  commandId          String   @db.VarChar(128)
+  baseVersionId      String   @db.VarChar(128)
+  resultVersionId    String   @db.VarChar(128)
+  /// The stable State variant. Never an aspect ratio.
+  variantId          String   @db.VarChar(128)
+  clipId             String   @db.VarChar(128)
+  startFrame         Int
+  endFrame           Int
+  action             String   @db.VarChar(16)
+  previousOverrideId String?  @db.VarChar(128)
+  overrideJson       String   @db.Text
+  overrideHash       String   @db.Char(64)
+  impactJson         String   @db.Text
+  impactHash         String   @db.Char(64)
+  createdAt          DateTime @db.Timestamptz(3)
+
+  workspace          V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project            V2Project                      @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  command            V2EditCommand                  @relation(fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  baseVersion        V2ProjectVersion               @relation("VariantReframeOverrideBase", fields: [baseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  resultVersion      V2ProjectVersion               @relation("VariantReframeOverrideResult", fields: [resultVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  previousOverride   V2VariantReframeOverride?      @relation("VariantReframeOverrideChain", fields: [previousOverrideId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  replacedBy         V2VariantReframeOverride[]     @relation("VariantReframeOverrideChain")
+  currentForRanges   V2VariantReframeOverrideHead[]
+
+  @@unique([id, workspaceId])
+  @@unique([commandId, workspaceId])
+  @@unique([resultVersionId, workspaceId])
+  @@unique([previousOverrideId, workspaceId])
+  @@index([workspaceId, projectId, variantId, clipId, createdAt(sort: Desc)], map: "variant_reframe_overrides_variant_idx")
+  @@index([workspaceId, projectId, baseVersionId], map: "variant_reframe_overrides_base_idx")
+  @@map("variant_reframe_overrides")
 }
 
 model V2MediaArtifactLineage {
