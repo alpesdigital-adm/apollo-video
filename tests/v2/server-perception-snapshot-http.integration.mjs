@@ -123,7 +123,7 @@ test('W63a HTTP server perception snapshot: scoped, isolated, honest about cover
       assert.ok(own.payload.data.result.coverage.filter((entry) => entry.kind !== 'transcript-word').every((entry) => entry.state === 'absent'))
 
       // authentication and scope
-      assert.equal((await get('', undefined)).status, 401)
+      assert.equal((await get('', null)).status, 401)
       assert.equal((await get('', 'not-a-token')).status, 401)
       const forbidden = await get('', noScope)
       assert.equal(forbidden.status, 403)
