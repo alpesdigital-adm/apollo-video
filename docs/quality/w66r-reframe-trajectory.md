@@ -156,7 +156,42 @@ Os ids das execuções de regressão, de mutação e do `npm test` completo est�
 
 ## 10. Mutação, regressão e `npm test`
 
-(preenchido ao final da execução)
+**Mutação** (a regra quebrada com Edit temporário, o teste falha; restaurada, passa; `git status` limpo depois de cada uma). Cada mutação foi
+aplicada também contra a prova no mp4/PG pelo harness.
+
+| Regra | Quebra | Teste unitário (domínio) | Prova renderizada / PG |
+| --- | --- | --- | --- |
+| Nunca interpolar através de um corte | a amostra seguinte passa a valer mesmo fora do clipe (`server-reframe-roi.ts`) | 9 de 10 passam; falha "ROI ... never across a cut" (caixa de 0,105 em vez de uma só) | run `w66r-gt-mut-a-a6dbfeaf`: 8 de 9; falha a cena de dois clipes (a cena guarda uma terceira posição nos frames cortados) |
+| Limite de velocidade/aceleração | o rastreador sem os dois `clampMagnitude` (`reframe-plan.ts`) | 6 de 10 passam; 4 falham (`Reframe tracking acceleration exceeds its limit`) | run `w66r-gt-mut-b-e76d1237`: 5 de 9; falham as cenas em movimento, a que reverte e a rápida demais |
+| O override nunca muda a observação nem o plano do servidor | o plano do servidor passa a ser decidido já com os overrides (`variant-reframe-plan.ts`) | 9 de 10 passam; falha o teste de precedência (plano do servidor igual) | run `w66r-pg-mut-c-a7c6ce6a`: o arquivo falha (`A manual reframe segment does not name its override`, guarda do planejador) |
+
+Restaurado: domínio 10 de 10 (`reframe-trajectory-domain.test.mjs`), GT no mp4 9 de 9 (run `w66r-gt-3-1835ab38`, antes das mutações, sobre a árvore
+que foi restaurada byte a byte) e PG 2 de 2 (`w66r-pg-5-15203dbf`).
+
+**Regressão no harness** (run `w66r-regress-1-02aaf67b`, 7 passos, todos verdes): `reframe-plan-render` 1/1, `render-geometry-render` 3/3,
+`caption-placement-pixels` 11/11, `format-quality-critic` 1/1, `transcript-rate-render` 2/2, `wave9-combined-journeys` 3/3,
+`wave10-combined-journey` 2/2.
+
+**Fixtures alteradas, e por quê** (nenhuma asserção de comportamento foi afrouxada):
+
+- `wave9`/`wave10` `reframePlanFor` e `project-final-export` `reframeFor`: o plano passa a nomear a **variante estável** a que o render está
+  selado (a geometria do render confere `reframePlan.variantId` com `sourceOutputVariantId(source)`, não com a proporção); duas asserções de
+  `wave9` que comparavam `variantId` a `'9:16'`/`'16:9'` comparam agora com o id estável.
+- `proxy-source-rights` e `command-impact`: os clientes Prisma falsos ganham `v2VariantReframePlan.findFirst -> null` (a leitura do plano
+  persistido da Versão); sem plano, o render é o que sempre foi.
+- `project-output-state-transition` e `renderable-compile-output-state`: os testes que fixavam a lista de tipos do guard SQL e a CHECK de
+  `edit_commands.type` contra o registro leem a primeira definição (com os tipos de então) **e** a definição em vigor (a migração W66r, com o
+  registro de hoje); `public-operation-contracts`: o inventário passa de 391 para 394 capacidades.
+- `reframe-plan.test.mjs`: os testes de domínio ficam como estavam; os dois de fronteira de aplicação/contrato foram reescritos para o serviço
+  e o contrato v3 (a assinatura do serviço e a versão da capacidade mudaram por desenho).
+- `mvp-production-formats.test.mjs`: só o nome importado (`createReframePlan` -> `createResponsiveReframePlan`, que colidia com o planejador).
+
+**`npm test` completo**, pelo harness (binários de FFmpeg fixados), um único passo, run `w66r-full-1-e9d691e6`: **3600 testes, 3587 passaram, 0 falharam,
+13 pulados** (no log: testes só de Linux de pidfd/perception, a ponte YuNet e um teste que exige PostgreSQL isolado). Nenhuma das falhas
+conhecidas de binário de FFmpeg apareceu sob o harness. Uma execução anterior de `npm test` **fora do harness e sem o lock** (o escritor não tinha rodado pelo harness) achou 7
+regressões minhas (fixtures dos clientes Prisma falsos, o plano de `project-final-export` com `variantId` de proporção, e três pins de lista de tipos/
+capacidades); todas corrigidas e cobertas acima. Gates estáticos no fim: `tsc --noEmit`, `lint`, `lint:code`, `lint:whitespace`, `db:v2:validate`
+(321 tabelas, 1436 índices, 1119 FKs), `api:v1:validate` (394 capacidades, 713 schemas, 795 exemplos) e `api:parity:validate`, todos com saída 0.
 
 ## 11. Limites e lacunas abertas
 
