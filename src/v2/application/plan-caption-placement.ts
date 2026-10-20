@@ -12,7 +12,7 @@ import { createRenderPlacementPlan, type RenderPlacementPlan, type RenderPlaceme
 import type { RenderReframePlanV1 } from '../domain/render-reframe-plan.ts'
 import { FINAL_CAPTION_ANCHOR_POLICY } from '../domain/final-caption-certification.ts'
 import { DEFAULT_SUBTITLE_ANCHOR_POLICY } from '../domain/subtitle-anchor-plan.ts'
-import type { SubtitlePresetId } from '../domain/subtitle-system.ts'
+import type { SubtitleAnchor, SubtitlePresetId } from '../domain/subtitle-system.ts'
 import type { FaceSourceWindowEvidenceReader } from './ports/face-source-window-evidence-reader.ts'
 
 /**
@@ -66,7 +66,7 @@ export type CaptionPlacementInput = Readonly<{
   composition?: Readonly<{ foregroundScale: number; verticalPosition: number }>
   renderSources: readonly CaptionPlacementRenderSource[]
   reframePlan?: Readonly<RenderReframePlanV1>
-  subtitleCues: readonly Readonly<{ id: string; startFrame: number; endFrame: number }>[]
+  subtitleCues: readonly Readonly<{ id: string; startFrame: number; endFrame: number; pinnedAnchor?: SubtitleAnchor }>[]
   subtitlePresetId: SubtitlePresetId | null | undefined
   placementElements: readonly Readonly<RenderPlacementRequestV1>[]
   trustedOcr?: Readonly<{ envelopeId: string; envelopeHash: string; inputVersionId: string; timeMapHash: string; timeline: Readonly<PerceptionTimeline> }>
@@ -171,7 +171,7 @@ export async function planCaptionPlacement(
     ...(input.subtitleCues.length ? {
       subtitleAnchor: {
         fps: input.editPlan.fps,
-        cues: input.subtitleCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame })),
+        cues: input.subtitleCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame, ...(cue.pinnedAnchor ? { pinnedAnchor: cue.pinnedAnchor } : {}) })),
         ...(input.uncertifiedCues === 'omit-and-list' ? { policy: FINAL_CAPTION_ANCHOR_POLICY } : {}),
         faceClearance: {
           projection,

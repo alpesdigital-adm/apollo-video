@@ -7,6 +7,7 @@ import { referencesOfVariant } from '../domain/output-variant-references.ts'
 import { reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import {
   createSubtitleSegmentOverride,
+  describeSubtitleSegments,
   normalizeSubtitleSegmentOverrideDimensions,
   resolveSubtitleSegmentOverrideResetTarget,
   type SubtitleSegmentOverrideAction,
@@ -214,4 +215,24 @@ export function listSubtitleSegmentOverridesService(dependencies: {
       projectId: id(input.projectId, 'projectId'),
       variantId: id(input.variantId, 'variantId'),
     })
+}
+
+/**
+ * W68 — the segments of ONE output of the current Version as the editor lists them: compiled text and range, the head exception and the
+ * values a render draws. It reads; it decides and writes nothing, and a stranger's project or an output the State does not carry is
+ * refused before any segment is read.
+ */
+export function readSubtitleSegmentsService(dependencies: { repository: SubtitleSegmentOverrideRepository }) {
+  return async (input: { workspaceId: string; projectId: string; variantId: string }) => {
+    const view = await dependencies.repository.readSegments({
+      workspaceId: id(input.workspaceId, 'workspaceId'),
+      projectId: id(input.projectId, 'projectId'),
+      variantId: id(input.variantId, 'variantId'),
+    })
+    if (!view) throw new DomainError('PROJECT_NOT_FOUND', 'Subtitle segments project was not found')
+    return Object.freeze({
+      version: view.version, variantId: view.variantId, fps: view.fps, durationFrames: view.durationFrames,
+      segments: describeSubtitleSegments({ segments: view.segments, overrides: view.overrides, variantId: view.variantId }),
+    })
+  }
 }

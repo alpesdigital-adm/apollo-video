@@ -7,6 +7,7 @@ import {
 import { validateRenderReframePlan } from '../domain/render-reframe-plan.ts'
 import { sourceOutputVariantId } from './project-render-sources.ts'
 import { emittedSubtitleTracks } from '../domain/subtitle-emission-tracks.ts'
+import { resolveSubtitleOverridesForRender } from '../domain/subtitle-segment-override.ts'
 import {
   requireSubtitlePresetSnapshot,
   SUBTITLE_STYLE_REGISTRY,
@@ -39,7 +40,7 @@ import type { ProjectProxyRenderSource } from './ports/project-proxy-render-repo
 export async function deriveEditorialRenderGeometry(input: Readonly<{
   source: Pick<
     ProjectProxyRenderSource,
-    'editPlan' | 'format' | 'trustedOcr' | 'subtitleResolution' | 'reframePlan' | 'reframeIssues' | 'renderSources' | 'sourceArtifactId' | 'outputConsumption'
+    'editPlan' | 'format' | 'trustedOcr' | 'subtitleResolution' | 'reframePlan' | 'reframeIssues' | 'renderSources' | 'sourceArtifactId' | 'outputConsumption' | 'subtitleOverrides'
   >
   canvas: Readonly<{ width: number; height: number }>
   workspaceId: string
@@ -59,13 +60,25 @@ export async function deriveEditorialRenderGeometry(input: Readonly<{
   // An explicitly disabled style must never leak the EditPlan's cues into FFmpeg.
   // A renderable snapshot can have cues without a style resolution; its persisted
   // track preset only reserves geometry for the review plan.
-  const subtitleCues = subtitleResolution?.enabled === false
+  const compiledCues = subtitleResolution?.enabled === false
     ? [] : cueTracks.flatMap((track) => track.cues)
   const subtitlePresetId = subtitleResolution?.enabled
-    ? subtitleResolution.presetId : subtitleCues.length ? cueTracks[0]?.presetId : null
-  if (subtitleCues.length && (!subtitlePresetId || cueTracks.some(
+    ? subtitleResolution.presetId : compiledCues.length ? cueTracks[0]?.presetId : null
+  if (compiledCues.length && (!subtitlePresetId || cueTracks.some(
     (track) => track.presetId !== subtitlePresetId,
   ))) throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle cues require one consistent persisted preset')
+  // W68. The persisted per-segment exceptions of THIS output (text, visibility, style, and the band an operator pinned a cue to). A cue
+  // the operator hid is neither drawn nor planned; a pinned band is still decided by the evidence (see `pinnedAnchor`).
+  const overrideResolution = compiledCues.length && source.subtitleOverrides?.length
+    ? resolveSubtitleOverridesForRender({ cues: compiledCues, overrides: source.subtitleOverrides, variantId: sourceOutputVariantId(source) })
+    : null
+  const subtitleOverrideReceipt = overrideResolution?.receipt ?? null
+  const subtitleCues = overrideResolution
+    ? overrideResolution.cues.map((cue) => {
+        const preset = subtitleOverrideReceipt?.stylePresets[cue.id]
+        return preset ? Object.freeze({ ...cue, presetId: preset }) : cue
+      })
+    : compiledCues
   const ctaOverlays = (source.editPlan.overlayTracks ?? []).filter(
     (track) => 'kind' in track && track.kind === 'cta',
   )
@@ -117,7 +130,10 @@ export async function deriveEditorialRenderGeometry(input: Readonly<{
         artifactId: asset.artifactId, sha256: asset.sha256, mediaType: asset.mediaType, ...(asset.probe ? { probe: asset.probe } : {}),
       })),
       ...(reframePlan ? { reframePlan } : {}),
-      subtitleCues: subtitleCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame })),
+      subtitleCues: subtitleCues.map((cue) => ({
+        id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame,
+        ...(subtitleOverrideReceipt?.pinnedAnchors[cue.id] ? { pinnedAnchor: subtitleOverrideReceipt.pinnedAnchors[cue.id]! } : {}),
+      })),
       // The subtitle band is reserved from the *resolved* preset, so a CTA is never solved into the rows the subtitles
       // already own - and never from a rectangle authored here.
       subtitlePresetId, placementElements,
@@ -131,5 +147,6 @@ export async function deriveEditorialRenderGeometry(input: Readonly<{
   validateRenderPlacementPlan(placementPlan)
   return Object.freeze({
     subtitleCues, subtitlePresetId, subtitleResolution, ctaOverlays, placementPlan, reframePlan, reframeIssues: source.reframeIssues ?? [], requiredFaceWindows,
+    subtitleOverrideReceipt,
   })
 }

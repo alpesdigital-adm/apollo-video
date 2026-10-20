@@ -110,6 +110,9 @@ export function projectProxyRenderInputHash(input: {
     // W66r. The persisted reframe plan changes the pixels, so another plan is another input. Absent when none was persisted, which keeps the
     // identity of every render made before plans existed.
     ...(source.reframeRecordHash ? { reframeRecordHash: source.reframeRecordHash, reframeComposition: REFRAME_COMPOSITION_ID } : {}),
+    // W68. The per-segment subtitle exceptions that carry a value change the pixels, so another set is another input. Absent when the
+    // output has none (or every one was reset), which keeps the identity of every render made before they existed.
+    ...(source.subtitleOverridesHash ? { subtitleOverridesHash: source.subtitleOverridesHash } : {}),
   }
   return calculateVersionHash(source.unchangedReuse
     ? {

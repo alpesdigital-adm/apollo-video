@@ -445,3 +445,175 @@ export function reapplyProtectedSubtitleSegmentOverrides<TCue extends SubtitleSe
     onlyProtected: true,
   })
 }
+
+/* -------------------------------------------------------------------------- */
+/* Application to the cues a RENDER draws (W68)                               */
+/* -------------------------------------------------------------------------- */
+
+export interface SubtitleOverrideRenderCue {
+  id: string
+  startFrame: number
+  endFrame: number
+  text: string
+}
+
+export type SubtitleOverrideRenderSkipReason = 'segment-missing' | 'range-mismatch' | 'inherited' | 'variant-mismatch'
+
+export interface SubtitleOverrideRenderReceipt {
+  schemaVersion: 'subtitle-override-render-receipt/v1'
+  variantId: string
+  /** Content address of the head overrides that carried a value (see `subtitleOverrideSetHash`). */
+  overridesHash: string
+  applied: readonly Readonly<{ overrideId: string; overrideHash: string; segmentId: string; kinds: readonly SubtitleSegmentOverrideKind[] }>[]
+  skipped: readonly Readonly<{ overrideId: string; overrideHash: string; segmentId: string; reason: SubtitleOverrideRenderSkipReason }>[]
+  hiddenCueIds: readonly string[]
+  pinnedAnchors: Readonly<Record<string, SubtitleAnchor>>
+  stylePresets: Readonly<Record<string, SubtitlePresetId>>
+}
+
+/**
+ * Content address of the head exceptions of ONE variant that carry a value. Heads that returned a segment to the inherited level
+ * (no dimension) do not count: a variant whose every exception was reset renders, and is identified, exactly as one that never had any.
+ * `null` when no head carries a value.
+ */
+export function subtitleOverrideSetHash(overrides: readonly Readonly<SubtitleSegmentOverride>[], variantId: string): string | null {
+  const effective = overrides.map((stored) => requirePersistedSubtitleSegmentOverride(stored))
+    .filter((override) => override.variantId === variantId && override.dimensions.length > 0)
+    .map((override) => override.overrideHash)
+    .toSorted()
+  return effective.length === 0 ? null : calculateCanonicalHash({ schemaVersion: 'subtitle-override-set/v1', variantId, overrideHashes: effective })
+}
+
+/**
+ * What the render draws once the persisted exceptions of ONE variant are applied to the cues the EditPlan compiled.
+ *
+ * - `text` replaces the cue text; `visibility: false` removes the cue from the render (and from its placement plan: a cue that is not
+ *   drawn is not certified); `style` names the preset the cue is drawn with; `position` becomes a PIN, not a position: the band is
+ *   still decided by the same evidence (`pinnedAnchors` feeds the anchor plan, which refuses a band that is occupied or uncertified).
+ * - An exception whose segment or exact range the EditPlan no longer has is a recorded no-op, never a guess about the frames meant.
+ * - A head that returned the segment to the inherited level has no value and changes nothing.
+ */
+export function resolveSubtitleOverridesForRender<TCue extends SubtitleOverrideRenderCue>(input: {
+  cues: readonly TCue[]
+  overrides: readonly Readonly<SubtitleSegmentOverride>[]
+  variantId: string
+}): Readonly<{ cues: readonly TCue[]; receipt: Readonly<SubtitleOverrideRenderReceipt> | null }> {
+  const variantId = identifier(input.variantId, 'variantId')
+  const overrideHash = subtitleOverrideSetHash(input.overrides, variantId)
+  if (overrideHash === null) return Object.freeze({ cues: input.cues, receipt: null })
+  const byId = new Map(input.cues.map((cue) => [cue.id, cue]))
+  assertDomain(byId.size === input.cues.length, 'INVALID_ARGUMENT', 'Compiled subtitle segments must have unique ids')
+  const texts = new Map<string, string>()
+  const hidden = new Set<string>()
+  const pinned: Record<string, SubtitleAnchor> = {}
+  const presets: Record<string, SubtitlePresetId> = {}
+  const applied: { overrideId: string; overrideHash: string; segmentId: string; kinds: readonly SubtitleSegmentOverrideKind[] }[] = []
+  const skipped: { overrideId: string; overrideHash: string; segmentId: string; reason: SubtitleOverrideRenderSkipReason }[] = []
+  for (const stored of input.overrides.map((value) => requirePersistedSubtitleSegmentOverride(value))
+    .toSorted((left, right) => left.segmentId.localeCompare(right.segmentId) || left.id.localeCompare(right.id))) {
+    const note = (reason: SubtitleOverrideRenderSkipReason) =>
+      skipped.push({ overrideId: stored.id, overrideHash: stored.overrideHash, segmentId: stored.segmentId, reason })
+    if (stored.variantId !== variantId) { note('variant-mismatch'); continue }
+    if (stored.dimensions.length === 0) { note('inherited'); continue }
+    const cue = byId.get(stored.segmentId)
+    if (!cue) { note('segment-missing'); continue }
+    if (cue.startFrame !== stored.range.startFrame || cue.endFrame !== stored.range.endFrame) { note('range-mismatch'); continue }
+    for (const dimension of stored.dimensions) {
+      if (dimension.kind === 'text') texts.set(cue.id, dimension.text)
+      else if (dimension.kind === 'position') pinned[cue.id] = dimension.anchor
+      else if (dimension.kind === 'style') presets[cue.id] = dimension.presetId
+      else if (dimension.visible) hidden.delete(cue.id)
+      else hidden.add(cue.id)
+    }
+    applied.push({ overrideId: stored.id, overrideHash: stored.overrideHash, segmentId: stored.segmentId, kinds: Object.freeze(stored.dimensions.map((dimension) => dimension.kind)) })
+  }
+  const cues = Object.freeze(input.cues
+    .filter((cue) => !hidden.has(cue.id))
+    .map((cue) => texts.has(cue.id) ? Object.freeze({ ...cue, text: texts.get(cue.id)! }) as TCue : cue))
+  return Object.freeze({
+    cues,
+    receipt: Object.freeze({
+      schemaVersion: 'subtitle-override-render-receipt/v1' as const,
+      variantId,
+      overridesHash: overrideHash,
+      applied: Object.freeze(applied.map((entry) => Object.freeze(entry))),
+      skipped: Object.freeze(skipped.map((entry) => Object.freeze(entry))),
+      hiddenCueIds: Object.freeze([...hidden].toSorted()),
+      pinnedAnchors: Object.freeze(Object.fromEntries(Object.entries(pinned).toSorted(([left], [right]) => left.localeCompare(right)))),
+      stylePresets: Object.freeze(Object.fromEntries(Object.entries(presets).toSorted(([left], [right]) => left.localeCompare(right)))),
+    }),
+  })
+}
+
+/* -------------------------------------------------------------------------- */
+/* What the editor shows for each segment (W68)                               */
+/* -------------------------------------------------------------------------- */
+
+export type SubtitleSegmentExceptionState = 'inherited' | 'overridden' | 'stale'
+
+export interface SubtitleSegmentDescription {
+  segmentId: string
+  startFrame: number
+  /** Exclusive. */
+  endFrame: number
+  /** The text the EditPlan compiled, before any exception. */
+  text: string
+  state: SubtitleSegmentExceptionState
+  /** The head exception, or null while the segment is inherited. A reset head (no dimension) is reported as `inherited` with its chain. */
+  override: Readonly<{
+    overrideId: string
+    overrideHash: string
+    action: SubtitleSegmentOverrideAction
+    dimensions: readonly SubtitleSegmentOverrideDimension[]
+    protected: boolean
+    previousOverrideId: string | null
+    createdAt: string
+  }> | null
+  /** What a render of this output draws for the segment once the head is applied (the inherited values when none applies). */
+  effective: Readonly<{
+    text: string
+    visible: boolean
+    pinnedAnchor: SubtitleAnchor | null
+    presetId: SubtitlePresetId | null
+  }>
+}
+
+/**
+ * The segments of ONE output as the editor lists them: compiled text and range, the head exception (if any) and the values a render
+ * draws. `stale` is an exception whose segment kept its id but not its exact range: the render records it as a no-op, and the editor
+ * says so instead of showing a value that is not drawn.
+ */
+export function describeSubtitleSegments(input: {
+  segments: readonly Readonly<{ id: string; startFrame: number; endFrame: number; text: string }>[]
+  overrides: readonly Readonly<SubtitleSegmentOverride>[]
+  variantId: string
+}): readonly Readonly<SubtitleSegmentDescription>[] {
+  const variantId = identifier(input.variantId, 'variantId')
+  const heads = new Map(input.overrides.map((stored) => requirePersistedSubtitleSegmentOverride(stored))
+    .filter((override) => override.variantId === variantId).map((override) => [override.segmentId, override] as const))
+  return Object.freeze(input.segments.map((segment) => {
+    const head = heads.get(segment.id) ?? null
+    const rangeMatches = head !== null && head.range.startFrame === segment.startFrame && head.range.endFrame === segment.endFrame
+    const carries = head !== null && head.dimensions.length > 0
+    const applied = carries && rangeMatches ? head.dimensions : []
+    const dimension = <K extends SubtitleSegmentOverrideDimension['kind']>(kind: K) =>
+      applied.find((entry): entry is Extract<SubtitleSegmentOverrideDimension, { kind: K }> => entry.kind === kind)
+    return Object.freeze({
+      segmentId: segment.id,
+      startFrame: segment.startFrame,
+      endFrame: segment.endFrame,
+      text: segment.text,
+      state: carries ? (rangeMatches ? 'overridden' as const : 'stale' as const) : 'inherited' as const,
+      override: head === null ? null : Object.freeze({
+        overrideId: head.id, overrideHash: head.overrideHash, action: head.action, dimensions: head.dimensions,
+        protected: head.protected, previousOverrideId: head.previousOverrideId, createdAt: head.createdAt,
+      }),
+      effective: Object.freeze({
+        text: dimension('text')?.text ?? segment.text,
+        visible: dimension('visibility')?.visible ?? true,
+        pinnedAnchor: dimension('position')?.anchor ?? null,
+        presetId: dimension('style')?.presetId ?? null,
+      }),
+    })
+  }))
+}

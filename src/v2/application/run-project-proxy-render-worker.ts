@@ -245,7 +245,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       // placement plan with its unknown-face anchor plan, and the persisted reframe plan); only the
       // canvas differs, because a placement plan is addressed against the pixels it is drawn on.
       const outputPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
-      const { subtitleCues, subtitleResolution, ctaOverlays, placementPlan, reframePlan, reframeIssues } = await deriveEditorialRenderGeometry({
+      const { subtitleCues, subtitleResolution, ctaOverlays, placementPlan, reframePlan, reframeIssues, subtitleOverrideReceipt } = await deriveEditorialRenderGeometry({
         source,
         canvas: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height },
         workspaceId: operation.workspaceId, projectId: context.projectId, clips,
@@ -466,6 +466,9 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null,
         perceptionTimelineHash: placementPlan.subtitleAnchorPlan?.perceptionTimelineHash ?? null,
         ocrReceipt,
+        // W68. The per-segment exceptions this proxy was drawn with (absent when the output has none that carry a value, which keeps the
+        // recipe of every earlier render byte for byte).
+        ...(subtitleOverrideReceipt ? { subtitleOverrides: subtitleOverrideReceipt } : {}),
       })
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',

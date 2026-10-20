@@ -6381,6 +6381,16 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200, 201], idempotency: 'required', requestBodyRequired: true,
   },
   {
+    id: 'apollo.projects.subtitle-segments.read', version: '1.0.0', title: 'Read the subtitle segments of one output variant',
+    description: 'Reads the subtitle segments ONE output variant of the current immutable version compiles: each one with its text, half-open frame range, head exception (position, style, text, visibility, protection) and the values a render draws. It reads only; every change is a subtitle-segment-overrides Command. variantId is the stable State variant id of the output, never an aspect ratio.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/subtitle-segments-response/v1', endpoint: { method: 'GET', path: '/v1/projects/{projectId}/subtitle-segments' }, toolName: 'apollo.projects.subtitle-segments.read',
+    queryParameters: [
+      { name: 'variantId', required: true, description: 'Stable variant id of the output whose subtitle segments are read.', schema: { type: 'string', minLength: 3, maxLength: 128 } },
+    ],
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
     id: 'apollo.projects.policy-overrides.read', version: '1.0.0', title: 'Read project policy overrides',
     description: 'Reads all ten allowlisted brand and guardrail values from the current immutable Policy Snapshot, including each resolved origin.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],

@@ -265,6 +265,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         // Re-read through the same `final` verdict: another State, variant revision or materialization is another input hash.
         outputConsumptionSealHash: source.outputConsumption.sealHash,
         ...(source.reframeRecordHash ? { reframeRecordHash: source.reframeRecordHash } : {}),
+        ...(source.subtitleOverridesHash ? { subtitleOverridesHash: source.subtitleOverridesHash } : {}),
       })
       if (
         immutableInputHash !== context.inputHash ||
@@ -295,7 +296,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       // the export before the encode is anything else - a hard issue, a band that is not free-certified under a placed cue, or a
       // burned caption that nothing would confirm in the delivered pixels. When the geometry cannot be derived the export stops here;
       // rendering the cut without its captions is not an option.
-      const { subtitleCues, ctaOverlays, placementPlan, reframePlan } = await deriveEditorialRenderGeometry({
+      const { subtitleCues, ctaOverlays, placementPlan, reframePlan, subtitleOverrideReceipt } = await deriveEditorialRenderGeometry({
         source,
         canvas: { width: context.outputSpec.width, height: context.outputSpec.height },
         workspaceId: operation.workspaceId, projectId: context.projectId, clips,
@@ -590,6 +591,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             // W65b. What was burned, how each band was certified, and what was omitted and listed for review.
             captionCertificationPolicySha256: FINAL_CAPTION_CERTIFICATION_POLICY_SHA256,
             captionCertification: certification.receipt,
+            // W68. The per-segment exceptions this final was drawn with (absent when the output has none that carry a value).
+            ...(subtitleOverrideReceipt ? { subtitleOverrides: subtitleOverrideReceipt } : {}),
           },
         },
         sources: [

@@ -29,6 +29,8 @@ import { PrismaProxyReviewRepository } from './proxy-review-repository.ts'
 import { reframeTimelineOf } from '../../application/project-reframe-facts.ts'
 import { reframeClipMapHash } from '../../domain/variant-reframe-plan.ts'
 import { readVariantReframePlanHead } from './variant-reframe-plan-repository.ts'
+import { readSubtitleSegmentOverrideHeads } from './subtitle-segment-override-repository.ts'
+import { subtitleOverrideSetHash } from '../../domain/subtitle-segment-override.ts'
 import { PrismaPublicOperationRepository } from './public-operation-repository.ts'
 
 function parseArray(value: string, field: string): readonly unknown[] {
@@ -109,7 +111,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
   async readCurrentSource(input: { workspaceId: string; projectId: string; purpose?: ProjectRenderConsumptionPurpose; variantId?: string }) {
     const project = await this.queryProject(input)
     const source = hydrateProxySource(project)
-    return source ? this.attachReframePlan(project!, await this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source))) : null
+    return source ? this.attachSubtitleOverrides(project!, await this.attachReframePlan(project!, await this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source)))) : null
   }
 
   /** The exact Version a worker was sealed to, consumed for `purpose` (default: the proxy render). */
@@ -120,7 +122,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       throw new DomainError('PERSISTENCE_CONFLICT', 'The sealed Version is no longer the current Version of the project')
     }
     const source = hydrateProxySource(project, input)
-    return source ? this.attachReframePlan(project!, await this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source))) : null
+    return source ? this.attachSubtitleOverrides(project!, await this.attachReframePlan(project!, await this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source)))) : null
   }
 
   /**
@@ -150,6 +152,27 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     ) throw new DomainError('PERSISTENCE_CONFLICT', 'The persisted reframe plan does not describe the Version and output it is bound to')
     const { rangeReuse: _range, unchangedReuse: _unchanged, unchangedReuseRequired: _required, ...rest } = source
     return Object.freeze({ ...rest, reframePlan: record.renderPlan, reframeIssues: record.issues, reframeRecordHash: record.recordHash })
+  }
+
+  /**
+   * W68. The persisted subtitle exceptions of THIS output, applied by the single geometry derivation (text, visibility, style, and the band
+   * an operator pinned a cue to). Nothing is decided here: a variant with no exception that carries a value renders as it always did, with
+   * the identity it always had.
+   *
+   * A render that carries an exception is always a full render of the output: the bytes of an earlier proxy were drawn under another
+   * caption, so a reused range or an unchanged-render reuse of them would put the old caption back.
+   */
+  private async attachSubtitleOverrides(
+    project: NonNullable<Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>>,
+    source: Readonly<ProjectProxyRenderSource>,
+    client: PrismaClient | Prisma.TransactionClient = this.client,
+  ): Promise<Readonly<ProjectProxyRenderSource>> {
+    const variantId = sourceOutputVariantId(source)
+    const heads = await readSubtitleSegmentOverrideHeads(client, { workspaceId: project.workspaceId, projectId: project.id, variantId })
+    const overridesHash = subtitleOverrideSetHash(heads, variantId)
+    if (overridesHash === null) return source
+    const { rangeReuse: _range, unchangedReuse: _unchanged, unchangedReuseRequired: _required, ...rest } = source
+    return Object.freeze({ ...rest, subtitleOverrides: Object.freeze([...heads]), subtitleOverridesHash: overridesHash })
   }
 
   private async attachTrustedOcr(

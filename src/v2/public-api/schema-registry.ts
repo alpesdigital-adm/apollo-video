@@ -26217,6 +26217,37 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
       overrides: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: true } },
     },
   })),
+  defineSchema('subtitle-segments-response', 1, 'The subtitle segments of ONE output of the current version: compiled text and half-open range, the head exception and the values a render draws', successSchema({
+    type: 'object', additionalProperties: false, required: ['version', 'variantId', 'fps', 'durationFrames', 'segments'], properties: {
+      version: { type: 'object', additionalProperties: false, required: ['id', 'sequence', 'baseHash'], properties: { id: idSchema, sequence: { type: 'integer', minimum: 1 }, baseHash: sha256Schema } },
+      variantId: idSchema,
+      fps: { type: 'number', exclusiveMinimum: 0 },
+      durationFrames: { type: 'integer', minimum: 0 },
+      segments: {
+        type: 'array', maxItems: 10_000, items: {
+          type: 'object', additionalProperties: false, required: ['segmentId', 'startFrame', 'endFrame', 'text', 'state', 'override', 'effective'], properties: {
+            segmentId: idSchema, startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 }, text: { type: 'string' },
+            state: { enum: ['inherited', 'overridden', 'stale'] },
+            override: {
+              anyOf: [{ type: 'null' }, {
+                type: 'object', additionalProperties: false, required: ['overrideId', 'overrideHash', 'action', 'dimensions', 'protected', 'previousOverrideId', 'createdAt'], properties: {
+                  overrideId: idSchema, overrideHash: sha256Schema, action: { enum: ['set', 'reset'] }, dimensions: subtitleSegmentOverrideDimensionsSchemaV1,
+                  protected: { type: 'boolean' }, previousOverrideId: { anyOf: [{ type: 'null' }, idSchema] }, createdAt: { type: 'string', format: 'date-time' },
+                },
+              }],
+            },
+            effective: {
+              type: 'object', additionalProperties: false, required: ['text', 'visible', 'pinnedAnchor', 'presetId'], properties: {
+                text: { type: 'string' }, visible: { type: 'boolean' },
+                pinnedAnchor: { anyOf: [{ type: 'null' }, { enum: [...SUBTITLE_SEGMENT_OVERRIDE_ANCHORS] }] },
+                presetId: { anyOf: [{ type: 'null' }, { enum: [...SUBTITLE_PRESET_IDS] }] },
+              },
+            },
+          },
+        },
+      },
+    },
+  })),
   defineSchema('variant-reframe-override-apply-request', 1, 'Frame ONE range of ONE clip of ONE output variant by hand, or reset that exact range to the automatic level', {
     type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash', 'variantId', 'clipId', 'startFrame', 'endFrame', 'action'], properties: {
       baseVersionId: idSchema, baseHash: sha256Schema,
