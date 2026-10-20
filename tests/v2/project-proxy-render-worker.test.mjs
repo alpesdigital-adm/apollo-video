@@ -2154,3 +2154,112 @@ test('W65 proxy worker: no control render is paid for when the plan draws nothin
   assert.equal(review.status, 'warning-ack-required')
   assert.deepEqual(review.criticIssues.filter((entry) => entry.code === 'FACE_PIXEL_CHECK_UNAVAILABLE').map((entry) => entry.severity), ['warning'])
 })
+
+// ---- W67: the independent MP4 critic reads the pixels of the delivered proxy ----
+const { createMp4QualityReport: createMp4ProxyReport, MP4_PIXEL_CRITIC_POLICY: MP4_PROXY_POLICY } = await import('../../src/v2/domain/mp4-pixel-quality.ts')
+const { pixelOracleModelPins: proxyOraclePins } = await import('../../src/v2/domain/pixel-face-oracle.ts')
+
+function fakeProxyMp4Critic({ overFaceFrames = [], throws = false } = {}) {
+  const critic = {
+    requests: [], controls: [],
+    async verify(request) {
+      critic.requests.push(request)
+      if (throws) throw new Error('W67_CONTROLLED_CRITIC_FAILURE')
+      for (const kind of ['overlays-off', 'captions-off', 'cta-off']) critic.controls.push((await request.renderControl(kind)).path)
+      const frames = 300
+      const samples = Array.from({ length: frames }, (_unused, frameIndex) => {
+        const over = overFaceFrames.includes(frameIndex)
+        return {
+          sampleId: `sample-${frameIndex}`, frameIndex, ptsTicks: frameIndex * 512, frameSha256: 'a'.repeat(64),
+          caption: over ? { pixels: 4000, bbox: { x0: 100, y0: 600, x1: 440, y1: 640 }, touchesCanvasEdge: false } : { pixels: 0, bbox: null, touchesCanvasEdge: false },
+          cta: { pixels: 0, bbox: null, touchesCanvasEdge: false }, inkDensity: over ? 0.02 : 0,
+          oracle: { state: 'observed', outputFaceCount: 1, sourceFaceCount: 1 }, registration: null,
+          protectedRegions: [{ origin: 'oracle-0204-v9', box: { x: 0.3, y: 0.3, width: 0.2, height: 0.2 }, captionInkPixels: over ? 60 : 0, ctaInkPixels: 0 }],
+          subject: { state: 'measured', visibleFraction: 1, outputConfirmed: true, projected: { x0: 0.3, y0: 0.3, x1: 0.5, y1: 0.5 } },
+        }
+      })
+      const report = createMp4ProxyReport({
+        identity: request.identity,
+        artifact: { sha256: 'd'.repeat(64), byteSize: 4096, container: 'mov,mp4,m4a,3gp,3g2,mj2', videoCodec: 'h264', pixelFormat: 'yuv420p', width: request.outputSpec.width, height: request.outputSpec.height, frameRate: { num: 30, den: 1 }, timeBase: { num: 1, den: 15360 }, frameCount: frames, durationTicks: frames * 512 },
+        decode: { status: 'complete', framesExpected: frames, framesDecoded: frames, frameListSha256: 'e'.repeat(64), stderrSha256: 'c'.repeat(64), ffmpegBinarySha256: null },
+        outputSpec: request.outputSpec, controls: [], noiseProbe: null,
+        oracle: { protocol: 'apollo-pixel-oracle/v1', models: proxyOraclePins(), bridgeSha256: '1'.repeat(64), pythonSha256: '2'.repeat(64), runtime: {}, registration: MP4_PROXY_POLICY.registration, perSample: [] },
+        samples,
+      })
+      return { report, issues: report.issues }
+    },
+  }
+  return critic
+}
+
+function wireProxyMp4(base, critic) {
+  base.deps.mp4PixelCritic = critic
+  const stored = []
+  const promote = base.deps.storage.promoteDerived
+  base.deps.storage.promoteDerived = async (input) => {
+    if (input.prefix === 'mp4-quality-reports') { stored.push(input); return { key: `workspaces/${input.prefix}/${input.sha256}.json`, sha256: input.sha256, byteSize: 1 } }
+    return promote(input)
+  }
+  const rendered = []
+  const originalRender = base.deps.renderer.render
+  base.deps.renderer = { async render(input) { rendered.push(input); return originalRender(input) }, async cleanup(operationId) { rendered.push({ cleaned: operationId }) } }
+  return { stored, rendered }
+}
+
+test('W67 proxy worker: a hard issue of the MP4 critic blocks THIS proxy, the review carries the seal, and the report is stored', async () => {
+  const critic = fakeProxyMp4Critic({ overFaceFrames: [20, 21, 22, 23] })
+  const base = dependencies(createOperations(), {})
+  const { stored, rendered } = wireProxyMp4(base, critic)
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-w67-mp4-blocked')
+  assert.equal(outcome.status, 'succeeded', 'the render is made; its review is what blocks the final')
+  const review = base.attachedReview()
+  assert.equal(review.status, 'blocked')
+  assert.equal(review.finalAllowed, false)
+  const issue = review.criticIssues.find((entry) => entry.code === 'SUBTITLE_FACE_OVERLAP_IN_PIXELS')
+  assert.ok(issue && issue.severity === 'hard')
+  assert.deepEqual(issue.evidenceRange, { startFrame: 20, endFrame: 24 })
+  assert.equal(review.formatQuality.status, 'blocked')
+  assert.equal(review.formatQuality.exportAllowed, false)
+  assert.equal(review.formatQuality.mp4Evidence.schemaVersion, 'mp4-evidence-seal/v1')
+  assert.equal(review.formatQuality.mp4Evidence.artifactSha256, 'd'.repeat(64))
+  assert.equal(review.formatQuality.mp4Evidence.outputSpecId, 'preset-9x16')
+  assert.ok(issue.evidenceIds.includes(`mp4-quality-report:${review.formatQuality.mp4Evidence.reportHash}`))
+  assert.equal(stored.length, 1, 'the sealed report is stored')
+  assert.match(stored[0].sha256, /^[a-f0-9]{64}$/)
+  assert.equal(critic.requests.length, 1)
+  assert.equal(critic.requests[0].identity.operationId, 'operation-project-proxy-test')
+  assert.equal(critic.requests[0].deliveredPath.endsWith('project-proxy-worker-output.mp4'), true)
+  // three controls of the SAME input, each under its own operation id, cleaned up afterwards
+  const controls = rendered.filter((input) => input.operationId?.includes('-mp4-'))
+  assert.deepEqual(controls.map((input) => input.operationId.split('-mp4-')[1]).toSorted(), ['captions-off', 'cta-off', 'overlays-off'])
+  assert.equal(controls.find((input) => input.operationId.endsWith('overlays-off')).subtitleCues.length, 0)
+  for (const control of controls) assert.ok(rendered.some((entry) => entry.cleaned === control.operationId), `${control.operationId} is cleaned`)
+})
+
+test('W67 proxy worker: a clean MP4 verdict adds its seal and no issue; a critic that cannot read the file is a warning, never a pass or a failed render', async () => {
+  const clean = dependencies(createOperations(), {})
+  wireProxyMp4(clean, fakeProxyMp4Critic())
+  assert.equal((await runNextProjectProxyRenderOperationService(clean.deps)('worker-w67-mp4-clean')).status, 'succeeded')
+  const cleanReview = clean.attachedReview()
+  assert.equal(cleanReview.formatQuality.mp4Evidence.verdict, 'passed')
+  assert.equal(cleanReview.criticIssues.some((entry) => entry.code.endsWith('_IN_PIXELS')), false)
+
+  const broken = dependencies(createOperations(), {})
+  wireProxyMp4(broken, fakeProxyMp4Critic({ throws: true }))
+  assert.equal((await runNextProjectProxyRenderOperationService(broken.deps)('worker-w67-mp4-broken')).status, 'succeeded')
+  const review = broken.attachedReview()
+  assert.equal(review.status, 'warning-ack-required')
+  const warning = review.criticIssues.find((entry) => entry.code === 'MP4_PIXEL_CRITIC_UNAVAILABLE')
+  assert.ok(warning && warning.severity === 'warning')
+  assert.equal(review.formatQuality.mp4Evidence, undefined, 'no seal without a report')
+})
+
+test('W67 proxy worker: without an MP4 critic wired nothing changes - no control is rendered and the review carries no seal', async () => {
+  const base = dependencies(createOperations(), {})
+  const rendered = []
+  const originalRender = base.deps.renderer.render
+  base.deps.renderer = { async render(input) { rendered.push(input); return originalRender(input) }, async cleanup() {} }
+  assert.equal((await runNextProjectProxyRenderOperationService(base.deps)('worker-w67-mp4-absent')).status, 'succeeded')
+  assert.equal(rendered.filter((input) => input.operationId.includes('-mp4-')).length, 0)
+  assert.equal(base.attachedReview().formatQuality?.mp4Evidence, undefined)
+})

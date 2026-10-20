@@ -3,6 +3,7 @@ import { assertDomain } from './errors.ts'
 import { readOutputFormatPreset } from './output-format-registry.ts'
 import { OUTPUT_ASPECT_RATIOS, type NormalizedBounds, type OutputAspectRatio } from './output-spec.ts'
 import type { CaptionPixelIssueV1 } from './caption-pixel-verdict.ts'
+import { mp4EvidenceSealMismatches, type Mp4EvidenceSealV1, type Mp4PixelIssueV1 } from './mp4-pixel-quality.ts'
 import type { RenderElementMap } from './review-system.ts'
 import type { SubtitleAnchorPlan } from './subtitle-anchor-plan.ts'
 import type { VariantReframeIssueV1 } from './variant-reframe-plan.ts'
@@ -19,6 +20,9 @@ export const FORMAT_QUALITY_CODES = [
   // W66r: the persisted reframe plan of THIS output reports into its own verdict, localized by range and evidence. Two of them block the
   // output (the trajectory cannot keep the subject in frame); two ask a person to look (no subject, or evidence that is absent or uncertain).
   'REFRAME_SUBJECTS_DO_NOT_FIT', 'REFRAME_TRACKING_LIMIT_EXCEEDED', 'REFRAME_PERCEPTION_UNCERTAIN', 'REFRAME_NO_SUBJECT_OBSERVATION',
+  // W67: what the independent critic read on the pixels of the delivered MP4 (see mp4-pixel-quality.ts). SUBTITLE_FACE_OVERLAP_IN_PIXELS is shared with W65.
+  'CTA_FACE_OVERLAP_IN_PIXELS', 'INK_OUTSIDE_SAFE_AREA_IN_PIXELS', 'INK_CLIPPED_BY_CANVAS_IN_PIXELS', 'SUBJECT_NOT_VISIBLE_IN_PIXELS', 'SUBJECT_CLIPPED_IN_PIXELS',
+  'INK_DENSITY_EXCESS_IN_PIXELS', 'MP4_PIXEL_EVIDENCE_UNKNOWN', 'MP4_PIXEL_COVERAGE_PARTIAL', 'MP4_DECODE_FAILED',
 ] as const
 export type FormatQualityCode = (typeof FORMAT_QUALITY_CODES)[number]
 
@@ -60,8 +64,13 @@ export interface FormatQualityIssueV2 {
   correctable: boolean
 }
 
-export interface FormatQualityReportV2 {
-  schemaVersion: 'format-quality-report/v2'
+/**
+ * `format-quality-report/v3` (W67) adds `mp4Evidence`: the seal of the independent MP4 critic's report that judged the delivered file, or
+ * null when no such critic ran. v2 reports did not carry it and are not accepted by `selectExportableVariants`.
+ */
+export interface FormatQualityReportV3 {
+  schemaVersion: 'format-quality-report/v3'
+  mp4Evidence: Readonly<Mp4EvidenceSealV1> | null
   outputSpecId: string
   format: OutputAspectRatio
   proxyHash: string
@@ -140,7 +149,13 @@ export function critiqueOutputFormat(input: Readonly<{
    */
   reframeIssues?: readonly Readonly<VariantReframeIssueV1>[]
   reframeRecordHash?: string | null
-}>): Readonly<FormatQualityReportV2> {
+  /**
+   * W67. What the independent MP4 critic found on the decoded pixels of THIS delivered file, with the content address of the sealed
+   * report they came from. A hard issue blocks this output, and only this output.
+   */
+  mp4PixelIssues?: readonly Readonly<Mp4PixelIssueV1>[]
+  mp4Evidence?: Readonly<Mp4EvidenceSealV1> | null
+}>): Readonly<FormatQualityReportV3> {
   assertDomain(ID.test(input.outputSpecId) && OUTPUT_ASPECT_RATIOS.includes(input.format), 'INVALID_OUTPUT_SPEC', 'Format critic output identity is invalid')
   assertDomain(SHA256.test(input.proxyHash) && input.map.proxyHash === input.proxyHash, 'INVALID_RENDER_INPUT', 'Format critic proxy evidence is inconsistent')
   const placementPlanHash = input.placementPlanHash ?? null
@@ -215,6 +230,22 @@ export function critiqueOutputFormat(input: Readonly<{
       evidenceIds: [...issue.evidenceIds, `render-map:${input.proxyHash}`],
     })
   }
+  const mp4Evidence = input.mp4Evidence ?? null
+  assertDomain((input.mp4PixelIssues ?? []).length === 0 || mp4Evidence !== null, 'INVALID_RENDER_INPUT', 'MP4 pixel issues need the seal of the report they came from')
+  if (mp4Evidence) {
+    assertDomain(mp4EvidenceSealMismatches(mp4Evidence, { artifactSha256: input.proxyHash, outputSpecId: input.outputSpecId }).length === 0, 'INVALID_RENDER_INPUT', 'MP4 evidence does not belong to this delivered file and output')
+  }
+  for (const issue of input.mp4PixelIssues ?? []) {
+    assertDomain(
+      issue.evidenceRange.startFrame >= 0 && issue.evidenceRange.endFrame <= input.map.durationFrames && issue.evidenceRange.endFrame > issue.evidenceRange.startFrame,
+      'INVALID_RENDER_INPUT', 'MP4 pixel issue is outside the rendered timeline',
+    )
+    add({
+      code: issue.code, severity: issue.severity, message: issue.message,
+      evidenceRange: issue.evidenceRange, elementIds: issue.elementIds,
+      evidenceIds: [...issue.evidenceIds, `mp4-quality-report:${mp4Evidence!.reportHash}`, `render-map:${input.proxyHash}`],
+    })
+  }
   for (const issue of input.reframeIssues ?? []) {
     assertDomain(
       issue.startFrame >= 0 && issue.endFrame > issue.startFrame && issue.endFrame <= input.map.durationFrames,
@@ -248,7 +279,7 @@ export function critiqueOutputFormat(input: Readonly<{
   const canonicalIssues = Object.freeze(grouped.toSorted((left, right) => left.evidenceRange.startFrame - right.evidenceRange.startFrame || left.code.localeCompare(right.code) || left.elementIds.join(':').localeCompare(right.elementIds.join(':'))))
   const status = canonicalIssues.some((issue) => issue.severity === 'hard') ? 'blocked' as const : canonicalIssues.length ? 'warning' as const : 'passed' as const
   const body = Object.freeze({
-    schemaVersion: 'format-quality-report/v2' as const, outputSpecId: input.outputSpecId, format: input.format, proxyHash: input.proxyHash,
+    schemaVersion: 'format-quality-report/v3' as const, mp4Evidence, outputSpecId: input.outputSpecId, format: input.format, proxyHash: input.proxyHash,
     renderElementMapHash: calculateCanonicalHash(input.map), outputPresetHash: preset.presetHash,
     placementPlanHash, reframePlanHash, status, exportAllowed: status !== 'blocked',
     explanation: explain(input.outputSpecId, input.format, status, canonicalIssues, input.map.durationFrames), issues: canonicalIssues,
@@ -272,7 +303,7 @@ function explain(outputSpecId: string, format: OutputAspectRatio, status: 'passe
   return `${outputSpecId} (${format}) passed every format check over ${durationFrames} frames: no clipping, safe area, subject visibility, subtitle collision, subtitle anchor or density issue was found.`
 }
 
-export function selectExportableVariants(reports: readonly Readonly<FormatQualityReportV2>[]): Readonly<{
+export function selectExportableVariants(reports: readonly Readonly<FormatQualityReportV3>[]): Readonly<{
   approvedOutputSpecIds: readonly string[]
   blockedOutputSpecIds: readonly string[]
   decisions: readonly Readonly<FormatVariantDecisionV2>[]
@@ -286,6 +317,9 @@ export function selectExportableVariants(reports: readonly Readonly<FormatQualit
     // An issue always carries the geometry of the render it came from; a report that mixes two
     // placement plans or two trajectories is not evidence about any single variant.
     assertDomain(report.issues.every((issue) => issue.placementPlanHash === report.placementPlanHash && issue.reframePlanHash === report.reframePlanHash), 'INVALID_RENDER_INPUT', 'Format quality issue is not bound to the geometry of its own render')
+    // A report that carries the seal of the MP4 critic cannot allow an export the seal's own verdict forbids.
+    assertDomain(report.schemaVersion === 'format-quality-report/v3', 'INVALID_RENDER_INPUT', 'Format quality report schema is unsupported')
+    assertDomain(report.mp4Evidence === null || (mp4EvidenceSealMismatches(report.mp4Evidence, { artifactSha256: report.proxyHash, outputSpecId: report.outputSpecId }).length === 0 && !(report.mp4Evidence.verdict === 'blocked' && report.exportAllowed)), 'INVALID_RENDER_INPUT', 'Format quality report disagrees with its MP4 evidence')
   }
   assertDomain(new Set(ordered.map((report) => report.outputSpecId)).size === ordered.length, 'INVALID_ARGUMENT', 'Format quality reports must be unique per output')
   return Object.freeze({
