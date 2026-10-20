@@ -109,3 +109,22 @@ O esquema público `formatQuality` da revisão de proxy omitia `placementPlanHas
 - Densidade de tinta não tem defeito semeado: só falsos positivos medidos (0).
 - Runtime Windows (Python 3.14, OpenVINO 2026.4.0, OpenCV 4.13.0, NumPy 2.5.1); sem recibo de paridade Linux. **O OpenVINO não roda no CI hospedado**: as provas com o oráculo real são locais (`KNOWN_UNRUN` `W67_MP4_CRITIC_PIXELS`, suíte `tests/v2/mp4-pixel-critic.integration.mjs`, que usa um oráculo de chave de cor, não o OpenVINO); o CI cobre os testes de domínio, de portão, de contrato e de hidratação.
 - Nenhum modelo reprovado, fixture mecânica ou supressão geral de legendas converte este documento em crítico visual validado; aprovação do proprietário e revisão humana são etapas separadas.
+
+## 7. Gates e execuções locais (cabeça `ab3e4918`, árvore limpa; este documento é o único acréscimo posterior)
+
+Gates diretos, todos exit 0: `typecheck`, `lint`, `lint:code`, `lint:whitespace`, `db:v2:validate`, `api:v1:validate`, `api:parity:validate`.
+
+Execuções pelo harness (`run-local-pg-s2d.mjs`, `APOLLO_S2D_CHECKOUT` = o worktree, lock global respeitado, intervalos de 60 s entre execuções; as pastas estão em `s2d-runs/`):
+
+| execução | passos | testes | passaram | falharam | pulados | resultado |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `w67-full-3-65923a68` (`npm test` completo + suíte sintética `mp4-pixel-critic.integration.mjs`) | 2 | 3723 | 3710 | 0 | 13 | verde (suíte completa 3713 / 3700 / 0 / 13; sintética 10 / 10) |
+| `w67-full-b1r-597c0ec4` (full-b1, com build) | 37 | 104 | 103 | 1 | 0 | 1 falha **herdada** (dashboard runtime journey) |
+| `w67-full-b2-c7e98c37` (full-b2, com build) | 51 | 109 | 105 | 1 | 3 | 1 falha de tempo, **verde ao repetir** |
+| `w67-full-b3-bed6a701` (full-b3, com build) | 27 | 39 | 33 | 3 | 3 | 3 falhas **herdadas** |
+
+- Uma primeira execução do b1 (`w67-full-b1-f2b80d8e`) foi abortada pelo próprio harness: a consulta `Get-CimInstance Win32_Process` do observador de processos foi cancelada pelo WMI (carga da máquina). Não é falha de teste; o b1 foi refeito (`…b1r…`).
+- Uma execução anterior da suíte completa (`w67-full-2-316e32c4`) achou 3 falhas reais minhas (a auditoria de spawns de `ffmpeg-binary-resolution` recusava o spawn do Python do oráculo, e a checagem de suítes não executadas exigia que este documento citasse a suíte sintética). Foram corrigidas no commit `ab3e4918` (registro auditado do spawn, `optionalMp4PixelCritic` no formato `required(...)` e citação); a execução `w67-full-3` é a verde.
+- `quali-051-test-integration-api` (no b2) falhou com "W36 timed out waiting for bounded retries" sob carga; repetido isolado (`w67-full-051r-7ac74eed`): 12 de 12.
+- **Herdadas**, reproduzidas na base do meu branch (`ba56e0db`, sem nenhum código do W67), com a mesma mensagem: `dashboard-runtime-journey` (`w67-basecheck-088-8736733d`: "The negative must reach the real persistence admission gate", 0 !== 1) e, no b3, `059 export-matrix.e2e` (`false !== true` na pré-verificação), `069 library-journey.e2e` (`'local' !== 's3'`, o ambiente local não tem o S3 versionado) e `070 synthetic-wave24-journey` (409 `PERSISTENCE_CONFLICT` no enqueue de render do project-a-final, o VERSION_CONFLICT do W24 já em investigação no W64), tudo em `w67-basecheck-b3-86a2660b`. Nenhuma delas toca código do W67 (pré-verificação de matriz, S3, enqueue).
+- CI: nenhum passo novo foi necessário para o crítico em si além dos testes de domínio, de portão, de contrato e de hidratação, que rodam em `npm test`; a suíte com o runtime real do OpenVINO é `KNOWN_UNRUN` com motivo (§6), e o corpus registrado é local por construção (modelos privados, runtime Windows).
