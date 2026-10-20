@@ -3431,15 +3431,23 @@ const PIXEL_ORACLE_VARIABLES = Object.freeze([
  * W67. The MP4 pixel critic of a worker, or nothing when no deployment variable names the private OpenVINO runtime. A deployment that
  * names some of them and not all is misconfigured and fails closed: a half-wired critic would be a critic nobody can tell is off.
  */
-export function optionalMp4PixelCritic(environment: NodeJS.ProcessEnv, artifactRoot: string): { mp4PixelCritic?: Mp4PixelCritic } {
-  const values = PIXEL_ORACLE_VARIABLES.map((name) => environment[name]?.trim())
-  if (values.every((value) => !value)) return {}
-  if (values.some((value) => !value)) {
-    throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `The MP4 pixel critic needs all of ${PIXEL_ORACLE_VARIABLES.join(', ')}`)
+type Mp4PixelCriticWiring = Readonly<{ mp4PixelCritic?: Mp4PixelCritic }>
+
+export function optionalMp4PixelCritic(environment: NodeJS.ProcessEnv, artifactRoot: string): Mp4PixelCriticWiring {
+  if (PIXEL_ORACLE_VARIABLES.every((name) => !environment[name]?.trim())) return {}
+  const required = (key: string) => {
+    const value = environment[key]?.trim()
+    if (!value) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `${key} is required for the MP4 pixel critic (all of ${PIXEL_ORACLE_VARIABLES.join(', ')} or none)`)
+    return value
   }
-  const [python, pythonSha256, modules, v9ModelDirectory, retailModelDirectory, bridgePath, bridgeSha256] = values as [string, string, string, string, string, string, string]
   const oracle = new OpenvinoPixelOracle({
-    pythonExecutable: python, pythonExecutableSha256: pythonSha256, pythonModulePath: modules, v9ModelDirectory, retailModelDirectory, bridgePath, bridgeSha256,
+    pythonExecutable: required('APOLLO_V2_PIXEL_ORACLE_PYTHON'),
+    pythonExecutableSha256: required('APOLLO_V2_PIXEL_ORACLE_PYTHON_SHA256'),
+    pythonModulePath: required('APOLLO_V2_PIXEL_ORACLE_MODULES'),
+    v9ModelDirectory: required('APOLLO_V2_PIXEL_ORACLE_V9_MODEL_DIR'),
+    retailModelDirectory: required('APOLLO_V2_PIXEL_ORACLE_RETAIL_MODEL_DIR'),
+    bridgePath: required('APOLLO_V2_PIXEL_ORACLE_BRIDGE'),
+    bridgeSha256: required('APOLLO_V2_PIXEL_ORACLE_BRIDGE_SHA256'),
   })
   return {
     mp4PixelCritic: new FfmpegMp4PixelCritic({
