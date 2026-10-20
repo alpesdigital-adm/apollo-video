@@ -8,8 +8,8 @@ import test from 'node:test'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { artifactPath } from './helpers/capture-journey.mjs'
 import { apiClient, chromeExecutable, startServer } from './helpers/issue-override-runtime.mjs'
-import { PIXEL_TOLERANCE, bandRows, changedClusters, decodeFrame, sha256Hex } from './helpers/issue-override-proof.mjs'
-import { CUES, runProxyWorkerOnce, seedIssueOverrideWorld } from './helpers/issue-override-world.mjs'
+import { PIXEL_TOLERANCE, bandRows, changedClusters, decodeFrame, occupiedBands, sha256Hex } from './helpers/issue-override-proof.mjs'
+import { CUES, SCENE, runProxyWorkerOnce, seedIssueOverrideWorld } from './helpers/issue-override-world.mjs'
 
 /**
  * W68 browser proof (supervised harness; also a CI step). A real Chromium drives the editor against `next start`, PostgreSQL and the production
@@ -63,7 +63,12 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
     })
     const server = await startServer({ appRoot: process.cwd(), environment: environmentFor(world.owner.clientId) })
     servers.push(server)
-    const workerEnvironment = { ...process.env, ...environmentFor(world.owner.clientId), V2_DATABASE_URL: process.env.V2_DATABASE_URL }
+    // The render worker seals its recipe parameters before it writes a manifest, and refuses to start without a key. Generated here, never read from a file.
+    const workerEnvironment = {
+      ...process.env, ...environmentFor(world.owner.clientId), V2_DATABASE_URL: process.env.V2_DATABASE_URL,
+      APOLLO_PROTECTED_PAYLOAD_KEY_ID: process.env.APOLLO_PROTECTED_PAYLOAD_KEY_ID ?? `w68-${suffix}`,
+      APOLLO_PROTECTED_PAYLOAD_KEY: process.env.APOLLO_PROTECTED_PAYLOAD_KEY ?? Buffer.alloc(32, 7).toString('base64url'),
+    }
     const api = apiClient(server.baseUrl, world.owner.token)
     const strangerApi = apiClient(server.baseUrl, world.stranger.token)
     const projectPath = `/v1/projects/${world.projectId}`
@@ -167,6 +172,7 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       await page.goto(`${server.baseUrl}${projectUrl}`)
       await page.getByTestId(`output-option-${entry.variantId}`).click()
       await page.locator(`[data-testid="issue-override-panel"][data-variant-id="${entry.variantId}"]`).waitFor()
+      await page.locator('[data-testid="issue-chip"], [data-testid="issue-none"], [data-testid="issue-no-review"]').first().waitFor()
     }
     const chipFor = (code, cue) => page.locator(`[data-testid="issue-chip"][data-issue-code="${code}"]${cue ? `[data-cue-id="${cue}"]` : ''}`).first()
     const chipCodes = async () => page.locator('[data-testid="issue-chip"]').evaluateAll((nodes) => nodes.map((node) => [node.getAttribute('data-issue-code'), node.getAttribute('data-severity'), node.getAttribute('data-cue-id')]))
@@ -287,6 +293,322 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       await panel.screenshot({ path: join(evidenceDir, `w68-16x9-2-after-text-fix-panel-${fixProxy.sha256.slice(0, 10)}.png`) })
       note('wide-text-fix', { beforeProxy: wide.proxy.sha256, afterProxy: fixProxy.sha256, clustersBefore: clustersBeforeText, clustersAfter: clustersAfterText, reviewStatus: fixedReview.status, cue: 'cue-1' })
     }
+    /* ================================================== shared helpers of the remaining scenarios ================================================== */
+    const range = (from, to) => Array.from({ length: to - from }, (_, index) => from + index)
+    const planAt = async (variantId, versionId) => {
+      const response = await api('GET', `${projectPath}/reframe-plans?variantId=${encodeURIComponent(variantId)}&projectVersionId=${versionId}`)
+      assert.equal(response.status, 200, serialize(response.body))
+      return response.data.plan
+    }
+    const plansOf = async (versionId) => ({ wide: (await planAt(world.wideVariantId, versionId))?.recordHash ?? null, tall: (await planAt(world.verticalVariantId, versionId))?.recordHash ?? null })
+    const cropAt = (plan, frame) => {
+      const keyframes = plan.renderPlan.ranges.find((candidate) => candidate.startFrame <= frame && frame < candidate.endFrame).keyframes
+      let previous = keyframes[0], next
+      for (const keyframe of keyframes) { if (keyframe.frame <= frame) previous = keyframe; else { next = keyframe; break } }
+      if (!next) return previous.crop
+      const ratio = (frame - previous.frame) / (next.frame - previous.frame)
+      return { ...previous.crop, x: previous.crop.x + (next.crop.x - previous.crop.x) * ratio }
+    }
+    const snapshot = async (entry) => {
+      const version = await head()
+      return { beforeVersion: version, beforeFacts: await immutableFacts(version.id, siblingOf(entry.variantId).variantId), beforePlans: await plansOf(version.id) }
+    }
+    const afterCommand = async ({ entry, beforeVersion, beforeFacts, beforePlans, label, type, rendered = true }) => {
+      const sibling = siblingOf(entry.variantId)
+      const current = await head()
+      assert.equal(current.sequence, beforeVersion.sequence + 1, `${label}: exactly one new Version`)
+      assert.equal(current.parentVersionId, beforeVersion.id)
+      const command = await db.v2EditCommand.findUniqueOrThrow({ where: { id: current.commandId } })
+      assert.equal(command.type, type, `${label}: the Command type`)
+      assert.deepEqual(JSON.parse(command.scopeJson).outputVariantIds, [entry.variantId], `${label}: the Command names the output it is for`)
+      const operations = await db.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: world.owner.workspaceId, projectId: world.projectId, projectVersionId: current.id } })
+      assert.ok(operations.every((operation) => operation.outputVariantId === entry.variantId) && (!rendered || operations.length >= 1), `${label}: every render of the new Version is for ${entry.key} only`)
+      assert.equal(await proxyOf(current.id, sibling.variantId), null, `${label}: the other output was not rendered again`)
+      assert.equal(await immutableFacts(beforeVersion.id, sibling.variantId), beforeFacts, `${label}: the previous Version and the other output's renders, reviews and approvals are untouched`)
+      if (type === 'apply-subtitle-segment-override') assert.deepEqual(await plansOf(current.id), beforePlans, `${label}: both outputs keep the very same reframe plan record on the new Version`)
+      assert.equal(await decisionCount(), 0, `${label}: nothing was accepted`)
+      return current
+    }
+    const fillForm = async ({ anchor, text, visible }) => {
+      await page.getByTestId('caption-form').waitFor()
+      if (anchor !== undefined) await page.getByTestId('caption-anchor').selectOption(anchor)
+      if (text !== undefined) await page.getByTestId('caption-text').fill(text)
+      if (visible !== undefined) await page.getByTestId('caption-visible').setChecked(visible)
+    }
+    const segmentStates = async (variantId) => (await api('GET', `${projectPath}/subtitle-segments?variantId=${encodeURIComponent(variantId)}`)).data.segments.map((segment) => [segment.segmentId, segment.state])
+    const CUE2 = CUES[1]
+    const mid2 = cueMid(CUE2)
+
+    /* ============================ 16:9 : unsafe pin (with a replay), reset, safe pin (protected), reset, hide ============================ */
+    {
+      const entry = VARIANTS[1]
+      const occupied = occupiedBands({ scene: SCENE, format: '16:9', frames: range(CUE2.startFrame, CUE2.endFrame) })
+      const unsafe = occupied.find((anchor) => anchor !== 'bottom')
+      const safe = ['lower-third', 'top', 'upper-third', 'center'].find((anchor) => !occupied.includes(anchor))
+      assert.ok(unsafe && safe, `the generator's face occupies some band and leaves another free: ${occupied.join(',')}`)
+      await openOutput(entry)
+      const current = await head()
+      const currentProxy = await proxyOf(current.id, entry.variantId)
+      const reference = await frameAt(currentProxy, mid2), early = await frameAt(currentProxy, 5), late = await frameAt(currentProxy, 120)
+      const bottom = bandRows('16:9', 'bottom')
+
+      // ---- unsafe pin: the band is occupied by the generator's face -> the plan refuses to draw it; the answer is lost once -> replay
+      let snap = await snapshot(entry)
+      await selectChip('FACE_PIXEL_CHECK_UNAVAILABLE', 'cue-2')
+      await fillForm({ anchor: unsafe })
+      let posts = 0
+      await page.route('**/v1/projects/*/subtitle-segment-overrides', async (route) => {
+        if (route.request().method() !== 'POST') { await route.continue(); return }
+        posts += 1
+        if (posts === 1) { await route.fetch(); await route.abort('failed') } else await route.continue()
+      })
+      await page.getByTestId('caption-apply').click()
+      await page.locator('[data-testid="issue-command-failure"][data-failure-kind="unavailable"]').waitFor()
+      const createdByFirst = await head()
+      assert.equal(createdByFirst.sequence, snap.beforeVersion.sequence + 1, 'the first request reached the server and committed even though the browser never saw the answer')
+      await page.getByTestId('caption-apply').click()
+      await page.getByTestId('issue-applied').waitFor()
+      await page.unroute('**/v1/projects/*/subtitle-segment-overrides')
+      assert.match(await page.getByTestId('issue-applied-version').innerText(), /repetição da mesma chave/)
+      assert.equal((await head()).id, createdByFirst.id, 'the replay is the same Version: no second one was created')
+      assert.equal(posts, 2)
+      await waitRecompiled('unsafe pin')
+      await afterCommand({ entry, ...snap, label: 'wide unsafe pin', type: 'apply-subtitle-segment-override' })
+      const unsafeProxy = await proxyOf(createdByFirst.id, entry.variantId)
+      const unsafeReview = await reviewOf(entry.variantId, createdByFirst.id)
+      const refusal = issuesOf(unsafeReview).find((issue) => issue.code === 'NO_SAFE_SUBTITLE_REGION' && issue.elementIds.includes('subtitle:cue-2'))
+      assert.ok(refusal, `the occupied band is refused with its reason: ${serialize(issuesOf(unsafeReview).map((issue) => issue.code))}`)
+      assert.ok(refusal.evidenceIds.length > 0 && refusal.evidenceRange.startFrame === CUE2.startFrame)
+      const unsafeFrame = await frameAt(unsafeProxy, mid2)
+      const vanished = changedClusters(reference, unsafeFrame)
+      assert.equal(vanished.length, 1, `only the old caption changed (it is gone): ${serialize(vanished)}`)
+      assert.ok(clustersWithin(vanished, bottom), 'and it was in the bottom band')
+      await sameChips(unsafeReview)
+      await shoot('16x9-3-unsafe-pin', { 'cue-2-before': reference, 'cue-2-after': unsafeFrame })
+      await panel.screenshot({ path: join(evidenceDir, `w68-16x9-3-unsafe-pin-panel-${unsafeProxy.sha256.slice(0, 10)}.png`) })
+      note('wide-unsafe-pin', { occupied, unsafe, replayedPosts: posts, version: createdByFirst.id, issue: refusal.code, vanished })
+
+      // ---- reset: back to the inherited level; the decoded frames are the inherited ones again
+      snap = await snapshot(entry)
+      await selectChip('NO_SAFE_SUBTITLE_REGION', 'cue-2')
+      await page.getByTestId('caption-form').waitFor()
+      await page.getByTestId('caption-reset').click()
+      await waitRecompiled('reset after unsafe pin')
+      const resetVersion = await afterCommand({ entry, ...snap, label: 'wide reset', type: 'apply-subtitle-segment-override' })
+      const resetProxy = await proxyOf(resetVersion.id, entry.variantId)
+      const resetReview = await reviewOf(entry.variantId, resetVersion.id)
+      assert.ok(!issuesOf(resetReview).some((issue) => issue.code === 'NO_SAFE_SUBTITLE_REGION'))
+      assert.equal((await frameAt(resetProxy, mid2)).sha256, reference.sha256, 'the decoded frame of cue-2 is exactly the inherited one')
+      assert.equal((await frameAt(resetProxy, 5)).sha256, early.sha256)
+      assert.equal((await frameAt(resetProxy, 120)).sha256, late.sha256)
+      const resetState = (await api('GET', `${projectPath}/subtitle-segments?variantId=${encodeURIComponent(entry.variantId)}`)).data.segments.find((segment) => segment.segmentId === 'cue-2')
+      assert.equal(resetState.state, 'inherited')
+      assert.equal(resetState.override.action, 'reset')
+      note('wide-reset', { frame: reference.sha256, proxyBefore: currentProxy.sha256, proxyAfter: resetProxy.sha256 })
+
+      // ---- safe pin: the caption moves to a band the evidence certifies, measured on the pixels; protected; then reset
+      snap = await snapshot(entry)
+      await openOutput(entry)
+      await selectChip('FACE_PIXEL_CHECK_UNAVAILABLE', 'cue-2')
+      await fillForm({ anchor: safe })
+      await page.getByTestId('caption-protected').setChecked(true)
+      await page.getByTestId('caption-apply').click()
+      await waitRecompiled('safe pin')
+      const safeVersion = await afterCommand({ entry, ...snap, label: 'wide safe pin', type: 'apply-subtitle-segment-override' })
+      const safeProxy = await proxyOf(safeVersion.id, entry.variantId)
+      const safeReview = await reviewOf(entry.variantId, safeVersion.id)
+      assert.ok(!issuesOf(safeReview).some((issue) => issue.code === 'NO_SAFE_SUBTITLE_REGION'))
+      const safeFrame = await frameAt(safeProxy, mid2)
+      const moved = changedClusters(reference, safeFrame)
+      const target = bandRows('16:9', safe)
+      assert.equal(moved.length, 2, `the old caption vanished and a new one appeared: ${serialize(moved)}`)
+      assert.ok(moved.some((cluster) => clustersWithin([cluster], bottom)) && moved.some((cluster) => clustersWithin([cluster], target)), `one cluster in the bottom band, one in ${safe}: ${serialize({ moved, bottom, target })}`)
+      const protectedRow = (await api('GET', `${projectPath}/subtitle-segment-overrides?variantId=${encodeURIComponent(entry.variantId)}&segmentId=cue-2`)).data.result
+      assert.equal(protectedRow.subtitleOverride.protected, true, 'the exception is protected')
+      const recipe = JSON.parse((await db.v2MediaArtifactManifest.findFirstOrThrow({ where: { artifactId: safeProxy.artifactId, workspaceId: world.owner.workspaceId } })).manifestJson)
+      assert.ok(serialize(recipe).includes(protectedRow.subtitleOverride.overrideHash), 'the render records the exception it was drawn with')
+      await shoot('16x9-5-safe-pin', { 'cue-2-before': reference, 'cue-2-after': safeFrame })
+      await panel.screenshot({ path: join(evidenceDir, `w68-16x9-5-safe-pin-panel-${safeProxy.sha256.slice(0, 10)}.png`) })
+      note('wide-safe-pin', { safe, moved, override: protectedRow.subtitleOverride.overrideHash })
+      snap = await snapshot(entry)
+      await selectChip('FACE_PIXEL_CHECK_UNAVAILABLE', 'cue-2')
+      await page.getByTestId('caption-form').waitFor()
+      await page.getByTestId('caption-reset').click()
+      await waitRecompiled('reset after safe pin')
+      const reset2 = await afterCommand({ entry, ...snap, label: 'wide second reset', type: 'apply-subtitle-segment-override' })
+      assert.equal((await frameAt(await proxyOf(reset2.id, entry.variantId), mid2)).sha256, reference.sha256, 'reset returns the inherited geometry, pixel for pixel')
+
+      // ---- hide cue-3: its chip goes away because the NEW critic no longer sees a caption to certify, not because anyone clicked it
+      snap = await snapshot(entry)
+      await selectChip('FACE_PERCEPTION_UNAVAILABLE', 'cue-3')
+      await fillForm({ visible: false })
+      await page.getByTestId('caption-apply').click()
+      await waitRecompiled('hide cue-3')
+      const hiddenVersion = await afterCommand({ entry, ...snap, label: 'wide hide', type: 'apply-subtitle-segment-override' })
+      const hiddenReview = await reviewOf(entry.variantId, hiddenVersion.id)
+      assert.ok(!issuesOf(hiddenReview).some((issue) => issue.elementIds.includes('subtitle:cue-3')))
+      assert.equal(await page.locator('[data-testid="issue-chip"][data-cue-id="cue-3"]').count(), 0)
+      assert.ok((await page.locator('[data-testid="issue-comparison-row"][data-delta="not-reported-now"]').count()) >= 1)
+      assert.deepEqual((await segmentStates(entry.variantId)).find(([id]) => id === 'cue-3'), ['cue-3', 'overridden'])
+      note('wide-hide', { review: hiddenReview.status })
+    }
+
+    /* ====== 9:16 : render the current Version, pin with an expired session, reframe set/reset, hide + cancel the recompile ====== */
+    {
+      const entry = VARIANTS[0]
+      await openOutput(entry)
+      assert.ok(await page.getByTestId('issue-render-current').isVisible(), 'the vertical output has no render of the current Version yet')
+      const current = await head()
+      assert.equal(await proxyOf(current.id, entry.variantId), null)
+      const wideFacts = await immutableFacts(current.id, entry.variantId)
+      await page.getByTestId('issue-render-current').click()
+      await waitFor('the vertical output is rendered for the current Version', async () => (await proxyOf(current.id, entry.variantId)) !== null)
+      assert.equal(await immutableFacts(current.id, entry.variantId), wideFacts, 'rendering the vertical output touched nothing of the wide one')
+      const tallNow = await proxyOf(current.id, entry.variantId)
+      await waitFor('the vertical review reaches the editor', async () => (await page.locator('[data-testid="issue-chip"]').count()) > 0, { timeoutMs: 120_000 })
+      const tallReview = await reviewOf(entry.variantId, current.id)
+      await sameChips(tallReview)
+      // the vertical pixels are what they were at its first render: nothing done to the wide output reached them
+      const probeFrames = [5, 25, 70, 120]
+      for (const frame of probeFrames) assert.equal((await frameAt(tallNow, frame)).sha256, (await frameAt(tall.proxy, frame)).sha256, `vertical frame ${frame} equals the one of its first render`)
+      note('tall-unaffected-by-wide', { first: tall.proxy.sha256, again: tallNow.sha256, frames: probeFrames })
+
+      const plan = await planAt(entry.variantId, current.id)
+      const window = cropAt(plan, mid2)
+      const occupied = occupiedBands({ scene: SCENE, format: '9:16', frames: range(CUE2.startFrame, CUE2.endFrame), window: { x: window.x, width: window.width } })
+      const safe = ['top', 'upper-third', 'center', 'lower-third'].find((anchor) => !occupied.includes(anchor))
+      assert.ok(safe, `a free band exists on the vertical output: ${occupied.join(',')}`)
+      const reference = await frameAt(tallNow, mid2), early = await frameAt(tallNow, 5), late = await frameAt(tallNow, 120)
+
+      // ---- safe pin with an EXPIRED SESSION: the draft survives the sign-in
+      let snap = await snapshot(entry)
+      await selectChip('FACE_PIXEL_CHECK_UNAVAILABLE', 'cue-2')
+      await fillForm({ anchor: safe })
+      await context.clearCookies({ name: 'apollo_session' })
+      const versionsBefore = await db.v2ProjectVersion.count({ where: { projectId: world.projectId } })
+      await page.getByTestId('caption-apply').click()
+      await page.waitForURL((url) => url.pathname.startsWith('/login'), { timeout: 30_000 })
+      assert.ok(decodeURIComponent(new URL(page.url()).searchParams.get('next') ?? '').includes(`/projects/${world.projectId}`), 'the sign-in returns to this project')
+      assert.equal(await db.v2ProjectVersion.count({ where: { projectId: world.projectId } }), versionsBefore, 'an expired session writes nothing')
+      const stored = await page.evaluate(() => Object.entries(window.localStorage).filter(([key]) => key.startsWith('apollo:v2:issue-draft:')).map(([, value]) => JSON.parse(value)))
+      assert.ok(stored.some((draft) => draft.segmentId === 'cue-2' && draft.form.anchor === safe), 'the draft is in the browser storage')
+      await login(page, server.baseUrl, projectUrl)
+      await openOutput(entry)
+      await selectChip('FACE_PIXEL_CHECK_UNAVAILABLE', 'cue-2')
+      await page.getByTestId('caption-form').waitFor()
+      assert.equal(await page.getByTestId('caption-anchor').inputValue(), safe, 'the draft came back after the sign-in')
+      note('tall-session-expired', { redirectedTo: 'login?next=project', draftRestored: safe })
+      await page.getByTestId('caption-apply').click()
+      await waitRecompiled('tall safe pin')
+      const pinned = await afterCommand({ entry, ...snap, label: 'tall safe pin', type: 'apply-subtitle-segment-override' })
+      const pinnedProxy = await proxyOf(pinned.id, entry.variantId)
+      const pinnedFrame = await frameAt(pinnedProxy, mid2)
+      const bottom = bandRows('9:16', 'bottom'), target = bandRows('9:16', safe)
+      const movedTall = changedClusters(reference, pinnedFrame)
+      assert.equal(movedTall.length, 2, `the old caption vanished and a new one appeared: ${serialize(movedTall)}`)
+      assert.ok(movedTall.some((cluster) => clustersWithin([cluster], bottom)) && movedTall.some((cluster) => clustersWithin([cluster], target)), serialize({ movedTall, bottom, target }))
+      await sameChips(await reviewOf(entry.variantId, pinned.id))
+      await shoot('9x16-2-safe-pin', { 'cue-2-before': reference, 'cue-2-after': pinnedFrame })
+      await panel.screenshot({ path: join(evidenceDir, `w68-9x16-2-safe-pin-panel-${pinnedProxy.sha256.slice(0, 10)}.png`) })
+      snap = await snapshot(entry)
+      await selectChip('FACE_PIXEL_CHECK_UNAVAILABLE', 'cue-2')
+      await page.getByTestId('caption-form').waitFor()
+      await page.getByTestId('caption-reset').click()
+      await waitRecompiled('tall reset')
+      const tallReset = await afterCommand({ entry, ...snap, label: 'tall reset', type: 'apply-subtitle-segment-override' })
+      const tallResetProxy = await proxyOf(tallReset.id, entry.variantId)
+      assert.equal((await frameAt(tallResetProxy, mid2)).sha256, reference.sha256, 'the vertical reset returns the inherited frame, pixel for pixel')
+      assert.equal((await frameAt(tallResetProxy, 5)).sha256, early.sha256)
+      assert.equal((await frameAt(tallResetProxy, 120)).sha256, late.sha256)
+
+      // ---- reframe: the crop of frames 100-150 (no evidence) is framed by hand, then reset to the automatic level
+      const planBefore = await planAt(entry.variantId, tallReset.id)
+      const centroid = (frame) => {
+        let sum = 0, count = 0
+        for (let y = 0; y < frame.height; y += 1) for (let x = 0; x < frame.width; x += 1) {
+          const offset = (y * frame.width + x) * 3
+          if (frame.data[offset] > 200 && frame.data[offset + 1] < 90 && frame.data[offset + 2] < 90) { sum += x; count += 1 }
+        }
+        return count > 200 ? sum / count : null
+      }
+      const subjectFrame = 120
+      const subjectBox = SCENE.subjectsAtSource(subjectFrame)[0].box
+      const faceCentreX = (subjectBox[0] + subjectBox[2]) / 2
+      const autoFrame = await frameAt(tallResetProxy, subjectFrame)
+      const autoCentroid = centroid(autoFrame)
+      snap = await snapshot(entry)
+      await selectChip('REFRAME_PERCEPTION_UNCERTAIN')
+      await page.getByTestId('reframe-form').waitFor()
+      const cropX = 0.25
+      await page.getByTestId('reframe-x').evaluate((input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, String(value))
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      }, cropX)
+      await page.getByTestId('reframe-apply').click()
+      await waitRecompiled('reframe set')
+      const framed = await afterCommand({ entry, ...snap, label: 'reframe set', type: 'apply-variant-reframe-override' })
+      const framedProxy = await proxyOf(framed.id, entry.variantId)
+      const framedPlan = await planAt(entry.variantId, framed.id)
+      assert.equal(framedPlan.serverPlanHash, planBefore.serverPlanHash, 'the server plan did not move: only the final plan did')
+      assert.notEqual(framedPlan.finalPlanHash, planBefore.finalPlanHash)
+      const payload = JSON.parse((await db.v2EditCommand.findUniqueOrThrow({ where: { id: framed.commandId } })).payloadJson)
+      assert.ok(Math.abs(payload.crop.x - cropX) < 0.01, `the Command carries the crop the editor chose: ${serialize(payload.crop)}`)
+      const framedFrame = await frameAt(framedProxy, subjectFrame)
+      const framedCentroid = centroid(framedFrame)
+      const expectedX = ((faceCentreX - payload.crop.x) / payload.crop.width) * framedFrame.width
+      assert.ok(framedCentroid !== null && Math.abs(framedCentroid - expectedX) < 14, `the subject sits where the chosen crop puts it: measured ${framedCentroid}, specified ${expectedX}`)
+      assert.ok(autoCentroid === null || Math.abs(autoCentroid - framedCentroid) > 20, `the manual crop changed the frame: automatic ${autoCentroid}, manual ${framedCentroid}`)
+      const framedReview = await reviewOf(entry.variantId, framed.id)
+      await sameChips(framedReview)
+      await shoot('9x16-3-reframe-set', { 'frame-120-before': autoFrame, 'frame-120-after': framedFrame })
+      await panel.screenshot({ path: join(evidenceDir, `w68-9x16-3-reframe-set-panel-${framedProxy.sha256.slice(0, 10)}.png`) })
+      note('tall-reframe-set', { cropX: payload.crop.x, expectedX, framedCentroid, autoCentroid, reframeIssuesAfter: issuesOf(framedReview).filter((issue) => issue.code.startsWith('REFRAME_')).map((issue) => [issue.code, issue.evidenceRange]) })
+      snap = await snapshot(entry)
+      await page.getByTestId('issue-chip').first().waitFor()
+      const reframeChip = page.locator('[data-testid="issue-chip"][data-domain="reframe"]').first()
+      await reframeChip.click()
+      await page.getByTestId('reframe-reset').first().waitFor()
+      await page.getByTestId('reframe-reset').first().click()
+      await waitRecompiled('reframe reset')
+      const unframed = await afterCommand({ entry, ...snap, label: 'reframe reset', type: 'apply-variant-reframe-override' })
+      const unframedPlan = await planAt(entry.variantId, unframed.id)
+      assert.equal(unframedPlan.recordHash, planBefore.recordHash, 'a complete reset returns the very record the automatic plan had')
+      assert.equal((await frameAt(await proxyOf(unframed.id, entry.variantId), subjectFrame)).sha256, autoFrame.sha256, 'and the decoded frame is the automatic one again')
+      note('tall-reframe-reset', { record: unframedPlan.recordHash })
+
+      // ---- hide cue-3, and cancel the recompile while it waits: no partial artifact is promoted
+      snap = await snapshot(entry)
+      await openOutput(entry)
+      await selectChip('FACE_PERCEPTION_UNAVAILABLE', 'cue-3')
+      await fillForm({ visible: false })
+      pump.pause()
+      await page.getByTestId('caption-apply').click()
+      await page.getByTestId('issue-applied').waitFor()
+      const hiddenTall = await afterCommand({ entry, ...snap, label: 'tall hide', type: 'apply-subtitle-segment-override', rendered: false })
+      await page.getByTestId('issue-recompile-status').waitFor()
+      await page.getByTestId('issue-recompile-cancel').click()
+      assert.equal(await page.getByTestId('issue-recompile-cancel').innerText(), 'Confirmar o cancelamento', 'cancelling asks for a confirmation')
+      await page.getByTestId('issue-recompile-cancel').click()
+      await waitFor('the operation is canceled', async () => (await db.v2PublicOperation.findFirst({ where: { workspaceId: world.owner.workspaceId, projectId: world.projectId, type: 'project-proxy-render', status: 'canceled' } })) !== null, { timeoutMs: 60_000 })
+      await page.locator('[data-testid="issue-recompile-status"]').filter({ hasText: 'Cancelado' }).waitFor()
+      pump.resume()
+      await delay(6_000)
+      assert.equal(await proxyOf(hiddenTall.id, entry.variantId), null, 'a canceled recompile promoted no artifact')
+      const canceledOps = await db.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: world.owner.workspaceId, projectId: world.projectId, projectVersionId: hiddenTall.id } })
+      assert.equal(canceledOps.length, 1)
+      assert.equal((await db.v2PublicOperation.findUniqueOrThrow({ where: { id: canceledOps[0].operationId } })).status, 'canceled')
+      note('tall-cancel', { operation: canceledOps[0].operationId, artifact: null })
+      await page.getByTestId('issue-recompile-retry').click()
+      await waitFor('the retried recompile succeeded', async () => (await proxyOf(hiddenTall.id, entry.variantId)) !== null, { timeoutMs: 300_000 })
+      await page.locator('[data-testid="issue-recompile-status"][data-operation-status="succeeded"]').waitFor({ timeout: 120_000 })
+      const hiddenTallReview = await reviewOf(entry.variantId, hiddenTall.id)
+      assert.ok(!issuesOf(hiddenTallReview).some((issue) => issue.elementIds.includes('subtitle:cue-3')))
+      assert.equal(await page.locator('[data-testid="issue-chip"][data-cue-id="cue-3"]').count(), 0)
+    }
+
+    /* ======================================= the whole journey: nothing was accepted by clicking ======================================= */
+    assert.equal(await decisionCount(), 0, 'no approval row was written by any click')
+    assert.equal(await db.v2ProjectFinalExportOperation.count({ where: { workspaceId: world.owner.workspaceId } }), 0)
     assert.deepEqual(jsErrors, [], 'no uncaught page error')
     assert.equal(workerFailures.length, 0, workerFailures.join('\n'))
   } catch (error) {

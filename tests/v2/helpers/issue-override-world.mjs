@@ -36,7 +36,7 @@ export const SCENE = Object.freeze({
   subjectsAtSource: (frame) => [{ id: 'A', kind: 'face', color: 'A', box: faceBox(0.2 + 0.1 * Math.min(Math.max(frame - 40, 0), 6) / 6) }],
 })
 export const CUES = Object.freeze([
-  Object.freeze({ id: 'cue-1', startFrame: 10, endFrame: 40, text: 'Primeira legenda', anchor: 'bottom' }),
+  Object.freeze({ id: 'cue-1', startFrame: 10, endFrame: 40, text: 'Primeira legenda do vídeo', anchor: 'bottom' }),
   Object.freeze({ id: 'cue-2', startFrame: 50, endFrame: 90, text: 'Segunda legenda', anchor: 'bottom' }),
   Object.freeze({ id: 'cue-3', startFrame: 105, endFrame: 140, text: 'Terceira legenda', anchor: 'bottom' }),
 ])

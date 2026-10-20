@@ -481,6 +481,21 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
   }, [applied?.recompile.operationId, props.operations])
   const operationActive = operation !== null && !(operation.visibleState?.terminal ?? TERMINAL.has(operation.status))
 
+  /** Renders THIS output for the current Version (an output whose render belongs to an older Version): the other output is not touched. */
+  async function renderCurrent() {
+    if (!variantId || !version || busy) return
+    setBusy(true); setFailure(null)
+    try {
+      const body = { variantId }
+      const result = await requestJson<{ operation: OperationView }>(
+        `/v1/projects/${encodeURIComponent(projectId)}/proxy-renders`,
+        { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKeys(`render-current-${version.id}`, body) }, body: JSON.stringify(body) },
+      )
+      if (!result.ok) { failWith(result); return }
+      await refresh()
+    } finally { setBusy(false) }
+  }
+
   async function cancelRecompile() {
     const id = applied?.recompile.operationId
     if (!id || busy) return
@@ -531,6 +546,12 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
       </div>
 
       {props.reviewFailure ? <p className="px-4 py-3 text-[10px] text-[#c97870]" data-testid="issue-review-unavailable">{props.reviewFailure}</p> : null}
+      {version && (!review || review.projectVersionId !== version.id) ? (
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3" data-testid="issue-render-current-box">
+          <button className="rounded-lg border border-[#d9aa3d]/30 px-3 py-2 text-[10px] text-[#ddb858] disabled:opacity-40" data-testid="issue-render-current" disabled={busy || props.operations.some((candidate) => candidate.type === 'project-proxy-render' && !(candidate.visibleState?.terminal ?? TERMINAL.has(candidate.status)))} onClick={() => void renderCurrent()} type="button">Renderizar esta saída na versão atual</button>
+          <span className="text-[9px] text-[#716d65]">Só esta saída é renderizada: as outras mantêm os renders que já têm.</span>
+        </div>
+      ) : null}
       {!review && !props.reviewFailure ? <p className="px-4 py-3 text-[10px] text-[#716d65]" data-testid="issue-no-review">{props.reviewLoading ? 'Lendo o laudo desta saída…' : 'Esta saída ainda não tem laudo para esta versão. Renderize o proxy para que o critic aponte problemas.'}</p> : null}
       {review && version && review.projectVersionId !== version.id ? (
         <p className="border-l-2 border-[#d9aa3d] bg-[#d9aa3d]/[0.05] px-4 py-2 text-[10px] leading-4 text-[#c9ad6c]" data-testid="issue-review-older">
