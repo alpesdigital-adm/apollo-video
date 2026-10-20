@@ -11,7 +11,7 @@ import {
   planMp4SampleFrames, safeAreaOvershootPixels, unsampledRanges, verifyMp4QualityReport,
 } from '../../src/v2/domain/mp4-pixel-quality.ts'
 import {
-  decodeRetail0004Output, decodeV9Output, PIXEL_ORACLE_MODELS, pixelOracleModelPins, unionOracleReadings,
+  decodeRetail0004Output, decodeV9Output, modelReadStatuses, PIXEL_ORACLE_MODELS, pixelOracleModelPins, unionOracleReadings,
 } from '../../src/v2/domain/pixel-face-oracle.ts'
 
 const CANVAS = Object.freeze({ width: 540, height: 960 })
@@ -78,8 +78,11 @@ test('the union keeps every box of every model, never merges, and an unreadable 
   assert.equal(both.status, 'observed')
   assert.deepEqual(both.faces.map((face) => face.models[0]), [PIXEL_ORACLE_MODELS.v9.id, PIXEL_ORACLE_MODELS.retail.id])
   const onlyRetail = unionOracleReadings([decodeV9Output(new Uint8Array(3)), retail])
-  assert.equal(onlyRetail.status, 'observed')
-  assert.equal(onlyRetail.faces.length, 1, 'a model that failed contributes no box')
+  assert.equal(onlyRetail.status, 'unknown', 'a frame is read only when BOTH models read it')
+  assert.equal(onlyRetail.faces.length, 1, 'a model that failed contributes no box, but the one that read keeps its own')
+  assert.deepEqual(modelReadStatuses(onlyRetail.readings), { [PIXEL_ORACLE_MODELS.v9.id]: 'unknown', [PIXEL_ORACLE_MODELS.retail.id]: 'observed' })
+  assert.deepEqual(modelReadStatuses([retail]), { [PIXEL_ORACLE_MODELS.v9.id]: 'unknown', [PIXEL_ORACLE_MODELS.retail.id]: 'observed' }, 'a model with no reading is unknown, not observed')
+  assert.equal(unionOracleReadings([retail]).status, 'unknown')
   const none = unionOracleReadings([decodeV9Output(new Uint8Array(3)), decodeRetail0004Output(new Uint8Array(3))])
   assert.equal(none.status, 'unknown')
   const pins = pixelOracleModelPins()

@@ -49,7 +49,7 @@ before(async () => {
 after(async () => { if (root) await rm(root, { recursive: true, force: true }) })
 
 /** The colour-key oracle: the marker is the face; the registration is the crop window's own transform (a stand-in for feature matching). */
-function stubOracle(spec) {
+function stubOracle(spec, detector = 'v9') {
   const canvas = FORMATS[spec.format]
   return {
     models: [{ id: PIXEL_ORACLE_MODELS.v9.id }, { id: PIXEL_ORACLE_MODELS.retail.id }],
@@ -65,8 +65,8 @@ function stubOracle(spec) {
         }
         const boxes = count >= 30 ? [{ box: { x: minX / info.width, y: minY / info.height, width: (maxX - minX + 1) / info.width, height: (maxY - minY + 1) / info.height }, confidence: 0.99, clipped: false }] : []
         results.push({ id: frame.id, sha256: 'f'.repeat(64), status: 'ok', reason: null, width: info.width, height: info.height, readings: [
-          { modelId: PIXEL_ORACLE_MODELS.v9.id, status: 'observed', boxes, rawOutputSha256: '1'.repeat(64) },
-          { modelId: PIXEL_ORACLE_MODELS.retail.id, status: 'observed', boxes: [], rawOutputSha256: '2'.repeat(64) },
+          { modelId: PIXEL_ORACLE_MODELS.v9.id, status: 'observed', boxes: detector === 'v9' ? boxes : [], rawOutputSha256: '1'.repeat(64) },
+          { modelId: PIXEL_ORACLE_MODELS.retail.id, status: 'observed', boxes: detector === 'retail' ? boxes : [], rawOutputSha256: '2'.repeat(64) },
         ] })
       }
       const registrations = pairs.map((pair) => {
@@ -81,12 +81,12 @@ function stubOracle(spec) {
   }
 }
 
-async function runOutput(format, variant) {
+async function runOutput(format, variant, { detector = 'v9' } = {}) {
   const spec = outputSpecOf({ imageId: 'synthetic', format, variant, face: FACE, source: SOURCE, bands: bands[format] })
   const planned = await planOutput(spec, bands[format])
   const render = (kind) => renderOutput({ renderer, spec, planned, sourcePath, kind })
   const delivered = await render('delivered')
-  const critic = new FfmpegMp4PixelCritic({ oracle: stubOracle(spec), workRoot: join(root, 'critic'), ffmpegPath })
+  const critic = new FfmpegMp4PixelCritic({ oracle: stubOracle(spec, detector), workRoot: join(root, 'critic'), ffmpegPath })
   const verification = await critic.verify(criticRequest({
     spec, deliveredPath: delivered.outputPath, sourcePath, sourceSha256, renderInputHash: 'd'.repeat(64),
     renderControl: async (kind) => ({ path: (await render(kind)).outputPath }),
@@ -125,7 +125,8 @@ for (const [format, variants] of [['9:16', ['clean', 'caption', 'crop', 'cta', '
       assert.equal(report.exportAllowed, labelled.length === 0)
       assert.ok(report.noiseProbe, 'the noise floor between a delivered encode and its control is measured')
       // W67 fail-closed gate: this stand-in oracle read every frame, so the final gate has nothing to block on (no false block)
-      assert.deepEqual(mp4ExportGate({ report }).blockers, [], 'the final gate does not block a report whose oracle ran on every frame')
+      const gateCodes = mp4ExportGate({ report }).blockers.map((blocker) => blocker.code)
+      assert.deepEqual(gateCodes, spec.defects.includes('caption-over-face') ? ['MP4_FACE_INTERSECTS_INK'] : [], 'the final gate blocks only a caption that touches a face; a report whose oracle read every frame of both models has nothing else to block on')
       // every projected region says which detector produced the source face it projects (the stand-in's only reader is the V9 slot)
       const projected = report.samples.flatMap((sample) => sample.facts.protectedRegions).filter((region) => region.origin === 'source-projection')
       assert.ok(projected.length > 0, 'the registered projection of the source face protects some frames')
@@ -133,6 +134,20 @@ for (const [format, variants] of [['9:16', ['clean', 'caption', 'crop', 'cta', '
     })
   }
 }
+
+test('W67 critic: with the RETAIL detector as the only one that finds the face, the sealed regions say retail (output origin and source projection), and the verdict does not change', { timeout: 10 * 60_000 }, async () => {
+  const run = await runOutput('16:9', 'clean', { detector: 'retail' })
+  const { report } = run.verification
+  verifyMp4QualityReport(report)
+  assert.equal(report.verdict, 'passed')
+  const regions = report.samples.flatMap((sample) => sample.facts.protectedRegions)
+  assert.ok(regions.some((region) => region.origin === 'oracle-retail-0004'), 'the output frame regions come from retail')
+  assert.ok(regions.every((region) => region.origin !== 'oracle-0204-v9'), 'V9 found nothing here and is not credited with a face')
+  const projected = regions.filter((region) => region.origin === 'source-projection')
+  assert.ok(projected.length > 0)
+  for (const region of projected) assert.deepEqual(region.sourceModels, ['oracle-retail-0004'])
+  assert.deepEqual(mp4ExportGate({ report }).blockers, [])
+})
 
 test('W67 critic: a blocked 9:16 never blocks 16:9, and a blocked variant is not exportable', { timeout: 10 * 60_000 }, async () => {
   const wide = await runOutput('16:9', 'clean')

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import { calculateCanonicalHash } from './canonical-hash.ts'
+import { DomainError } from './errors.ts'
 import { decodeFace0204Output, FACE0204_OUTPUT_BYTES, FACE0204_OUTPUT_POLICY_ID, FACE0204_OUTPUT_POLICY_SHA256 } from './face-detector-output.ts'
 import type { NormalizedBounds } from './output-spec.ts'
 
@@ -132,9 +133,25 @@ export function decodeV9Output(raw: Uint8Array, scoreFloor: number = PIXEL_ORACL
   })
 }
 
+export const PIXEL_ORACLE_MODEL_IDS: readonly PixelOracleModelId[] = Object.freeze(Object.values(PIXEL_ORACLE_MODELS).map((model) => model.id))
+
+/** Per pinned model: did it read this frame? A model with no reading at all is `unknown`, never `observed`. */
+export function modelReadStatuses(readings: readonly OracleModelReading[]): Readonly<Record<PixelOracleModelId, 'observed' | 'unknown'>> {
+  return Object.freeze(Object.fromEntries(PIXEL_ORACLE_MODEL_IDS.map((id) => [id, readings.some((reading) => reading.modelId === id && reading.status === 'observed') ? 'observed' : 'unknown'])) as Record<PixelOracleModelId, 'observed' | 'unknown'>)
+}
+
+export type ProtectedRegionModelOrigin = 'oracle-0204-v9' | 'oracle-retail-0004'
+
+/** The region origin of a detector, by its exact pinned id; an id that is not one of the two pinned models is refused, never defaulted. */
+export function regionOriginOf(modelId: string): ProtectedRegionModelOrigin {
+  if (modelId === PIXEL_ORACLE_MODELS.v9.id) return 'oracle-0204-v9'
+  if (modelId === PIXEL_ORACLE_MODELS.retail.id) return 'oracle-retail-0004'
+  throw new DomainError('INVALID_RENDER_INPUT', `Unknown face model id ${JSON.stringify(modelId).slice(0, 80)}`)
+}
+
 export type UnionFace = Readonly<{ box: Readonly<NormalizedBounds>; models: readonly PixelOracleModelId[]; confidence: number; clipped: boolean }>
 export type UnionReading = Readonly<{
-  /** `observed`: at least one model read the frame; `unknown`: no model could read it (every reading failed). */
+  /** `observed`: EVERY pinned model read the frame (a frame is read only when both detectors read it); `unknown`: at least one did not. The faces of a model that did read are kept either way. */
   status: 'observed' | 'unknown'
   /** Every box either model reports, the protected region of the frame. Boxes are not merged: each protects what its detector saw. */
   faces: readonly UnionFace[]
@@ -150,7 +167,7 @@ export function unionOracleReadings(readings: readonly OracleModelReading[]): Un
       faces.push(Object.freeze({ box: detection.box, models: Object.freeze([reading.modelId]), confidence: detection.confidence, clipped: detection.clipped }))
     }
   }
-  const observed = readings.some((reading) => reading.status === 'observed')
+  const observed = PIXEL_ORACLE_MODEL_IDS.every((id) => readings.some((reading) => reading.modelId === id && reading.status === 'observed'))
   return Object.freeze({ status: observed ? 'observed' as const : 'unknown' as const, faces: Object.freeze(faces), readings: Object.freeze([...readings]) })
 }
 

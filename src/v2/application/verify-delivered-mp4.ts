@@ -98,3 +98,22 @@ export async function persistMp4QualityReport(input: Readonly<{
     await rm(directory, { recursive: true, force: true }).catch(() => undefined)
   }
 }
+
+/** Stores the structured record of an acknowledgement that delivered a final (content-addressed JSON, like the report). */
+export async function persistMp4ExportAcknowledgement(input: Readonly<{
+  storage: Pick<VerifiedMediaStorage, 'promoteDerived'>
+  workspaceId: string
+  text: string
+}>): Promise<Readonly<{ key: string; sha256: string; byteSize: number }>> {
+  const sha256 = createHash('sha256').update(input.text).digest('hex')
+  const directory = await mkdtemp(join(tmpdir(), 'apollo-mp4-ack-'))
+  try {
+    const path = join(directory, 'mp4-export-acknowledgement.json')
+    await writeFile(path, input.text, 'utf8')
+    const stored = await input.storage.promoteDerived({ workspaceId: input.workspaceId, sourcePath: path, sha256, extension: 'json', prefix: 'mp4-export-acknowledgements' })
+    if (stored.sha256 !== sha256) throw new DomainError('RENDER_OUTPUT_PROMOTION_FAILED', 'The stored MP4 export acknowledgement checksum changed')
+    return Object.freeze({ key: stored.key, sha256: stored.sha256, byteSize: stored.byteSize })
+  } finally {
+    await rm(directory, { recursive: true, force: true }).catch(() => undefined)
+  }
+}

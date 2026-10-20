@@ -13,13 +13,13 @@ import type {
 } from '../../application/ports/mp4-pixel-critic.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
-  countPackedMaskInRect, measureInk, measureSubject, packMask, pixelRectOf, rawLumaChangedPixels, type RegistrationMeasurement,
+  countPackedMaskInRect, measureInk, measureSubject, packMask, pixelRectOf, rawLumaChangedPixels, registrationFacts, type RegistrationMeasurement,
 } from '../../domain/mp4-pixel-geometry.ts'
 import {
   createMp4QualityReport, MP4_PIXEL_CRITIC_POLICY, planMp4SampleFrames, type InkFacts, type Mp4ArtifactIdentity, type Mp4ControlReceipt,
   type Mp4NoiseProbe, type Mp4OracleReceipt, type Mp4SampleFacts, type ProtectedRegionFacts,
 } from '../../domain/mp4-pixel-quality.ts'
-import { pixelOracleModelPins, PIXEL_ORACLE_PROTOCOL, unionOracleReadings, type PixelOracleModelId } from '../../domain/pixel-face-oracle.ts'
+import { modelReadStatuses, pixelOracleModelPins, PIXEL_ORACLE_PROTOCOL, regionOriginOf, unionOracleReadings, type PixelOracleModelId } from '../../domain/pixel-face-oracle.ts'
 import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 import { resolveFfprobeBinary } from './ffmpeg-sync-marker-renderer.ts'
 import { PIXEL_ORACLE_MAX_FRAMES_PER_BATCH } from '../perception/openvino-pixel-oracle.ts'
@@ -336,20 +336,26 @@ export class FfmpegMp4PixelCritic implements Mp4PixelCritic {
         }
         for (const face of outputUnion?.faces ?? []) {
           const counts = countIn(face.box)
-          regions.push(Object.freeze({ origin: face.models[0] === 'omz-face-detection-0204-v9' ? 'oracle-0204-v9' as const : 'oracle-retail-0004' as const, box: face.box, captionInkPixels: counts.caption, ctaInkPixels: counts.cta }))
+          regions.push(Object.freeze({ origin: regionOriginOf(face.models[0]!), box: face.box, captionInkPixels: counts.caption, ctaInkPixels: counts.cta }))
         }
         for (const [position, box] of subject.projectedSourceFaces.entries()) {
           const counts = countIn(box)
           const sourceFace = sourceUnion?.faces[subject.projectedSourceFaceIndices[position]!]
           regions.push(Object.freeze({
             origin: 'source-projection' as const, box, captionInkPixels: counts.caption, ctaInkPixels: counts.cta,
-            sourceModels: Object.freeze((sourceFace?.models ?? []).map((model) => (model === 'omz-face-detection-0204-v9' ? 'oracle-0204-v9' as const : 'oracle-retail-0004' as const))),
+            sourceModels: Object.freeze((sourceFace?.models ?? []).map((model) => regionOriginOf(model))),
           }))
         }
         facts.push(Object.freeze({
           sampleId, frameIndex: frame, ptsTicks: pts, frameSha256: frameShas[frame]!,
           caption: entry.caption, cta: entry.cta, inkDensity: (entry.caption.pixels + entry.cta.pixels) / (width * height),
-          oracle: Object.freeze({ state: outputUnion ? outputUnion.status : 'unknown' as const, outputFaceCount: outputUnion?.faces.length ?? 0, sourceFaceCount: sourceUnion?.faces.length ?? 0 }),
+          oracle: Object.freeze({
+            state: outputUnion ? outputUnion.status : 'unknown' as const, outputFaceCount: outputUnion?.faces.length ?? 0, sourceFaceCount: sourceUnion?.faces.length ?? 0,
+            outputReads: modelReadStatuses(output && output.status === 'ok' ? output.readings : []),
+            sourceReads: source ? modelReadStatuses(sourceResult && sourceResult.status === 'ok' ? sourceResult.readings : []) : null,
+            registrationStatus: measurement ? (registrationFacts(measurement).usable ? 'ok' as const : 'failed' as const) : 'not-attempted' as const,
+            mappedSourceFaces: subject.mappedSourceFaces,
+          }),
           registration: subject.registration, protectedRegions: Object.freeze(regions), subject: subject.subject,
         }))
         const raws = (result: PixelOracleFrameResult | undefined) => Object.freeze(Object.fromEntries((result?.readings ?? []).map((reading) => [reading.modelId, reading.rawOutputSha256])) as Record<PixelOracleModelId, string | null>)

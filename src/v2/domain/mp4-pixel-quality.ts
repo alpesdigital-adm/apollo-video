@@ -133,7 +133,20 @@ export type Mp4SampleFacts = Readonly<{
   cta: InkFacts
   /** (caption + cta ink pixels) / canvas pixels. */
   inkDensity: number
-  oracle: Readonly<{ state: 'observed' | 'unknown'; outputFaceCount: number; sourceFaceCount: number }>
+  oracle: Readonly<{
+    /** `observed` only when BOTH pinned models read the overlay-free output frame. */
+    state: 'observed' | 'unknown'
+    outputFaceCount: number
+    sourceFaceCount: number
+    /** W67 gate facts. Read status of each pinned model on the output frame (a model with no reading is `unknown`). */
+    outputReads?: Readonly<Record<string, 'observed' | 'unknown'>>
+    /** Read status of each pinned model on the SOURCE frame of this output frame; null when no source frame maps to it. */
+    sourceReads?: Readonly<Record<string, 'observed' | 'unknown'>> | null
+    /** Whether the pixel registration of source to output was usable under the policy's gates ('not-attempted': no source frame). */
+    registrationStatus?: 'ok' | 'failed' | 'not-attempted'
+    /** How many of the `sourceFaceCount` source faces were projected onto the output (0 when the registration is not usable). */
+    mappedSourceFaces?: number
+  }>
   registration: RegistrationFacts | null
   protectedRegions: readonly ProtectedRegionFacts[]
   subject: SubjectFacts

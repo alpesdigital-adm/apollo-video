@@ -2963,6 +2963,8 @@ export function createProjectFinalExportWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
+  // W67. Before anything connects: an acknowledgement of the missing MP4 critic in the environment of a production deployment is refused outright.
+  const mp4Acknowledgement = optionalMp4ExportAcknowledgement(environment)
   const telemetry = createConfiguredOperationTelemetry(environment)
   const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
   if (!artifactRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Artifact root is not configured')
@@ -2992,7 +2994,7 @@ export function createProjectFinalExportWorker(
     // W67. The final fails closed on the MP4 critic: with no private OpenVINO runtime configured (and no recorded acknowledgement) it
     // delivers nothing; with one, a blocked variant, an oracle that failed or ink over frames it could not read is never promoted.
     ...optionalMp4PixelCritic(environment, artifactRoot),
-    ...optionalMp4ExportAcknowledgement(environment),
+    ...mp4Acknowledgement,
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),

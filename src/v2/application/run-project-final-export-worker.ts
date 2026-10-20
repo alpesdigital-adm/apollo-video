@@ -34,8 +34,8 @@ import {
 import type { CaptionPixelCritic } from './ports/caption-pixel-critic.ts'
 import type { Mp4PixelCritic } from './ports/mp4-pixel-critic.ts'
 import { critiqueOutputFormat, selectExportableVariants } from '../domain/format-quality-critic.ts'
-import { mp4ExportGate, parseMp4ExportAcknowledgement, type Mp4ExportAcknowledgement } from '../domain/mp4-export-gate.ts'
-import { persistMp4QualityReport, verifyDeliveredMp4 } from './verify-delivered-mp4.ts'
+import { mp4ExportAcknowledgementRecord, mp4ExportGate, parseMp4ExportAcknowledgement, type Mp4ExportAcknowledgement } from '../domain/mp4-export-gate.ts'
+import { persistMp4ExportAcknowledgement, persistMp4QualityReport, verifyDeliveredMp4 } from './verify-delivered-mp4.ts'
 import type { FaceSourceWindowEvidenceReader } from './ports/face-source-window-evidence-reader.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
@@ -420,7 +420,18 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       if (!dependencies.mp4PixelCritic) {
         // Not wired: the final is not approved by silence. Only an explicit acknowledgement (actor, time, reason) delivers it.
         const gate = mp4ExportGate({ report: null, acknowledgement: mp4Acknowledgement })
-        mp4Validator = { code: 'FINAL_MP4_CRITIC', passed: gate.allowed, message: gate.message }
+        let recorded = ''
+        if (gate.allowed) {
+          // The acknowledgement that delivers this final is stored as a structured record (who, when, why, which operation), not as validator text.
+          const unwiredPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
+          const acknowledgementRecord = mp4ExportAcknowledgementRecord({
+            gate, workspaceId: operation.workspaceId, projectId: context.projectId, variantId: context.outputVariantId ?? sourceOutputVariantId(source),
+            outputSpecId: unwiredPreset.spec.id, operationId: operation.id, reportHash: null,
+          })
+          const stored = await persistMp4ExportAcknowledgement({ storage: dependencies.storage, workspaceId: operation.workspaceId, text: acknowledgementRecord!.text })
+          recorded = `; acknowledgement record ${stored.sha256} stored as ${stored.key}`
+        }
+        mp4Validator = { code: 'FINAL_MP4_CRITIC', passed: gate.allowed, message: `${gate.message.slice(0, 230)}${recorded}.`.slice(0, 500) }
       } else {
         const outputPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
         const outputSpecId = outputPreset.spec.id
@@ -451,10 +462,11 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           const approved = reported && gate.allowed
           const verdictText = !reported ? `MP4 critic blocked this variant (${blocking.join(', ')})`
             : !gate.allowed ? `MP4 critic could not fully judge this variant: ${gate.message}`
-              : gate.blockers.length > 0 ? `MP4 critic did not block this variant; ${gate.message}` : 'MP4 critic did not block this variant'
+              : `MP4 critic did not block this variant${gate.blockers.length > 0 || gate.informational.length > 0 ? `; ${gate.message}` : ''}`
+          // the tail that names the stored evidence is never the part that gets cut
           mp4Validator = {
             code: 'FINAL_MP4_CRITIC', passed: approved,
-            message: `${verdictText}; report ${verification.evidence.reportHash} stored as ${stored.key}.`.slice(0, 500),
+            message: `${verdictText.slice(0, 300)}; report ${verification.evidence.reportHash} stored as ${stored.key}.`.slice(0, 500),
           }
         }
       }
