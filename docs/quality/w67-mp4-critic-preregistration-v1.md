@@ -13,7 +13,7 @@ Manifesto congelado (etapa 2): `docs/quality/w67-mp4-critic-corpus-v1.json`, cuj
 | Olhos | Sem anotação de olhos: **verificações de olhos ficam fora de escopo e não são contadas como amostras**; proteger a caixa inteira do rosto é regra conservadora, não detecção de olhos | o protocolo v1 já dizia que olhos sem anotação são desconhecidos |
 | Oráculo de rosto independente do detector do produto | **União** do detector do produto (OMZ face-detection-0204, V9) e de um segundo detector (OMZ face-detection-retail-0004), mais a projeção, por registro de pixels, das detecções do quadro da FONTE; `unknown` explícito quando nenhum modelo nem a projeção dá evidência de rosto no quadro | o produto não pode ser o único oráculo |
 
-Inspeção visual das fotos (a única leitura de pixels da seleção) foi feita pelo agente redator Claude, **uma etapa automatizada — não é adjudicação humana** — e só serviu para aplicar a regra R6 (§3). Casos ambíguos achados pela regra estão listados em §3.
+Inspeção visual das fotos (a única leitura de pixels da seleção) foi feita pelo agente redator Claude, **uma etapa automatizada — não é adjudicação humana**. **EMENDA (§11): a regra R6 foi escrita DEPOIS de eu ver os títulos e as fotos dos 3 candidatos que passam em R1–R4; é uma exclusão POST HOC**, não uma regra pré-registrada antes de ver os candidatos. Casos ambíguos achados pela regra estão listados em §3.
 
 ## 2. Independência: o que foi e o que não foi usado
 
@@ -31,13 +31,13 @@ Regras, aplicadas ao split calibration (60 itens):
 - R3 largura e altura do espelho pares, sem orientação EXIF, `Rotation 0.0`;
 - R4 as regras de enquadramento (`corpus-geometry.mjs`) conseguem enquadrar o rosto nos DOIS formatos (janela boa, janela perdida, uma faixa de legenda que cubra o rosto, faixa inferior livre);
 - R5 ordem crescente de `sha256("w67-mp4-v1|select|<ImageID>")`, primeiros N = 2; nenhum resultado de detector, renderer ou crítico entra;
-- R6 exclusão visual, só da foto de origem: o "rosto" anotado é uma representação (retrato impresso ou pintado) ou há outros rostos visíveis sem anotação.
+- R6 exclusão visual, só da foto de origem: o "rosto" anotado é uma representação (retrato impresso ou pintado) ou há outros rostos visíveis sem anotação. **POST HOC (§11):** escrita e aplicada depois de ver os títulos e as fotos dos candidatos; as duas cláusulas foram julgadas depois de olhar.
 
 ### Resultado da seleção (etapa 2)
 
 Manifesto congelado: `docs/quality/w67-mp4-critic-corpus-v1.json`, SHA-256 do arquivo `f88584cdd473906544d784b4379bbbc2f04ed52e68a4016915ac2a0b76d90b2f`, `manifestHash` canônico `5fe1eaf409f84055d103a714d0d194927910565ef9e5710c60872c74048d4f0a` (cobre tudo menos o instante do congelamento). O manifesto leva os SHA-256 dos 13 arquivos de código congelados e da política; o executor se recusa a rodar se qualquer um mudar ou se o manifesto não se re-derivar das entradas.
 
-Só **3** imagens do calibration passam R1–R4. A primeira na ordem de R5 (`968a460084c588a1`) foi excluída por R6 depois de eu olhar a foto de origem (e só ela): o "rosto" anotado é o retrato gravado numa cédula de dois dólares (a foto mostra duas cédulas sobre uma mesa). É uma representação, mesmo com `IsDepiction = 0` na anotação. As outras duas foram vistas na mesma inspeção e passam em R6 (um homem de cartola com trompete; um homem deitado numa cama de hospital; na segunda aparece um rosto minúsculo impresso na capa de um livro na borda, não "claramente visível"). A inspeção é do agente redator (Claude), automatizada, **não é inspeção humana**, e foi feita **antes de qualquer render ou detector sobre foto do calibration**. Com a exclusão, restam exatamente 2 elegíveis: o corpus é esse, sem margem de escolha.
+Só **3** imagens do calibration passam R1–R4. A primeira na ordem de R5 (`968a460084c588a1`, título "2$ bill") foi excluída por R6: o "rosto" anotado é o retrato gravado numa cédula de dois dólares (a foto mostra duas cédulas sobre uma mesa), uma representação, mesmo com `IsDepiction = 0` na anotação. **Esta exclusão é POST HOC e foi ela que decidiu o corpus**: com 3 elegíveis e N = 2, excluir a primeira deixou exatamente as outras duas. Eu vi os títulos e abri as três fotos antes de escrever R6 (linha do tempo verdadeira no §11, que corrige a frase anterior desta seção, "só ela"). As outras duas foram vistas na mesma inspeção (um homem de cartola com trompete; um homem deitado numa cama de hospital) e a cláusula "outros rostos visíveis" também foi julgada depois de olhar (na segunda aparece um rosto minúsculo impresso na capa de um livro na borda, que não considerei "claramente visível"). A inspeção é do agente redator (Claude), automatizada, **não é inspeção humana**. O que é verdade e continua valendo: foi feita antes de qualquer render ou detector sobre foto do calibration. A execução de sensibilidade do §11 roda as 10 saídas da foto excluída sob o código congelado, para que a exclusão não fique sem medida.
 
 Candidatos: 60; elegíveis pelas regras R1–R4: 3; elegíveis finais: 2.
 
@@ -191,3 +191,24 @@ Os ensaios servem para achar defeitos de encanamento e de desenho; o que mudou p
 - Densidade não tem defeito semeado: só falsos positivos são medidos.
 - O oráculo roda em runtime Windows (Python 3.14, OpenVINO 2026.4.0, OpenCV 4.13.0, NumPy 2.5.1); não há recibo de paridade Linux.
 - Nenhum modelo reprovado, fixture mecânica ou supressão geral de legendas converte este documento em crítico visual validado; aprovação do proprietário e revisão humana permanecem etapas separadas.
+
+## 11. Emenda pós-revisão (linha do tempo verdadeira, R6 post hoc, divulgações, execução de sensibilidade)
+
+Esta emenda foi pedida pela revisão do coordenador (Astra/Opus) e corrige o texto dos §1 e §3 acima, que estava mais limpo do que os fatos. Horários locais (UTC−03:00), lidos do transcrito da sessão (`subagents/agent-a3633a85a0f720cf8.jsonl`) e dos commits:
+
+| horário (19/10/2026) | o que aconteceu |
+| --- | --- |
+| 19:46 | sondas de geometria dos presets (`probe1`, `probe2`): o planejador de legendas de produção foi chamado sem evidência de rosto |
+| 20:03:11 e 20:03:34 | `feas.mjs` e `feas2.mjs`: as regras de enquadramento de `corpus-geometry.mjs` foram executadas sobre as caixas humanas de **todos** os candidatos do calibration (só metadados) e `feas2` **imprimiu os títulos dos três que passam em R1–R4**, entre eles "2$ bill" |
+| 20:03:39 e 20:03:40 | abri as fotos dos três candidatos (`968a…`, `1580…`, `9295…`) |
+| 20:04–20:05 | passes de ensaio do planejador de produção (`plan1`–`plan3`, `probe2`) sobre geometrias de enquadramento do calibration (metadados, sem detector, sem render) |
+| 20:12:24 | a regra R6 foi escrita pela primeira vez em `corpus-generate.mjs`, **depois** de ver títulos e fotos, com a redação "retrato impresso ou pintado" que descreve a cédula |
+| 20:44:32 | commit `524755c2` (etapa 1) |
+| 21:06:43 | commit `5838b3ae` (etapa 2, manifesto congelado), antes de qualquer render ou detector sobre foto do calibration |
+
+Consequências declaradas:
+
+1. **R6 é uma exclusão post hoc**, não uma regra pré-registrada. A cláusula "retrato impresso" foi redigida olhando a cédula; a cláusula "outros rostos visíveis" foi julgada olhando as fotos. Ela decidiu o corpus (3 passam em R1–R4; excluída a primeira, ficam 2). O que este protocolo pode afirmar é só: nenhum render e nenhum detector tocaram foto do calibration antes do congelamento.
+2. **Divulgação (dry-runs com metadados do calibration antes do congelamento):** as regras de enquadramento `corpus-geometry.mjs` e o planejador de legendas de produção foram executados sobre caixas humanas e dimensões de itens do calibration (metadados do manifesto V5), às 20:03–20:05, antes do congelamento. Não houve pixel, detector, render nem crítico sobre essas fotos. As regras R4 (viabilidade do enquadramento) foram escritas conhecendo esses números.
+3. **`renderInputHash` do corpus é um substituto.** `corpus-run.mjs:135` calcula o `renderInputHash` do relatório como o hash canônico de `{ output, placementPlanHash, reframePlanHash }` da saída, e não o `renderInputHash` real de um `RenderInput` de produção. O vínculo com o plano continua verificável, mas esse campo nos relatórios do corpus não é o hash de produção.
+4. **Execução de sensibilidade pós-hoc (declarada antes de rodar):** as 10 saídas da foto excluída `968a460084c588a1` serão renderizadas e avaliadas sob o código **congelado** (nenhum arquivo congelado foi tocado; os SHA-256 do código do manifesto de sensibilidade são iguais aos do manifesto registrado), no mesmo executor e com os mesmos critérios de aceite do §6. O resultado será publicado seja qual for, no documento de resultados (§8). Ela **não** substitui nem altera o corpus registrado e não entra no aceite dele. O manifesto de sensibilidade (`docs/quality/w67-mp4-critic-sensitivity-968-v1.json`) é gerado pelo mesmo gerador com o id forçado; a frase "design rehearsal on the development split" que ele carrega é a redação genérica do gerador para ids forçados (código congelado, não editado) e não vale para este caso: trata-se de uma execução de sensibilidade sobre o calibration.
