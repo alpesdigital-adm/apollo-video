@@ -184,6 +184,20 @@ export const EDIT_COMMAND_POLICIES = Object.freeze({
       + '[variantId] and affectedArtifacts is filtered to it; :770 parseCommandImpact refuses a stored '
       + 'document with more than one variant, range or minimal render',
   }),
+  'apply-variant-reframe-override': Object.freeze({
+    // Full-timeline for ONE variant: a manual reframe moves the crop of one range of one clip inside that variant, but a render made from a
+    // reframe plan is always a full render of its output, so the honest invalidation is that variant's whole proxy (never the edited range);
+    // the other outputs keep their renders.
+    renderPolicy: 'full-timeline',
+    impactSchema: 'command-impact/v1',
+    requiresImpact: true,
+    supportsRenderFreeImpact: false,
+    deferralReason: null,
+    evidence: 'command-impact.ts:628 createVariantReframeOverrideCommandImpact derives affectedRanges from canonicalCommandImpactRanges of '
+      + '[0, durationFrames) and repeats that single range in minimalRenders for the target variant only; :672 affectedVariantIds is the '
+      + 'literal [variantId] and affectedArtifacts is filtered to it; :887 parseCommandImpact refuses a stored document that is not one '
+      + 'variant, one render of the whole timeline from frame zero',
+  }),
   'replace-source-transcript': Object.freeze({
     renderPolicy: 'deferred',
     impactSchema: 'source-transcript-replacement-impact/v1',

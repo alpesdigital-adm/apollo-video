@@ -4,7 +4,8 @@ import type {
   PublicOperationRepository,
 } from './ports/public-operation-repository.ts'
 import type { DirectorRunRepository } from './ports/director-run-repository.ts'
-import { runProjectDirectorService } from './run-project-director.ts'
+import { runProjectDirectorService, type RunProjectDirectorDependencies } from './run-project-director.ts'
+import type { DirectorFaceWindowRequester } from './director-face-window-requests.ts'
 import type { BriefCompilation } from './compile-brief.ts'
 import { immediateNextAttemptAt, workerShutdownFailure } from './worker-lifecycle.ts'
 
@@ -30,6 +31,10 @@ export function runNextProjectDirectorOperationService(dependencies: {
     text: string
     guardrails?: readonly string[]
   }) => Promise<Readonly<BriefCompilation>>
+  /** W64. How the run asks for the face windows its plan needs (see `runProjectDirectorService`). */
+  faceWindows?: DirectorFaceWindowRequester
+  /** W64. See `RunProjectDirectorDependencies.materializeSnapshot`. */
+  materializeSnapshot?: RunProjectDirectorDependencies['materializeSnapshot']
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
   retryBaseDelayMs?: number
@@ -147,6 +152,8 @@ export function runNextProjectDirectorOperationService(dependencies: {
         createId: dependencies.createId,
         createEventId: dependencies.createEventId,
         compileBrief: dependencies.compileBrief,
+        ...(dependencies.faceWindows ? { faceWindows: dependencies.faceWindows } : {}),
+        ...(dependencies.materializeSnapshot ? { materializeSnapshot: dependencies.materializeSnapshot } : {}),
       })({
         workspaceId: claimed.operation.workspaceId,
         projectId: context.projectId,

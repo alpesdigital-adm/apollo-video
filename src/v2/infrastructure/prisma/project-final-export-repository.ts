@@ -21,6 +21,14 @@ import { PrismaProjectProxyRenderRepository } from './project-proxy-render-repos
 import { parseDirectorQualityReport } from './director-run-repository.ts'
 import { PrismaPerceptionProducerEnvelopeRepository } from './perception-producer-envelope-repository.ts'
 
+/**
+ * W66r. A final is made from the very crop trajectory its proxy was approved with: the plan persisted for the Version now must be the one
+ * the approved proxy was drawn from (or both must be absent). A plan that moved since is not what the reviewer saw, so there is no approval.
+ */
+function reframeMatchesApproval(source: Readonly<{ reframePlan?: Readonly<{ reframePlanHash: string }> }>, approval: Readonly<{ approvedReframePlanHash: string | null }>): boolean {
+  return (source.reframePlan?.reframePlanHash ?? null) === approval.approvedReframePlanHash
+}
+
 const FAILURE_STAGES = new Set([
   'source-read', 'color-plan', 'color-bindings', 'lut-materialization',
   'input-validation', 'rights', 'source-materialization', 'render',
@@ -104,6 +112,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
             id: true,
             reviewHash: true,
             proxyArtifactId: true,
+            formatQualityJson: true,
           },
         },
       },
@@ -145,6 +154,12 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       proxyReviewId: proxyReview.id,
       proxyReviewHash: proxyReview.reviewHash,
       proxyArtifactId: proxyReview.proxyArtifactId,
+      // W66r. The crop trajectory the approved proxy was drawn from (null: it was drawn without one).
+      approvedReframePlanHash: (() => {
+        if (typeof proxyReview.formatQualityJson !== 'string') return null
+        const hash = (JSON.parse(proxyReview.formatQualityJson) as { reframePlanHash?: unknown }).reframePlanHash
+        return typeof hash === 'string' ? hash : null
+      })(),
     })
   }
 
@@ -162,7 +177,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     if (!source || source.projectVersionId !== input.projectVersionId) return null
     const approval = await this.readApproval({ ...input, outputVariantId: sourceOutputVariantId(source),
       outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: true })
-    if (!approval) return null
+    if (!approval || !reframeMatchesApproval(source, approval)) return null
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
   }
 
@@ -207,7 +222,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     if (!source) return null
     const approval = await this.readApproval({ ...input, outputVariantId: sourceOutputVariantId(source),
       outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: false })
-    if (!approval) return null
+    if (!approval || !reframeMatchesApproval(source, approval)) return null
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
   }
 

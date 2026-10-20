@@ -169,6 +169,12 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
     ],
   },
   {
+    // The Version exists and plays something; no snapshot of it has been written. A Director run (or a materialization) writes it; the
+    // read never assembles one, so the answer is a typed 404 and not an empty 200.
+    status: 404, category: 'validation', codes: ['SNAPSHOT_NOT_MATERIALIZED'],
+    message: 'The perception snapshot of this project version has not been written yet; the read does not assemble one',
+  },
+  {
     status: 409, category: 'conflict', codes: [
       'PROJECT_TRANSITION_REJECTED', 'MEDIA_UPLOAD_TRANSITION_REJECTED',
       'MEDIA_DOWNLOAD_GRANT_REJECTED', 'MEDIA_ARTIFACT_TRANSITION_REJECTED',

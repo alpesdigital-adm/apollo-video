@@ -589,7 +589,8 @@ function reframePlanFor(format) {
     ? { x: (1 - PORTRAIT_CROP_WIDTH) / 2, y: 0, width: PORTRAIT_CROP_WIDTH, height: 1 }
     : { x: 0, y: 0, width: 1, height: 1 }
   return createRenderReframePlan({
-    format, variantId: format, fps: FPS, durationFrames: DURATION_FRAMES,
+    // W66r: the plan names the STABLE variant the render is sealed to (the render derives geometry by that identity, not by aspect ratio).
+    format, variantId: STABLE_VARIANT[format], fps: FPS, durationFrames: DURATION_FRAMES,
     source: { width: SOURCE_WIDTH, height: SOURCE_HEIGHT },
     ranges: CLIPS.map((clip) => ({
       clipId: clip.id, startFrame: clip.timelineInFrame, endFrame: clip.timelineOutFrame,

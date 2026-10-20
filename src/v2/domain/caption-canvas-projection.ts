@@ -1,7 +1,7 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
 import type { NormalizedBounds } from './output-spec.ts'
-import type { RenderReframeRangeV1 } from './render-reframe-plan.ts'
+import { REFRAME_COMPOSITION_ID, type RenderReframeRangeV1 } from './render-reframe-plan.ts'
 
 /**
  * The single source <-> canvas projection of a render (W65).
@@ -159,6 +159,9 @@ export function createCaptionProjection(input: Readonly<{
   })
   const identity = Object.freeze({
     ...body,
+    // A reframed clip is laid on the canvas by the cover rule (see `reframeSimilarity`), not by steps 2-3: that is part of what a projection is,
+    // so it is part of its identity, and only when a clip is reframed (a projection with none keeps its identity).
+    ...(clips.some((clip) => clip.reframe) ? { reframeComposition: REFRAME_COMPOSITION_ID } : {}),
     clips: body.clips.map((clip) => ({
       id: clip.id, sourceArtifactId: clip.sourceArtifactId,
       timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame,
@@ -223,6 +226,16 @@ function similarityAt(model: Readonly<CaptionProjection>, clip: Readonly<Project
   const crop = cropWindow(clip, source, frame)
   const cropWidth = crop.r - crop.l, cropHeight = crop.b - crop.t
   const { staging, canvas } = model
+  if (clip.reframe) {
+    // A reframed clip FILLS the canvas: the crop is scaled by the cover factor (`scale=...:force_original_aspect_ratio=increase`) and centred
+    // (`crop=W:H`). There is no staging frame, no foreground band and no backdrop for it.
+    const scale = Math.max(canvas.width / cropWidth, canvas.height / cropHeight)
+    return {
+      scale, source, crop,
+      offsetX: -(cropWidth * scale - canvas.width) / 2 - scale * crop.l,
+      offsetY: -(cropHeight * scale - canvas.height) / 2 - scale * crop.t,
+    }
+  }
   const { foregroundScale, verticalPosition } = model.composition
   // 2. crop -> staging frame (fit, centred)
   const toStaging = Math.min(staging.width / cropWidth, staging.height / cropHeight)

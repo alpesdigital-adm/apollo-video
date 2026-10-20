@@ -15,6 +15,7 @@ import type {
 import type { DirectorDecisionLog } from '../../domain/director-decision.ts'
 import type { PerceptionProducerEnvelope } from '../../domain/perception-producer-envelope.ts'
 import type { ServerPerceptionAssemblyInput, ServerPerceptionSnapshot } from '../../domain/server-perception-snapshot.ts'
+import type { SourceRightsRecord } from '../../domain/director-evidence-rubric.ts'
 
 export interface DirectorRunContext {
   workspaceId: string
@@ -47,6 +48,13 @@ export interface DirectorRunContext {
         consentExpiresAt?: string
       }
   >
+  /**
+   * W64. The current rights of EVERY source the head EditPlan plays (the master and each insert), by artifact, as the database holds them
+   * at claim. Rights are integral: the Director blocks if any of them is not certain, and a source that is not listed here is unknown.
+   * Absent only where there is no store to read (a controlled context), which then states the master's rights through `sourceRights`
+   * alone - every other source is unknown.
+   */
+  timelineSourceRights?: readonly Readonly<{ artifactId: string; rights: SourceRightsRecord }>[]
   transcript: Readonly<{
     id: string
     sourceArtifactId: string
@@ -89,6 +97,11 @@ export interface DirectorRunCommit {
     transcriptId: string
     transcriptHash: string
     sourceArtifactId: string
+    /**
+     * W64. The rights snapshot of every source the plan plays, as the plan was judged on it (`null` ids: the source had none). The commit
+     * re-reads them in its own transaction and refuses the run, with `ASSET_RIGHTS_BLOCKED`, if one moved or is no longer certain.
+     */
+    rights: readonly Readonly<{ artifactId: string; snapshotId: string | null; snapshotHash: string | null }>[]
     ocrEnvelope?: Readonly<{
       id: string
       envelopeHash: string

@@ -26,6 +26,7 @@ import {
 } from '../domain/project-subtitle-configuration.ts'
 import { createSubtitleSegmentOverrideCommandImpact } from '../domain/command-impact.ts'
 import { createSubtitleSegmentOverride } from '../domain/subtitle-segment-override.ts'
+import { REFRAME_SCHEMA_EXAMPLES } from './reframe-examples.ts'
 import { subtitlePresetReference } from '../domain/subtitle-system.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import {
@@ -11339,6 +11340,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       },
       maxVelocityPerSecond: 0.35, maxAccelerationPerSecondSquared: 0.8, safetyMargin: 0.02,
     }],
+    ...REFRAME_SCHEMA_EXAMPLES,
     'apollo://schemas/reframe-plan-request/v2': [{ baseVersionId: 'project-version-reframe-1', format: '9:16' }],
     'apollo://schemas/reframe-plan-request-result/v2': [{ data: {
       schemaVersion: 'reframe-plan-request-result/v2', status: 'review-required', plan: null,
@@ -15330,6 +15332,40 @@ const withStableFormatIds = (value: unknown): unknown => {
   return Object.fromEntries(Object.entries(value as ExampleNode).map(([key, item]) =>
     [key, key === 'formatIds' ? [EXAMPLE_VERTICAL_VARIANT_ID] : withStableFormatIds(item)]))
 }
+// W64: a report born before the rubric (the v2 example, unchanged) and a v4 report whose perception evidence section is stated in full.
+const directorQualityReadExamplesV3: readonly ExampleNode[] = (() => {
+  const kinds = ['transcript-word', 'speaker', 'silence', 'face', 'object', 'shot', 'motion', 'ocr', 'image-insert'] as const
+  const [legacy] = clonedExamples('apollo://schemas/director-quality-report-read/v2')
+  const current = structuredClone(legacy!) as ExampleNode
+  const qualityReport = exampleNode(current, 'data', 'qualityReport')
+  exampleNode(qualityReport, 'qualitySnapshot').contentSchemaVersion = 4
+  const report = exampleNode(qualityReport, 'report')
+  report.schemaVersion = 'director-quality-report/v4'
+  report.perceptionEvidence = {
+    schemaVersion: 'director-perception-evidence/v1',
+    snapshot: { id: `perception-snapshot-${'1'.repeat(40)}`, snapshotHash: '1'.repeat(64), projectVersionId: 'project-version-example-1', timelineHash: '2'.repeat(64), durationMs: 10_000 },
+    policy: {
+      bandPolicy: { schemaVersion: 'confidence-band-policy/v2', policyHash: '3'.repeat(64) },
+      rubric: { schemaVersion: 'director-evidence-rubric/v1', rubricHash: '4'.repeat(64) },
+    },
+    coverage: kinds.map((kind) => ({ kind, state: 'absent', examinedMs: 0, durationMs: 10_000, reasonCode: 'NO_PRODUCER_RUN' })),
+    modalities: kinds.map((kind) => ({
+      modality: kind, tier: 'absent', reasonCode: 'NO_PRODUCER_RUN', rangeMs: 10_000, examinedMs: 0, denseMs: 0, pendingMs: 0,
+      confidence: null, confidenceBasis: 'none', ceilingApplied: false, envelopeIds: [], envelopeCount: 0,
+      observationIds: [], observationCount: 0, observationIdsHash: '5'.repeat(64),
+    })),
+    rights: { certain: true, sources: [{ artifactId: 'artifact-example-1', certain: true, reasonCode: 'RIGHTS_CERTAIN', snapshotId: 'rights-example-1', snapshotHash: '6'.repeat(64) }] },
+    faceWindows: {
+      schemaVersion: 'director-face-window-requests/v1', status: 'planned', reasonCode: null, requiredCount: 1, satisfiedCount: 0, requestedCount: 1,
+      refusedCount: 0, deferredCount: 0, requestLimit: 200, entriesTruncated: false,
+      entries: [{ sourceArtifactId: 'artifact-example-1', startSourceFrame: 0, endSourceFrame: 300, state: 'requested',
+        operationId: 'operation-example-1', idempotencyKey: `dfw-${'7'.repeat(56)}`, replayed: false, reasonCode: null }],
+    },
+    decisions: [{ decisionId: 'decision-layout-inset', decisionType: 'crop', tier: 'absent', band: 'review', confidence: 0.82, evidenceHash: '8'.repeat(64), reasonCodes: ['FACE_EVIDENCE_PENDING'] }],
+    evidenceHash: '9'.repeat(64),
+  }
+  return Object.freeze([legacy!, current])
+})()
 const MULTI_OUTPUT_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> = (() => {
   const annotationRequests = clonedExamples('apollo://schemas/create-review-annotation-request/v2')
   const reviews = clonedExamples('apollo://schemas/project-review/v3')
@@ -15360,6 +15396,9 @@ const MULTI_OUTPUT_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>>
     'apollo://schemas/project-proxy-render-request/v1': [{}, { variantId: EXAMPLE_VERTICAL_VARIANT_ID }],
     'apollo://schemas/project-final-export-request/v2': finalRequests.map((example) => ({ ...example, variantId: EXAMPLE_VERTICAL_VARIANT_ID })),
     'apollo://schemas/project-workspace/v14': workspaces,
+    // W64: the version whose uncertainty `type` also names crop, caption and insert; same examples, one more accepted value.
+    'apollo://schemas/project-workspace/v15': structuredClone(workspaces),
+    'apollo://schemas/director-quality-report-read/v3': directorQualityReadExamplesV3,
   })
 })()
 

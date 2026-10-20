@@ -66,6 +66,15 @@ test('W63a HTTP server perception snapshot: scoped, isolated, honest about cover
       const get = (query = '', who = reader, projectId = world.projectId) => callRoute(NextRequest, snapshotRoute, {
         path: `/v1/projects/${projectId}/perception/snapshot${query}`, params: { projectId }, token: who })
 
+      // W64: the route is READ-ONLY. A Version that plays something and has no stored snapshot is a typed 404 and the read writes
+      // nothing; the snapshot exists because a Director commit (or an explicit materialization, here) wrote it.
+      const unwritten = await get()
+      assert.equal(unwritten.status, 404, unwritten.text)
+      assert.equal(unwritten.payload.error.code, 'SNAPSHOT_NOT_MATERIALIZED')
+      assert.equal(await db.v2ServerPerceptionSnapshot.count({ where: { workspaceId: world.workspaceId } }), 0)
+      await built.service()({ workspaceId: world.workspaceId, projectId: world.projectId })
+      await built.service()({ workspaceId: other.workspaceId, projectId: other.projectId })
+
       // 200: all nine kinds' coverage, server provenance, and exactly the schema the API publishes
       const full = await get()
       assert.equal(full.status, 200, full.text)

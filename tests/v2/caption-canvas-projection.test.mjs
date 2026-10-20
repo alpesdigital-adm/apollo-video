@@ -135,18 +135,45 @@ test('the reframe crop window reproduces, frame by frame, the expression the fil
   assert.ok(parsed, filter)
   const model = projection(PORTRAIT, [clip({ reframe: range })])
   // The picture of the clip on the canvas follows the crop: the window's left edge in source px is what the filter computes.
+  // W66r: a reframed clip FILLS the canvas (cover fit), so what changed here is where the crop lands, not which window it is. Before the
+  // fix the picture was a 170x304 strip centred in a 16:9 band; the assertions that pinned that strip (the visible width of the staged crop,
+  // and the source band at the crop's left edge sitting at the strip's left edge) now pin the fill: the picture is the whole canvas, and
+  // the source band at the crop's left edge sits at the canvas's left edge.
   for (const frame of [0, 1, 37, 99, 100, 101, 160, 219, 220, 299]) {
     const expectedX = evaluateFilterAxis(parsed[3], frame)
-    const strip = clipForegroundOnCanvas(model, 'clip-1', frame)
-    const cropWidth = Number(parsed[1]), cropHeight = Number(parsed[2])
-    const staged = cropWidth * Math.min(1280 / cropWidth, 720 / cropHeight)
-    // the visible window is centred in the staging frame, so its canvas width is fixed by the crop size alone ...
-    near(strip.width * PORTRAIT.width, staged * (540 / 1280), 1e-6, `visible width at ${frame}`)
-    // ... and a source band at the crop's left edge sits at the visible window's left edge on the canvas
+    const picture = clipForegroundOnCanvas(model, 'clip-1', frame)
+    near(picture.width * PORTRAIT.width, PORTRAIT.width, 1e-6, `the picture fills the canvas width at ${frame}`)
+    near(picture.height * PORTRAIT.height, PORTRAIT.height, 1e-6, `the picture fills the canvas height at ${frame}`)
+    // the left edge of the crop window is the left edge of the canvas (the 404x720 crop has the canvas's aspect to within a pixel)
     const probe = { x: expectedX / 1280, y: 0.4, width: 4 / 1280, height: 0.1 }
     const [segment] = sourceRectCanvasSegments(model, probe, 'source-1', { startFrame: frame, endFrame: frame + 1 })
-    near(segment.bounds.x * PORTRAIT.width, strip.x * PORTRAIT.width, CANVAS_TOLERANCE_PX + 3 * SOURCE_TOLERANCE_PX, `left edge at ${frame}`)
+    near(segment.bounds.x * PORTRAIT.width, 0, CANVAS_TOLERANCE_PX + 3 * SOURCE_TOLERANCE_PX, `left edge at ${frame}`)
   }
+})
+
+test('W66r a reframed clip is laid on the canvas by the cover rule; a clip that is not reframed keeps the staging band, in the same projection', () => {
+  const plan = createRenderReframePlan({
+    format: '9:16', variantId: '9:16', fps: 30, durationFrames: 200, source: { width: 1280, height: 720 },
+    ranges: [
+      { clipId: 'clip-1', startFrame: 0, endFrame: 100, interpolation: 'linear', keyframes: [{ frame: 0, crop: { x: 0.2, y: 0, width: 0.31640625, height: 1 } }] },
+      { clipId: 'clip-2', startFrame: 100, endFrame: 200, interpolation: 'linear', keyframes: [{ frame: 100, crop: { x: 0.2, y: 0, width: 0.31640625, height: 1 } }] },
+    ],
+  })
+  const mixed = projection(PORTRAIT, [clip({ timelineOutFrame: 100, reframe: plan.ranges[0] }), clip({ id: 'clip-2', timelineInFrame: 100, timelineOutFrame: 200 })])
+  const reframed = clipForegroundOnCanvas(mixed, 'clip-1', 10)
+  assert.deepEqual({ x: reframed.x, y: reframed.y, width: reframed.width, height: reframed.height }, { x: 0, y: 0, width: 1, height: 1 })
+  // the second clip is the same source, not reframed: today's band, untouched by the first
+  const banded = clipForegroundOnCanvas(mixed, 'clip-2', 110)
+  near(banded.width, 1, 1e-9, 'band width'); near(banded.y * PORTRAIT.height, 328.125, 1e-6, 'band top'); near(banded.height * PORTRAIT.height, 303.75, 1e-6, 'band height')
+  // a point of the source lands where the cover rule puts it: 404x720 -> 540x962.4 (width-limited), centred
+  const scale = Math.max(540 / 404, 960 / 720)
+  const [segment] = sourceRectCanvasSegments(mixed, { x: 0.35, y: 0.2, width: 0.02, height: 0.1 }, 'source-1', { startFrame: 10, endFrame: 11 })
+  near(segment.bounds.x * 540, scale * (0.35 * 1280 - 256), CANVAS_TOLERANCE_PX + 3 * SOURCE_TOLERANCE_PX, 'x on the canvas')
+  near(segment.bounds.y * 960, scale * (0.2 * 720) - (scale * 720 - 960) / 2, CANVAS_TOLERANCE_PX + 3 * SOURCE_TOLERANCE_PX, 'y on the canvas')
+  // the geometry is part of the identity of a projection that has a reframed clip, and of no other
+  const plain = projection(PORTRAIT, [clip({ timelineOutFrame: 100 }), clip({ id: 'clip-2', timelineInFrame: 100, timelineOutFrame: 200 })])
+  assert.notEqual(plain.projectionHash, mixed.projectionHash)
+  assert.equal(projection(PORTRAIT).projectionHash, projection(PORTRAIT, [clip()]).projectionHash)
 })
 
 test('a panning trajectory is bounded by the hull of its end positions: the area never misses a frame in between', () => {

@@ -196,7 +196,7 @@ def validate_consumer(consumer):
               "tests/v2/prisma-perception-producer-admission.integration.mjs", "tests/v2/prisma-perception-producer-worker.integration.mjs",
               "tests/v2/prisma-perception-producer-http.integration.mjs", "tests/v2/prisma-director-ocr.integration.mjs",
               "tests/v2/prisma-temporal-producer.integration.mjs", "tests/v2/prisma-face-producer.integration.mjs",
-              "tests/v2/prisma-server-perception-snapshot.integration.mjs", "tests/v2/prisma-director-server-perception.integration.mjs", "tests/v2/server-perception-snapshot-server.integration.mjs"}
+              "tests/v2/prisma-server-perception-snapshot.integration.mjs", "tests/v2/prisma-director-server-perception.integration.mjs", "tests/v2/prisma-director-perception-evidence.integration.mjs", "tests/v2/server-perception-snapshot-server.integration.mjs"}
     require((mode == "unit" and not args)
             or (mode in ("dashboard", "acquisition") and not args)
             or (mode == "fixture" and len(args) == 1 and args[0] in

@@ -37,6 +37,20 @@ const WRITES_RENDERABLE_SNAPSHOT_ROW = [
   /INSERT\s+INTO\s+"?renderable_plan_snapshots"?/i,
   /insert\s*\(\s*\w+\s*,\s*['"]renderable_plan_snapshots['"]/,
 ]
+/**
+ * A reframe plan record (W66r) binds one variant of one Version to a content-addressed decision. It has two writers and no more: the
+ * planner's repository (the next record of a chain) and the override Command's repository (the records the result Version is born with,
+ * in the same transaction as the Version). A third writer would be a plan nobody decided.
+ */
+export const REFRAME_PLAN_WRITERS = Object.freeze([
+  'infrastructure/prisma/variant-reframe-plan-repository.ts',
+  'infrastructure/prisma/variant-reframe-override-repository.ts',
+])
+const WRITES_REFRAME_PLAN_ROW = [
+  /\.v2VariantReframePlan\s*\.\s*(?:create|createMany|upsert|createManyAndReturn|update|updateMany|delete|deleteMany)\s*\(/,
+  /(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+"?variant_reframe_plans"?/i,
+  /insert\s*\(\s*\w+\s*,\s*['"]variant_reframe_plans['"]/,
+]
 const BUILDS_RETIRED_VERSION = /\bcreateProjectVersion\b/
 const REBUILDS_RETIRED_VERSION = /\brebuildRetiredContractOneVersion\b/
 
@@ -44,6 +58,7 @@ function violationKinds(rel, source) {
   const kinds = []
   if (rel !== VERSION_WRITER && WRITES_VERSION_ROW.some((pattern) => pattern.test(source))) kinds.push('writes a ProjectVersion row outside the shared writer')
   if (rel !== VERSION_WRITER && WRITES_RENDERABLE_SNAPSHOT_ROW.some((pattern) => pattern.test(source))) kinds.push('writes a renderable plan snapshot row outside the shared writer')
+  if (!REFRAME_PLAN_WRITERS.includes(rel) && WRITES_REFRAME_PLAN_ROW.some((pattern) => pattern.test(source))) kinds.push('writes a reframe plan record outside its two writers')
   if (rel !== VERSION_BUILDER && BUILDS_RETIRED_VERSION.test(source)) {
     kinds.push('uses the retired createProjectVersion builder instead of a sealed Version read or the output state transition')
   }

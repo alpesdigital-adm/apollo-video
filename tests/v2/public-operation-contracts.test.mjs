@@ -118,7 +118,7 @@ function parameterMap(operation) {
 }
 
 test('T-FR-241 every public operation has an executable, versioned contract test', async (t) => {
-  assert.equal(FOUNDATION_CAPABILITIES.length, 392)
+  assert.equal(FOUNDATION_CAPABILITIES.length, 395)
   assert.deepEqual(FOUNDATION_CAPABILITIES
     .filter((capability) => capability.id.startsWith('apollo.projects.perception-producer-operations.'))
     .map((capability) => capability.id).sort(), [
@@ -546,7 +546,7 @@ test('T-F4.015 each renderable-plan compiler is reached by its own route and by 
 test('the server perception snapshot capability is a scoped query that answers with server provenance and honest coverage', () => {
   const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.perception.snapshot.read')
   assert.ok(capability)
-  assert.equal(capability.version, '1.0.0')
+  assert.equal(capability.version, '2.0.0')
   assert.equal(capability.operationKind, 'query')
   assert.deepEqual(capability.requiredScopes, ['projects:read'])
   assert.deepEqual(capability.endpoint, { method: 'GET', path: '/v1/projects/{projectId}/perception/snapshot' })

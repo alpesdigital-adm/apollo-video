@@ -8,7 +8,7 @@ import { produceSnapshotEvidence } from './server-perception-pg-world.mjs'
 // Under tsx a static named import of a TypeScript module is not visible to Node (the module runs as CommonJS), so these are dynamic.
 const { createExternalAuditContext } = await import('../../../src/v2/application/authenticate-api-client.ts')
 const { runProjectDirectorService } = await import('../../../src/v2/application/run-project-director.ts')
-const { readServerPerceptionSnapshotService } = await import('../../../src/v2/application/server-perception-snapshots.ts')
+const { ensureServerPerceptionSnapshotService, readServerPerceptionSnapshotService } = await import('../../../src/v2/application/server-perception-snapshots.ts')
 const { stableSerialize } = await import('../../../src/v2/domain/canonical-hash.ts')
 const { createMediaTranscript } = await import('../../../src/v2/domain/media-transcript.ts')
 const { createEvidenceBoundBriefCompiler } = await import('../../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts')
@@ -25,10 +25,11 @@ const { PrismaServerPerceptionSnapshotRepository } = await import('../../../src/
  * Returns the repositories, the Director service over any repository (so a suite can wrap the commit) and the request builder; `request`
  * takes the base Version to direct (the input Version by default, or the head a previous run left).
  */
-export async function seedDirectorSnapshotWorld(db, { aspectRatio = '4:5' } = {}) {
+export async function seedDirectorSnapshotWorld(db, { aspectRatio = '4:5', evidence = true, ocrConfidence, faceRows, uniqueVariant = false } = {}) {
   const suffix = randomUUID().slice(0, 8)
   const workspaceId = `w61-admission-${suffix}`
-  const world = await seedDirectorOcrWorld(db, { suffix, artifactKey: `${workspaceId}/source.mp4`, sourceSha256: sha('a'), byteSize: 1024n, aspectRatio })
+  const world = await seedDirectorOcrWorld(db, { suffix, artifactKey: `${workspaceId}/source.mp4`, sourceSha256: sha('a'), byteSize: 1024n, aspectRatio,
+    ...(uniqueVariant ? { variantId: `w64-variant-${suffix}` } : {}) })
   const manifestId = `w63a-manifest-${suffix}`
   await db.v2MediaArtifactManifest.create({ data: { id: manifestId, workspaceId, artifactId: world.sourceId,
     schemaVersion: 'media-artifact-manifest/v2', manifestHash: sha('b'), recipeId: 'w63a-controlled-source', recipeVersion: '1.0.0',
@@ -57,15 +58,18 @@ export async function seedDirectorSnapshotWorld(db, { aspectRatio = '4:5' } = {}
   world.versionId = inputHead.version.id
   world.editId = inputHead.editPlanSnapshot.id
   const evidenceWorld = { ...world, suffix, sourceSha256: sha('a'), actor: world.actor }
-  const built = await produceSnapshotEvidence(db, evidenceWorld)
+  const built = await produceSnapshotEvidence(db, evidenceWorld, { evidence, ...(ocrConfidence === undefined ? {} : { ocrConfidence }), ...(faceRows === undefined ? {} : { faceRows }) })
   const director = new PrismaDirectorRunRepository(db)
   const snapshots = new PrismaServerPerceptionSnapshotRepository(db)
-  const publicSnapshot = readServerPerceptionSnapshotService({ evidence: new PrismaServerPerceptionEvidenceReader(db), snapshots, clock: () => new Date() })
+  // W64: the public read is READ-ONLY (it serves what a Director commit wrote); the Version a run creates is materialized after its commit.
+  const publicSnapshot = readServerPerceptionSnapshotService({ snapshots, clock: () => new Date() })
+  const ensureSnapshot = ensureServerPerceptionSnapshotService({ evidence: new PrismaServerPerceptionEvidenceReader(db), snapshots, clock: () => new Date() })
   const actorContext = createExternalAuditContext({ clientId: world.clientId, credentialId: `w61-credential-${suffix}`, workspaceId, environment: 'production' })
   const actor = { ...actorContext, scopes: new Set(['projects:write']), authenticationKind: 'bearer', clientKillSwitchEngaged: false,
     workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext: actorContext }
   const counters = new Map()
-  const service = (repository) => runProjectDirectorService({ repository, clock: () => new Date(), createEventId: randomUUID,
+  const service = (repository, extra = {}) => runProjectDirectorService({ repository, clock: () => new Date(), createEventId: randomUUID,
+    materializeSnapshot: (input) => ensureSnapshot(input), ...extra,
     createId: (kind) => `${kind}-w63a-${suffix}-${counters.set(kind, (counters.get(kind) ?? 0) + 1).get(kind)}`,
     compileBrief: createEvidenceBoundBriefCompiler() })
   const request = (key, base = { versionId: world.versionId, baseHash: world.head.version.baseHash }) => ({
@@ -78,5 +82,5 @@ export async function seedDirectorSnapshotWorld(db, { aspectRatio = '4:5' } = {}
     snapshots: await db.v2ProjectSnapshot.count({ where: { projectId: world.projectId } }),
     perception: await db.v2ServerPerceptionSnapshot.count({ where: { workspaceId } }),
   })
-  return Object.freeze({ suffix, workspaceId, world, built, director, snapshots, publicSnapshot, actor, service, request, rowsBefore })
+  return Object.freeze({ suffix, workspaceId, world, built, director, snapshots, publicSnapshot, ensureSnapshot, actor, service, request, rowsBefore })
 }

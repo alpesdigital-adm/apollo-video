@@ -264,6 +264,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         outputSpec: context.outputSpec,
         // Re-read through the same `final` verdict: another State, variant revision or materialization is another input hash.
         outputConsumptionSealHash: source.outputConsumption.sealHash,
+        ...(source.reframeRecordHash ? { reframeRecordHash: source.reframeRecordHash } : {}),
       })
       if (
         immutableInputHash !== context.inputHash ||

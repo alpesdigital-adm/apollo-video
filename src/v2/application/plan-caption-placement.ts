@@ -92,7 +92,8 @@ const FACE_WINDOW_LIST_LIMIT = 200
 function buildProjection(input: CaptionPlacementInput): Readonly<{ projection: Readonly<CaptionProjection> | null; reason?: string }> {
   const videos = input.renderSources.filter((source) => source.mediaType === 'video')
   if (videos.length === 0 || videos.some((source) => !source.probe)) return { projection: null, reason: 'SOURCE_DIMENSIONS_UNKNOWN' }
-  const ranges = new Map((input.reframePlan?.ranges ?? []).map((range) => [range.clipId, range]))
+  // A fallback range carries no crop: the clip is projected as it plays (its own static crop, else the whole frame).
+  const ranges = new Map((input.reframePlan?.ranges ?? []).filter((range) => range.source !== 'fallback').map((range) => [range.clipId, range]))
   try {
     const clips: ProjectionClip[] = input.clips.map((clip) => ({
       id: clip.id, sourceArtifactId: clip.sourceArtifactId, timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame,
