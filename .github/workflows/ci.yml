@@ -769,6 +769,26 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # W68: the journey from an issue chip to a recompiled, re-criticised output. One project, two outputs (9:16 and 16:9), a real
+      # recording, the production proxy-render worker and a real Chromium; the new frames are decoded and measured against the old ones.
+      # The screenshots and the evidence JSON are uploaded for a person; nothing in them is a cookie, a token or a signed URL.
+      - name: Run W68 issue, override and recompile browser journey
+        id: issue-override-ui
+        run: npm run test:e2e:issue-override-ui
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-issue-override-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_ISSUE_OVERRIDE_UI_E2E: "1"
+          APOLLO_ISSUE_OVERRIDE_EVIDENCE_DIR: ${{ runner.temp }}/issue-override-ui
+
+      - name: Publish W68 issue override evidence
+        if: always() && steps.issue-override-ui.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-issue-override-ui-${{ github.sha }}
+          path: ${{ runner.temp }}/issue-override-ui
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Run final export integration against the migrated capture database
         run: |
           set -euo pipefail

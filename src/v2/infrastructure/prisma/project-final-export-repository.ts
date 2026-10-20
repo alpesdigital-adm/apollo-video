@@ -29,6 +29,15 @@ function reframeMatchesApproval(source: Readonly<{ reframePlan?: Readonly<{ refr
   return (source.reframePlan?.reframePlanHash ?? null) === approval.approvedReframePlanHash
 }
 
+/**
+ * W68. A final is made with the very subtitle exceptions its proxy was approved with: the set of the Version's output now must equal the set the
+ * approved proxy review records (both absent counts as equal). Every exception also makes a new Version, which a final never crosses; this guard
+ * is the second, independent reason a final built from a proxy drawn with other exceptions is refused.
+ */
+export function subtitleOverridesMatchApproval(source: Readonly<{ subtitleOverridesHash?: string }>, approval: Readonly<{ approvedSubtitleOverridesHash: string | null }>): boolean {
+  return (source.subtitleOverridesHash ?? null) === approval.approvedSubtitleOverridesHash
+}
+
 const FAILURE_STAGES = new Set([
   'source-read', 'color-plan', 'color-bindings', 'lut-materialization',
   'input-validation', 'rights', 'source-materialization', 'render',
@@ -160,6 +169,12 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
         const hash = (JSON.parse(proxyReview.formatQualityJson) as { reframePlanHash?: unknown }).reframePlanHash
         return typeof hash === 'string' ? hash : null
       })(),
+      // W68. The subtitle exceptions the approved proxy was drawn with (null: drawn with none).
+      approvedSubtitleOverridesHash: (() => {
+        if (typeof proxyReview.formatQualityJson !== 'string') return null
+        const hash = (JSON.parse(proxyReview.formatQualityJson) as { subtitleOverridesHash?: unknown }).subtitleOverridesHash
+        return typeof hash === 'string' ? hash : null
+      })(),
     })
   }
 
@@ -177,7 +192,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     if (!source || source.projectVersionId !== input.projectVersionId) return null
     const approval = await this.readApproval({ ...input, outputVariantId: sourceOutputVariantId(source),
       outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: true })
-    if (!approval || !reframeMatchesApproval(source, approval)) return null
+    if (!approval || !reframeMatchesApproval(source, approval) || !subtitleOverridesMatchApproval(source, approval)) return null
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
   }
 
@@ -222,7 +237,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     if (!source) return null
     const approval = await this.readApproval({ ...input, outputVariantId: sourceOutputVariantId(source),
       outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: false })
-    if (!approval || !reframeMatchesApproval(source, approval)) return null
+    if (!approval || !reframeMatchesApproval(source, approval) || !subtitleOverridesMatchApproval(source, approval)) return null
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
   }
 

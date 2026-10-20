@@ -17,6 +17,7 @@ import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { parseProjectColorPlan } from '../../domain/project-color-plan.ts'
 import { buildRenderElementMap } from '../../domain/review-system.ts'
 import { subtitleAnchorDecisionFor, type SubtitleAnchorPlan } from '../../domain/subtitle-anchor-plan.ts'
+import { applyAssCasing, assPresetStyle, type AssPresetStyle } from '../../domain/subtitle-ass-preset-style.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
 import { FfmpegColorPipelineProcessor } from './ffmpeg-color-pipeline-processor.ts'
@@ -74,6 +75,8 @@ export function buildAssSubtitles(input: {
   const marginHorizontal = Math.round(input.width * 0.07)
   const marginVertical = Math.round(input.height * 0.075)
   let binder: AssBoundaryBinder | undefined
+  // W68. A cue with a `style` exception is drawn with the style of that preset; every other cue keeps `Default`, byte for byte.
+  const presetStyles = new Map<string, AssPresetStyle>()
   const stamps = (start: number, end: number) => (binder ??= assFrameClockBinder(input.fps, input.durationFrames)).timestamps(start, end)
   const events = input.cues.flatMap((cue) => {
     assertAssCueText(cue.text)
@@ -88,7 +91,15 @@ export function buildAssSubtitles(input: {
       const centreX = Math.round((decision.bounds.x + decision.bounds.width / 2) * input.width)
       const centreY = Math.round((decision.bounds.y + decision.bounds.height / 2) * input.height)
       const time = stamps(cue.startFrame, cue.endFrame)
-      return [`Dialogue: 0,${time.start},${time.end},Default,,0,0,0,,{\\an5\\pos(${centreX},${centreY})}${wrapAssText(cue.text)}`]
+      let styleName = 'Default'
+      let text = cue.text
+      if (cue.presetId) {
+        const style = presetStyles.get(cue.presetId) ?? assPresetStyle(cue.presetId, { fontSize, marginHorizontal, marginVertical })
+        presetStyles.set(cue.presetId, style)
+        styleName = style.name
+        text = applyAssCasing(text, style.casing)
+      }
+      return [`Dialogue: 0,${time.start},${time.end},${styleName},,0,0,0,,{\\an5\\pos(${centreX},${centreY})}${wrapAssText(text)}`]
     }
     throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle cue review decision has no drawable bounds')
   })
@@ -108,6 +119,7 @@ export function buildAssSubtitles(input: {
     'Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding',
     `Style: Default,Arial,${fontSize},&H00FFFFFF,&H0038AFE1,&H00111111,&H78000000,-1,0,0,0,100,100,0,0,3,1,0,2,${marginHorizontal},${marginHorizontal},${marginVertical},1`,
     `Style: CTA,Arial,${Math.max(28, Math.round(fontSize * 0.82))},&H00111111,&H00111111,&H00FFFFFF,&H00E1AF38,-1,0,0,0,100,100,0,0,3,2,0,8,${marginHorizontal},${marginHorizontal},${marginVertical},1`,
+    ...[...presetStyles.entries()].toSorted(([left], [right]) => left.localeCompare(right)).map(([, style]) => style.line),
     '',
     '[Events]',
     'Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text',

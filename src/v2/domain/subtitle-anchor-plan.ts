@@ -164,6 +164,13 @@ export interface SubtitleAnchorCueV1 {
   id: string
   startFrame: number
   endFrame: number
+  /**
+   * W68. The band an operator asked THIS cue to be drawn in (an `apply-subtitle-segment-override` position dimension). It is a
+   * request, never an authority: the band still has to be certified free by the same evidence (a pinned band that is occupied or
+   * could not be certified is not drawn and says why), and a pinned cue takes no part in the hysteresis of its neighbours, so
+   * pinning one cue never moves another.
+   */
+  pinnedAnchor?: SubtitleAnchor
 }
 
 const EPSILON = 1e-7

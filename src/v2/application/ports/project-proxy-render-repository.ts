@@ -6,6 +6,7 @@ import type { PerceptionTimeline } from '../../domain/perception-timeline.ts'
 import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
 import type { VariantReframeIssueV1 } from '../../domain/variant-reframe-plan.ts'
 import type { SubtitlePresetId, SubtitlePresetSnapshot } from '../../domain/subtitle-system.ts'
+import type { SubtitleSegmentOverride } from '../../domain/subtitle-segment-override.ts'
 import type { ProxyQualityIssue, ProxyReview } from '../render-workflow.ts'
 
 /**
@@ -118,6 +119,13 @@ export interface ProjectProxyRenderSource {
    */
   reframeIssues?: readonly Readonly<VariantReframeIssueV1>[]
   reframeRecordHash?: string
+  /**
+   * W68. The persisted per-segment subtitle exceptions (head of each segment) of THIS output, and the content address of the ones that
+   * carry a value. They travel with the source so the render and its identity move when an exception does; a variant with none, or whose
+   * every exception was reset, has neither (and keeps the identity it always had).
+   */
+  subtitleOverrides?: readonly Readonly<SubtitleSegmentOverride>[]
+  subtitleOverridesHash?: string
   /**
    * Protected subject evidence already projected onto **this** variant's canvas, as perception
    * persisted it. Without it two of the five format reason codes — `SUBTITLE_SUBJECT_COLLISION`

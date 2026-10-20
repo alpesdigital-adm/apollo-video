@@ -159,6 +159,7 @@ export function enqueueProjectFinalExportService(dependencies: {
       // The `final` verdict this source was read through: the exact Version, State, variant revision and materialization.
       outputConsumptionSealHash: source.outputConsumption.sealHash,
       ...(source.reframeRecordHash ? { reframeRecordHash: source.reframeRecordHash } : {}),
+      ...(source.subtitleOverridesHash ? { subtitleOverridesHash: source.subtitleOverridesHash } : {}),
     })
     const requestFingerprint = calculateVersionHash({
       type: 'project-final-export',

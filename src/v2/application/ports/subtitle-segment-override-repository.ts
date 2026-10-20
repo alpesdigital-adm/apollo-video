@@ -34,6 +34,16 @@ export interface SubtitleSegmentOverrideContext {
   previousOverride: Readonly<SubtitleSegmentOverride> | null
 }
 
+/** The segments of one output of the head Version, with every head exception of that output (W68: what the editor lists). */
+export interface SubtitleSegmentsView {
+  version: Readonly<{ id: string; sequence: number; baseHash: string }>
+  variantId: string
+  fps: number
+  durationFrames: number
+  segments: readonly Readonly<SubtitleSegmentOverrideCompiledSegment>[]
+  overrides: readonly Readonly<SubtitleSegmentOverride>[]
+}
+
 export interface SubtitleSegmentOverridePayload {
   schemaVersion: 1
   variantId: string
@@ -76,6 +86,11 @@ export interface SubtitleSegmentOverrideRepository {
     variantId: string
     segmentId: string
   }): Promise<Readonly<SubtitleSegmentOverrideResult> | null>
+  /**
+   * The compiled segments of one output of the CURRENT Version and its head exceptions. The project must exist in this workspace and the
+   * variant must be an exact member of the sealed State of the head (an aspect ratio is not one), or the read is refused.
+   */
+  readSegments(input: { workspaceId: string; projectId: string; variantId: string }): Promise<Readonly<SubtitleSegmentsView> | null>
   /**
    * Every head override of one variant — what the compiler applies to the cues it
    * produced. Scoped by workspace, project and variant, so a variant never reads

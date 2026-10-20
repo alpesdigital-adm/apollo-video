@@ -4,6 +4,7 @@ import { sha256 } from '@noble/hashes/sha256'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
+import IssueOverridePanel from '@/components/IssueOverridePanel'
 import LogoutButton from '@/components/LogoutButton'
 import SyntheticPhaseGatePanel from '@/components/SyntheticPhaseGatePanel'
 import TransformationReviewPanel from '@/components/TransformationReviewPanel'
@@ -1102,6 +1103,11 @@ function localSignedUrl(value: string): string {
   return url.toString()
 }
 
+/** The sign-in that returns to THIS page: an expired session loses the session, never the place (and the editor keeps its drafts in the browser). */
+function loginUrl(): string {
+  return `/login?next=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`
+}
+
 function clamp01(value: number): number { return Math.min(1, Math.max(0, value)) }
 
 function readableDuration(value: number): string {
@@ -1208,6 +1214,7 @@ export default function ProjectWorkspacePage() {
   const [projectPolicy, setProjectPolicy] = useState<ProjectPolicyOverridesData | null>(null)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
+  const [projectNotFound, setProjectNotFound] = useState(false)
   const [rightsConfirmed, setRightsConfirmed] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle')
@@ -1375,7 +1382,9 @@ export default function ProjectWorkspacePage() {
       for (const result of [workspaceRead, policyRead]) {
         if (result.ok) continue
         if (result.failure.dropped) return
-        if (result.failure.kind === 'auth') { router.replace('/login'); return }
+        if (result.failure.kind === 'auth') { router.replace(loginUrl()); return }
+        // A project of another workspace is not found: the same answer as a project that does not exist, with no detail about either.
+        if (result.failure.kind === 'not-found') { setProjectNotFound(true); throw new Error('Projeto não encontrado neste workspace.') }
         throw new Error(result.failure.message)
       }
       if (!workspaceRead.ok || !policyRead.ok) return
@@ -1418,7 +1427,7 @@ export default function ProjectWorkspacePage() {
         `/v1/projects/${encodeURIComponent(projectId)}/timeline`,
         { headers: { accept: 'application/json' }, cache: 'no-store' },
       )
-      if (response.status === 401) { router.replace('/login'); return }
+      if (response.status === 401) { router.replace(loginUrl()); return }
       const payload = await response.json() as ApiEnvelope<ManualTimelineData>
       if (!response.ok || !payload.data) {
         if (response.status === 428 || response.status === 409) {
@@ -1483,7 +1492,7 @@ export default function ProjectWorkspacePage() {
         { headers: { accept: 'application/json' }, cache: 'no-store' },
       )
       if (response.status === 401) {
-        router.replace('/login')
+        router.replace(loginUrl())
         return
       }
       const payload = await response.json() as ApiEnvelope<{
@@ -1523,7 +1532,7 @@ export default function ProjectWorkspacePage() {
         { headers: { accept: 'application/json' }, cache: 'no-store' },
       )
       if (response.status === 401) {
-        router.replace('/login')
+        router.replace(loginUrl())
         return
       }
       const payload = await response.json() as ApiEnvelope<{
@@ -1564,7 +1573,7 @@ export default function ProjectWorkspacePage() {
       })
       if (!result.ok) {
         if (result.failure.dropped) return
-        if (result.failure.kind === 'auth') { router.replace('/login'); return }
+        if (result.failure.kind === 'auth') { router.replace(loginUrl()); return }
         throw new Error(result.failure.message)
       }
       setSourceCleanups(result.data.cleanups)
@@ -1595,7 +1604,7 @@ export default function ProjectWorkspacePage() {
           },
         )
         if (response.status === 401) {
-          router.replace('/login')
+          router.replace(loginUrl())
           return
         }
         const payload = await response.json() as ApiEnvelope<{
@@ -1636,7 +1645,7 @@ export default function ProjectWorkspacePage() {
         },
       )
       if (response.status === 401) {
-        router.replace('/login')
+        router.replace(loginUrl())
         return
       }
       const payload = await response.json() as ApiEnvelope<{
@@ -1676,7 +1685,7 @@ export default function ProjectWorkspacePage() {
           },
         )
         if (response.status === 401) {
-          router.replace('/login')
+          router.replace(loginUrl())
           return
         }
         const payload = await response.json() as ApiEnvelope<{
@@ -1718,7 +1727,7 @@ export default function ProjectWorkspacePage() {
           },
         )
         if (response.status === 401) {
-          router.replace('/login')
+          router.replace(loginUrl())
           return
         }
         const payload = await response.json() as ApiEnvelope<{
@@ -1802,7 +1811,7 @@ export default function ProjectWorkspacePage() {
         },
       )
       if (response.status === 401) {
-        router.replace('/login')
+        router.replace(loginUrl())
         return
       }
       const payload = await response.json() as ApiEnvelope<{
@@ -1856,7 +1865,7 @@ export default function ProjectWorkspacePage() {
       if (!reviewReadFenceRef.current.isCurrent(readTicket)) return false
       if (!result.ok) {
         if (result.failure.dropped) return false
-        if (result.failure.kind === 'auth') { router.replace('/login'); return }
+        if (result.failure.kind === 'auth') { router.replace(loginUrl()); return }
         // The failure is kept as data, never folded into an empty review: a 409
         // PERSISTENCE_CONFLICT means stored annotations could not be hydrated,
         // and rendering nothing in their place would read as "no annotations".
@@ -1894,7 +1903,7 @@ export default function ProjectWorkspacePage() {
       }, { explicitRetry })
       if (!proxyReviewReadFenceRef.current.isCurrent(readTicket)) return
       if (!result.ok && result.failure.dropped) return
-      if (!result.ok && result.failure.kind === 'auth') { router.replace('/login'); return }
+      if (!result.ok && result.failure.kind === 'auth') { router.replace(loginUrl()); return }
       if (!result.ok) {
         setProxyReview(null)
         setProxyReviewFailure(result.failure)
@@ -2153,7 +2162,7 @@ export default function ProjectWorkspacePage() {
 
   async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(url, { ...init, headers: { accept: 'application/json', ...(init.headers ?? {}) } })
-    if (response.status === 401) { router.replace('/login'); throw new Error('Sessão expirada.') }
+    if (response.status === 401) { router.replace(loginUrl()); throw new Error('Sessão expirada.') }
     const payload = await response.json() as ApiEnvelope<T>
     if (!response.ok || !payload.data) throw new Error(apiError(payload, 'A API recusou a operação.'))
     return payload.data
@@ -2693,7 +2702,7 @@ export default function ProjectWorkspacePage() {
       const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/render-elements?${query.toString()}`, {
         headers: { accept: 'application/json' }, cache: 'no-store', signal: controller.signal,
       })
-      if (response.status === 401) { router.replace('/login'); return }
+      if (response.status === 401) { router.replace(loginUrl()); return }
       const payload = await response.json() as ApiEnvelope<RenderElementHitTestData>
       if (response.status === 404) {
         setReviewElementResolution('unavailable')
@@ -3321,7 +3330,7 @@ export default function ProjectWorkspacePage() {
         },
       )
       if (response.status === 401) {
-        router.replace('/login')
+        router.replace(loginUrl())
         return
       }
       const payload = await response.json() as ApiEnvelope<{
@@ -3395,7 +3404,7 @@ export default function ProjectWorkspacePage() {
         },
       )
       if (response.status === 401) {
-        router.replace('/login')
+        router.replace(loginUrl())
         return
       }
       const payload = await response.json() as ApiEnvelope<{
@@ -3478,7 +3487,7 @@ export default function ProjectWorkspacePage() {
     : undefined
 
   if (loading) return <main className="grid min-h-screen place-items-center bg-[#070707] text-[#8d887f]"><span className="animate-pulse text-sm">Abrindo sala de produção…</span></main>
-  if (!workspace) return <main className="grid min-h-screen place-items-center bg-[#070707] px-6 text-center text-[#c8c2b8]"><div><p>{notice ?? 'Projeto não encontrado.'}</p><button className="mt-4 text-sm text-[#d9ad44]" onClick={() => router.push('/')} type="button">Voltar aos projetos</button></div></main>
+  if (!workspace) return <main className="grid min-h-screen place-items-center bg-[#070707] px-6 text-center text-[#c8c2b8]" data-testid={projectNotFound ? 'project-not-found' : 'project-unavailable'}><div><p>{notice ?? 'Projeto não encontrado.'}</p><button className="mt-4 text-sm text-[#d9ad44]" onClick={() => router.push('/')} type="button">Voltar aos projetos</button></div></main>
 
   return (
     <main className="min-h-screen bg-[#070707] text-[#f3efe7] selection:bg-[#e1af38]/25">
@@ -3658,6 +3667,9 @@ export default function ProjectWorkspacePage() {
                           : issue.message}{issue.evidenceRange ? ` · frames ${issue.evidenceRange.startFrame}–${issue.evidenceRange.endFrame}` : ''}</span>
                       </div>
                     ))}
+                    {[...proxyReview.technicalIssues, ...proxyReview.criticIssues].length > [...proxyReview.technicalIssues, ...proxyReview.criticIssues].filter((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE').length + 4 ? (
+                      <p className="pl-2 text-[9px] leading-4 text-[#8e8980]" data-testid="proxy-review-issues-more">Há mais problemas neste laudo: todos aparecem, com evidência, em Problemas do render.</p>
+                    ) : null}
                   </div>
                 ) : <p className="mt-3 text-[9px] leading-4 text-[#78aa87]">Codec, canvas, duração, mapa e crítica editorial aprovados.</p>}
                 {proxyReview.status === 'warning-ack-required' ? (
@@ -3781,6 +3793,32 @@ export default function ProjectWorkspacePage() {
               <span className="border-l border-white/[0.08] pl-3 font-mono text-[10px] tabular-nums text-[#8e887e]">{frameTimecode(previewFrame, review?.session.fps ?? editingProxy.probe?.fps ?? 30)}</span>
               {previewState === 'error' ? <span className="text-[10px] text-[#d17a7a]">O preview não carregou. Use o download final para validar o arquivo.</span> : null}
             </div>
+          ) : null}
+
+          {workspace.version && outputVariantId ? (
+            <IssueOverridePanel
+              aspectRatio={outputAspectRatio}
+              fps={review?.session.fps ?? editingProxy?.probe?.fps ?? workspace.editPlan?.fps ?? 30}
+              onChanged={async () => {
+                reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
+                const refreshed = await loadWorkspace(true)
+                await loadManualTimeline(true)
+                if (refreshed) await refreshWorkspaceReviews(refreshed)
+              }}
+              onSeekFrame={seekPreviewToFrame}
+              operations={workspace.operations}
+              projectId={projectId}
+              proxyArtifact={proxyReview ? (() => {
+                const record = workspace.media.find((item) => item.artifactId === proxyReview.proxyArtifactId)
+                return { artifactId: proxyReview.proxyArtifactId, sha256: record?.sha256 ?? null }
+              })() : null}
+              reads={reads}
+              review={proxyReview}
+              reviewFailure={proxyReviewFailure ? (proxyReviewFailure.code ?? `HTTP ${proxyReviewFailure.status}`) : null}
+              reviewLoading={proxyReviewLoading}
+              variantId={outputVariantId}
+              version={workspace.version}
+            />
           ) : null}
 
           {manualTimeline?.timeline.clips.length ? (

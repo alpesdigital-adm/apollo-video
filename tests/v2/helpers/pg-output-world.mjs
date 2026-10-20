@@ -156,11 +156,11 @@ const TRANSACTION_OPTIONS = Object.freeze({ maxWait: 5000, timeout: 60_000 })
  */
 export async function persistRecording(client, {
   workspaceId, projectId, actor, slug, createdAt = new Date().toISOString(), durationFrames = 60, nativeFps = 30,
-  sourceSha256, sourceByteSize, sourceKey, rights = {}, persistReceipt = true,
+  sourceSha256, sourceByteSize, sourceKey, rights = {}, persistReceipt = true, width, height,
 }) {
   const scope = { workspaceId, projectId }
   const names = recordingNames(slug)
-  const receipt = controlledNormalization(projectId, scope, { slug, createdAt, nativeFps, durationFrames, sourceSha256, sourceByteSize, sourceKey })
+  const receipt = controlledNormalization(projectId, scope, { slug, createdAt, nativeFps, durationFrames, sourceSha256, sourceByteSize, sourceKey, ...(width === undefined ? {} : { width, height }) })
   const document = receipt.document
   if (!persistReceipt) return Object.freeze({ slug, names, receipt, sourceRights: null, proxyRights: null })
   const audit = materializeActorAuditContext(actor)

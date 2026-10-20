@@ -69,6 +69,11 @@ export interface ProxyFormatQualityVerdict {
   reportHash: string
   /** W67. The seal of the independent MP4 critic's report on the delivered file; absent when no such critic ran. */
   mp4Evidence?: Readonly<Mp4EvidenceSealV1>
+  /**
+   * W68. The set of per-segment subtitle exceptions this proxy was drawn with (the hash the render input and the recipe carry); absent when it
+   * was drawn with none that carry a value. The final is made from the same set: an approval does not cover another one.
+   */
+  subtitleOverridesHash?: string
 }
 
 export interface ProxyReview {
@@ -206,7 +211,7 @@ export function evaluateRenderedProxy(input: {
   subtitleSafeRegion?: readonly [number, number, number, number]
   criticIssues?: readonly Readonly<ProxyQualityIssue>[]
   warningsAcknowledged?: boolean
-  formatCritic?: Readonly<{ outputSpecId: string; placementPlanHash?: string | null; reframePlanHash?: string | null; reframeIssues?: readonly Readonly<VariantReframeIssueV1>[]; reframeRecordHash?: string | null; subjects?: readonly Readonly<FormatSubjectEvidenceV1>[]; densityLimit?: number; subtitleAnchorPlan?: Readonly<SubtitleAnchorPlan> | null; captionPixelIssues?: readonly Readonly<CaptionPixelIssueV1>[]; mp4PixelIssues?: readonly Readonly<Mp4PixelIssueV1>[]; mp4Evidence?: Readonly<Mp4EvidenceSealV1> | null }>
+  formatCritic?: Readonly<{ outputSpecId: string; placementPlanHash?: string | null; reframePlanHash?: string | null; reframeIssues?: readonly Readonly<VariantReframeIssueV1>[]; reframeRecordHash?: string | null; subtitleOverridesHash?: string | null; subjects?: readonly Readonly<FormatSubjectEvidenceV1>[]; densityLimit?: number; subtitleAnchorPlan?: Readonly<SubtitleAnchorPlan> | null; captionPixelIssues?: readonly Readonly<CaptionPixelIssueV1>[]; mp4PixelIssues?: readonly Readonly<Mp4PixelIssueV1>[]; mp4Evidence?: Readonly<Mp4EvidenceSealV1> | null }>
 }): Readonly<ProxyReview> {
   const spec = PROXY_OUTPUT_SPECS[input.format as ProxyOutputFormat]
   assertDomain(Boolean(spec), 'INVALID_OUTPUT_SPEC', 'Proxy format is not supported')
@@ -337,6 +342,7 @@ export function evaluateRenderedProxy(input: {
             explanation: formatReport.explanation,
             reportHash: formatReport.reportHash,
             ...(formatReport.mp4Evidence ? { mp4Evidence: formatReport.mp4Evidence } : {}),
+            ...(input.formatCritic?.subtitleOverridesHash ? { subtitleOverridesHash: input.formatCritic.subtitleOverridesHash } : {}),
           }),
         }
       : {}),

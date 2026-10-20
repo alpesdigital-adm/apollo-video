@@ -51,6 +51,8 @@ export type SubtitleAnchorDecisionV3 = Readonly<SubtitleAnchorDecisionV1 & {
   /** Half-open window the band assessments were measured over: the cue, extended so a decision cannot be undone one cue later. */
   stabilityWindow: Readonly<{ startFrame: number; endFrame: number }>
   bandAssessments: Readonly<Record<SubtitleAnchor, SubtitleAnchorBandAssessmentV1>>
+  /** W68. The band an operator pinned the cue to (an override); absent for every cue the plan decided on its own. */
+  pinnedAnchor?: SubtitleAnchor
 }>
 export type FaceClearanceEvidenceV1 = Readonly<{
   schemaVersion: typeof FACE_CLEARANCE_EVIDENCE_SCHEMA
@@ -182,8 +184,15 @@ export function deriveCueDecisionV3(input: Readonly<{
   lastChangeFrame: number | null
   policy: Readonly<SubtitleAnchorPolicyV1>
   fps: number
+  /** W68. The band the operator pinned this cue to, or null. Decided by the same evidence; takes no part in hysteresis. */
+  pinned?: SubtitleAnchor | null
 }>): Readonly<{ decision: Readonly<SubtitleAnchorDecisionV3>; lastChangeFrame: number | null }> {
   const { cue, assessments, bands, previous, policy } = input
+  const pinned = input.pinned ?? null
+  assertDomain(
+    pinned === null || (SUBTITLE_ANCHOR_PREFERENCE as readonly string[]).includes(pinned),
+    'INVALID_RENDER_INPUT', `Subtitle anchor pin of cue ${cue.id} is not a subtitle band`,
+  )
   const strict: SubtitleAnchor[] = [], relaxed: SubtitleAnchor[] = []
   let anyUnknown = false
   for (const anchor of SUBTITLE_ANCHOR_PREFERENCE) {
@@ -208,7 +217,37 @@ export function deriveCueDecisionV3(input: Readonly<{
   }
   let anchor: SubtitleAnchor | null = null
   let disposition: SubtitleAnchorDispositionV3 = 'placed'
-  if (previous !== null && strict.includes(previous)) anchor = previous
+  if (pinned !== null) {
+    // W68. The operator's band, judged by the evidence exactly like any other: certified free (and nothing else on it) draws it;
+    // a non-critical overlap draws it with the warning that records the overlap; anything else leaves the cue out, with the reason.
+    // The hysteresis never chooses for a pinned cue (it neither keeps `previous` nor gets updated by it).
+    if (strict.includes(pinned)) anchor = pinned
+    else if (relaxed.includes(pinned)) {
+      anchor = pinned
+      addIssue('SUBTITLE_ANCHOR_FALLBACK', 'warning',
+        `The ${pinned} band requested for cue ${cue.id} was used and overlaps non-critical evidence.`,
+        assessments[pinned].blockerIds)
+    } else {
+      assertDomain(
+        policy.onNoSafeRegion === 'suppress-cue' || policy.onNoSafeRegion === 'omit-and-list',
+        'INVALID_RENDER_INPUT', `The requested subtitle band is not safe for cue ${cue.id}`, { cueId: cue.id },
+      )
+      const severity = policy.onNoSafeRegion === 'omit-and-list' ? 'warning' as const : 'hard' as const
+      const listed = severity === 'warning' ? ' It was omitted from the render and is listed for review.' : ''
+      const pinnedAssessment = assessments[pinned]
+      if (pinnedAssessment.face.state === 'unknown') {
+        disposition = 'review-required'
+        addIssue('FACE_PERCEPTION_UNAVAILABLE', severity,
+          `Facial clearance could not be certified for the ${pinned} band requested for cue ${cue.id} (${pinnedAssessment.face.reasons.slice(0, 6).join(', ') || 'no reason recorded'}); the cue was not drawn and needs review.${listed}`,
+          [...pinnedAssessment.blockerIds, ...notFreeFaceIds])
+      } else {
+        disposition = 'blocked'
+        addIssue('NO_SAFE_SUBTITLE_REGION', severity,
+          `The ${pinned} band requested for cue ${cue.id} collides with protected evidence; the cue was suppressed instead of covering it.${listed}`,
+          [...pinnedAssessment.blockerIds, ...notFreeFaceIds])
+      }
+    }
+  } else if (previous !== null && strict.includes(previous)) anchor = previous
   else if (strict.length > 0) anchor = strict[0]!
   else if (relaxed.length > 0) {
     anchor = (previous !== null && relaxed.includes(previous)) ? previous : relaxed[0]!
@@ -238,8 +277,8 @@ export function deriveCueDecisionV3(input: Readonly<{
     }
   }
   const suppressed = anchor === null
-  const stable = anchor !== null && previous !== null && anchor === previous
-  const changedFromPrevious = anchor !== null && previous !== null && anchor !== previous
+  const stable = pinned === null && anchor !== null && previous !== null && anchor === previous
+  const changedFromPrevious = pinned === null && anchor !== null && previous !== null && anchor !== previous
   if (changedFromPrevious && input.lastChangeFrame !== null && cue.startFrame - input.lastChangeFrame < policy.minFramesBetweenChanges) {
     addIssue('SUBTITLE_ANCHOR_UNSTABLE', 'warning',
       `Cue ${cue.id} had to move from ${previous} to ${anchor} only ${cue.startFrame - input.lastChangeFrame} frames after the previous change.`,
@@ -256,8 +295,11 @@ export function deriveCueDecisionV3(input: Readonly<{
     disposition,
     stabilityWindow: Object.freeze({ startFrame: input.stabilityWindow.startFrame, endFrame: input.stabilityWindow.endFrame }),
     bandAssessments: assessments,
+    // Present only for a pinned cue, so a plan without pins keeps the content address it always had.
+    ...(pinned !== null ? { pinnedAnchor: pinned } : {}),
   })
-  const lastChangeFrame = anchor !== null && (changedFromPrevious || previous === null) ? cue.startFrame : input.lastChangeFrame
+  // A pinned cue never starts a hysteresis epoch: the cues around it are decided as if it were not there.
+  const lastChangeFrame = pinned === null && anchor !== null && (changedFromPrevious || previous === null) ? cue.startFrame : input.lastChangeFrame
   return Object.freeze({ decision, lastChangeFrame })
 }
 
@@ -345,10 +387,11 @@ export function createSubtitleAnchorPlanV3(input: Readonly<{
         criticalBlockerIds: unique(hits.filter((blocker) => blocker.critical).map((blocker) => blocker.id)),
       })]
     })) as Record<SubtitleAnchor, SubtitleAnchorBandAssessmentV1>
-    const derived: Readonly<{ decision: Readonly<SubtitleAnchorDecisionV3>; lastChangeFrame: number | null }> = deriveCueDecisionV3({ cue, stabilityWindow, assessments: Object.freeze(assessments), bands, previous, lastChangeFrame, policy, fps: input.fps })
+    const derived: Readonly<{ decision: Readonly<SubtitleAnchorDecisionV3>; lastChangeFrame: number | null }> = deriveCueDecisionV3({ cue, stabilityWindow, assessments: Object.freeze(assessments), bands, previous, lastChangeFrame, policy, fps: input.fps, pinned: cue.pinnedAnchor ?? null })
     decisions.push(derived.decision as SubtitleAnchorDecisionV3)
     lastChangeFrame = derived.lastChangeFrame
-    if (derived.decision.anchor !== null) previous = derived.decision.anchor
+    // A pinned cue is the operator's choice, not the plan's: the next cue is decided as if it were not there.
+    if (derived.decision.anchor !== null && cue.pinnedAnchor === undefined) previous = derived.decision.anchor
   }
   const body = Object.freeze({
     schemaVersion: 'subtitle-anchor-plan/v3' as const,
@@ -511,13 +554,14 @@ export function validateSubtitleAnchorPlanV3(plan: Readonly<SubtitleAnchorPlanV3
     }
     const derived: Readonly<{ decision: Readonly<SubtitleAnchorDecisionV3>; lastChangeFrame: number | null }> = deriveCueDecisionV3({
       cue, stabilityWindow: window, assessments: recorded.bandAssessments, bands, previous, lastChangeFrame, policy, fps: plan.fps,
+      pinned: recorded.pinnedAnchor ?? null,
     })
     assertDomain(
       calculateCanonicalHash(derived.decision) === calculateCanonicalHash(recorded),
       'INVALID_RENDER_INPUT', `Subtitle anchor decision ${recorded.cueId} does not follow from its band assessments`,
     )
     lastChangeFrame = derived.lastChangeFrame
-    if (derived.decision.anchor !== null) previous = derived.decision.anchor
+    if (derived.decision.anchor !== null && recorded.pinnedAnchor === undefined) previous = derived.decision.anchor
   }
   assertDomain(
     calculateCanonicalHash(plan.issues) === calculateCanonicalHash(sortedIssues(plan.decisions)),

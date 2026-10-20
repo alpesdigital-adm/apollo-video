@@ -27,7 +27,7 @@ import {
 import { createSubtitleSegmentOverrideCommandImpact } from '../domain/command-impact.ts'
 import { createSubtitleSegmentOverride } from '../domain/subtitle-segment-override.ts'
 import { REFRAME_SCHEMA_EXAMPLES } from './reframe-examples.ts'
-import { subtitlePresetReference } from '../domain/subtitle-system.ts'
+import { SUBTITLE_PRESET_IDS, subtitlePresetReference } from '../domain/subtitle-system.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import {
   MVP_CORE_ACCEPTANCE_CRITERIA,
@@ -13434,6 +13434,28 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       { data: subtitleSegmentOverrideResultExample, meta: { apiVersion: 'v1' } },
       { data: subtitleSegmentOverrideResetResultExample, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/subtitle-segments-response/v1': [{
+      data: {
+        version: { id: 'project-version-example-subtitle-4', sequence: 4, baseHash: 'f'.repeat(64) },
+        variantId: EXAMPLE_VERTICAL_VARIANT_ID, fps: 30, durationFrames: 2380,
+        presets: SUBTITLE_PRESET_IDS.map((presetId) => subtitlePresetReference(presetId)),
+        segments: [
+          {
+            segmentId: subtitleSegmentOverrideExample.segmentId, startFrame: 90, endFrame: 150, text: 'O dono some do negócio em 90 dias', state: 'overridden',
+            override: {
+              overrideId: subtitleSegmentOverrideExample.id, overrideHash: subtitleSegmentOverrideExample.overrideHash, action: 'set', dimensions: subtitleSegmentOverrideExample.dimensions,
+              protected: true, previousOverrideId: null, createdAt,
+            },
+            effective: { text: 'O dono some do negócio em 90 dias.', visible: true, pinnedAnchor: 'upper-third', presetId: null },
+          },
+          {
+            segmentId: 'subtitle-cue-example-cta', startFrame: 2200, endFrame: 2380, text: 'Chame no WhatsApp', state: 'inherited', override: null,
+            effective: { text: 'Chame no WhatsApp', visible: true, pinnedAnchor: null, presetId: null },
+          },
+        ],
+      },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/subtitle-segment-override-response/v1': [
       { data: { result: subtitleSegmentOverrideResultExample }, meta: { apiVersion: 'v1' } },
       { data: { result: null }, meta: { apiVersion: 'v1' } },

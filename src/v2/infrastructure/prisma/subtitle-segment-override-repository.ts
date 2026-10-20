@@ -11,6 +11,7 @@ import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
 import { renderOutputReferences } from '../../domain/output-variant-references.ts'
+import { requireOutputVariant } from '../../domain/output-consumption.ts'
 import { childCommandOf } from '../../domain/project-output-state-transition.ts'
 import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import {
@@ -18,6 +19,7 @@ import {
   type SubtitleSegmentOverride,
 } from '../../domain/subtitle-segment-override.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { carryVariantReframePlans } from './variant-reframe-plan-repository.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
@@ -148,8 +150,40 @@ function segmentsOf(editPlan: Record<string, unknown>, variantId: string): reado
   return Object.freeze(segments)
 }
 
+type Reader = PrismaClient | Prisma.TransactionClient
+
+/**
+ * Every head exception of one variant, rebuilt through its own constructor (a hand-edited row cannot survive). Scoped by workspace,
+ * project and variant, so a variant never reads another variant's exceptions. The compiler, the render sources and the editor read
+ * the same list.
+ */
+export async function readSubtitleSegmentOverrideHeads(
+  client: Reader,
+  input: Readonly<{ workspaceId: string; projectId: string; variantId: string }>,
+): Promise<readonly Readonly<SubtitleSegmentOverride>[]> {
+  const heads = await client.v2SubtitleSegmentOverrideHead.findMany({
+    where: { workspaceId: input.workspaceId, projectId: input.projectId, variantId: input.variantId },
+    select: { overrideId: true },
+  })
+  if (heads.length === 0) return Object.freeze([])
+  const rows = await client.v2SubtitleSegmentOverride.findMany({
+    where: {
+      workspaceId: input.workspaceId, projectId: input.projectId, variantId: input.variantId,
+      id: { in: heads.map((head) => head.overrideId) },
+    },
+    orderBy: [{ startFrame: 'asc' }, { segmentId: 'asc' }],
+  })
+  if (rows.length !== heads.length) throw new DomainError('PERSISTENCE_CONFLICT', 'A subtitle segment override head names an override that is not stored')
+  return Object.freeze(rows.map((row) => overrideOf(row)))
+}
+
 export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentOverrideRepository {
-  constructor(private readonly client: PrismaClient = getV2PostgresClient()) {}
+  // An explicit field, not a parameter property: the render source reader imports this module and runs under type stripping.
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
+  }
 
   async findIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string }) {
     const command = await this.client.v2EditCommand.findUnique({
@@ -232,25 +266,34 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
     })
   }
 
+  async readSegments(input: { workspaceId: string; projectId: string; variantId: string }) {
+    const project = await this.client.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId } })
+    if (!project?.currentVersionId) return null
+    const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersionId })
+    if (!parent) return null
+    // The variant must be an exact member of the sealed State of the head BEFORE anything else about it is read.
+    requireOutputVariant(parent.state, input.variantId)
+    const editPlan = parse(operationalBundlePlanV3(parent).contentJson, 'subtitle segments EditPlan')
+    const durationFrames = Number(editPlan.durationFrames)
+    const fps = Number(editPlan.fps)
+    if (!Number.isSafeInteger(durationFrames) || durationFrames < 0 || !Number.isFinite(fps) || fps <= 0) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Subtitle segments render context is incomplete')
+    }
+    return Object.freeze({
+      version: Object.freeze({ id: parent.version.id, sequence: parent.version.sequence, baseHash: parent.version.baseHash }),
+      variantId: input.variantId, fps, durationFrames,
+      segments: segmentsOf(editPlan, input.variantId),
+      overrides: await readSubtitleSegmentOverrideHeads(this.client, input),
+    })
+  }
+
   async readCurrent(input: { workspaceId: string; projectId: string; variantId: string; segmentId: string }) {
     const chain = await this.readHeadChain(input)
     return chain.currentRow ? hydrate(chain.currentRow, false) : null
   }
 
   async listCurrentByVariant(input: { workspaceId: string; projectId: string; variantId: string }) {
-    const heads = await this.client.v2SubtitleSegmentOverrideHead.findMany({
-      where: { workspaceId: input.workspaceId, projectId: input.projectId, variantId: input.variantId },
-      select: { overrideId: true },
-    })
-    if (heads.length === 0) return Object.freeze([])
-    const rows = await this.client.v2SubtitleSegmentOverride.findMany({
-      where: {
-        workspaceId: input.workspaceId, projectId: input.projectId, variantId: input.variantId,
-        id: { in: heads.map((head) => head.overrideId) },
-      },
-      orderBy: [{ startFrame: 'asc' }, { segmentId: 'asc' }],
-    })
-    return Object.freeze(rows.map((row) => overrideOf(row)))
+    return readSubtitleSegmentOverrideHeads(this.client, input)
   }
 
   async commitOrReplay(
@@ -308,6 +351,11 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
           where: { projectId_workspaceId_variantId_segmentId: headKey },
           create: { ...headKey, overrideId: input.subtitleOverride.id, updatedAt: new Date(input.subtitleOverride.createdAt) },
           update: { overrideId: input.subtitleOverride.id, updatedAt: new Date(input.subtitleOverride.createdAt) },
+        })
+        // W68. This Command changes no crop: every output keeps the reframe plan it had on the base Version.
+        await carryVariantReframePlans(tx, {
+          workspaceId: command.workspaceId, projectId: command.projectId, fromVersionId: command.baseVersionId, toVersionId: bundleVersion.id,
+          variantIds: input.bundle.state.document.entries.map((entry) => entry.variantId), createdAt: new Date(input.subtitleOverride.createdAt),
         })
         const updated = await tx.v2Project.updateMany({
           where: {

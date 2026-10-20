@@ -177,6 +177,11 @@ export interface DirectedSubtitleCue {
    * text drops them.
    */
   sourceWordIndices?: readonly number[]
+  /**
+   * W68. The subtitle preset an operator's `style` exception draws THIS cue with. Never part of a compiled EditPlan: it is set only on
+   * the render copy of the cue, from the persisted exception of the output being rendered.
+   */
+  presetId?: SubtitlePresetId
 }
 
 export interface DirectedTransition {
