@@ -36,11 +36,17 @@ export function assPresetStyleName(presetId: SubtitlePresetId): string {
   return `Preset-${presetId}`
 }
 
+/** The libass outline (BorderStyle 1) or box padding (BorderStyle 3) of a preset's style, in px: the room a line needs beside its text. */
+export function assPresetOutlineWidth(presetId: SubtitlePresetId, fontSize: number): number {
+  const preset = readSubtitlePreset(presetId)
+  return preset.background.shape !== 'none' ? 1 : Math.max(1, Math.round(fontSize * preset.stroke.widthEm))
+}
+
 export function assPresetStyle(presetId: SubtitlePresetId, metrics: Readonly<{ fontSize: number; marginHorizontal: number; marginVertical: number }>): AssPresetStyle {
   const preset = readSubtitlePreset(presetId)
   const boxed = preset.background.shape !== 'none'
   const bold = preset.typography.weight >= 700 ? -1 : 0
-  const outlineWidth = boxed ? 1 : Math.max(1, Math.round(metrics.fontSize * preset.stroke.widthEm))
+  const outlineWidth = assPresetOutlineWidth(presetId, metrics.fontSize)
   const fields = [
     assPresetStyleName(presetId), 'Arial', metrics.fontSize,
     assColour(preset.highlight.inactiveColor),

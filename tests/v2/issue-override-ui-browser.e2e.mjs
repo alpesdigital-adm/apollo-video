@@ -17,7 +17,7 @@ import { CUES, SCENE, runProxyWorkerOnce, seedIssueOverrideWorld } from './helpe
  *
  * Per output: a caption issue chip is opened and its evidence read, an override Command is applied from the chip, the proxy of THAT output
  * only is rendered again, the critic runs again on the new pixels, and the new frames are measured against the old ones; a reset returns the
- * decoded frame to the inherited one. For 16:9 a hard CAPTION_PLACEMENT_MISMATCH (a two-line caption in a wide band) is fixed by a shorter
+ * decoded frame to the inherited one. For 16:9 a hard CAPTION_PLACEMENT_MISMATCH (a text exception too long for the two lines of the wide band, seeded by the world) is fixed by a shorter
  * text; for 9:16 a manual reframe is set and reset. Negatives: expired session (draft kept), another workspace's URL, stale base, replay,
  * cancel during the recompile, an attempt to acknowledge a block, and the proof that nothing was accepted by clicking.
  */
@@ -61,7 +61,7 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
   let failure
   try {
     /* ------------------------------------------------------------------ world, servers, baseline renders ------------------------------------------------- */
-    const world = await seedIssueOverrideWorld({ db, artifactRoot, suffix, ffmpegPath })
+    const world = await seedIssueOverrideWorld({ db, artifactRoot, suffix, ffmpegPath, wideOverflow: true })
     const username = `w68-ui-${suffix}`, password = `W68-${suffix}-secure-passphrase`
     const environmentFor = (clientId) => ({
       APOLLO_API_ENVIRONMENT: 'production', APOLLO_AUTH_MODE: 'bootstrap', APOLLO_ALLOW_BOOTSTRAP_AUTH: 'true', APOLLO_UI_BOOTSTRAP_ROLE: 'operator',
@@ -145,7 +145,7 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
     }
     assert.equal(workerFailures.length, 0, workerFailures.join('\n'))
     const wide = baseline['16x9'], tall = baseline['9x16']
-    assert.equal(wide.review.status, 'blocked', 'the wide baseline is blocked by a real pixel mismatch (a two-line caption does not fit the wide band)')
+    assert.equal(wide.review.status, 'blocked', 'the wide baseline is blocked by a real pixel mismatch (the seeded text does not fit the two lines of the wide band)')
     assert.ok(issuesOf(wide.review).some((issue) => issue.code === 'CAPTION_PLACEMENT_MISMATCH' && issue.severity === 'hard' && issue.elementIds.includes('subtitle:cue-1')))
     assert.equal(tall.review.status, 'warning-ack-required')
     assert.equal(await decisionCount(), 0)
@@ -315,7 +315,9 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       assert.notEqual(fixedReview.status, 'blocked')
       // The approval of a proxy names the set of exceptions it was drawn with (the final export refuses another set); the baseline render was drawn with none.
       assert.match(fixedReview.formatQuality.subtitleOverridesHash ?? '', /^[a-f0-9]{64}$/, 'the review of a render with an exception names the set')
-      assert.equal(wide.review.formatQuality.subtitleOverridesHash, undefined, 'the baseline render was drawn with none')
+      assert.match(wide.review.formatQuality.subtitleOverridesHash ?? '', /^[a-f0-9]{64}$/, 'the baseline render was drawn with the over-long text exception the world seeded')
+      assert.notEqual(fixedReview.formatQuality.subtitleOverridesHash, wide.review.formatQuality.subtitleOverridesHash, 'and the fix is another set of exceptions')
+      assert.equal(tall.review.formatQuality.subtitleOverridesHash, undefined, 'the untouched output was drawn with none')
       const fixedFrame = await frameAt(fixProxy, cueMid(CUE1)), fixedReference = await frameAt(fixProxy, 5)
       const clustersAfterText = changedClusters(fixedReference, fixedFrame)
       assert.ok(clustersAfterText.length >= 1 && clustersWithin(clustersAfterText, bottom), `the fixed caption sits inside the bottom band on the decoded pixels: ${serialize(clustersAfterText)} vs ${serialize(bottom)}`)

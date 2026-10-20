@@ -17,7 +17,9 @@ import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { parseProjectColorPlan } from '../../domain/project-color-plan.ts'
 import { buildRenderElementMap } from '../../domain/review-system.ts'
 import { subtitleAnchorDecisionFor, type SubtitleAnchorPlan } from '../../domain/subtitle-anchor-plan.ts'
-import { applyAssCasing, assPresetStyle, type AssPresetStyle } from '../../domain/subtitle-ass-preset-style.ts'
+import { applyAssCasing, assPresetOutlineWidth, assPresetStyle, type AssPresetStyle } from '../../domain/subtitle-ass-preset-style.ts'
+import { canonicalCaptionText, captionFontPx, captionTextWidthPx, layoutCaption } from '../../domain/caption-text-layout.ts'
+import { readSubtitlePreset, resolveSubtitleMvpFormat, resolveSubtitleRenderMetrics } from '../../domain/subtitle-system.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
 import { FfmpegColorPipelineProcessor } from './ffmpeg-color-pipeline-processor.ts'
@@ -39,7 +41,11 @@ function assertContained(root: string, candidate: string): void {
   if (rel.startsWith('..') || isAbsolute(rel)) throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial render work path escaped its root')
 }
 
-function wrapAssText(value: string, maxCharacters = 20): string {
+/**
+ * CTA overlays keep their fixed-width wrap: they are not subtitle-band captions and no certified band exists for them. A CAPTION is laid out
+ * from the band the placement plan certified (`layoutCaption`), never by a character count.
+ */
+function wrapCtaText(value: string, maxCharacters = 28): string {
   assertAssCueText(value)
   const lines: string[] = []
   let line = ''
@@ -54,6 +60,25 @@ function wrapAssText(value: string, maxCharacters = 20): string {
   return lines.slice(0, 2).join('\\N')
 }
 
+/**
+ * The geometry every caption of a render is drawn with, derived from the placement plan that certified its bands (single geometry): the
+ * font is the preset's own size at this canvas (reduced only when the certified band is too short for `maxLines` lines of it) and a line
+ * may take the width of the band. The plan must describe this canvas, or the render does not start.
+ */
+export function deriveCaptionGeometry(plan: Readonly<SubtitleAnchorPlan>, canvas: Readonly<{ width: number; height: number }>): Readonly<{
+  fontPx: number; maxLines: number; bandWidthPx: number; bandHeightPx: number
+}> {
+  if (plan.canvas.width !== canvas.width || plan.canvas.height !== canvas.height) {
+    throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle anchor plan was decided on another canvas than the one being drawn')
+  }
+  const preset = readSubtitlePreset(plan.presetId)
+  const metrics = resolveSubtitleRenderMetrics(preset, resolveSubtitleMvpFormat(plan.format), canvas.height)
+  const bandWidthPx = plan.bands.bottom.width * canvas.width
+  const bandHeightPx = plan.bands.bottom.height * canvas.height
+  const maxLines = preset.lineBreaking.maxLines
+  return Object.freeze({ fontPx: captionFontPx({ metrics, bandHeightPx, maxLines }), maxLines, bandWidthPx, bandHeightPx })
+}
+
 export function buildAssSubtitles(input: {
   width: number
   height: number
@@ -65,13 +90,18 @@ export function buildAssSubtitles(input: {
   /** Runtime cues require a v2 review decision. The old `cue.anchor` is never a fallback. */
   anchorPlan?: Readonly<SubtitleAnchorPlan> | null
 }): string {
-  const fontSize = Math.max(
+  // The CTA keeps the canvas-proportional size it always had; the CAPTIONS are sized from the band the plan certified.
+  const ctaBaseFontSize = Math.max(
     32,
     Math.min(
       72,
       Math.round(Math.min(input.width * 0.059, input.height * 0.067)),
     ),
   )
+  const captionGeometry = input.cues.length > 0 && input.anchorPlan
+    ? deriveCaptionGeometry(input.anchorPlan, { width: input.width, height: input.height })
+    : null
+  const fontSize = captionGeometry?.fontPx ?? ctaBaseFontSize
   const marginHorizontal = Math.round(input.width * 0.07)
   const marginVertical = Math.round(input.height * 0.075)
   let binder: AssBoundaryBinder | undefined
@@ -92,20 +122,27 @@ export function buildAssSubtitles(input: {
       const centreY = Math.round((decision.bounds.y + decision.bounds.height / 2) * input.height)
       const time = stamps(cue.startFrame, cue.endFrame)
       let styleName = 'Default'
-      let text = cue.text
+      let text = canonicalCaptionText(cue.text)
+      let outlinePx = 1
       if (cue.presetId) {
         const style = presetStyles.get(cue.presetId) ?? assPresetStyle(cue.presetId, { fontSize, marginHorizontal, marginVertical })
         presetStyles.set(cue.presetId, style)
         styleName = style.name
+        outlinePx = assPresetOutlineWidth(cue.presetId, fontSize)
         text = applyAssCasing(text, style.casing)
       }
-      return [`Dialogue: 0,${time.start},${time.end},${styleName},,0,0,0,,{\\an5\\pos(${centreX},${centreY})}${wrapAssText(text)}`]
+      // Lines come from the measured width of the text against the band the plan certified; every line is drawn (nothing is cut).
+      const layout = layoutCaption({
+        text, fontPx: fontSize, maxLines: captionGeometry!.maxLines,
+        maxWidthPx: captionTextWidthPx(captionGeometry!.bandWidthPx, outlinePx),
+      })
+      return [`Dialogue: 0,${time.start},${time.end},${styleName},,0,0,0,,{\\an5\\pos(${centreX},${centreY})}${layout.lines.join('\\N')}`]
     }
     throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle cue review decision has no drawable bounds')
   })
   const ctaEvents = (input.ctaOverlays ?? []).map((overlay) => {
     const time = stamps(overlay.startFrame, overlay.endFrame)
-    return `Dialogue: 1,${time.start},${time.end},CTA,,0,0,0,,{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.1)})}${wrapAssText(overlay.text, 28)}`
+    return `Dialogue: 1,${time.start},${time.end},CTA,,0,0,0,,{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.1)})}${wrapCtaText(overlay.text, 28)}`
   })
   return [
     '[Script Info]',
@@ -118,7 +155,7 @@ export function buildAssSubtitles(input: {
     '[V4+ Styles]',
     'Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding',
     `Style: Default,Arial,${fontSize},&H00FFFFFF,&H0038AFE1,&H00111111,&H78000000,-1,0,0,0,100,100,0,0,3,1,0,2,${marginHorizontal},${marginHorizontal},${marginVertical},1`,
-    `Style: CTA,Arial,${Math.max(28, Math.round(fontSize * 0.82))},&H00111111,&H00111111,&H00FFFFFF,&H00E1AF38,-1,0,0,0,100,100,0,0,3,2,0,8,${marginHorizontal},${marginHorizontal},${marginVertical},1`,
+    `Style: CTA,Arial,${Math.max(28, Math.round(ctaBaseFontSize * 0.82))},&H00111111,&H00111111,&H00FFFFFF,&H00E1AF38,-1,0,0,0,100,100,0,0,3,2,0,8,${marginHorizontal},${marginHorizontal},${marginVertical},1`,
     ...[...presetStyles.entries()].toSorted(([left], [right]) => left.localeCompare(right)).map(([, style]) => style.line),
     '',
     '[Events]',
@@ -143,12 +180,12 @@ export function assertEditorialAssEmission(input: Pick<EditorialRenderInput,
     const plan = input.placementPlan?.subtitleAnchorPlan
     const decision = plan ? subtitleAnchorDecisionFor(plan, cue.id) : null
     if (decision?.suppressed) continue
-    if (!wrapAssText(cue.text)) throw new DomainError('INVALID_RENDER_INPUT', 'Drawable ASS text is empty')
+    if (!canonicalCaptionText(cue.text)) throw new DomainError('INVALID_RENDER_INPUT', 'Drawable ASS text is empty')
     assertAssFrameInterval(cue.startFrame, cue.endFrame, input.fps, input.durationFrames)
   }
   for (const overlay of input.ctaOverlays ?? []) {
     assertAssCueText(overlay.text)
-    if (!wrapAssText(overlay.text, 28)) throw new DomainError('INVALID_RENDER_INPUT', 'Drawable ASS text is empty')
+    if (!wrapCtaText(overlay.text, 28)) throw new DomainError('INVALID_RENDER_INPUT', 'Drawable ASS text is empty')
     assertAssFrameInterval(overlay.startFrame, overlay.endFrame, input.fps, input.durationFrames)
   }
 }

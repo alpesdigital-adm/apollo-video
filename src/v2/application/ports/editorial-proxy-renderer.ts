@@ -40,13 +40,18 @@ import type { ProjectColorPlan } from '../../domain/project-color-plan.ts'
 // 1.13.0 (final recipe only, W65b): a final records the caption certification it was admitted under - the pinned policy digest and
 // the receipt of what was burned (and how each band was certified) and what was omitted and listed for review - and its pre-render
 // identity binds that policy. The renderer and the pixels do not change, so the renderer version and the proxy recipe stay.
+// 1.17.0 (W69 tail / W70 prep): a caption is laid out FROM the band the placement plan certified (caption-text-layout/v1): the font is
+// the preset's own size at the canvas, a line breaks by the measured width of its text against the band (not at a fixed 20 characters),
+// and the lines come out as the text needs them. At 16:9 the old 36 px font asked for ~74 rows of a 56-row band, so any caption over
+// 20 characters drew taller than the band and the W65 critic blocked it. The same cue list now draws different pixels (a smaller
+// font, other line breaks), so a proxy or final of 1.16.0/1.17.0/1.14.0 must not be reused for it. Proxy recipe 1.18.0, final 1.15.0.
 // These affect pixels; renderer digest and both recipe versions invalidate previous reuse.
-export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.16.0'
-export const EDITORIAL_PROXY_RECIPE_VERSION = '1.17.0'
+export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.17.0'
+export const EDITORIAL_PROXY_RECIPE_VERSION = '1.18.0'
 // 1.14.0 (final recipe only, integration of W65b with S3/e17b9188): the integration's final recipe 1.10.0 hands the renderer the same
 // materialized placement and reframe plan the approved proxy was drawn from; the W65b lineage reached 1.13.0 without that change. The
 // merged final carries both, so it must not be mistaken for a final of either lineage: its recipe is 1.14.0.
-export const EDITORIAL_FINAL_RECIPE_VERSION = '1.14.0'
+export const EDITORIAL_FINAL_RECIPE_VERSION = '1.15.0'
 
 /** Absolute path + digest of one asset a drawable placement is allowed to read. */
 export interface EditorialPlacementAsset {

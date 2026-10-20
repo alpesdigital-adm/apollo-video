@@ -42,6 +42,12 @@ export const CUES = Object.freeze([
   Object.freeze({ id: 'cue-2', startFrame: 50, endFrame: 90, text: 'Segunda legenda', anchor: 'bottom' }),
   Object.freeze({ id: 'cue-3', startFrame: 105, endFrame: 140, text: 'Terceira legenda', anchor: 'bottom' }),
 ])
+/**
+ * A caption in capitals (wider glyphs; within the 200 characters an exception may carry) that does not fit the two lines of the band at 16:9: the layout draws it in full, it
+ * overflows the band, and the pixel critic blocks it. It is how a REAL hard block is produced now that an ordinary caption of any length up to two lines
+ * fits (before the layout was sized from the band, every caption over 20 characters blocked at 16:9).
+ */
+export const OVERFLOW_CAPTION = 'ESTA LEGENDA É PROPOSITALMENTE LONGA DEMAIS PARA CABER NAS DUAS LINHAS DA FAIXA DE LEGENDAS DESTE FORMATO: ELA TRANSBORDA, NENHUMA PALAVRA É CORTADA E O CRÍTICO PRECISA REPROVAR A LEGENDA.'
 export const FACE_WINDOW = Object.freeze({ startSourceFrame: 0, endSourceFrame: 100 })
 
 const CLIENT_SCOPES = Object.freeze(['projects:read', 'projects:write', 'projects:approve', 'artifacts:read', 'operations:cancel', 'media:write'])
@@ -84,7 +90,12 @@ async function tenant(db, suffix, label) {
   return { workspaceId, clientId, issued, token: issued.token, actor }
 }
 
-export async function seedIssueOverrideWorld({ db, artifactRoot, suffix, ffmpegPath }) {
+/**
+ * `wideOverflow`: the 16:9 output starts with a subtitle exception (a text on cue-1) that is too long for its band, so its first render is the
+ * hard block the issue-to-override journey fixes. The exception is applied by the production Command service before any render; the 9:16 output
+ * is untouched. (The block used to come for free - every caption over 20 characters overflowed the 16:9 band - and that was the defect.)
+ */
+export async function seedIssueOverrideWorld({ db, artifactRoot, suffix, ffmpegPath, wideOverflow = false }) {
   const owner = await tenant(db, suffix, 'owner')
   const stranger = await tenant(db, suffix, 'stranger')
   const scene = SCENE
@@ -113,9 +124,21 @@ export async function seedIssueOverrideWorld({ db, artifactRoot, suffix, ffmpegP
   })
   const faces = sourceWindowHarness(db, { suffix: `w68${suffix}`, workspaceId: owner.workspaceId, clientId: owner.clientId, projectId: seeded.projectId, sourceId: source.artifactId, actor: owner.actor })
   const windowEnvelope = await faces.publish('cover', FACE_WINDOW, (frame) => standInDetectorRows(scene, frame))
+  let current = lut.version
+  if (wideOverflow) {
+    const { applySubtitleSegmentOverrideService } = await import('../../../src/v2/application/subtitle-segment-overrides.ts')
+    const { PrismaSubtitleSegmentOverrideRepository } = await import('../../../src/v2/infrastructure/prisma/subtitle-segment-override-repository.ts')
+    const applied = await applySubtitleSegmentOverrideService({
+      repository: new PrismaSubtitleSegmentOverrideRepository(db), createId: (kind) => `w68-${suffix}-seed-${kind}-${randomUUID()}`, clock: () => new Date(),
+    })({
+      workspaceId: owner.workspaceId, projectId: seeded.projectId, baseVersionId: lut.version.id, baseHash: lut.version.baseHash, variantId: seeded.wideVariantId,
+      segmentId: CUES[0].id, dimensions: [{ kind: 'text', text: OVERFLOW_CAPTION }], actor: owner.actor, idempotencyKey: `w68-${suffix}-seed-overflow`,
+    })
+    current = applied.version
+  }
   return Object.freeze({
     owner, stranger, scene, source, projectId: seeded.projectId, wideVariantId: seeded.wideVariantId, verticalVariantId: seeded.verticalVariantId,
-    headVersionId: lut.version.id, headVersionHash: lut.version.baseHash, windowEnvelopeHash: windowEnvelope.envelopeHash, suffix,
+    headVersionId: current.id, headVersionHash: current.baseHash, windowEnvelopeHash: windowEnvelope.envelopeHash, suffix,
   })
 }
 
