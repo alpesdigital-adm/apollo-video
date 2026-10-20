@@ -263,3 +263,61 @@ test('the segments read refuses a stranger and answers from the repository view'
   await assert.rejects(read({ workspaceId: 'workspace-w68', projectId: 'project-w68', variantId: 'ab' }), (error) => error.code === 'INVALID_ARGUMENT')
   assert.equal(calls.length, 2, 'a malformed variant never reaches the repository')
 })
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+const { deriveEditorialRenderGeometry } = await import('../../src/v2/application/derive-editorial-render-geometry.ts')
+const { projectProxyRenderInputHash } = await import('../../src/v2/application/project-render-sources.ts')
+
+const sealedSource = (overrides) => ({
+  projectId: 'project-w68', projectVersionId: 'version-1', editPlanSnapshotId: 'snapshot-1', editPlanHash: 'a'.repeat(64),
+  editPlan: {
+    fps: 30, durationFrames: 300, overlayTracks: [], videoTracks: [],
+    subtitleTracks: [{ id: 'track-1', presetId: 'kinetic', cues: CUES.map((cue) => ({ ...cue, anchor: 'bottom' })) }],
+  },
+  format: '16:9', outputConsumption: { seal: { variantId: VARIANT }, sealHash: 'b'.repeat(64) },
+  sourceArtifactId: 'source-1', sourceManifestId: 'manifest-1', sourceArtifactKey: 'k', sourceSha256: 'c'.repeat(64),
+  renderSources: [{ artifactId: 'source-1', manifestId: 'manifest-1', artifactKey: 'k', sha256: 'c'.repeat(64), byteSize: 10, mediaType: 'video', container: 'mp4', role: 'source-master', probe: { width: 1280, height: 720 } }],
+  originalFileName: 'f.mp4', uploadReceivedAt: '2026-10-19T00:00:00.000Z', criticIssues: [],
+  ...(overrides ? { subtitleOverrides: overrides, subtitleOverridesHash: subtitleOverrideSetHash(overrides, VARIANT) } : {}),
+})
+const geometryOf = (source) => deriveEditorialRenderGeometry({
+  source, canvas: { width: 960, height: 540 }, workspaceId: 'workspace-w68', projectId: 'project-w68', clips: [], clock: () => new Date('2026-10-19T00:00:00.000Z'),
+})
+
+test('the one geometry derivation draws the exceptions: hidden cues leave the render and its plan, text and style travel with the cue, a pin is recorded', async () => {
+  const overrides = [
+    exception('cue-a', { startFrame: 20, endFrame: 50 }, [{ kind: 'text', text: 'fala corrigida' }, { kind: 'position', anchor: 'top' }, { kind: 'style', presetId: 'caps-stroke', presetVersion: 1, presetHash: subtitlePresetHash('caps-stroke') }]),
+    exception('cue-b', { startFrame: 100, endFrame: 130 }, [{ kind: 'visibility', visible: false }]),
+  ]
+  const plain = await geometryOf(sealedSource())
+  const drawn = await geometryOf(sealedSource(overrides))
+  assert.equal(plain.subtitleOverrideReceipt, null)
+  assert.deepEqual(plain.subtitleCues.map((cue) => cue.id), ['cue-a', 'cue-b', 'cue-c'])
+  assert.deepEqual(drawn.subtitleCues.map((cue) => [cue.id, cue.text, cue.presetId ?? null]), [['cue-a', 'fala corrigida', 'caps-stroke'], ['cue-c', 'terceira fala', null]])
+  assert.deepEqual(drawn.placementPlan.subtitleAnchorPlan.decisions.map((decision) => decision.cueId), ['cue-a', 'cue-c'], 'a hidden cue is not planned either')
+  assert.equal(drawn.placementPlan.subtitleAnchorPlan.decisions.find((decision) => decision.cueId === 'cue-a').pinnedAnchor, 'top')
+  assert.ok(!('pinnedAnchor' in drawn.placementPlan.subtitleAnchorPlan.decisions.find((decision) => decision.cueId === 'cue-c')))
+  assert.deepEqual(drawn.subtitleOverrideReceipt.hiddenCueIds, ['cue-b'])
+  assert.equal(drawn.subtitleOverrideReceipt.overridesHash, subtitleOverrideSetHash(overrides, VARIANT))
+  assert.notEqual(drawn.placementPlan.placementPlanHash, plain.placementPlan.placementPlanHash)
+  // exceptions that were all reset are the render that never had one
+  const reset = [exception('cue-a', { startFrame: 20, endFrame: 50 }, [], { action: 'reset', previousOverrideId: 'override-previous-0003' })]
+  const afterReset = await geometryOf(sealedSource(reset))
+  assert.equal(afterReset.subtitleOverrideReceipt, null)
+  assert.equal(afterReset.placementPlan.placementPlanHash, plain.placementPlan.placementPlanHash)
+  assert.deepEqual(afterReset.subtitleCues, plain.subtitleCues)
+})
+
+test('the exceptions that carry a value are part of what a render is; none, or all reset, keeps the identity of every earlier render', () => {
+  const live = [exception('cue-a', { startFrame: 20, endFrame: 50 }, [{ kind: 'text', text: 'outra fala' }])]
+  const reset = [exception('cue-a', { startFrame: 20, endFrame: 50 }, [], { action: 'reset', previousOverrideId: 'override-previous-0004' })]
+  const hashes = {
+    none: projectProxyRenderInputHash({ source: sealedSource(), colorPipelineBindings: [] }),
+    live: projectProxyRenderInputHash({ source: sealedSource(live), colorPipelineBindings: [] }),
+    other: projectProxyRenderInputHash({ source: sealedSource([exception('cue-a', { startFrame: 20, endFrame: 50 }, [{ kind: 'text', text: 'mais outra fala' }])]), colorPipelineBindings: [] }),
+  }
+  assert.equal(new Set(Object.values(hashes)).size, 3)
+  assert.equal(subtitleOverrideSetHash(reset, VARIANT), null)
+  assert.equal(projectProxyRenderInputHash({ source: sealedSource(reset), colorPipelineBindings: [] }), hashes.none)
+})

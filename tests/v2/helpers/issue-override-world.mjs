@@ -26,12 +26,11 @@ const { PrismaProjectLutSelectionRepository } = await import('../../../src/v2/in
  * own (reframe-gt-oracle.mjs), written by the real V9 decoder into sealed windows.
  */
 /**
- * The generator's scene: one person at x = 0.20, who steps right to x = 0.30 in six frames (a speed the 9:16 crop cannot follow: 0.5 per second
- * against the policy's 0.35) and stays there. The whole step fits inside one crop window, so a manual crop CAN keep the subject, which is what an
- * editor fixes by hand. `kind: 'face'` is what the stand-in detector reports.
+ * The generator's scene: one person (a 0.1 x 0.3 face, in the upper part of the picture and inside the 9:16 safe area) at x = 0.20, who steps right to
+ * x = 0.30 in six frames and stays there. Once the PUBLISHED clearance dilation is applied the face occupies the top, upper-third and center caption
+ * bands and leaves lower-third and bottom free, so a caption pinned to an occupied band is refused and one pinned lower is granted.
+ * `kind: 'face'` is what the stand-in detector reports.
  */
-// The generator's usual face (0.1 x 0.3 of the frame) in the upper part of the picture (inside the 9:16 safe area): once the published clearance dilation is applied it occupies the top,
-// upper-third and center caption bands and leaves lower-third and bottom free, so a caption pinned there is refused and one pinned lower is granted.
 const smallFace = (x) => [x, 0.1, x + 0.1, 0.4]
 export const SCENE = Object.freeze({
   sourceFrames: 150,
