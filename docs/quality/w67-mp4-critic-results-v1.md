@@ -150,3 +150,32 @@ O que a execução mostra além do placar:
 - **A exclusão não escondia uma falha deste crítico.** Os dois detectores trataram o retrato gravado na cédula como um rosto: V9 achou a caixa humana em 720 de 720 quadros, retail-0004 também (720 de 720, mas com 360 detecções sem relação com a caixa, todas no 16:9), e a projeção por registro bateu com a construção (IoU mediana 0,786). Por isso a legenda de defeito caiu "sobre o rosto" e foi marcada.
 - **Limite que isso evidencia:** o crítico não distingue um rosto de uma representação de rosto. Um retrato impresso, um cartaz ou uma tela com rosto passam a ser regiões protegidas; é o comportamento conservador (protege mais, não menos), mas significa que "rosto" aqui é "o que os detectores acham que é rosto". Isso é a razão técnica pela qual R6 não é uma regra do crítico e sim uma regra de escolha de fotos, e o motivo de eu ter tratado a cédula como depiction; o resultado de sensibilidade diz só que, tratada como foto de rosto, ela também é medida de forma exata.
 - O corpus registrado (2 fotos, escolhidas com a exclusão R6 post hoc) e a foto excluída dão o mesmo veredito qualitativo; isso **não** valida a escolha das fotos nem torna R6 uma regra pré-registrada.
+
+## 9. Emenda pós-revisão: o final falha fechado, a proveniência do detector, o código depois da corrida registrada
+
+Pedida pela revisão do coordenador (Astra/Opus); commits `50570fbd` (código e testes) e `312a1275` (merge de `origin/main` 11823b72).
+
+**Falha aberta achada na revisão.** Quando a ponte do OpenVINO caía, o crítico engolia o erro e deixava os quadros `unknown` (`ffmpeg-mp4-pixel-critic.ts`); `unknown` era só aviso (`mp4-pixel-quality.ts`) e tudo o que não fosse bloqueado era aprovado (`format-quality-critic.ts`, worker final). Um OpenVINO caído entregava o final, contra o que os comentários do worker diziam. O mesmo valia para um crítico não ligado (só ligava com as 7 variáveis `APOLLO_V2_PIXEL_ORACLE_*`).
+
+**Regra agora** (`src/v2/domain/mp4-export-gate.ts`, aplicada pelo worker final ao relatório verificado, além do `selectExportableVariants`):
+
+| bloqueio | quando | pode ser reconhecido? |
+| --- | --- | --- |
+| `MP4_ORACLE_FAILED` | o relatório traz uma falha do oráculo (lote não rodou), com ou sem tinta | **nunca** |
+| `MP4_ORACLE_MODEL_MISSING` | o relatório não fixa nenhum modelo | **nunca** |
+| `MP4_FACE_ORACLE_UNREADABLE_UNDER_INK` | há tinta de legenda/CTA em quadros que o oráculo não conseguiu ler | **nunca** |
+| `MP4_FACE_EVIDENCE_ABSENT_UNDER_INK` | há tinta em quadros sem nenhuma evidência de rosto (o oráculo leu e não viu rosto, nem na fonte projetada) | só com reconhecimento explícito |
+| `MP4_CRITIC_NOT_CONFIGURED` | nenhum crítico ligado ao final | só com reconhecimento explícito |
+
+O reconhecimento é um registro de quem aceitou, quando (instante UTC canônico) e por quê (≥ 10 caracteres): `mp4ExportAcknowledgement` no serviço do worker, vindo da implantação por três variáveis, todas ou nenhuma (`APOLLO_V2_MP4_CRITIC_ACK_ACTOR`, `…_ACK_AT`, `…_ACK_REASON`); malformado ou parcial lança erro. Ele é copiado para a mensagem do validador `FINAL_MP4_CRITIC` da tentativa. **Efeito de implantação:** um worker final sem as 7 variáveis do OpenVINO e sem o reconhecimento **não entrega mais nenhum final**. A revisão de proxy continua só avisando (`MP4_PIXEL_CRITIC_UNAVAILABLE`, `unknown` como aviso): é consultiva, e o final é que fecha.
+
+**Provas** (`tests/v2/project-final-export.test.mjs`, `tests/v2/mp4-export-gate.test.mjs`; worker real, armazenamento falso, zero chamadas de promoção/anexo/catálogo quando bloqueado):
+
+- ponte caída (com e sem tinta, com e sem reconhecimento): nada promovido; a mensagem traz `MP4_ORACLE_FAILED (… BRIDGE_EXIT_NONZERO)` e o relatório selado fica guardado;
+- crítico não ligado: bloqueado; com reconhecimento é entregue e o validador registra "acknowledged by … at …: …"; reconhecimento malformado (ator vazio, instante sem milissegundos, motivo curto, campo a mais) não entrega;
+- tinta sobre quadros ilegíveis: bloqueada, mesmo com reconhecimento; tinta sobre quadros sem rosto: bloqueada, entregue só com reconhecimento;
+- **mutação** (no teste, sem tocar o repositório): uma cópia do worker, em diretório temporário, sem a regra "crítico não ligado" ou sem a regra "gate sobre o relatório", **entrega** o mesmo final que o worker real recusa; e, trocando a linha no worker real, 3 testes falham (conferido à mão antes de restaurar). O teste achou um defeito real na hora (`new Date('2026-13-40…').toISOString()` lançava `RangeError` em vez de recusar), já corrigido.
+
+**Proveniência do detector na projeção.** Cada região protegida `source-projection` do relatório selado agora traz `sourceModels` (qual detector produziu o rosto da fonte que ela projeta); `measureSubject` devolve também o índice do rosto de origem de cada projeção mantida, o que vale quando uma projeção anterior sai do quadro. A suíte sintética com o renderer real confere o campo.
+
+**O código depois da corrida registrada (declaração).** Três arquivos congelados mudaram depois da corrida registrada e da de sensibilidade: `mp4-pixel-geometry.ts` (devolve `projectedSourceFaceIndices`), `mp4-pixel-quality.ts` (só o tipo: `sourceModels` opcional) e `ffmpeg-mp4-pixel-critic.ts` (preenche `sourceModels`). Nada da lógica de detecção, de tolerância ou de veredito mudou. Consequências: (1) os SHA-256 de código do manifesto `w67-mp4-critic-corpus-v1.json` **deixam de bater** com a cabeça atual, então `corpus-run.mjs` **recusa rodar** o corpus registrado nesta cabeça; reproduzir a corrida registrada exige o commit `ab3e4918`; (2) os relatórios de uma nova corrida teriam hashes diferentes (campo novo), sem mudar quais quadros são marcados; (3) **o corpus registrado não foi rodado de novo** na cabeça nova: a evidência de detecção continua sendo a corrida `w67-calibration-run1-4fcf3a8c`, e a suíte sintética com o renderer real foi refeita na cabeça nova (§10). Uma nova corrida registrada sob este código seria um novo protocolo com novo congelamento.
