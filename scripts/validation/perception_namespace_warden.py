@@ -115,7 +115,10 @@ def verified_metadata(pid):
         return None
     owner = credentials(pid)
     after = identity(pid)
-    require(after is not None and key(before) == key(after), "identity changed during status read")
+    if after is None:
+        # The process exited between the two stat reads: a disappearance, exactly like a first-read ENOENT. It is not a change of identity.
+        return None
+    require(key(before) == key(after), "identity changed during status read")
     return {**after, **owner}
 
 
@@ -130,7 +133,9 @@ def marker_facts(pid, expected, run_id):
                        for value in raw.split(b"\0"))
     del raw
     after = verified_metadata(pid)
-    require(after is not None and key(before) == key(after) and before["uids"] == after["uids"]
+    if after is None:
+        return None  # exited while its environment was read: a disappearance, not a credential change
+    require(key(before) == key(after) and before["uids"] == after["uids"]
             and before["gids"] == after["gids"], "marker credentials changed")
     return {"identity": after, "runMarked": run_marked, "knownMarker": known_marker,
             "attestation": "privileged-proc-environ-identity-recheck/v1"}
@@ -901,7 +906,9 @@ def init_main(expected_unshare):
         require(report["nodeExitCode"] == 0, "inner Node failed")
     except BaseException as error:
         report["errors"].append({"stage": report["order"][-1] if report["order"] else "startup",
-                                 "type": type(error).__name__, "code": getattr(error, "errno", None)})
+                                 "type": type(error).__name__, "code": getattr(error, "errno", None),
+                                 # Names the fixed guard that raised, never its free text (CI run 39446701464 attempt 1 recorded only "RuntimeError").
+                                 **({"guardCode": guard_code(error)} if type(error) is RuntimeError else {})})
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         cleanup_deadline = min(deadline, time.monotonic() + 25)
@@ -970,7 +977,22 @@ CARRIER_GUARD_CODES = {
     "sudo carrier executable grew": "CARRIER_EXECUTABLE_GREW",
     "sudo carrier executable changed during authentication": "CARRIER_EXECUTABLE_CHANGED",
     "sudo carrier facts changed before publication": "CARRIER_PUBLICATION_FACTS_CHANGED",
+    "marker identity mismatch": "MARKER_IDENTITY_MISMATCH",
+    "marker credentials changed": "MARKER_CREDENTIALS_CHANGED",
+    "marker read outside product credentials": "MARKER_OUTSIDE_PRODUCT_CREDENTIALS",
+    "owner missing before hello": "OBSERVER_OWNER_MISSING",
+    "invalid snapshot cursor": "OBSERVER_SNAPSHOT_CURSOR",
+    "namespace inventory exceeds bound": "NAMESPACE_INVENTORY_BOUND",
+    "init interrupted": "INIT_INTERRUPTED",
+    "owner died without authenticated finish": "OWNER_DIED_WITHOUT_FINISH",
+    "inner Node failed": "INNER_NODE_FAILED",
 }
+
+
+def guard_code(error):
+    # A stable name for the guard that raised: the table's code, else a digest of its (fixed, code-constant) message, never the text itself.
+    message = str(error)
+    return CARRIER_GUARD_CODES.get(message) or "GUARD_" + hashlib.sha256(message.encode("utf-8", "replace")).hexdigest()[:12]
 
 
 def carrier_diagnostic_fact(value):

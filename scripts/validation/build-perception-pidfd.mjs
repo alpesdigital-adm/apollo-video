@@ -17,6 +17,7 @@ export function buildEnvironmentEvidence(context) {
   // Both Maps already enforce the observer's 16,384-identity bounds. Preserve
   // its sanitized before/recheck/guard facts; no new /proc/environment read.
   return { environmentDenials: [...(context?.environmentDenials.values() ?? [])],
+    settledEnvironmentDenials: [...(context?.settledEnvironmentDenials?.values() ?? [])],
     terminalEnvironmentRechecks: [...(context?.terminalEnvironmentRechecks.values() ?? [])] }
 }
 export async function buildPidfd({ compiler, timeout, headers, env = process.env } = {}) {
