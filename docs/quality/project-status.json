@@ -6,7 +6,7 @@
     "total": 1259,
     "source": "TODO.md"
   },
-  "evidenceBaseCommit": "f837c33a63d6e5aedc772ed16fd3b28cb5523140",
+  "evidenceBaseCommit": "c65c31dcf5c63b325cf789e833e2177e0787b49d",
   "coverage": {
     "unit": "todo-section",
     "total": 250,
@@ -1918,20 +1918,24 @@
         "65ee578c6695-1",
         "fa2bbfa8f082-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
-      "integration": "not-integrated",
-      "validation": "none",
+      "state": "pendente-validacao",
+      "construction": "implemented",
+      "integration": "main",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "W65 e W66 já estão no head integrado (fora de main), então o critic por formato não depende mais delas. O que falta é do próprio W67: corpus independente com GT adjudicado antes do run (a tentativa v2 parou em STOP por quotas de múltiplas faces, development 0/2 e evaluation 1/2; o lote v3 é só metadata, sem direitos individuais verificados) e o critic sobre os frames do MP4 renderizado de cada formato."
+          "kind": "deployment",
+          "text": "Pré-requisito de implantação: nenhuma configuração define as 7 variáveis APOLLO_V2_PIXEL_ORACLE_* (oráculos OpenVINO V9 + retail-0004). Sem elas todo final de produção fica bloqueado com MP4_CRITIC_NOT_CONFIGURED; o reconhecimento por ambiente é recusado em produção."
         },
         {
           "kind": "validation",
-          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+          "text": "Prova controlada pré-registrada (524755c2/5838b3ae): 2 fotos do split de calibração V5 com caixas humanas do Open Images, 20 saídas, 24/24 unidades exatas, 0 falso seguro, 0 falso positivo, 0 unknown (run w67-calibration-run1-4fcf3a8c). N=1 render sobre fotos paradas: prova o mecanismo, não taxa populacional. A regra R6 foi escrita depois de olhar os candidatos (declarado post hoc; sensibilidade da foto excluída 12/12). retail-0004 perdeu o rosto em 360 quadros de uma foto (V9 cobriu): a independência existe no papel e é fraca na prática. Código congelado mudou depois do run registrado (união, fatos por amostra) sem medição nova. A suíte de pixels OpenVINO não roda no CI hospedado (KNOWN_UNRUN)."
+        },
+        {
+          "kind": "implementation",
+          "text": "Olhos fora de escopo (sem GT de olhos). O crítico não distingue rosto de representação de rosto. Adjudicação humana do corpus pendente do proprietário."
         },
         {
           "kind": "deployment",
@@ -2002,10 +2006,52 @@
           "ref": "Apollo/w61-70-20261008/w67-v3-metadata-lot-v1-3c4870df/result.json",
           "role": "implementation",
           "scope": "Metadata-only W67v3 PASS:14sinteticos receipt6f598837a8b0eddf28a03e6bea24e39d45c7b06a5f1f1055b4e245b8bf3cc320; extracao922IDs permitidos receipt184abdd768cc95c91f4696150a5910fc71975509e450cf0365ac13cc2febb6d8, FP44c0c4910c26f068630c9b576ace09baf4feaa807cd392f65c1fce4ff28e1a21 igual somente4dependencias explicitas, nao checkout inteiro. Lote418bcfd484b63316740885182b985566a1292a6a2fdc7d0777af63157daadd9d/4962863B, manifest4b81fc0cdb665c4a60e9b1f1a1d38507a835b5fab5b689a5a870b095eee0762b.365candidatos177devsingle/15devmultiple/147evalsingle/26evalmultiple;8selecionados porrank fixo,557rejeitados com motivos. Rawrefs/flags/headextras preservados, rightsCurrentunverified/eyesKnownfalse/completudeunknown; nenhum GT fora922 desserializado, nenhuma aquisicao/rede/decode/inferencia.2identidades observadas terminais/noDB/scratch/postflight limpos. Isso e preparo anterior a direitos e adjudicacao humana, nao corpus qualificado."
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/87",
+          "scope": "W67 MP4 critic and fail-closed final export gate merged into main.",
+          "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/88",
+          "scope": "W67 gate hardening and Linux CI supervisor fixes merged into main.",
+          "role": "integration"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/quality/w67-mp4-critic-results-v1.md",
+          "scope": "W67 controlled results, post-hoc R6 disclosure, sensitivity run, fail-closed gate and runs.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/w67-calibration-run1-4fcf3a8c/summary.json",
+          "scope": "Registered calibration run: 24/24 units exact, 0 false-safe.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39479199883",
+          "scope": "main c65c31dc CI green after PR #88.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39479199905",
+          "scope": "main c65c31dc CI green after PR #88.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39479199882",
+          "scope": "main c65c31dc CI green after PR #88.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Fila W67: autenticar o lote v3 metadata-only e verificar os direitos individuais atuais dos 8 ranqueados; adquirir somente após owner, pins, licenças e gates, preservando hashes e correspondência de derivados, com adjudicação humana identificada (quotas originais, splits e IoU imutáveis; head extras e olhos incompletos não se ocultam; holdout W62 fechado). Depois o critic sobre os frames do MP4 de cada formato, com sample IDs, hash do output e versão de calibration no QualityReport; falha no vertical reprova só o 9:16.",
-      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Inventário local de partida SHA256 4d273863096f75a6aa3c86944657496359b757e7c9d78c5f6c6389f69c935b2d. A checagem de direitos usa HTML preservado, não consulta atual ao Flickr. Tentativa v2 parou corretamente por quotas antes de criar seleção ou obter pixels; nenhuma tarefa de produto foi promovida."
+      "nextAction": "Configurar o crítico na DigitalOcean (7 variáveis OpenVINO) antes de qualquer final em produção; obter adjudicação humana e um corpus maior/independente; medir com o master real na W70.",
+      "notes": "PR #87: crítico independente por MP4 (decodificação completa, amostras com ids e hashes, tinta de legenda/CTA por diferença com encodes de controle, oráculo de rosto = união V9 + retail-0004 projetada por registro ORB, QualityReport selado), selectExportableVariants com caller de produção, gate do final por fatos da amostra (fail-closed). PR #88: endurecimento do gate (contagens inteiras, os dois modelos pinados, registro do reconhecimento antes do artefato). Docs: docs/quality/w67-mp4-critic-preregistration-v1.md e w67-mp4-critic-results-v1.md."
     },
     {
       "id": "W68",
