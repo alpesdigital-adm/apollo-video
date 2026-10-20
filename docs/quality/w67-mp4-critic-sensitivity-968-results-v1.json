@@ -1,0 +1,440 @@
+{
+  "schemaVersion": "w67-mp4-critic-sensitivity-results/v1",
+  "kind": "post-hoc sensitivity run (photograph excluded by the post-hoc rule R6)",
+  "protocol": "w67-mp4-critic-preregistration/v1",
+  "frozenManifestHash": "f96ae78e1a8d88dc470dea9af47aa99a2f69934c6b01c84a8e557c7865db0d02",
+  "harnessRunId": "w67-sensitivity-968-a74cd3a6",
+  "summary": {
+    "totals": {
+      "outputs": 10,
+      "labelledUnits": 12,
+      "detectedUnits": 12,
+      "exactUnits": 12,
+      "recallDetected": 1,
+      "recallExact": 1,
+      "falseSafeUnits": 0,
+      "falsePositiveUnits": 0,
+      "precisionExact": 1,
+      "unmappedHard": 0,
+      "unknownFrames": 0,
+      "decodeFailures": 0
+    },
+    "thresholds": {
+      "falseSafeUnits": 0,
+      "recall": 1,
+      "precision": 1,
+      "unknownFrames": 0,
+      "decodeFailures": 0
+    },
+    "accepted": true
+  },
+  "rows": [
+    {
+      "className": "caption-over-face",
+      "format": "16:9",
+      "labelledUnits": 2,
+      "detectedUnits": 2,
+      "exactUnits": 2,
+      "falseSafeUnits": 0,
+      "unlabelledUnits": 3,
+      "falsePositiveUnits": 0,
+      "extraFrames": 0,
+      "unknownFrames": 0
+    },
+    {
+      "className": "caption-over-face",
+      "format": "9:16",
+      "labelledUnits": 2,
+      "detectedUnits": 2,
+      "exactUnits": 2,
+      "falseSafeUnits": 0,
+      "unlabelledUnits": 3,
+      "falsePositiveUnits": 0,
+      "extraFrames": 0,
+      "unknownFrames": 0
+    },
+    {
+      "className": "crop-lost",
+      "format": "16:9",
+      "labelledUnits": 2,
+      "detectedUnits": 2,
+      "exactUnits": 2,
+      "falseSafeUnits": 0,
+      "unlabelledUnits": 3,
+      "falsePositiveUnits": 0,
+      "extraFrames": 0,
+      "unknownFrames": 0
+    },
+    {
+      "className": "crop-lost",
+      "format": "9:16",
+      "labelledUnits": 2,
+      "detectedUnits": 2,
+      "exactUnits": 2,
+      "falseSafeUnits": 0,
+      "unlabelledUnits": 3,
+      "falsePositiveUnits": 0,
+      "extraFrames": 0,
+      "unknownFrames": 0
+    },
+    {
+      "className": "cta-outside-safe-area",
+      "format": "16:9",
+      "labelledUnits": 2,
+      "detectedUnits": 2,
+      "exactUnits": 2,
+      "falseSafeUnits": 0,
+      "unlabelledUnits": 3,
+      "falsePositiveUnits": 0,
+      "extraFrames": 0,
+      "unknownFrames": 0
+    },
+    {
+      "className": "cta-outside-safe-area",
+      "format": "9:16",
+      "labelledUnits": 2,
+      "detectedUnits": 2,
+      "exactUnits": 2,
+      "falseSafeUnits": 0,
+      "unlabelledUnits": 3,
+      "falsePositiveUnits": 0,
+      "extraFrames": 0,
+      "unknownFrames": 0
+    }
+  ],
+  "oracleVsHumanBox": {
+    "totals": {
+      "oracle-0204-v9": {
+        "visible": 720,
+        "found": 720,
+        "extra": 0
+      },
+      "oracle-retail-0004": {
+        "visible": 720,
+        "found": 720,
+        "extra": 360
+      },
+      "union": {
+        "visible": 720,
+        "found": 720,
+        "extra": 360
+      }
+    }
+  },
+  "promotedFiles": [
+    "0436ac73eabec6a5d0a076277ec95cff2d813779f4527deb5aae53e694c28b49",
+    "e04bf40bb878c602dd807819dfe4e784cbf5a4a8aa6acb43fce83a3d20e8233a"
+  ],
+  "outputs": [
+    {
+      "outputId": "968a460084c588a1-9x16-clean",
+      "format": "9:16",
+      "variant": "clean",
+      "deliveredSha256": "e04bf40bb878c602dd807819dfe4e784cbf5a4a8aa6acb43fce83a3d20e8233a",
+      "deliveredBytes": 107339,
+      "verdict": "passed",
+      "labelledUnits": [],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "a6cb1fca716b02d0041de821f8d1da4a7eb09bc7dd71ac486cace590aed2b8c0",
+      "exportApproved": true,
+      "blockingCodes": [],
+      "promoted": true,
+      "criticMs": 20424
+    },
+    {
+      "outputId": "968a460084c588a1-9x16-caption",
+      "format": "9:16",
+      "variant": "caption",
+      "deliveredSha256": "816e34500fb223b8ef93300c4fed73d29d0fb5cb304b45fb2400ef8cd6b02b9e",
+      "deliveredBytes": 106516,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "caption-over-face",
+          "interval": [
+            8,
+            28
+          ],
+          "flaggedFrames": 20,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "41d2d78c2fc0a70cc916629e563d7644e1c012c0d2b7f5b32742bb3017b79233",
+      "exportApproved": false,
+      "blockingCodes": [
+        "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 19339
+    },
+    {
+      "outputId": "968a460084c588a1-9x16-crop",
+      "format": "9:16",
+      "variant": "crop",
+      "deliveredSha256": "69a43c7d9584c7e4118fe24b27efd09c66f8e300ae3cc8536179603e71216a6e",
+      "deliveredBytes": 173830,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "crop-lost",
+          "interval": [
+            45,
+            90
+          ],
+          "flaggedFrames": 45,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "a5e8f8777c924dfef12450362a867c4bc5d32f09662919e3c873de6a2f325e10",
+      "exportApproved": false,
+      "blockingCodes": [
+        "SUBJECT_CLIPPED_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 19292
+    },
+    {
+      "outputId": "968a460084c588a1-9x16-cta",
+      "format": "9:16",
+      "variant": "cta",
+      "deliveredSha256": "d8ce95624f5e0533ab90b7d540bc645b2c02cb2f7690a7aae10f2f12b39c5274",
+      "deliveredBytes": 114052,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "cta-outside-safe-area",
+          "interval": [
+            31,
+            44
+          ],
+          "flaggedFrames": 13,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "7b1f70ec18eab2ddf062c9637af34e30cf55b54d772c9c64fd1bd4da3a5db349",
+      "exportApproved": false,
+      "blockingCodes": [
+        "INK_CLIPPED_BY_CANVAS_IN_PIXELS",
+        "INK_OUTSIDE_SAFE_AREA_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 20282
+    },
+    {
+      "outputId": "968a460084c588a1-9x16-combined",
+      "format": "9:16",
+      "variant": "combined",
+      "deliveredSha256": "a0c60e229215b77b7a1db4022ed5ceee251d8005c38bed38c529bd923cf5f7b4",
+      "deliveredBytes": 178578,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "caption-over-face",
+          "interval": [
+            8,
+            28
+          ],
+          "flaggedFrames": 20,
+          "exact": true,
+          "falseSafe": false
+        },
+        {
+          "defect": "crop-lost",
+          "interval": [
+            45,
+            90
+          ],
+          "flaggedFrames": 45,
+          "exact": true,
+          "falseSafe": false
+        },
+        {
+          "defect": "cta-outside-safe-area",
+          "interval": [
+            31,
+            44
+          ],
+          "flaggedFrames": 13,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "49a3858c3ea06ff3623aa75694a3cb8c18f63a0b9cab606d63240d1b33b65dea",
+      "exportApproved": false,
+      "blockingCodes": [
+        "INK_CLIPPED_BY_CANVAS_IN_PIXELS",
+        "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+        "SUBJECT_CLIPPED_IN_PIXELS",
+        "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 20438
+    },
+    {
+      "outputId": "968a460084c588a1-16x9-clean",
+      "format": "16:9",
+      "variant": "clean",
+      "deliveredSha256": "0436ac73eabec6a5d0a076277ec95cff2d813779f4527deb5aae53e694c28b49",
+      "deliveredBytes": 114214,
+      "verdict": "passed",
+      "labelledUnits": [],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "99359eef513548287d670503c639912b8da0c9bfc896cef9d29a3bfa37add113",
+      "exportApproved": true,
+      "blockingCodes": [],
+      "promoted": true,
+      "criticMs": 20338
+    },
+    {
+      "outputId": "968a460084c588a1-16x9-caption",
+      "format": "16:9",
+      "variant": "caption",
+      "deliveredSha256": "e616afcfa97cb42483c3a97c6f5f06364933b9e5f14c772b02b837931e7023ec",
+      "deliveredBytes": 114058,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "caption-over-face",
+          "interval": [
+            8,
+            28
+          ],
+          "flaggedFrames": 20,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "3611b5d2db4529bba2cf4d6e21b81cb065263803ec88eaca7d59295d328563c0",
+      "exportApproved": false,
+      "blockingCodes": [
+        "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 20557
+    },
+    {
+      "outputId": "968a460084c588a1-16x9-crop",
+      "format": "16:9",
+      "variant": "crop",
+      "deliveredSha256": "8d314197ea8f9f4bd6ab91807f477c2303dff7e4881c16f2d580e82f41bc0121",
+      "deliveredBytes": 179177,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "crop-lost",
+          "interval": [
+            45,
+            90
+          ],
+          "flaggedFrames": 45,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "1adf36d2b0d6cacfb66ee89b72786fd411d756f9bafd2e60ce623ed9bb05264b",
+      "exportApproved": false,
+      "blockingCodes": [
+        "SUBJECT_CLIPPED_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 20336
+    },
+    {
+      "outputId": "968a460084c588a1-16x9-cta",
+      "format": "16:9",
+      "variant": "cta",
+      "deliveredSha256": "a7e1faf0db5c95484cc34d6f458a20026fc4522e652d779625d09846bd73c88b",
+      "deliveredBytes": 128162,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "cta-outside-safe-area",
+          "interval": [
+            31,
+            44
+          ],
+          "flaggedFrames": 13,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "07f799d2e34199596fc7668f84e3aa632f8fcc6ca56e187f9e00e3e092ea318a",
+      "exportApproved": false,
+      "blockingCodes": [
+        "INK_OUTSIDE_SAFE_AREA_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 20468
+    },
+    {
+      "outputId": "968a460084c588a1-16x9-combined",
+      "format": "16:9",
+      "variant": "combined",
+      "deliveredSha256": "7d5066642e9346197dd887d8483f9747552acb825a1bb1be04b5dea81070ed8d",
+      "deliveredBytes": 190213,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "caption-over-face",
+          "interval": [
+            8,
+            28
+          ],
+          "flaggedFrames": 20,
+          "exact": true,
+          "falseSafe": false
+        },
+        {
+          "defect": "crop-lost",
+          "interval": [
+            45,
+            90
+          ],
+          "flaggedFrames": 45,
+          "exact": true,
+          "falseSafe": false
+        },
+        {
+          "defect": "cta-outside-safe-area",
+          "interval": [
+            31,
+            44
+          ],
+          "flaggedFrames": 13,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "25701785a1393bab9456104899bbdb8dc2eafa4d7bd30a355f07239fcb08163c",
+      "exportApproved": false,
+      "blockingCodes": [
+        "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+        "SUBJECT_CLIPPED_IN_PIXELS",
+        "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 19328
+    }
+  ]
+}

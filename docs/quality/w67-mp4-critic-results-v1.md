@@ -129,3 +129,24 @@ Execuções pelo harness (`run-local-pg-s2d.mjs`, `APOLLO_S2D_CHECKOUT` = o work
 - `quali-051-test-integration-api` (no b2) falhou com "W36 timed out waiting for bounded retries" sob carga; repetido isolado (`w67-full-051r-7ac74eed`): 12 de 12.
 - **Herdadas**, reproduzidas na base do meu branch (`ba56e0db`, sem nenhum código do W67), com a mesma mensagem: `dashboard-runtime-journey` (`w67-basecheck-088-8736733d`: "The negative must reach the real persistence admission gate", 0 !== 1) e, no b3, `059 export-matrix.e2e` (`false !== true` na pré-verificação), `069 library-journey.e2e` (`'local' !== 's3'`, o ambiente local não tem o S3 versionado) e `070 synthetic-wave24-journey` (409 `PERSISTENCE_CONFLICT` no enqueue de render do project-a-final, o VERSION_CONFLICT do W24 já em investigação no W64), tudo em `w67-basecheck-b3-86a2660b`. Nenhuma delas toca código do W67 (pré-verificação de matriz, S3, enqueue).
 - CI: nenhum passo novo foi necessário para o crítico em si além dos testes de domínio, de portão, de contrato e de hidratação, que rodam em `npm test`; a suíte com o runtime real do OpenVINO é `KNOWN_UNRUN` com motivo (§6), e o corpus registrado é local por construção (modelos privados, runtime Windows).
+
+## 8. Execução de sensibilidade pós-hoc: a foto excluída por R6 (`968a460084c588a1`)
+
+Declarada no pré-registro §11 e commitada antes de renderizar (`fb3aec56`, manifesto `19eafe8b`: `docs/quality/w67-mp4-critic-sensitivity-968-v1.json`, `manifestHash` `f96ae78e1a8d88dc470dea9af47aa99a2f69934c6b01c84a8e557c7865db0d02`, SHA-256 do arquivo `6fb49ec64ea5e29c2ba63ccf3f127b66eff3afa2d0955d197f915eff243191ae`). Roda sob o **código congelado** (os 13 SHA-256 de código e o da política iguais aos do manifesto registrado, conferido; nenhum arquivo congelado tocado). Corrida do harness `w67-sensitivity-968-a74cd3a6` (passos `render`, `evaluate`, exit 0, pós-voo limpo). Resumo por saída em `docs/quality/w67-mp4-critic-sensitivity-968-results-v1.json`. **É uma execução pós-hoc: não entra no aceite do corpus registrado e não o altera.**
+
+| defeito | formato | unidades rotuladas | detectadas | exatas | falso seguro | marcações em unidade sem rótulo | quadros unknown |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| caption-over-face | 16:9 | 2 | 2 | 2 | 0 | 0 | 0 |
+| caption-over-face | 9:16 | 2 | 2 | 2 | 0 | 0 | 0 |
+| crop-lost | 16:9 | 2 | 2 | 2 | 0 | 0 | 0 |
+| crop-lost | 9:16 | 2 | 2 | 2 | 0 | 0 | 0 |
+| cta-outside-safe-area | 16:9 | 2 | 2 | 2 | 0 | 0 | 0 |
+| cta-outside-safe-area | 9:16 | 2 | 2 | 2 | 0 | 0 | 0 |
+
+Totais: 10 saídas, 12 unidades rotuladas; 12 detectadas e 12 exatas; 0 falso seguro; 0 falso positivo (as 2 limpas passaram); 0 `unknown`; 0 falha de decodificação. Mesmos intervalos exatos (20, 45 e 13 quadros). Com as 20 saídas registradas somam 30 saídas e 36 unidades, todas exatas (a soma é informativa; o aceite registrado é o do §3). N = 1 render e 1 avaliação (sem réplica).
+
+O que a execução mostra além do placar:
+
+- **A exclusão não escondia uma falha deste crítico.** Os dois detectores trataram o retrato gravado na cédula como um rosto: V9 achou a caixa humana em 720 de 720 quadros, retail-0004 também (720 de 720, mas com 360 detecções sem relação com a caixa, todas no 16:9), e a projeção por registro bateu com a construção (IoU mediana 0,786). Por isso a legenda de defeito caiu "sobre o rosto" e foi marcada.
+- **Limite que isso evidencia:** o crítico não distingue um rosto de uma representação de rosto. Um retrato impresso, um cartaz ou uma tela com rosto passam a ser regiões protegidas; é o comportamento conservador (protege mais, não menos), mas significa que "rosto" aqui é "o que os detectores acham que é rosto". Isso é a razão técnica pela qual R6 não é uma regra do crítico e sim uma regra de escolha de fotos, e o motivo de eu ter tratado a cédula como depiction; o resultado de sensibilidade diz só que, tratada como foto de rosto, ela também é medida de forma exata.
+- Duas fotos escolhidas sem R6 e três com R6 post hoc dão o mesmo veredito qualitativo; isso **não** valida a escolha das fotos nem a torna pré-registrada.
