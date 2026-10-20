@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index
 import type {
   StoredVariantReframePlan, VariantReframePlanContext, VariantReframePlanRepository,
 } from '../../application/ports/variant-reframe-plan-repository.ts'
+import { variantReframePlanRowId } from '../../application/plan-project-reframe.ts'
 import { reframeSpecOf, reframeTimelineOf } from '../../application/project-reframe-facts.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -73,6 +74,31 @@ export async function readVariantReframePlanHead(client: Reader, input: Readonly
     orderBy: { sequence: 'desc' },
   })
   return row ? storedOf(row) : null
+}
+
+/**
+ * W68. A reframe plan is persisted per (Version, output). A Command that changes no crop leaves every output with the plan it had: the very
+ * same record (same content address) is carried to the new Version, inside the Command's own transaction. Without it the new Version would
+ * render with no trajectory and a caption fix would silently undo the framing.
+ */
+export async function carryVariantReframePlans(tx: Prisma.TransactionClient, input: Readonly<{
+  workspaceId: string; projectId: string; fromVersionId: string; toVersionId: string; variantIds: readonly string[]; createdAt: Date
+}>): Promise<number> {
+  let carried = 0
+  for (const variantId of input.variantIds) {
+    const head = await readVariantReframePlanHead(tx, { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.fromVersionId, variantId })
+    if (!head) continue
+    await tx.v2VariantReframePlan.create({
+      data: {
+        id: variantReframePlanRowId({ projectVersionId: input.toVersionId, variantId, recordHash: head.record.recordHash }),
+        workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.toVersionId, variantId,
+        sequence: 1, recordHash: head.record.recordHash, disposition: head.record.disposition,
+        recordJson: stableSerialize(head.record), previousPlanId: null, createdAt: input.createdAt,
+      },
+    })
+    carried += 1
+  }
+  return carried
 }
 
 export class PrismaVariantReframePlanRepository implements VariantReframePlanRepository {

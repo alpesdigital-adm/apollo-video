@@ -4,6 +4,7 @@ import { sha256 } from '@noble/hashes/sha256'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
+import IssueOverridePanel from '@/components/IssueOverridePanel'
 import LogoutButton from '@/components/LogoutButton'
 import SyntheticPhaseGatePanel from '@/components/SyntheticPhaseGatePanel'
 import TransformationReviewPanel from '@/components/TransformationReviewPanel'
@@ -3658,6 +3659,9 @@ export default function ProjectWorkspacePage() {
                           : issue.message}{issue.evidenceRange ? ` · frames ${issue.evidenceRange.startFrame}–${issue.evidenceRange.endFrame}` : ''}</span>
                       </div>
                     ))}
+                    {[...proxyReview.technicalIssues, ...proxyReview.criticIssues].length > [...proxyReview.technicalIssues, ...proxyReview.criticIssues].filter((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE').length + 4 ? (
+                      <p className="pl-2 text-[9px] leading-4 text-[#8e8980]" data-testid="proxy-review-issues-more">Há mais problemas neste laudo: todos aparecem, com evidência, em Problemas do render.</p>
+                    ) : null}
                   </div>
                 ) : <p className="mt-3 text-[9px] leading-4 text-[#78aa87]">Codec, canvas, duração, mapa e crítica editorial aprovados.</p>}
                 {proxyReview.status === 'warning-ack-required' ? (
@@ -3781,6 +3785,32 @@ export default function ProjectWorkspacePage() {
               <span className="border-l border-white/[0.08] pl-3 font-mono text-[10px] tabular-nums text-[#8e887e]">{frameTimecode(previewFrame, review?.session.fps ?? editingProxy.probe?.fps ?? 30)}</span>
               {previewState === 'error' ? <span className="text-[10px] text-[#d17a7a]">O preview não carregou. Use o download final para validar o arquivo.</span> : null}
             </div>
+          ) : null}
+
+          {workspace.version && outputVariantId ? (
+            <IssueOverridePanel
+              aspectRatio={outputAspectRatio}
+              fps={review?.session.fps ?? editingProxy?.probe?.fps ?? workspace.editPlan?.fps ?? 30}
+              onChanged={async () => {
+                reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
+                const refreshed = await loadWorkspace(true)
+                await loadManualTimeline(true)
+                if (refreshed) await refreshWorkspaceReviews(refreshed)
+              }}
+              onSeekFrame={seekPreviewToFrame}
+              operations={workspace.operations}
+              projectId={projectId}
+              proxyArtifact={proxyReview ? (() => {
+                const record = workspace.media.find((item) => item.artifactId === proxyReview.proxyArtifactId)
+                return { artifactId: proxyReview.proxyArtifactId, sha256: record?.sha256 ?? null }
+              })() : null}
+              reads={reads}
+              review={proxyReview}
+              reviewFailure={proxyReviewFailure ? (proxyReviewFailure.code ?? `HTTP ${proxyReviewFailure.status}`) : null}
+              reviewLoading={proxyReviewLoading}
+              variantId={outputVariantId}
+              version={workspace.version}
+            />
           ) : null}
 
           {manualTimeline?.timeline.clips.length ? (

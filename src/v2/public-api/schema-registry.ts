@@ -26218,8 +26218,14 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
     },
   })),
   defineSchema('subtitle-segments-response', 1, 'The subtitle segments of ONE output of the current version: compiled text and half-open range, the head exception and the values a render draws', successSchema({
-    type: 'object', additionalProperties: false, required: ['version', 'variantId', 'fps', 'durationFrames', 'segments'], properties: {
+    type: 'object', additionalProperties: false, required: ['version', 'variantId', 'fps', 'durationFrames', 'presets', 'segments'], properties: {
       version: { type: 'object', additionalProperties: false, required: ['id', 'sequence', 'baseHash'], properties: { id: idSchema, sequence: { type: 'integer', minimum: 1 }, baseHash: sha256Schema } },
+      presets: {
+        type: 'array', maxItems: 32, items: {
+          type: 'object', additionalProperties: false, required: ['presetId', 'presetVersion', 'presetHash'],
+          properties: { presetId: { enum: [...SUBTITLE_PRESET_IDS] }, presetVersion: { const: 1 }, presetHash: sha256Schema },
+        },
+      },
       variantId: idSchema,
       fps: { type: 'number', exclusiveMinimum: 0 },
       durationFrames: { type: 'integer', minimum: 0 },

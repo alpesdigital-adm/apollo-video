@@ -3,6 +3,7 @@ import { createSubtitleSegmentOverrideCommandImpact } from '../domain/command-im
 import { createEditCommand, type CommandActor } from '../domain/edit-command.ts'
 import { DomainError } from '../domain/errors.ts'
 import { requireOutputVariant } from '../domain/output-consumption.ts'
+import { SUBTITLE_PRESET_IDS, subtitlePresetReference } from '../domain/subtitle-system.ts'
 import { referencesOfVariant } from '../domain/output-variant-references.ts'
 import { reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import {
@@ -232,6 +233,8 @@ export function readSubtitleSegmentsService(dependencies: { repository: Subtitle
     if (!view) throw new DomainError('PROJECT_NOT_FOUND', 'Subtitle segments project was not found')
     return Object.freeze({
       version: view.version, variantId: view.variantId, fps: view.fps, durationFrames: view.durationFrames,
+      // The versioned preset references a style exception must carry: the client never computes a hash, it is given the registered ones.
+      presets: Object.freeze(SUBTITLE_PRESET_IDS.map((presetId) => subtitlePresetReference(presetId))),
       segments: describeSubtitleSegments({ segments: view.segments, overrides: view.overrides, variantId: view.variantId }),
     })
   }

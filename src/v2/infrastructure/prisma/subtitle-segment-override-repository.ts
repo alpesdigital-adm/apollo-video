@@ -18,9 +18,8 @@ import {
   createSubtitleSegmentOverride,
   type SubtitleSegmentOverride,
 } from '../../domain/subtitle-segment-override.ts'
-import { variantReframePlanRowId } from '../../application/plan-project-reframe.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
-import { readVariantReframePlanHead } from './variant-reframe-plan-repository.ts'
+import { carryVariantReframePlans } from './variant-reframe-plan-repository.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
@@ -348,23 +347,11 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
           create: { ...headKey, overrideId: input.subtitleOverride.id, updatedAt: new Date(input.subtitleOverride.createdAt) },
           update: { overrideId: input.subtitleOverride.id, updatedAt: new Date(input.subtitleOverride.createdAt) },
         })
-        // W68. A reframe plan is persisted per (Version, output). This Command changes no crop, so every output keeps the plan it had:
-        // the very same record (same content address) is carried to the new Version. Without it the new Version would render with no
-        // trajectory at all and a caption fix would silently undo the framing.
-        for (const entry of input.bundle.state.document.entries) {
-          const carried = await readVariantReframePlanHead(tx, {
-            workspaceId: command.workspaceId, projectId: command.projectId, projectVersionId: command.baseVersionId, variantId: entry.variantId,
-          })
-          if (!carried) continue
-          await tx.v2VariantReframePlan.create({
-            data: {
-              id: variantReframePlanRowId({ projectVersionId: bundleVersion.id, variantId: entry.variantId, recordHash: carried.record.recordHash }),
-              workspaceId: command.workspaceId, projectId: command.projectId, projectVersionId: bundleVersion.id, variantId: entry.variantId,
-              sequence: 1, recordHash: carried.record.recordHash, disposition: carried.record.disposition,
-              recordJson: stableSerialize(carried.record), previousPlanId: null, createdAt: new Date(input.subtitleOverride.createdAt),
-            },
-          })
-        }
+        // W68. This Command changes no crop: every output keeps the reframe plan it had on the base Version.
+        await carryVariantReframePlans(tx, {
+          workspaceId: command.workspaceId, projectId: command.projectId, fromVersionId: command.baseVersionId, toVersionId: bundleVersion.id,
+          variantIds: input.bundle.state.document.entries.map((entry) => entry.variantId), createdAt: new Date(input.subtitleOverride.createdAt),
+        })
         const updated = await tx.v2Project.updateMany({
           where: {
             id: command.projectId, workspaceId: command.workspaceId,

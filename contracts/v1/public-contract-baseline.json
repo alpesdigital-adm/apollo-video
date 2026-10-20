@@ -9161,6 +9161,41 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.projects.subtitle-segments.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/subtitle-segments-response/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/subtitle-segments"
+      },
+      "toolName": "apollo.projects.subtitle-segments.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "variantId",
+          "required": true,
+          "description": "Stable variant id of the output whose subtitle segments are read.",
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.subtitle-sidecars.export": {
       "version": "2.0.0",
       "exposure": "public",
@@ -245671,6 +245706,354 @@
               "items": {
                 "type": "object",
                 "additionalProperties": true
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/subtitle-segments-response/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "variantId",
+            "fps",
+            "durationFrames",
+            "presets",
+            "segments"
+          ],
+          "properties": {
+            "version": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "sequence",
+                "baseHash"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "baseHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "presets": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "presetId",
+                  "presetVersion",
+                  "presetHash"
+                ],
+                "properties": {
+                  "presetId": {
+                    "enum": [
+                      "kinetic",
+                      "karaoke-box",
+                      "karaoke-pill",
+                      "caps-stroke",
+                      "clean-color"
+                    ]
+                  },
+                  "presetVersion": {
+                    "const": 1
+                  },
+                  "presetHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            },
+            "variantId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "fps": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "durationFrames": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "segments": {
+              "type": "array",
+              "maxItems": 10000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "segmentId",
+                  "startFrame",
+                  "endFrame",
+                  "text",
+                  "state",
+                  "override",
+                  "effective"
+                ],
+                "properties": {
+                  "segmentId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "startFrame": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "endFrame": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "enum": [
+                      "inherited",
+                      "overridden",
+                      "stale"
+                    ]
+                  },
+                  "override": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "overrideId",
+                          "overrideHash",
+                          "action",
+                          "dimensions",
+                          "protected",
+                          "previousOverrideId",
+                          "createdAt"
+                        ],
+                        "properties": {
+                          "overrideId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "overrideHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "action": {
+                            "enum": [
+                              "set",
+                              "reset"
+                            ]
+                          },
+                          "dimensions": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "items": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "kind",
+                                    "anchor"
+                                  ],
+                                  "properties": {
+                                    "kind": {
+                                      "const": "position"
+                                    },
+                                    "anchor": {
+                                      "enum": [
+                                        "top",
+                                        "upper-third",
+                                        "center",
+                                        "lower-third",
+                                        "bottom"
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "kind",
+                                    "presetId",
+                                    "presetVersion",
+                                    "presetHash"
+                                  ],
+                                  "properties": {
+                                    "kind": {
+                                      "const": "style"
+                                    },
+                                    "presetId": {
+                                      "enum": [
+                                        "kinetic",
+                                        "karaoke-box",
+                                        "karaoke-pill",
+                                        "caps-stroke",
+                                        "clean-color"
+                                      ]
+                                    },
+                                    "presetVersion": {
+                                      "const": 1
+                                    },
+                                    "presetHash": {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{64}$"
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "kind",
+                                    "text"
+                                  ],
+                                  "properties": {
+                                    "kind": {
+                                      "const": "text"
+                                    },
+                                    "text": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "kind",
+                                    "visible"
+                                  ],
+                                  "properties": {
+                                    "kind": {
+                                      "const": "visibility"
+                                    },
+                                    "visible": {
+                                      "type": "boolean"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          "protected": {
+                            "type": "boolean"
+                          },
+                          "previousOverrideId": {
+                            "anyOf": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              }
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "effective": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "text",
+                      "visible",
+                      "pinnedAnchor",
+                      "presetId"
+                    ],
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "visible": {
+                        "type": "boolean"
+                      },
+                      "pinnedAnchor": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "enum": [
+                              "top",
+                              "upper-third",
+                              "center",
+                              "lower-third",
+                              "bottom"
+                            ]
+                          }
+                        ]
+                      },
+                      "presetId": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "enum": [
+                              "kinetic",
+                              "karaoke-box",
+                              "karaoke-pill",
+                              "caps-stroke",
+                              "clean-color"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
               }
             }
           }
