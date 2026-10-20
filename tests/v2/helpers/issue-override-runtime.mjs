@@ -73,6 +73,8 @@ export function apiClient(baseUrl, token) {
         ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(key ? { 'idempotency-key': key } : {}), ...headers,
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      // A server that never answers is a failure with a name, not a run that is killed by the clock.
+      signal: AbortSignal.timeout(90_000),
     })
     const payload = await response.json().catch(() => null)
     return { status: response.status, body: payload, data: payload?.data ?? null, error: payload?.error ?? null }

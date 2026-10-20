@@ -37,7 +37,7 @@ async function waitFor(label, probe, { timeoutMs = 240_000, intervalMs = 500 } =
   }
 }
 
-test('W68 issue -> override -> recompile -> critic again, in a real browser, for 9:16 and 16:9', { skip: !enabled, timeout: 3_000_000 }, async () => {
+test('W68 issue -> override -> recompile -> critic again, in a real browser, for 9:16 and 16:9', { skip: !enabled, timeout: 1_650_000 }, async () => {
   const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
   const db = new PrismaClient({ datasources: { db: { url: process.env.V2_DATABASE_URL } } })
   const root = await mkdtemp(join(tmpdir(), 'apollo-w68-'))
@@ -595,7 +595,9 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       note('tall-reframe-reset', { record: unframedPlan.recordHash })
 
       // ---- hide cue-3, and cancel the recompile while it waits: no partial artifact is promoted
+      note('tall-hide-begin')
       snap = await snapshot(entry)
+      note('tall-hide-snapshot', { sequence: snap.beforeVersion.sequence })
       await openOutput(entry)
       await selectChip('FACE_PERCEPTION_UNAVAILABLE', 'cue-3')
       await fillForm({ visible: false })
@@ -647,6 +649,7 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
     await browser?.close().catch(() => undefined)
     for (const server of servers) await server.stop().catch(() => undefined)
     await writeFile(join(evidenceDir, 'evidence.json'), JSON.stringify({ ...evidence, failure: failure ? String(failure.stack ?? failure) : null }, null, 2)).catch(() => undefined)
+    if (failure) for (const server of servers) await writeFile(join(evidenceDir, 'server-log-tail.txt'), server.logs.text.slice(-20_000)).catch(() => undefined)
     await db.$disconnect().catch(() => undefined)
     const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
     await disconnectV2PostgresClient().catch(() => undefined)
