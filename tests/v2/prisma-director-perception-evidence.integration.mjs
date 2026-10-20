@@ -151,7 +151,7 @@ test('W64 PostgreSQL Director: complete OCR and partial face give PARTIAL decisi
     const db = new PrismaClient()
     let primaryError
     try {
-      const { workspaceId, world, built, director, service, request, rowsBefore, publicSnapshot } = await seedDirectorSnapshotWorld(db, { aspectRatio: '4:5' })
+      const { workspaceId, world, built, director, service, request, rowsBefore, publicSnapshot } = await seedDirectorSnapshotWorld(db, { uniqueVariant: true, aspectRatio: '4:5' })
       const requester = realRequester(db)
       const faceOperations = await operationCount(db, workspaceId, 'perception-face-run')
       assert.ok(faceOperations >= 2, 'the world published its own windows')
@@ -225,7 +225,7 @@ test('W64 PostgreSQL Director: with no perception at all the plan is review, fac
     const db = new PrismaClient()
     let primaryError
     try {
-      const { workspaceId, world, director, service, request, rowsBefore } = await seedDirectorSnapshotWorld(db, { aspectRatio: '1:1', evidence: false })
+      const { workspaceId, world, director, service, request, rowsBefore } = await seedDirectorSnapshotWorld(db, { uniqueVariant: true, aspectRatio: '1:1', evidence: false })
       const requester = realRequester(db)
       assert.equal(await db.v2ServerPerceptionSnapshot.count({ where: { workspaceId } }), 0)
       assert.equal(await operationCount(db, workspaceId, 'perception-face-run'), 0)
@@ -282,7 +282,7 @@ test('W64 PostgreSQL Director: rights revoked between claim and commit refuse th
     const db = new PrismaClient()
     let primaryError
     try {
-      const { workspaceId, world, director, service, request, rowsBefore } = await seedDirectorSnapshotWorld(db, { aspectRatio: '21:9', evidence: false })
+      const { workspaceId, world, director, service, request, rowsBefore } = await seedDirectorSnapshotWorld(db, { uniqueVariant: true, aspectRatio: '21:9', evidence: false })
       const racing = Object.create(director)
       racing.commitWithCanonicalSnapshots = async (scope, prepare) => {
         await db.v2MediaArtifact.update({ where: { id: world.sourceId }, data: { currentRightsSnapshotId: null, rightsRevision: 2 } })
@@ -316,7 +316,7 @@ test('W64 PostgreSQL Director: low confidence evidence is partial and review, an
     let primaryError
     try {
       const { workspaceId, world, actor, director, service, request, ensureSnapshot } = await seedDirectorSnapshotWorld(db, {
-        aspectRatio: '16:9', ocrConfidence: 0.2, faceRows: [[0.3, 0.2, 0.1, 0.4, 0.6]] })
+        uniqueVariant: true, aspectRatio: '16:9', ocrConfidence: 0.2, faceRows: [[0.3, 0.2, 0.1, 0.4, 0.6]] })
       // the snapshot of the input Version as the sealed evidence makes it, before anyone writes a timeline of their own
       const sealedOnly = (await ensureSnapshot({ workspaceId, projectId: world.projectId, projectVersionId: world.versionId })).record.snapshot
       // a caller's manual timeline that claims complete, perfect face coverage of the whole Version

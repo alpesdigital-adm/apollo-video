@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-19",
+  "updatedAt": "2026-10-20",
   "audit": {
     "delivered": 380,
     "total": 1259,
     "source": "TODO.md"
   },
-  "evidenceBaseCommit": "16a6d04b870eac7a5aab5ec7d403a603c0c4a500",
+  "evidenceBaseCommit": "f837c33a63d6e5aedc772ed16fd3b28cb5523140",
   "coverage": {
     "unit": "todo-section",
     "total": 250,
@@ -1199,20 +1199,20 @@
         "b543c60be203-1",
         "85514de89d9b-1"
       ],
-      "state": "em-construcao",
-      "construction": "in-progress",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "OCR e produtor temporal têm prova controlada (worker real, PostgreSQL e HTTP) e estão no head integrado, fora de main (CI verde em 67bb41aa). Recorte temporal até 300 frames/10 s, source único, CFR/fps iguais, rotação zero; medidas brutas não provam semântica de corte ou câmera. Faltam avaliação externa, master longo e a timeline canônica que funde faces, OCR, shots e motion; o consumer do Diretor ainda não agrega o temporal (W64)."
+          "kind": "validation",
+          "text": "W63b (pré-registro 94206685 antes do run w63b-eval1-18515a95, corpus sintético de 33 clipes): 12 estratos passam; text-normal (exato 0,806 vs 0,90), audio-no-face e time-after-cuts FALHAM, todos por OCR em fundo texturizado com caixa escura; diacríticos por+eng errados (Tributagao). text-non-latin e talking head com rosto real não rodaram (sem traineddata; direitos do corpus de rosto não cobrem composição). Corpus sintético = regressão do contrato, não evidência em vídeo real."
         },
         {
-          "kind": "validation",
-          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+          "kind": "implementation",
+          "text": "speaker fica absent (DIARIZATION_UNAVAILABLE: diarização não ligada a versão), silence e image-insert sem produtor ligado à versão, object sempre absent (NO_VERIFIED_DETECTOR). Snapshot só é materializado pelo commit do Diretor; não há gatilho na publicação do produtor."
         },
         {
           "kind": "deployment",
@@ -1265,10 +1265,64 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471458",
           "scope": "main 16a6d04b Media library validation green.",
           "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/83",
+          "scope": "W63a server perception snapshot merged into main.",
+          "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/86",
+          "scope": "W63b pre-registered label evaluation merged into main.",
+          "role": "integration"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/quality/w63a-server-perception-snapshot.md",
+          "scope": "W63a design, cost measurements (linear ~4.8 ms/window) and runs.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/quality/w63b-perception-label-eval-results.md",
+          "scope": "W63b results per stratum, integrity notes and product implications.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/w63a-r2b-86ec159d/summary.json",
+          "scope": "W63a harness 14/14 with build, clean postflight.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/w63b-eval1-18515a95/summary.json",
+          "scope": "W63b single evaluation run on the sealed split, clean postflight.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39369376499",
+          "scope": "main f837c33a CI green after PRs #82–#86.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39369376446",
+          "scope": "main f837c33a CI green after PRs #82–#86.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39369376477",
+          "scope": "main f837c33a CI green after PRs #82–#86.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Fila W63: avaliação externa com labels independentes (OCR de texto pequeno e multilíngue, hard cut, crossfade, motion) e janela do master longo com PTS original, preservando medidas brutas, gaps e limites; depois a timeline canônica que funde faces (W62), OCR, shots e motion para o Diretor consumir (W64).",
-      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Adapter temporal isolado commit b17001ef: goldens controlados e negativos passaram após revisão de pins, threads, prazo/abort e domínio PTS; ainda sem labels externos ou persistência. Núcleo temporal: run w64-temporal-producer-4837afc0 passou 1/1 PG sem skips, bootstrap e constraints, claim/fence/rights/outbox; SHA 765b8f0d673578c207bc72b49fe938a1549eda7e68ffa3cc726d56296a80fa9. Postflight confirmou três PIDs encerrados, zero backends, cluster parado e scratch removido. Esta prova não executou adapter/runner/browser; API em construção. Runner temporal real PG passou 2/2 no run w64-temporal-video-6621d218. Primeiro HTTP falhou em assert 400 vs contrato 422; correção apenas no teste, runtime inalterado. Run focado w64-temporal-http-fixed-ee4db7ec passou 1/1 sem skips; SHA 2f45bd9c40a6ea37bc9069a67468ebdd1d3b8b1e9d7da0b6ed74e2eb03f587bc. Build, tsc, lint, contratos e baseline passaram (384 capabilities, 675 schemas, 743 exemplos; schemas históricos preservados). Estágio de prova controlada refere-se somente aos recortes runner/PG/HTTP citados, não à totalidade da wave, implantação ou aceite. Construção permanece parcial no branch."
+      "nextAction": "Tratar as falhas de OCR em fundo texturizado (corroboração em amostras seguidas, preferência por por em diacríticos, confiança por amostra) e reavaliar num novo pré-registro; ligar diarização à versão; avaliar em vídeo real com direitos (W70).",
+      "notes": "W63a (PR #83): snapshot de percepção server-owned por ProjectVersion, cobertura por kind sem complete inventado, janelas de rosto paginadas com orçamento 1000 e FACE_WINDOW_LIMIT_EXCEEDED, GET /v1/projects/{id}/perception/snapshot (2.0.0 read-only após W64). W63b (PR #86): avaliação pré-registrada contra labels independentes; resultados em docs/quality/w63b-perception-label-eval-results.md."
     },
     {
       "id": "W64",
@@ -1285,20 +1339,20 @@
         "76e7e1f536dd-1",
         "6a723f9a056c-1"
       ],
-      "state": "em-construcao",
-      "construction": "in-progress",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "main",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Consumer OCR server-owned provado em PostgreSQL com runner Tesseract real (snapshot v2, policy v2). A cobertura facial ainda não chega ao Diretor: ele não pede face-source-windows (POST /v1/projects/{projectId}/face-source-windows existe como produtor) e faceCoverage é fixo em absent (src/v2/application/run-project-director.ts:234). Agregação multimodal, prova HTTP do consumer e decisões por variante seguem pendentes."
+          "kind": "validation",
+          "text": "Bandas confidence-band-policy/v2 (crop/caption/insert) são priors de projeto, não calibradas: a W63b mostrou OCR falhando em fundo texturizado. Face fica no máximo partial até o detector ser implantável (recibo de paridade Linux), então crop e legenda nunca são auto-aplicados. Prova em PG controlado (oráculo relê linhas persistidas), não em master real."
         },
         {
-          "kind": "validation",
-          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+          "kind": "implementation",
+          "text": "summary.confidence segue 0,82 (prior rotulado; nenhuma decisão o lê). Nenhum gatilho de publicação materializa o snapshot; versão nunca dirigida responde 404 SNAPSHOT_NOT_MATERIALIZED. Pedidos de janela de rosto são idempotentes por ator e versão e rodam dentro do POST /commands síncrono (até 200)."
         },
         {
           "kind": "deployment",
@@ -1351,10 +1405,52 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471458",
           "scope": "main 16a6d04b Media library validation green.",
           "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/85",
+          "scope": "W64 merged into main.",
+          "role": "integration"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/quality/w64-director-perception.md",
+          "scope": "W64 rubric, band policy v2, enqueue rule, evidence ids, runs and limits.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/w64-ci-9f7deb82/summary.json",
+          "scope": "W64 harness 14/14 on the merged tree incl. dashboard journey, export matrix, public API.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/w64-070c-bc8f71f0/summary.json",
+          "scope": "Wave24 journey 25/25 on the clean tree.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39369376499",
+          "scope": "main f837c33a CI green after PRs #82–#86.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39369376446",
+          "scope": "main f837c33a CI green after PRs #82–#86.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39369376477",
+          "scope": "main f837c33a CI green after PRs #82–#86.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Fila W64: o Diretor pede face-source-windows para o corte que decidiu e consome faceCoverage no TreatmentPlan, no EditPlan, no decisions log e no critic (hoje fixo em absent em run-project-director.ts:234); depois agregar o temporal (W63) e provar HTTP e decisões por variante.",
-      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Run w64-director-ocr-5002ece4: 1/1 PG sem skip com OCR real, PUT manual ignorado, hash/rights negativos, refs/snapshot/review persistidos, replay adulterado e parent stale. SHA do relatório 3d5db0f69cccd5a9e567b606dc24a8910d34da63b061c9b31ec847f1c7943759; 11 PIDs terminais, zero backends e cluster parado. Unit25/25, typecheck e API registry passaram. Prova parcial, sem face-safe ou aceite da wave."
+      "nextAction": "Calibrar as bandas v2 com produtores medidos (W63b) e, após o recibo de paridade Linux do V9, rever o teto de face; provar no master real (W70).",
+      "notes": "PR #85: rubrica de evidência (high/partial/absent), confidence-band-policy/v2, director-quality-report/v4 com tier por modalidade e evidence ids, direitos integrais no claim e no commit, snapshot gravado no commit do Diretor e GET read-only, observationSet do caller inalcançável. Design: docs/quality/w64-director-perception.md."
     },
     {
       "id": "W65",
@@ -1548,24 +1644,24 @@
         "da5a414c29b3-1",
         "72babc1df6c4-1"
       ],
-      "state": "em-construcao",
-      "construction": "in-progress",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "O escopo da W66 no plano (reframe com trajetória: ROI do snapshot do servidor, keyframes 9:16 e 16:9 separados, suavização de velocidade/aceleração, overrides por Command por variante/range e issue localizado com a variante bloqueada/revisável) NÃO está implementado: plan-project-reframe devolve sempre review-required e nenhum produtor chama createRenderReframePlan. No main está só a fundação de estado de output por ProjectVersion (variantes estáveis, overlay, fork, consumo selado), da qual o reframe depende."
+          "kind": "validation",
+          "text": "GT no MP4 renderizado com detector substituto (caixas do gerador pelo decodificador V9 real e envelope selado): nenhum detector real medido, qualidade em vídeo real desconhecida. Paridade de aprovação do final (approvedReframePlanHash) só em teste unitário; suíte PG do reframe só no harness local."
         },
         {
           "kind": "implementation",
           "text": "Lacunas nomeadas pelo Sol1 no código integrado: (1) quality-iteration e cleanup-mask sem variantId recusam saída múltipla; (2) o decision-log usa a final mais nova de qualquer output; (3) o mvp-core-gate usa o formato 9:16; (4) há um único status de projeto para todos os outputs; (5) o reuse não exclui os proxies de localização."
         },
         {
-          "kind": "validation",
-          "text": "O final de duas saídas (9:16 e 16:9) não está provado em PostgreSQL. A prova controlada cobre o estado de output por versão (root, variante, ingest, select, restore e fork) em PostgreSQL e a CI verde no head 67bb41aa; o critic final por saída é do W67."
+          "kind": "implementation",
+          "text": "Motivos de recusa do override (HIDES_CRITICAL_SUBJECT, reframe-plan-required) não são publicados pelo apresentador de erros (422/428 sem motivo). GET com projectVersionId de outro projeto do mesmo workspace devolve 200 plan:null."
         },
         {
           "kind": "deployment",
@@ -1756,10 +1852,58 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39291471458",
           "scope": "main 16a6d04b Media library validation green.",
           "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/84",
+          "scope": "W66 reframe with trajectory merged into main.",
+          "role": "integration"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/quality/w66r-reframe-trajectory.md",
+          "scope": "W66r policy, ROI rules, issue mapping, override semantics, GT method, runs.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/w66r-after-2-c24995ad/summary.json",
+          "scope": "Rendered-MP4 GT 10/10 after the fill fix.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/w66r-gt-before-3-661d89f4/summary.json",
+          "scope": "GT before the fill fix: 3/9, coverage 31.9% x 31.8% (the defect the oracle catches).",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/w66r-merge-1-2d9ef3d4/summary.json",
+          "scope": "W66r merged-tree harness 26/26.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39369376499",
+          "scope": "main f837c33a CI green after PRs #82–#86.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39369376446",
+          "scope": "main f837c33a CI green after PRs #82–#86.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39369376477",
+          "scope": "main f837c33a CI green after PRs #82–#86.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Implementar o reframe com trajetória sobre a fundação de output (branch claude/w66r-reframe-trajectory): ROI de face v3 do servidor projetada pelos clipes, plano por variante estável com política versionada, persistência content-addressed, consumo pelo render por variantId, issues bloqueando só a variante afetada e Command apply-variant-reframe-override; depois fechar as cinco lacunas de multi-saída e provar em PostgreSQL o final de duas saídas.",
-      "notes": "Fundação de estado de output selado por ProjectVersion (variantes estáveis, overlay, fork, consumo selado) integrada no main em 16a6d04b. O reframe com trajetória, que é o escopo da W66 no plano, não começou. Cronologia: git show 67bb41aa:docs/quality/project-status.json e docs/quality/w66-version-overlay-integration-v1.md."
+      "nextAction": "Medir o reframe com o detector real após a paridade Linux do V9; publicar os motivos de recusa do override; fechar as lacunas de multi-saída; provar o final de duas saídas no PostgreSQL e na jornada W70.",
+      "notes": "PR #84: ROI server-owned das janelas de rosto v3 projetadas pelos clipes, plano por variante estável selado com reframe-policy/v1, persistência content-addressed, crop reenquadrado preenche o canvas da variante (antes: faixa de ~10% sobre fundo borrado), Command apply-variant-reframe-override (set/reset). GT: cobertura ≥99,6% × 99,8%, crop a 0,86 px, velocidade 0,269/0,35, aceleração 0,713/0,8. Fundação de estado de output no main desde 16a6d04b. Design: docs/quality/w66r-reframe-trajectory.md."
     },
     {
       "id": "W67",

@@ -1,0 +1,1142 @@
+{
+ "schemaVersion": "w63b-results-summary/v1",
+ "split": "evaluation",
+ "freezeCommit": "942066853fb56a2e53afa1a398743d4603642afe",
+ "headAtRun": "6f300e090216cb668305f06aa9448e0e33e9ef68",
+ "preregVersion": "w63b-prereg/v1",
+ "manifestSha256": "5eec7cf55412728fe088188efbc9f2bf509d2073b457fdf861453dfc94c41a10",
+ "attempts": [
+  {
+   "runId": "w63b-eval1-18515a95",
+   "harness": "run-local-pg-s2d.mjs",
+   "startedAt": "2026-10-19T22:52:48.388Z",
+   "finishedAt": "2026-10-19T22:56:46.488Z",
+   "outcome": "completed, success:true, postflight clean",
+   "used": true
+  }
+ ],
+ "tools": {
+  "ffmpegSha256": "04e1307997530f9cf2fe35cba2ca7e8875ca91da02f89d6c7243df819c94ad00",
+  "tesseract": "tesseract v5.5.3.20260724",
+  "tesseractExe": "c66f0f12ed76f6aa455dac97684bbc86756d6a732380bee09122454cfda3f420",
+  "ocrFfmpegSha256": "04e1307997530f9cf2fe35cba2ca7e8875ca91da02f89d6c7243df819c94ad00",
+  "ffprobeSha256": "a6618e99bb58869ded3c6f37b53aa1a8d701c3591dbb7b5b317d47369c112be2",
+  "node": "v24.10.0"
+ },
+ "unrun": [
+  {
+   "stratum": "text-non-latin",
+   "reason": "Tesseract traineddata is present locally only for eng and por, and the product restricts OCR languages to por/eng (createPerceptionProducerWorker); a non-Latin script cannot be produced, so no label is generated for it."
+  },
+  {
+   "stratum": "talking-head-real-face",
+   "reason": "The only private face corpus on this machine is admitted for a decode-and-resize-to-448x448 development benchmark (rights-admission-single-output-v2.json, scope development-benchmark, entries expired 2026-10-14T13:38Z); compositing a photograph into a test clip is outside that scope. The talking-head stratum therefore uses a drawn face-like shape and is labelled synthetic."
+  },
+  {
+   "stratum": "face-producer",
+   "reason": "W63b evaluates OCR and the temporal (shot/motion) producers; the face producer needs real faces and its own admission and is not evaluated here."
+  }
+ ],
+ "strata": {
+  "text-normal": {
+   "verdict": "fail",
+   "clips": [
+    "text-normal-a",
+    "text-normal-b",
+    "text-normal-c"
+   ],
+   "criteria": [
+    {
+     "criterion": "exactRateMin",
+     "rule": ">= 0.9",
+     "value": 0.80556,
+     "pass": false
+    },
+    {
+     "criterion": "meanCerMax",
+     "rule": "<= 0.03",
+     "value": 0.071569,
+     "pass": false
+    },
+    {
+     "criterion": "iouShareMin",
+     "rule": ">= 0.9",
+     "value": 0.88889,
+     "pass": false
+    },
+    {
+     "criterion": "spuriousPerSampleMax",
+     "rule": "<= 0.25",
+     "value": 2.6667,
+     "pass": false
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "units": 72,
+    "samples": 36,
+    "medianIou": 0.99904,
+    "duplicateReadingRate": 0.44444,
+    "diacriticUnits": 31
+   }
+  },
+  "text-small-20": {
+   "verdict": "pass",
+   "clips": [
+    "text-small-20-a",
+    "text-small-20-b"
+   ],
+   "criteria": [
+    {
+     "criterion": "exactRateMin",
+     "rule": ">= 0.7",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "meanCerMax",
+     "rule": "<= 0.1",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "iouShareMin",
+     "rule": ">= 0.8",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "spuriousPerSampleMax",
+     "rule": "<= 0.5",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "units": 50,
+    "samples": 24,
+    "medianIou": 1,
+    "duplicateReadingRate": 0.54,
+    "diacriticUnits": 27
+   }
+  },
+  "text-small-16": {
+   "verdict": "pass",
+   "clips": [
+    "text-small-16-a",
+    "text-small-16-b"
+   ],
+   "criteria": [
+    {
+     "criterion": "exactRateMin",
+     "rule": ">= 0.5",
+     "value": 0.83673,
+     "pass": true
+    },
+    {
+     "criterion": "meanCerMax",
+     "rule": "<= 0.2",
+     "value": 0.01126,
+     "pass": true
+    },
+    {
+     "criterion": "iouShareMin",
+     "rule": ">= 0.7",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "spuriousPerSampleMax",
+     "rule": "<= 0.5",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "units": 49,
+    "samples": 24,
+    "medianIou": 1,
+    "duplicateReadingRate": 0.57143,
+    "diacriticUnits": 28
+   }
+  },
+  "text-small-12": {
+   "verdict": "pass",
+   "clips": [
+    "text-small-12-a",
+    "text-small-12-b"
+   ],
+   "criteria": [
+    {
+     "criterion": "exactRateMin",
+     "rule": ">= 0.25",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "meanCerMax",
+     "rule": "<= 0.4",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "spuriousPerSampleMax",
+     "rule": "<= 1",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "units": 43,
+    "samples": 24,
+    "medianIou": 0.98907,
+    "duplicateReadingRate": 0.51163,
+    "diacriticUnits": 22
+   }
+  },
+  "text-multilingual": {
+   "verdict": "pass",
+   "clips": [
+    "text-multilingual-a",
+    "text-multilingual-b",
+    "text-multilingual-c"
+   ],
+   "criteria": [
+    {
+     "criterion": "exactRateMin",
+     "rule": ">= 0.85",
+     "value": 0.90789,
+     "pass": true
+    },
+    {
+     "criterion": "meanCerMax",
+     "rule": "<= 0.05",
+     "value": 0.0065789,
+     "pass": true
+    },
+    {
+     "criterion": "iouShareMin",
+     "rule": ">= 0.9",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "diacriticExactRateMin",
+     "rule": ">= 0.8",
+     "value": 0.875,
+     "pass": true
+    },
+    {
+     "criterion": "spuriousPerSampleMax",
+     "rule": "<= 0.25",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "units": 76,
+    "samples": 36,
+    "medianIou": 0.99848,
+    "duplicateReadingRate": 0.63158,
+    "diacriticUnits": 56
+   }
+  },
+  "static": {
+   "verdict": "pass",
+   "clips": [
+    "static-a"
+   ],
+   "criteria": [
+    {
+     "criterion": "shotScoreMax",
+     "rule": "<= 0.03",
+     "value": 0.000046024,
+     "pass": true
+    },
+    {
+     "criterion": "staticVectorPxPerSecondMax",
+     "rule": "<= 2",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "residualMax",
+     "rule": "<= 0.03",
+     "value": 0.000022933,
+     "pass": true
+    },
+    {
+     "criterion": "falseBoundariesPerMinuteMax",
+     "rule": "<= 0",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "pairs": 119,
+    "minutes": 0.066111,
+    "hardCutLabels": 0,
+    "fadeEvents": 0,
+    "movingSegments": 0
+   }
+  },
+  "hard-cut-high-contrast": {
+   "verdict": "pass",
+   "clips": [
+    "hard-cut-high-contrast-a",
+    "hard-cut-high-contrast-b"
+   ],
+   "criteria": [
+    {
+     "criterion": "hardCutRecallMin",
+     "rule": ">= 1",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "hardCutScoreMin",
+     "rule": ">= 0.8",
+     "value": 0.9885,
+     "pass": true
+    },
+    {
+     "criterion": "falseBoundariesPerMinuteMax",
+     "rule": "<= 1",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "pairs": 379,
+    "minutes": 0.21056,
+    "hardCutLabels": 6,
+    "fadeEvents": 0,
+    "movingSegments": 0
+   }
+  },
+  "hard-cut-textured": {
+   "verdict": "pass",
+   "clips": [
+    "hard-cut-textured-a",
+    "hard-cut-textured-b"
+   ],
+   "criteria": [
+    {
+     "criterion": "hardCutRecallMin",
+     "rule": ">= 0.9",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "falseBoundariesPerMinuteMax",
+     "rule": "<= 1",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "staticFalseMotionShareMax",
+     "rule": "<= 0.05",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "pairs": 355,
+    "minutes": 0.19722,
+    "hardCutLabels": 6,
+    "fadeEvents": 0,
+    "movingSegments": 0
+   }
+  },
+  "crossfade-high-contrast": {
+   "verdict": "pass",
+   "clips": [
+    "crossfade-high-contrast-a",
+    "crossfade-high-contrast-b"
+   ],
+   "criteria": [
+    {
+     "criterion": "fadeRecallAtIouMin",
+     "rule": ">= 1",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "falseBoundariesPerMinuteMax",
+     "rule": "<= 1",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "pairs": 254,
+    "minutes": 0.14111,
+    "hardCutLabels": 0,
+    "fadeEvents": 4,
+    "movingSegments": 0
+   }
+  },
+  "crossfade-low-contrast": {
+   "verdict": "informational",
+   "clips": [
+    "crossfade-low-contrast-a"
+   ],
+   "criteria": [],
+   "n": {
+    "pairs": 129,
+    "minutes": 0.071667,
+    "hardCutLabels": 0,
+    "fadeEvents": 2,
+    "movingSegments": 0
+   },
+   "falseBoundaries": 0,
+   "fadeIouMedian": 1
+  },
+  "pan-subquantum": {
+   "verdict": "informational",
+   "clips": [
+    "pan-subquantum-a"
+   ],
+   "criteria": [],
+   "n": {
+    "pairs": 119,
+    "minutes": 0.066111,
+    "hardCutLabels": 0,
+    "fadeEvents": 0,
+    "movingSegments": 0
+   },
+   "subQuantum": [
+    {
+     "expectedMagnitude": 120,
+     "medianMagnitude": 0,
+     "directionShare": 0,
+     "observed": 89
+    }
+   ]
+  },
+  "pan-slow": {
+   "verdict": "pass",
+   "clips": [
+    "pan-slow-a",
+    "pan-slow-b"
+   ],
+   "criteria": [
+    {
+     "criterion": "movingDirectionShareMin",
+     "rule": ">= 0.9",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "movingMagnitudeRelErrorMax",
+     "rule": "<= 0.25",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "movingCoverageMin",
+     "rule": ">= 0.9",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "movingResidualMedianMax",
+     "rule": "<= 0.2",
+     "value": 0.0000057333,
+     "pass": true
+    },
+    {
+     "criterion": "staticFalseMotionShareMax",
+     "rule": "<= 0.05",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "falseBoundariesPerMinuteMax",
+     "rule": "<= 1",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "pairs": 238,
+    "minutes": 0.13222,
+    "hardCutLabels": 0,
+    "fadeEvents": 0,
+    "movingSegments": 2
+   }
+  },
+  "pan-fast": {
+   "verdict": "pass",
+   "clips": [
+    "pan-fast-a",
+    "pan-fast-b"
+   ],
+   "criteria": [
+    {
+     "criterion": "movingDirectionShareMin",
+     "rule": ">= 0.9",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "movingMagnitudeRelErrorMax",
+     "rule": "<= 0.25",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "movingCoverageMin",
+     "rule": ">= 0.9",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "movingResidualMedianMax",
+     "rule": "<= 0.2",
+     "value": 0.000022933,
+     "pass": true
+    },
+    {
+     "criterion": "staticFalseMotionShareMax",
+     "rule": "<= 0.05",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "falseBoundariesPerMinuteMax",
+     "rule": "<= 1",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "pairs": 238,
+    "minutes": 0.13222,
+    "hardCutLabels": 0,
+    "fadeEvents": 0,
+    "movingSegments": 2
+   }
+  },
+  "inserted-image": {
+   "verdict": "pass",
+   "clips": [
+    "inserted-image-a",
+    "inserted-image-b"
+   ],
+   "criteria": [
+    {
+     "criterion": "imageInsertClaimed",
+     "rule": "== false",
+     "value": false,
+     "pass": true
+    },
+    {
+     "criterion": "falseBoundariesPerMinuteMax",
+     "rule": "<= 1",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "staticFalseMotionShareMax",
+     "rule": "<= 0.05",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "pairs": 298,
+    "minutes": 0.16556,
+    "hardCutLabels": 0,
+    "fadeEvents": 0,
+    "movingSegments": 0
+   },
+   "insertEdgeScores": [
+    [
+     33,
+     0.10699,
+     true
+    ],
+    [
+     55,
+     0.10699,
+     true
+    ],
+    [
+     88,
+     0.013967,
+     false
+    ],
+    [
+     122,
+     0.013962,
+     false
+    ],
+    [
+     34,
+     0.111,
+     true
+    ],
+    [
+     58,
+     0.11101,
+     true
+    ],
+    [
+     77,
+     0.015315,
+     false
+    ],
+    [
+     124,
+     0.015315,
+     false
+    ]
+   ]
+  },
+  "talking-head-synthetic": {
+   "verdict": "pass",
+   "clips": [
+    "talking-head-synthetic-a",
+    "talking-head-synthetic-b"
+   ],
+   "criteria": [
+    {
+     "criterion": "exactRateMin",
+     "rule": ">= 0.85",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "meanCerMax",
+     "rule": "<= 0.05",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "iouShareMin",
+     "rule": ">= 0.9",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "spuriousPerSampleMax",
+     "rule": "<= 0.25",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "staticFalseMotionShareMax",
+     "rule": "<= 0.05",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "falseBoundariesPerMinuteMax",
+     "rule": "<= 1",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "units": 16,
+    "samples": 20,
+    "medianIou": 0.99907,
+    "duplicateReadingRate": 0,
+    "diacriticUnits": 0
+   }
+  },
+  "audio-no-face": {
+   "verdict": "fail",
+   "clips": [
+    "audio-no-face-a"
+   ],
+   "criteria": [
+    {
+     "criterion": "exactRateMin",
+     "rule": ">= 0.9",
+     "value": 0.88889,
+     "pass": false
+    },
+    {
+     "criterion": "meanCerMax",
+     "rule": "<= 0.03",
+     "value": 0.014403,
+     "pass": true
+    },
+    {
+     "criterion": "iouShareMin",
+     "rule": ">= 0.9",
+     "value": 0.88889,
+     "pass": false
+    },
+    {
+     "criterion": "spuriousPerSampleMax",
+     "rule": "<= 0.25",
+     "value": 5.5,
+     "pass": false
+    },
+    {
+     "criterion": "staticFalseMotionShareMax",
+     "rule": "<= 0.05",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "falseBoundariesPerMinuteMax",
+     "rule": "<= 1",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "units": 18,
+    "samples": 10,
+    "medianIou": 1,
+    "duplicateReadingRate": 0.55556,
+    "diacriticUnits": 8
+   }
+  },
+  "time-after-cuts": {
+   "verdict": "fail",
+   "clips": [
+    "time-after-cuts-a",
+    "time-after-cuts-reordered-b"
+   ],
+   "criteria": [
+    {
+     "criterion": "timelineFrameExact",
+     "rule": "== true",
+     "value": true,
+     "pass": true
+    },
+    {
+     "criterion": "exactRateMin",
+     "rule": ">= 0.85",
+     "value": 0.54545,
+     "pass": false
+    },
+    {
+     "criterion": "hardCutRecallMin",
+     "rule": ">= 1",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "seamPairsObserved",
+     "rule": "== 0",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "observedPairsExact",
+     "rule": "== true",
+     "value": true,
+     "pass": true
+    },
+    {
+     "criterion": "movingDirectionShareMin",
+     "rule": ">= 0.9",
+     "value": 1,
+     "pass": true
+    },
+    {
+     "criterion": "falseBoundariesPerMinuteMax",
+     "rule": "<= 1",
+     "value": 0,
+     "pass": true
+    },
+    {
+     "criterion": "producersSucceededOnEveryClip",
+     "rule": "== []",
+     "value": [],
+     "pass": true
+    }
+   ],
+   "n": {
+    "units": 22,
+    "samples": 22,
+    "medianIou": 0.85026,
+    "duplicateReadingRate": 0.86364,
+    "diacriticUnits": 22
+   }
+  }
+ },
+ "robustness": [
+  {
+   "id": "duplicate-envelope",
+   "pass": true,
+   "contract": "the same idempotency key replays the same operation; no second envelope; the assembler lists exactly one DUPLICATE_ENVELOPE per repeated envelope and keeps the timeline hash"
+  },
+  {
+   "id": "gap-stays-partial",
+   "pass": true,
+   "contract": "a range no sample examined stays unexamined: OCR partial with the exact complement, shot/motion partial (the last frame has no pair), image-insert/object/speaker/silence absent with their reasons"
+  },
+  {
+   "id": "reordered-evidence-same-hash",
+   "pass": true,
+   "contract": "the same evidence in another order is the same snapshot (same hash); evidence of another version is rejected and listed, never fused"
+  },
+  {
+   "id": "adversarial-envelope-source-refused",
+   "pass": true,
+   "contract": "an envelope row bound to other source bytes is refused at read with PERSISTENCE_CONFLICT (never served), and the unchanged rows read again"
+  },
+  {
+   "id": "replay-same-snapshot-hash",
+   "pass": true,
+   "contract": "repeated reads and a fresh connection return the same snapshot hash and the same content-addressed row"
+  },
+  {
+   "id": "non-cfr-pts-refused",
+   "pass": true,
+   "contract": "a source with a PTS gap (non-CFR) is refused by both producers: operations fail, no envelope row, the snapshot lists no OCR/temporal input and says NO_PRODUCER_RUN"
+  },
+  {
+   "id": "adversarial-source-bytes-refused",
+   "pass": true,
+   "contract": "a source whose bytes differ from the declared SHA-256 is refused by the materializer/producers: both operations fail, no envelope is written"
+  }
+ ],
+ "clips": [
+  {
+   "id": "text-normal-a",
+   "stratum": "text-normal",
+   "snapshotHash": "b7b1571d3ffd97047f29fd711b53b52731d334d46001b2cf75264b86dde22ca2",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "text-normal-b",
+   "stratum": "text-normal",
+   "snapshotHash": "61d2e0ebf6b8c4f98fc703c35fed4609789c8a737bffec435ebc429e0f00d9de",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "text-normal-c",
+   "stratum": "text-normal",
+   "snapshotHash": "190adb67f96b98a6343ab211e8a45f9d36d30416cabb116c6a0163442e4cc132",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "text-small-20-a",
+   "stratum": "text-small-20",
+   "snapshotHash": "fd6b7ee2745206b6844a4688a1d05e8aeec66b1925010b3ccfd53036362db6fe",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "text-small-20-b",
+   "stratum": "text-small-20",
+   "snapshotHash": "db1aea23c935589ec8c663a8e1b7e1ba7a6bdf5b7d51e0872c0267cce6414ea6",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "text-small-16-a",
+   "stratum": "text-small-16",
+   "snapshotHash": "126cbc569069f71b7e95649371ad9cdef0d2cea4170218a042f2859123ca29a8",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "text-small-16-b",
+   "stratum": "text-small-16",
+   "snapshotHash": "77a613c129b1a95d665ee456f2c3122e75b44eee727c3b2349984778dc7a2b12",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "text-small-12-a",
+   "stratum": "text-small-12",
+   "snapshotHash": "263a1fc060c95c703c3f31c4e872c3620cf30d196448a0a7631678042f40d034",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "text-small-12-b",
+   "stratum": "text-small-12",
+   "snapshotHash": "050f05875f0d38b7da296aa1ae5f8d480650e42d7e0e81160dd43e3a3ab64604",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "text-multilingual-a",
+   "stratum": "text-multilingual",
+   "snapshotHash": "38191f387b0b2235c242bc93bd8943ead5c38a2ff3a7c2936580ad4b1f364de7",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "text-multilingual-b",
+   "stratum": "text-multilingual",
+   "snapshotHash": "3dee0bc39c3e4a6957c60b21ff85d1a7a2d04bedcc4a59ab1dcf5991b57ff2d1",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "text-multilingual-c",
+   "stratum": "text-multilingual",
+   "snapshotHash": "d1a85f671b4cba7fa8342f9e55bed7a960e9a0d243db9ee1ae5f783c563bb43a",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "static-a",
+   "stratum": "static",
+   "snapshotHash": "e663c760706e485b0f7b156b1eab9bd394dca8e01300fdfa0c43a6dfedf49316",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "hard-cut-high-contrast-a",
+   "stratum": "hard-cut-high-contrast",
+   "snapshotHash": "5b5bd96e2bf15784ff506bfafbcfeec45127d4d7d387f37d2962cb171cb7adf1",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "hard-cut-high-contrast-b",
+   "stratum": "hard-cut-high-contrast",
+   "snapshotHash": "256095fbbe8c51ff6396c3dc614cb57abadeb47ba6d164f82caacf6bc01de575",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "hard-cut-textured-a",
+   "stratum": "hard-cut-textured",
+   "snapshotHash": "c97ffac318f0db60806f9c7022d158a517bac2d09a9aa42f2197c94f0bc6bd94",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "hard-cut-textured-b",
+   "stratum": "hard-cut-textured",
+   "snapshotHash": "cf1a7a8e6993bf749804ae40e0e476ed8e4d085951b9ea8e83f9684133418a78",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "crossfade-high-contrast-a",
+   "stratum": "crossfade-high-contrast",
+   "snapshotHash": "ce5865a46644166d47094fcd5fbef7aaaacdbdd9a20c5283f92b0365025a21f2",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "crossfade-high-contrast-b",
+   "stratum": "crossfade-high-contrast",
+   "snapshotHash": "a984fd50c8539f2674068466b0c9f713cd90ae9b97f023eade2787f22207b679",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "crossfade-low-contrast-a",
+   "stratum": "crossfade-low-contrast",
+   "snapshotHash": "700a08e472c296bfa38b9265171e0ebf5f56ff9e116bdc0e0402403ae59ed616",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "pan-subquantum-a",
+   "stratum": "pan-subquantum",
+   "snapshotHash": "1354db341fbb5b9c3119244b80e89958b36dc8feae60458dab9bf8df6e883b29",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "pan-slow-a",
+   "stratum": "pan-slow",
+   "snapshotHash": "b50759eaf4dc3a42235570a37bddfcd3db231cfbf3adbb68788d9440bed7387f",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "pan-slow-b",
+   "stratum": "pan-slow",
+   "snapshotHash": "23d67192467be6f5e3b916e3cb539d2347835c39658925ebd8264992bc7bbeaf",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "pan-fast-a",
+   "stratum": "pan-fast",
+   "snapshotHash": "d34dce65a03f6927a98c1a78bb8884ea5849ca32b6605154693df86c99fee099",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "pan-fast-b",
+   "stratum": "pan-fast",
+   "snapshotHash": "5ce46a48014103036c1b1ba32358db35a098c3be10ae127e1371e32414bbe534",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "inserted-image-a",
+   "stratum": "inserted-image",
+   "snapshotHash": "d9979ca92a8069a431e3ba9f76860a663f2343c2b6d4294764613304101fe0cf",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "inserted-image-b",
+   "stratum": "inserted-image",
+   "snapshotHash": "199f12956234194cdde5b3e55252270c3a45ef02a871bd336aa746fd356d2950",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "talking-head-synthetic-a",
+   "stratum": "talking-head-synthetic",
+   "snapshotHash": "347f9808cb16dc34665f562c8b45b93cb5981021635c35f3dfbb486ce46a673d",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "talking-head-synthetic-b",
+   "stratum": "talking-head-synthetic",
+   "snapshotHash": "a6d11361706a84b318e6743369573631608c9252c51d349813dd0f4cb7ef204b",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "audio-no-face-a",
+   "stratum": "audio-no-face",
+   "snapshotHash": "3f3ae8e587211ede1af3f7b3ddd402c955cda9d99d016849ba59d9496afc8b41",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "time-after-cuts-a",
+   "stratum": "time-after-cuts",
+   "snapshotHash": "0e9c5a1e19242342210f42322e47c84d66dfb01cba9722a1dfc17b3b9dca1968",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "time-after-cuts-reordered-b",
+   "stratum": "time-after-cuts",
+   "snapshotHash": "80d5a2322d1152fd2c4e0155a7249864f30b7a11a402d167b172eb8cd44b34e1",
+   "ocr": "succeeded",
+   "temporal": "succeeded"
+  },
+  {
+   "id": "robustness-pts-gap-a",
+   "stratum": "robustness-pts-gap",
+   "snapshotHash": "13fd11e19c018a19f0c34c369e6319bcec26a98fbd7bb42876282dccd2dfaea5",
+   "ocr": "attempt-failed",
+   "temporal": "attempt-failed"
+  }
+ ],
+ "development": {
+  "runId": "w63b-devfull1-7938bd80",
+  "split": "development",
+  "purpose": "harness/oracle debugging only; no threshold, rule or metric was changed afterwards",
+  "verdicts": {
+   "text-normal": "fail",
+   "text-small-20": "pass",
+   "text-small-16": "pass",
+   "text-small-12": "pass",
+   "text-multilingual": "fail",
+   "static": "pass",
+   "hard-cut-high-contrast": "pass",
+   "hard-cut-textured": "pass",
+   "crossfade-high-contrast": "pass",
+   "crossfade-low-contrast": "informational",
+   "pan-subquantum": "informational",
+   "pan-slow": "pass",
+   "pan-fast": "pass",
+   "inserted-image": "pass",
+   "talking-head-synthetic": "pass",
+   "audio-no-face": "fail",
+   "time-after-cuts": "fail"
+  }
+ }
+}

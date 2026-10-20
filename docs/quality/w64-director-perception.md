@@ -199,3 +199,17 @@ Gates: `typecheck`, `lint`, `lint:code`, `lint:whitespace`, `db:v2:validate` (32
 - Sem gatilho de produtor nem capability pública de materialização (ver acima).
 - Janelas pendentes entre versões podem ser pedidas duas vezes (chave inclui a versão).
 - A prova de cobertura densa usa gaps de design prior; o impacto real em vídeo é de W70.
+
+## Seguimento da CI da PR #85 (ba56e0db)
+
+Três falhas, três causas, nenhuma asserção enfraquecida:
+
+1. **Job `perception`**: o lançador de namespace tem listas fixas de suítes (`perception-consumer-cgroup.py`, `perception_namespace_warden.py`, `run-perception-ci-namespace.mjs`, e a lista do teste de fiação); a suíte nova não estava nelas e
+   o lançador recusou com `Suite outside fixed perception allowlist` (o `messageSha256` do log confere com essa frase). Adicionada às quatro. A suíte também passou a usar ids de variante de saída únicos (`uniqueVariant`), porque o banco de um job
+   de CI não é descartável (`resetDisposableDatabase` recusa) e id de variante = razão de aspecto colidiria com as suítes vizinhas (4:5 já é da `prisma-director-server-perception`).
+2. **`dashboard-runtime-journey` (W35)** e 3. **`export-matrix.e2e`**: os leitores controlados dos dois helpers (`readControlledSource`) exigiam `quality.schemaVersion !== 3` no snapshot de qualidade semeado por uma run REAL do Diretor, que agora grava 4;
+   o leitor devolvia `null` antes de chegar à admissão de persistência (`persistenceAdmissionAttempts` 0, esperado 1). O produto não mudou de comportamento: corrigido o pino do seed para 4, o negativo volta a chegar ao portão real e é recusado ali
+   (`EDITORIAL_ACCEPTANCE_FAILED`). Reproduzido antes do conserto no harness (`w64-dash-repro-a16266ee`: 5/6, mesma mensagem).
+
+Rodadas (árvore com `origin/main` 9795b41c fundida): `w64-ci-9f7deb82` (`--build`): suíte nova 4/4, `prisma-director-ocr` 6/6, W63a Director 1/1, snapshot PG 5/5, snapshot HTTP 1/1, servidor real 1/1, dashboard runtime journey (088) 6/6,
+`public-project-api` (papi-051) 1/1, `export-matrix.e2e` 2/2, `prisma-workspace-review-availability` 1/1. `w64-dash-95f1aa54` (antes do merge): 088 6/6, papi-051, `prisma-final-export` 2/2, `prisma-proxy-review`, `w66-operational-bundle-pg`, format-quality, quality-iteration, todos verdes. `npm test`: 3680, 3667 passam, 0 falham, 13 pulados.

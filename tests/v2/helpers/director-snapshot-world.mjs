@@ -25,10 +25,11 @@ const { PrismaServerPerceptionSnapshotRepository } = await import('../../../src/
  * Returns the repositories, the Director service over any repository (so a suite can wrap the commit) and the request builder; `request`
  * takes the base Version to direct (the input Version by default, or the head a previous run left).
  */
-export async function seedDirectorSnapshotWorld(db, { aspectRatio = '4:5', evidence = true, ocrConfidence, faceRows } = {}) {
+export async function seedDirectorSnapshotWorld(db, { aspectRatio = '4:5', evidence = true, ocrConfidence, faceRows, uniqueVariant = false } = {}) {
   const suffix = randomUUID().slice(0, 8)
   const workspaceId = `w61-admission-${suffix}`
-  const world = await seedDirectorOcrWorld(db, { suffix, artifactKey: `${workspaceId}/source.mp4`, sourceSha256: sha('a'), byteSize: 1024n, aspectRatio })
+  const world = await seedDirectorOcrWorld(db, { suffix, artifactKey: `${workspaceId}/source.mp4`, sourceSha256: sha('a'), byteSize: 1024n, aspectRatio,
+    ...(uniqueVariant ? { variantId: `w64-variant-${suffix}` } : {}) })
   const manifestId = `w63a-manifest-${suffix}`
   await db.v2MediaArtifactManifest.create({ data: { id: manifestId, workspaceId, artifactId: world.sourceId,
     schemaVersion: 'media-artifact-manifest/v2', manifestHash: sha('b'), recipeId: 'w63a-controlled-source', recipeVersion: '1.0.0',
