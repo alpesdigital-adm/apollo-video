@@ -191,7 +191,7 @@ test('the panel source cannot accept an issue: no resolve control, every Command
   assert.match(panel, /^'use client'/)
   assert.doesNotMatch(panel, /[Rr]esolver|[Rr]esolvido|acknowledge-warnings|proxy-reviews/, 'the panel never writes an acceptance')
   assert.match(panel, /Nenhum botão aqui aceita um problema/)
-  assert.equal((panel.match(/'idempotency-key': idempotencyKeys\(/g) ?? []).length, 3, 'the two Commands and the recompile enqueue each carry their key')
+  assert.equal((panel.match(/'idempotency-key': idempotencyKeys\(/g) ?? []).length, 4, 'the two Commands, the recompile enqueue and the render of the current Version each carry their key')
   assert.match(panel, /\/subtitle-segment-overrides`/); assert.match(panel, /\/variant-reframe-overrides`/); assert.match(panel, /\/proxy-renders`/)
   assert.match(panel, /\/v1\/operations\/\$\{encodeURIComponent\(id\)\}\/cancel/)
   assert.match(panel, /Confirmar o cancelamento/)
