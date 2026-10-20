@@ -1691,6 +1691,30 @@ test('W67 FAIL CLOSED: a final with no MP4 critic wired is not delivered; only a
   }
 })
 
+test('W67 an acknowledgement is stored only for a final that is delivered: a codec, canvas or persistence failure after the gate leaves no record and the attempt says it was not used', async () => {
+  const failures = {
+    codec: (dependencies) => { const render = dependencies.renderer.render; dependencies.renderer.render = async (input) => { const out = await render(input); return { ...out, probe: { ...out.probe, codec: 'vp9' } } } },
+    canvas: (dependencies) => { const render = dependencies.renderer.render; dependencies.renderer.render = async (input) => { const out = await render(input); return { ...out, probe: { ...out.probe, width: 720 } } } },
+    persistence: (dependencies) => { dependencies.artifacts.persistOrReplay = async () => { throw new Error('artifact persistence is down') } },
+  }
+  for (const [label, sabotage] of Object.entries(failures)) {
+    const operations = createOperations()
+    const { calls, dependencies } = workerDependencies(operations)
+    const seen = capture(dependencies)
+    sabotage(dependencies)
+    dependencies.mp4ExportAcknowledgement = { ...ACK }
+    const stored = captureMp4Storage(dependencies)
+    const outcome = await runNextProjectFinalExportOperationService(dependencies)(`worker-final-export-w67-ack-late-${label}`)
+    assert.notEqual(outcome.status, 'succeeded', label)
+    assert.equal(calls.attached, 0, label)
+    assert.equal(stored.filter((entry) => entry.prefix === 'mp4-export-acknowledgements').length, 0, `${label}: the final was not delivered, so no acknowledgement record is written`)
+    assert.equal(seen.attempt.status, 'failed', label)
+    const validator = mp4Validator(seen.attempt)
+    assert.equal(validator.passed, true, `${label}: the gate itself allowed it`)
+    assert.match(validator.message, /acknowledgement record [a-f0-9]{64} not stored: the final was not delivered.$/, label)
+  }
+})
+
 test('W67 FAIL CLOSED: a face oracle that failed (a crashed OpenVINO bridge) never delivers the final, with or without ink, and no acknowledgement lifts it', async () => {
   for (const [label, uncertainInk] of [['crash-no-ink', null], ['crash-over-ink', 'output-unreadable']]) {
     for (const acknowledgement of [null, ACK]) {

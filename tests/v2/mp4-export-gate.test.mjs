@@ -37,6 +37,11 @@ const INK_FRAMES = {
   'registration-failed-no-face': { oracle: { state: 'observed', outputFaceCount: 0, sourceFaceCount: 0, outputReads: reads(), sourceReads: reads(), registrationStatus: 'failed', mappedSourceFaces: 0 }, protectedRegions: [], subject: { state: 'not-applicable', reason: 'NO_SOURCE_FACE' } },
   'source-face-unmapped': { oracle: { state: 'observed', outputFaceCount: 0, sourceFaceCount: 2, outputReads: reads(), sourceReads: reads(), registrationStatus: 'ok', mappedSourceFaces: 1 }, protectedRegions: [], subject: SUBJECT },
   'face-intersects-ink': { oracle: { state: 'observed', outputFaceCount: 1, sourceFaceCount: 1, outputReads: reads(), sourceReads: reads(), registrationStatus: 'ok', mappedSourceFaces: 1 }, protectedRegions: [{ ...FACE, captionInkPixels: 40 }], subject: SUBJECT },
+  // the two face counts are facts too: a missing, fractional, negative or non-finite one must not read as "no faces"
+  'facts-missing-source-count': { oracle: { state: 'observed', outputFaceCount: 0, outputReads: reads(), sourceReads: reads(), registrationStatus: 'ok', mappedSourceFaces: 0 }, protectedRegions: [], subject: { state: 'not-applicable', reason: 'NO_SOURCE_FACE' } },
+  'facts-missing-output-count': { oracle: { state: 'observed', sourceFaceCount: 0, outputReads: reads(), sourceReads: reads(), registrationStatus: 'ok', mappedSourceFaces: 0 }, protectedRegions: [], subject: { state: 'not-applicable', reason: 'NO_SOURCE_FACE' } },
+  'facts-fractional-count': { oracle: { state: 'observed', outputFaceCount: 0.5, sourceFaceCount: 0, outputReads: reads(), sourceReads: reads(), registrationStatus: 'ok', mappedSourceFaces: 0 }, protectedRegions: [], subject: { state: 'not-applicable', reason: 'NO_SOURCE_FACE' } },
+  'facts-negative-count': { oracle: { state: 'observed', outputFaceCount: -1, sourceFaceCount: 0, outputReads: reads(), sourceReads: reads(), registrationStatus: 'ok', mappedSourceFaces: 0 }, protectedRegions: [], subject: { state: 'not-applicable', reason: 'NO_SOURCE_FACE' } },
   'facts-missing': { oracle: { state: 'observed', outputFaceCount: 0, sourceFaceCount: 0 }, protectedRegions: [], subject: { state: 'not-applicable', reason: 'NO_SOURCE_FACE' } },
 }
 
@@ -122,6 +127,10 @@ test('NOT WAIVABLE: each fact that leaves a frame with ink unestablished blocks 
     'source-face-unmapped': 'MP4_SOURCE_FACE_UNMAPPED_UNDER_INK',
     'face-intersects-ink': 'MP4_FACE_INTERSECTS_INK',
     'facts-missing': 'MP4_GATE_FACTS_MISSING_UNDER_INK',
+    'facts-missing-source-count': 'MP4_GATE_FACTS_MISSING_UNDER_INK',
+    'facts-missing-output-count': 'MP4_GATE_FACTS_MISSING_UNDER_INK',
+    'facts-fractional-count': 'MP4_GATE_FACTS_MISSING_UNDER_INK',
+    'facts-negative-count': 'MP4_GATE_FACTS_MISSING_UNDER_INK',
   }
   for (const [kind, code] of Object.entries(cases)) {
     for (const acknowledgement of [undefined, ACK]) {
@@ -158,6 +167,18 @@ test('a face oracle that failed blocks the final even with no ink in any frame, 
   const noModel = mp4ExportGate({ report: report({ models: [] }), acknowledgement: ACK })
   assert.equal(noModel.allowed, false)
   assert.deepEqual(codes(noModel), ['MP4_ORACLE_MODEL_MISSING'])
+  // a report that pins only ONE of the two detectors cannot back "both models read it": it blocks, and no acknowledgement lifts it
+  const pins = pixelOracleModelPins()
+  assert.equal(pins.length, 2)
+  for (const only of [[pins[0]], [pins[1]], [{ ...pins[0], id: 'omz-face-detection-9999' }, pins[1]]]) {
+    for (const acknowledgement of [undefined, ACK]) {
+      const partial = mp4ExportGate({ report: report({ models: only }), acknowledgement })
+      assert.equal(partial.allowed, false, only.map((model) => model.id).join('+'))
+      assert.deepEqual(codes(partial), ['MP4_ORACLE_MODEL_MISSING'])
+      assert.equal(partial.blockers[0].waivable, false)
+    }
+  }
+  assert.equal(mp4ExportGate({ report: report({ models: [...pins].reverse() }) }).allowed, true, 'both exact ids, in any order')
 })
 
 test('a deployment records the acknowledgement in three variables, all or none, never in production, and a malformed one throws instead of acknowledging', () => {
@@ -236,6 +257,13 @@ test('MUTATION: every rule of the gate is load-bearing (a copy without it delive
     // (an absent source frame is still not a read one, so the copy blocks it too, but as the wrong fact: the code that names it is gone)
     assert.ok(!codes(mutant.mp4ExportGate({ report: report({ kind: 'source-absent' }) })).includes('MP4_SOURCE_FRAME_ABSENT_UNDER_INK'), 'mutant 4 no longer names an absent source frame')
     assert.ok(codes(mp4ExportGate({ report: report({ kind: 'source-absent' }) })).includes('MP4_SOURCE_FRAME_ABSENT_UNDER_INK'))
+    // 4b. the two face counts are not validated (a missing one reads as zero faces)
+    mutant = await load('!isCount(oracle.sourceFaceCount) || !isCount(oracle.outputFaceCount) || !isCount(oracle.mappedSourceFaces)', 'oracle.mappedSourceFaces === undefined')
+    for (const kind of ['facts-missing-source-count', 'facts-missing-output-count', 'facts-fractional-count', 'facts-negative-count']) { assert.equal(blocks(mutant, kind), false, `mutant 4b lets ${kind} through`); assert.ok(blocks({ mp4ExportGate }, kind), kind) }
+    // 4c. one pinned model is enough
+    mutant = await load('const unpinned = PIXEL_ORACLE_MODEL_IDS.filter((id) => !report.oracle.models.some((model) => model.id === id))', 'const unpinned = report.oracle.models.length === 0 ? [...PIXEL_ORACLE_MODEL_IDS] : []')
+    assert.equal(mutant.mp4ExportGate({ report: report({ models: [pixelOracleModelPins()[0]] }) }).allowed, true, 'mutant 4c lets a report that pins one detector through')
+    assert.equal(mp4ExportGate({ report: report({ models: [pixelOracleModelPins()[0]] }) }).allowed, false)
     // 5. everything is waivable
     mutant = await load("new Set(['MP4_CRITIC_NOT_CONFIGURED'])", "new Set(['MP4_CRITIC_NOT_CONFIGURED', 'MP4_SOURCE_FRAME_UNREADABLE_UNDER_INK', 'MP4_ORACLE_FAILED', 'MP4_REGISTRATION_FAILED_UNDER_INK'])")
     assert.equal(blocks(mutant, 'source-unreadable-v9', ACK), false, 'mutant 5 lets an acknowledgement lift an unreadable source frame')

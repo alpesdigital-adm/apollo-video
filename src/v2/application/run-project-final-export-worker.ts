@@ -416,20 +416,25 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       const certification = certifyFinalCaptions({ plan: placementPlan, pixelCheck })
       // ---- W67. What the pixels of the delivered file say, by the independent critic; a blocked variant is not promoted ----
       let mp4Validator: { code: string; passed: boolean; message: string } | null = null
+      let pendingAcknowledgement: Readonly<{ text: string; sha256: string; gateMessage: string }> | null = null
       const mp4Acknowledgement = dependencies.mp4ExportAcknowledgement ? parseMp4ExportAcknowledgement(dependencies.mp4ExportAcknowledgement) : null
       if (!dependencies.mp4PixelCritic) {
         // Not wired: the final is not approved by silence. Only an explicit acknowledgement (actor, time, reason) delivers it.
         const gate = mp4ExportGate({ report: null, acknowledgement: mp4Acknowledgement })
         let recorded = ''
         if (gate.allowed) {
-          // The acknowledgement that delivers this final is stored as a structured record (who, when, why, which operation), not as validator text.
+          // The acknowledgement that delivers this final is a structured record (who, when, why, which operation), not validator text.
+          // It is only BUILT here: it is stored once the final is actually delivered (after the codec/canvas/duration validators, the
+          // rights check, the promotion and the artifact persistence), so an acknowledgement is never recorded for a final that failed.
           const unwiredPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
           const acknowledgementRecord = mp4ExportAcknowledgementRecord({
             gate, workspaceId: operation.workspaceId, projectId: context.projectId, variantId: context.outputVariantId ?? sourceOutputVariantId(source),
             outputSpecId: unwiredPreset.spec.id, operationId: operation.id, reportHash: null,
           })
-          const stored = await persistMp4ExportAcknowledgement({ storage: dependencies.storage, workspaceId: operation.workspaceId, text: acknowledgementRecord!.text })
-          recorded = `; acknowledgement record ${stored.sha256} stored as ${stored.key}`
+          const recordSha256 = createHash('sha256').update(acknowledgementRecord!.text).digest('hex')
+          // until it is stored, the attempt says so explicitly: the acknowledgement was not used
+          recorded = `; acknowledgement record ${recordSha256} not stored: the final was not delivered`
+          pendingAcknowledgement = Object.freeze({ text: acknowledgementRecord!.text, sha256: recordSha256, gateMessage: gate.message })
         }
         mp4Validator = { code: 'FINAL_MP4_CRITIC', passed: gate.allowed, message: `${gate.message.slice(0, 230)}${recorded}.`.slice(0, 500) }
       } else {
@@ -726,6 +731,14 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         createdAt: clock().toISOString(),
       })
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Final export lease was lost')
+      // W67. The final is delivered (promoted and persisted): the acknowledgement that lifted the critic's absence is recorded now, and
+      // the attempt names where. A failure to store it fails the attempt rather than leaving a delivered final without its record.
+      if (pendingAcknowledgement) {
+        const acknowledgement = pendingAcknowledgement
+        const recordedAcknowledgement = await persistMp4ExportAcknowledgement({ storage: dependencies.storage, workspaceId: operation.workspaceId, text: acknowledgement.text })
+        const message = `${acknowledgement.gateMessage.slice(0, 230)}; acknowledgement record ${recordedAcknowledgement.sha256} stored as ${recordedAcknowledgement.key}.`.slice(0, 500)
+        validators = validators.map((validator) => validator.code === 'FINAL_MP4_CRITIC' ? { ...validator, message } : validator)
+      }
       const attemptCompletedAt = clock().toISOString()
       await dependencies.projects.recordAttempt({
         workspaceId: operation.workspaceId,

@@ -64,6 +64,7 @@ export function parseMp4ExportAcknowledgement(value: unknown): Mp4ExportAcknowle
 }
 
 type Reads = Readonly<Record<string, 'observed' | 'unknown'>> | null | undefined
+const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0
 const readByEveryModel = (reads: Reads): boolean => Boolean(reads) && PIXEL_ORACLE_MODEL_IDS.every((id) => reads![id] === 'observed')
 
 /**
@@ -78,7 +79,9 @@ export function mp4ExportGate(input: Readonly<{ report: Readonly<Mp4QualityRepor
   if (report === null) {
     found.set('MP4_CRITIC_NOT_CONFIGURED', 'no MP4 pixel critic is wired for this final')
   } else {
-    if (report.oracle.models.length === 0) found.set('MP4_ORACLE_MODEL_MISSING', 'the report pins no face-detection model')
+    // Both pinned detectors (exact ids) must be pinned by the report: the frame facts claim "both models read it", which a report pinning one cannot back.
+    const unpinned = PIXEL_ORACLE_MODEL_IDS.filter((id) => !report.oracle.models.some((model) => model.id === id))
+    if (unpinned.length > 0) found.set('MP4_ORACLE_MODEL_MISSING', report.oracle.models.length === 0 ? 'the report pins no face-detection model' : `the report does not pin the face-detection model(s) ${unpinned.join(', ')}`)
     const failures = report.oracle.failures ?? []
     if (failures.length > 0) found.set('MP4_ORACLE_FAILED', `the face oracle could not run (${failures.join(', ')})`)
     const frames = new Map<Mp4ExportBlockerCode, number>()
@@ -88,7 +91,7 @@ export function mp4ExportGate(input: Readonly<{ report: Readonly<Mp4QualityRepor
       const { facts } = sample
       if (facts.caption.pixels === 0 && facts.cta.pixels === 0) continue
       const oracle = facts.oracle
-      if (oracle.outputReads === undefined || oracle.sourceReads === undefined || oracle.registrationStatus === undefined || oracle.mappedSourceFaces === undefined) { bump('MP4_GATE_FACTS_MISSING_UNDER_INK'); continue }
+      if (oracle.outputReads === undefined || oracle.sourceReads === undefined || oracle.registrationStatus === undefined || !isCount(oracle.sourceFaceCount) || !isCount(oracle.outputFaceCount) || !isCount(oracle.mappedSourceFaces)) { bump('MP4_GATE_FACTS_MISSING_UNDER_INK'); continue }
       let blocked = false
       const block = (code: Mp4ExportBlockerCode) => { bump(code); blocked = true }
       if (!readByEveryModel(oracle.outputReads)) block('MP4_OUTPUT_FRAME_UNREADABLE_UNDER_INK')
@@ -100,7 +103,7 @@ export function mp4ExportGate(input: Readonly<{ report: Readonly<Mp4QualityRepor
       if (!blocked && oracle.sourceFaceCount === 0 && oracle.outputFaceCount === 0) noFaceFrames += 1
     }
     const wording: Readonly<Partial<Record<Mp4ExportBlockerCode, string>>> = {
-      MP4_GATE_FACTS_MISSING_UNDER_INK: 'the sample carries no read status of the models, the registration or the mapped faces',
+      MP4_GATE_FACTS_MISSING_UNDER_INK: 'the sample carries no read status of the models, no registration status or no valid face counts (source, output, mapped)',
       MP4_SOURCE_FRAME_ABSENT_UNDER_INK: 'no source frame maps to the frame',
       MP4_SOURCE_FRAME_UNREADABLE_UNDER_INK: 'a detector could not read the source frame',
       MP4_OUTPUT_FRAME_UNREADABLE_UNDER_INK: 'a detector could not read the output frame',
