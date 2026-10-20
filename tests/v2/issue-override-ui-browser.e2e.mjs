@@ -619,15 +619,19 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       assert.equal(canceledOps.length, 1)
       assert.equal((await db.v2PublicOperation.findUniqueOrThrow({ where: { id: canceledOps[0].operationId } })).status, 'canceled')
       note('tall-cancel', { operation: canceledOps[0].operationId, artifact: null })
-      await page.getByTestId('issue-recompile-retry').click()
-      await delay(8_000)
-      const retried = await db.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: world.owner.workspaceId, projectId: world.projectId, projectVersionId: hiddenTall.id }, include: { operation: true } })
-      note('tall-retry-state', { operations: retried.map((row) => [row.operationId, row.operation.status, row.operation.phase, row.operation.errorCode]), failures: workerFailures.slice(-2), panel: (await panel.innerText()).slice(0, 700) })
-      await waitFor('the retried recompile succeeded', async () => (await proxyOf(hiddenTall.id, entry.variantId)) !== null, { timeoutMs: 300_000 })
-      await page.locator('[data-testid="issue-recompile-status"][data-operation-status="succeeded"]').waitFor({ timeout: 120_000 })
-      const hiddenTallReview = await reviewOf(entry.variantId, hiddenTall.id)
-      assert.ok(!issuesOf(hiddenTallReview).some((issue) => issue.elementIds.includes('subtitle:cue-3')))
-      assert.equal(await page.locator('[data-testid="issue-chip"][data-cue-id="cue-3"]').count(), 0)
+      // a canceled render is not reopened for the same inputs: the way forward is another Version. Reverting the exception creates it and renders it.
+      assert.match(await page.locator('[data-testid="issue-recompile-status"]').innerText(), /não é reaberto para as mesmas entradas/)
+      assert.equal(await page.getByTestId('issue-recompile-retry').count(), 0, 'no control pretends the canceled render can be run again')
+      snap = await snapshot(entry)
+      await page.getByTestId('active-subtitle-exception').waitFor()
+      await page.getByTestId('active-subtitle-reset').click()
+      await waitRecompiled('revert the hidden cue after the cancel')
+      const afterCancel = await afterCommand({ entry, ...snap, label: 'after cancel', type: 'apply-subtitle-segment-override' })
+      assert.ok(await proxyOf(afterCancel.id, entry.variantId), 'the next Version was rendered')
+      assert.equal(await proxyOf(hiddenTall.id, entry.variantId), null, 'and the canceled Version still has no artifact')
+      const afterCancelReview = await reviewOf(entry.variantId, afterCancel.id)
+      assert.ok(issuesOf(afterCancelReview).some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.elementIds.includes('subtitle:cue-3')) || issuesOf(afterCancelReview).some((issue) => issue.elementIds.includes('subtitle:cue-3')), 'the cue is back, so its issue is back')
+      note('tall-after-cancel', { version: afterCancel.id, review: afterCancelReview.status })
     }
 
     /* ======================================= the whole journey: nothing was accepted by clicking ======================================= */

@@ -748,14 +748,11 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
               <div className="mt-1">
                 <p className="text-[10px] text-[#d8d2c8]" data-operation-id={applied.recompile.operationId ?? ''} data-operation-status={operation?.status ?? 'queued'} data-testid="issue-recompile-status">
                   {cancelledOperationId === applied.recompile.operationId || operation?.status === 'canceled' || operation?.status === 'cancelled'
-                    ? 'Cancelado: nenhum proxy novo foi promovido. A versão nova existe e continua sem render.'
+                    ? 'Cancelado: nenhum proxy novo foi promovido. Esta versão continua sem render desta saída (um render cancelado não é reaberto para as mesmas entradas): reverter a exceção, ou aplicar outra, cria outra versão e outro render.'
                     : OPERATION_LABELS[operation?.status ?? 'queued'] ?? operation?.status}
                   {operation?.phase ? ` · ${operation.phase}` : ''}
                 </p>
                 {operation?.status === 'failed' ? <p className="mt-1 text-[10px] text-[#c97870]">{operation.error?.message ?? 'O render falhou.'}</p> : null}
-                {!operationActive && operation && operation.status !== 'succeeded' ? (
-                  <button className="mt-2 rounded border border-[#d9aa3d]/30 px-2 py-1 text-[9px] text-[#ddb858] disabled:opacity-40" data-testid="issue-recompile-retry" disabled={busy} onClick={() => void retryRecompile()} type="button">Recompilar de novo</button>
-                ) : null}
                 {operationActive ? (
                   <button className={`mt-2 rounded border px-2 py-1 text-[9px] ${cancelArmed ? 'border-[#c66f68] text-[#df8a82]' : 'border-white/[0.12] text-[#aaa49a]'} disabled:opacity-40`} data-testid="issue-recompile-cancel" disabled={busy} onClick={() => void cancelRecompile()} type="button">
                     {cancelArmed ? 'Confirmar o cancelamento' : 'Cancelar recompilação'}
