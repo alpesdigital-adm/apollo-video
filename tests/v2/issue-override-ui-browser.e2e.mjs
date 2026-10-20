@@ -39,7 +39,15 @@ async function waitFor(label, probe, { timeoutMs = 240_000, intervalMs = 500 } =
 
 test('W68 issue -> override -> recompile -> critic again, in a real browser, for 9:16 and 16:9', { skip: !enabled, timeout: 1_650_000 }, async () => {
   const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
-  const db = new PrismaClient({ datasources: { db: { url: process.env.V2_DATABASE_URL } } })
+  // The database role of the supervised harness allows 12 connections; the CI database allows far more, and a pool of 5 per process is what it
+  // configures. This journey runs the test, the render worker and TWO servers (the owner's and the stranger's) against one database, so each gets a
+  // small pool of its own: the journey is sequential and never needs more than a couple of connections at a time.
+  const harnessUrl = process.env.V2_DATABASE_URL
+  const poolOf = (limit) => { const url = new URL(harnessUrl); url.searchParams.set('connection_limit', String(limit)); return url.toString() }
+  const serverPool = poolOf(2)
+  // The in-process repositories (the render worker pass the journey drives) hold one process-wide client: it gets the same small pool.
+  process.env.V2_DATABASE_URL = poolOf(3)
+  const db = new PrismaClient({ datasources: { db: { url: poolOf(2) } } })
   const root = await mkdtemp(join(tmpdir(), 'apollo-w68-'))
   const artifactRoot = join(root, 'artifacts')
   await mkdir(artifactRoot, { recursive: true })
@@ -59,7 +67,7 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       APOLLO_API_ENVIRONMENT: 'production', APOLLO_AUTH_MODE: 'bootstrap', APOLLO_ALLOW_BOOTSTRAP_AUTH: 'true', APOLLO_UI_BOOTSTRAP_ROLE: 'operator',
       APOLLO_UI_USERNAME: username, APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(password, `w68-salt-${suffix}`),
       APOLLO_UI_SESSION_SECRET: `w68-session-${suffix}-at-least-32-bytes-long`, APOLLO_UI_API_CLIENT_ID: clientId,
-      APOLLO_V2_ARTIFACT_ROOT: artifactRoot, APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
+      APOLLO_V2_ARTIFACT_ROOT: artifactRoot, APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local', V2_DATABASE_URL: serverPool,
       // This journey verifies every step through the API while the editor polls: dozens of reads a minute from one client, a burst that the
       // request-anomaly alarm (default floor 20, 3x baseline) is built to stop. The alarm is the product's; its floor is raised here, for this
       // server only, and the rate limit itself (10000 a minute) is untouched. editor-reliability-browser.e2e.mjs is the suite that keeps the defaults.
@@ -69,7 +77,7 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
     servers.push(server)
     // The render worker seals its recipe parameters before it writes a manifest, and refuses to start without a key. Generated here, never read from a file.
     const workerEnvironment = {
-      ...process.env, ...environmentFor(world.owner.clientId), V2_DATABASE_URL: process.env.V2_DATABASE_URL,
+      ...process.env, ...environmentFor(world.owner.clientId),
       APOLLO_PROTECTED_PAYLOAD_KEY_ID: process.env.APOLLO_PROTECTED_PAYLOAD_KEY_ID ?? `w68-${suffix}`,
       APOLLO_PROTECTED_PAYLOAD_KEY: process.env.APOLLO_PROTECTED_PAYLOAD_KEY ?? Buffer.alloc(32, 7).toString('base64url'),
     }
