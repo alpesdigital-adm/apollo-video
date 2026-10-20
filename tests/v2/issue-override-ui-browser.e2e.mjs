@@ -60,6 +60,10 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       APOLLO_UI_USERNAME: username, APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(password, `w68-salt-${suffix}`),
       APOLLO_UI_SESSION_SECRET: `w68-session-${suffix}-at-least-32-bytes-long`, APOLLO_UI_API_CLIENT_ID: clientId,
       APOLLO_V2_ARTIFACT_ROOT: artifactRoot, APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
+      // This journey verifies every step through the API while the editor polls: dozens of reads a minute from one client, a burst that the
+      // request-anomaly alarm (default floor 20, 3x baseline) is built to stop. The alarm is the product's; its floor is raised here, for this
+      // server only, and the rate limit itself (10000 a minute) is untouched. editor-reliability-browser.e2e.mjs is the suite that keeps the defaults.
+      APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: '100000',
     })
     const server = await startServer({ appRoot: process.cwd(), environment: environmentFor(world.owner.clientId) })
     servers.push(server)
