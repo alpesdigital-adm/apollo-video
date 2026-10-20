@@ -641,5 +641,84 @@ class CarrierDiagnosticContracts(unittest.TestCase):
         self.assertEqual(world.opened, [])
 
 
+def observer_metadata_contract(world):
+    """The reviewed identity/metadata/marker functions, run against a controlled /proc (no CDLL, no privilege)."""
+    tree = ast.parse(WARDEN.read_text(encoding="utf-8"), filename=str(WARDEN))
+    names = {"require", "parse_stat", "identity", "key", "verified_metadata", "marker_facts"}
+    selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
+    if {node.name for node in selected} != names:
+        raise AssertionError("observer metadata declarations changed")
+    def bounded_read(path, _maximum):
+        return world.read(path)
+    namespace = {"__builtins__": __builtins__, "re": re, "errno": errno, "bounded_read": bounded_read,
+        "credentials": world.credentials, "STAT_LIMIT": 8192, "ENV_LIMIT": 1 << 20, "RUN_MARKER": b"APOLLO_PERCEPTION_RUN_ID="}
+    exec(compile(ast.Module(body=selected, type_ignores=[]), str(WARDEN), "exec"), namespace)
+    return namespace
+
+
+def stat_text(pid, starttime="500", state="S", ppid=1):
+    fields = ["0"] * 50
+    fields[0], fields[1], fields[2], fields[3], fields[19] = state, str(ppid), str(pid), str(pid), starttime
+    return ("%d (worker) %s" % (pid, " ".join(fields))).encode("ascii")
+
+
+class MetadataWorld:
+    """/proc/<pid>/stat answers come from a script per read, so a process can exit between two reads."""
+    def __init__(self, stats, environ=b"APOLLO_PERCEPTION_RUN_ID=run-1\0"):
+        self.stats, self.environ, self.reads = list(stats), environ, []
+
+    def read(self, path):
+        self.reads.append(path)
+        if path.endswith("/stat"):
+            answer = self.stats.pop(0) if len(self.stats) > 1 else self.stats[0]
+            if isinstance(answer, OSError):
+                raise answer
+            return answer
+        return self.environ
+
+    def credentials(self, pid):
+        return {"uids": [600] * 4, "gids": [700] * 4, "groups": []}
+
+
+class ObserverMetadataRaces(unittest.TestCase):
+    gone = FileNotFoundError(errno.ENOENT, "gone")
+
+    def test_a_process_that_exits_between_the_two_stat_reads_is_a_disappearance_not_a_failure(self):
+        world = MetadataWorld([stat_text(40), self.gone])
+        contract = observer_metadata_contract(world)
+        self.assertIsNone(contract["verified_metadata"](40))
+
+    def test_an_identity_that_really_changed_still_fails_closed(self):
+        world = MetadataWorld([stat_text(40, "500"), stat_text(40, "501")])
+        contract = observer_metadata_contract(world)
+        with self.assertRaisesRegex(RuntimeError, "identity changed during status read"):
+            contract["verified_metadata"](40)
+
+    def test_a_marker_read_of_a_process_that_exits_meanwhile_is_a_disappearance(self):
+        # before: two stat reads, then the environment, then the recheck finds the process gone
+        world = MetadataWorld([stat_text(40), stat_text(40), self.gone])
+        contract = observer_metadata_contract(world)
+        self.assertIsNone(contract["marker_facts"](40, {"pid": 40, "starttime": "500"}, "run-1"))
+
+    def test_a_marker_read_whose_identity_changed_still_fails_closed(self):
+        world = MetadataWorld([stat_text(40), stat_text(40), stat_text(40, "999"), stat_text(40, "999")])
+        contract = observer_metadata_contract(world)
+        with self.assertRaisesRegex(RuntimeError, "identity changed during status read|marker credentials changed"):
+            contract["marker_facts"](40, {"pid": 40, "starttime": "500"}, "run-1")
+
+    def test_a_marker_read_of_another_identity_than_requested_still_fails_closed(self):
+        world = MetadataWorld([stat_text(40)])
+        contract = observer_metadata_contract(world)
+        with self.assertRaisesRegex(RuntimeError, "marker identity mismatch"):
+            contract["marker_facts"](40, {"pid": 40, "starttime": "1"}, "run-1")
+
+    def test_the_init_error_names_the_guard_that_raised_never_its_text(self):
+        source = WARDEN.read_text(encoding="utf-8")
+        self.assertIn('"guardCode": CARRIER_GUARD_CODES.get(str(error), "UNCLASSIFIED_GUARD")', source)
+        for message in ("identity changed during status read", "marker credentials changed", "marker identity mismatch",
+                        "inner Node failed", "owner died without authenticated finish"):
+            self.assertIn('"%s": "' % message, source)
+
+
 if __name__ == "__main__":
     unittest.main()

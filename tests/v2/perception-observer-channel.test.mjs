@@ -5,7 +5,7 @@ import {
   OBSERVER_ABI, createObserverClient, decodeObserverFrames, encodeObserverFrame,
   validateMarkerAttestation, validateObserverIdentity, validateObserverAuthority,
 } from '../../scripts/validation/perception-observer-channel.mjs'
-import { containStoppedCarrierAfterCascade, decodeRootPackets, namespaceLaunchConfig, NAMESPACE_BUDGET_MS } from '../../scripts/validation/run-perception-ci-namespace.mjs'
+import { containStoppedCarrierAfterCascade, decodeRootPackets, namespaceLaunchConfig, NAMESPACE_BUDGET_MS, settleControlPipeErrors } from '../../scripts/validation/run-perception-ci-namespace.mjs'
 import { parseLinuxProcessCredentials } from '../../scripts/validation/run-perception-ci.mjs'
 
 const runId = 'perception-namespace-controlled-boundary'
@@ -189,4 +189,25 @@ test('root receipt descriptor supports coalesced frames with fatal UTF-8 and a b
   const partial = final.subarray(0, 5)
   assert.deepEqual(decodeRootPackets(Buffer.concat([ready, partial])).remaining, partial)
   assert.throws(() => decodeRootPackets(Buffer.from([0, 0, 0, 2, 0xc0, 0x80])))
+})
+
+// CI run 39446701464 attempt 2: the suite passed, the warden's final receipt succeeded and it closed with 0; a heartbeat byte written to its already
+// closed control pipe answered EPIPE and was the only error.
+test('an EPIPE on the warden control pipe is benign only after its successful final receipt and a zero close; before that it is an error', () => {
+  const epipe = { name: 'Error', code: 'EPIPE', message: 'write EPIPE' }
+  const settled = settleControlPipeErrors({ pipeErrors: [epipe], rootFinal: { success: true }, code: 0, childCloseObserved: true })
+  assert.deepEqual(settled, { errors: [], afterFinal: [epipe] })
+  assert.deepEqual(settleControlPipeErrors({ pipeErrors: [], rootFinal: null, code: null, childCloseObserved: false }), { errors: [], afterFinal: null })
+  for (const [label, input] of Object.entries({
+    'no final receipt': { rootFinal: undefined, code: 0, childCloseObserved: true },
+    'failed final receipt': { rootFinal: { success: false }, code: 0, childCloseObserved: true },
+    'non-zero close': { rootFinal: { success: true }, code: 1, childCloseObserved: true },
+    'signal close': { rootFinal: { success: true }, code: null, childCloseObserved: true },
+    'close not observed': { rootFinal: { success: true }, code: 0, childCloseObserved: false },
+  })) {
+    assert.deepEqual(settleControlPipeErrors({ pipeErrors: [epipe], ...input }), { errors: [epipe], afterFinal: null }, label)
+  }
+  const other = { name: 'Error', code: 'ECONNRESET', message: 'reset' }
+  assert.deepEqual(settleControlPipeErrors({ pipeErrors: [epipe, other], rootFinal: { success: true }, code: 0, childCloseObserved: true }),
+    { errors: [epipe, other], afterFinal: null }, 'only EPIPE is ever tolerated')
 })
