@@ -79,7 +79,7 @@ function compiledCuesOf(contentJson: string): readonly Readonly<{ id: string; st
 
 /** The set hash of subtitle exceptions the review of a render recorded (`formatQuality.subtitleOverridesHash`); `null` when it was drawn with none. */
 function reviewedOverridesHash(formatQualityJson: string | null): string | null {
-  if (formatQualityJson === null) return null
+  if (formatQualityJson === null || formatQualityJson === undefined) return null
   const hash = parseObject(formatQualityJson, 'proxy review format quality').subtitleOverridesHash
   return typeof hash === 'string' ? hash : null
 }

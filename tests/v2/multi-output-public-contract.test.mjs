@@ -27,7 +27,7 @@ test('the capabilities whose variantId changed meaning are a major bump onto new
   for (const [id, version, input] of [
     ['apollo.projects.subtitle-configuration.set', '2.0.0', 'project-subtitle-configuration-set-request/v2'],
     ['apollo.projects.subtitle-segment-overrides.apply', '2.0.0', 'subtitle-segment-override-apply-request/v2'],
-    ['apollo.projects.subtitle-sidecars.export', '2.0.0', 'export-subtitle-sidecar-request/v2'],
+    ['apollo.projects.subtitle-sidecars.export', '2.1.0', 'export-subtitle-sidecar-request/v2'],
     ['apollo.projects.manual-edits.apply', '4.0.0', 'apply-project-manual-edit-request/v3'],
     ['apollo.projects.annotations.create', '3.0.0', 'create-review-annotation-request/v3'],
   ]) {

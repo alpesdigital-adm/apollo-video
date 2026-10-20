@@ -1344,7 +1344,7 @@ test('W65b a final burns a certified cue, confirms it in the delivered pixels an
   assert.equal(controlPath, join(tmpdir(), 'apollo-final-export-output.mp4'))
   // the receipt: what was burned and how its band was certified
   const parameters = JSON.parse(seen.persisted.recipeParameters.canonicalJson)
-  assert.equal(seen.persisted.manifest.recipe.version, '1.14.0')
+  assert.equal(seen.persisted.manifest.recipe.version, '1.15.0')
   assert.equal(parameters.captionCertificationPolicySha256, FINAL_CAPTION_CERTIFICATION_POLICY_SHA256)
   const receipt = parameters.captionCertification
   assert.equal(receipt.faceSafety, 'unknown')
