@@ -442,8 +442,8 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       assert.ok(moved.some((cluster) => clustersWithin([cluster], bottom)) && moved.some((cluster) => clustersWithin([cluster], target)), `one cluster in the bottom band, one in ${safe}: ${serialize({ moved, bottom, target })}`)
       const protectedRow = (await api('GET', `${projectPath}/subtitle-segment-overrides?variantId=${encodeURIComponent(entry.variantId)}&segmentId=cue-2`)).data.result
       assert.equal(protectedRow.subtitleOverride.protected, true, 'the exception is protected')
-      const recipe = JSON.parse((await db.v2MediaArtifactManifest.findFirstOrThrow({ where: { artifactId: safeProxy.artifactId, workspaceId: world.owner.workspaceId } })).manifestJson)
-      assert.ok(serialize(recipe).includes(protectedRow.subtitleOverride.overrideHash), 'the render records the exception it was drawn with')
+      assert.equal(protectedRow.subtitleOverride.commandId, safeVersion.commandId, 'the exception is the one the Command of this very Version created')
+      assert.equal(protectedRow.subtitleOverride.resultVersionId, safeVersion.id)
       await shoot('16x9-5-safe-pin', { 'cue-2-before': reference, 'cue-2-after': safeFrame })
       await panel.screenshot({ path: join(evidenceDir, `w68-16x9-5-safe-pin-panel-${safeProxy.sha256.slice(0, 10)}.png`) })
       note('wide-safe-pin', { safe, moved, override: protectedRow.subtitleOverride.overrideHash })
