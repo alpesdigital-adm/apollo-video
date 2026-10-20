@@ -278,11 +278,11 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
     setPlan(result.data)
   }, [projectId, reads, sessionExpired, variantId, version])
 
-  const selectedDomain = selected?.domain ?? null
+  // The exceptions of the output are read with its Version, whether or not an issue is open: an exception whose issue is gone must still be reachable.
   useEffect(() => {
-    if (selectedDomain === 'caption') void loadSegments()
-    if (selectedDomain === 'reframe') void loadPlan()
-  }, [selectedDomain, loadSegments, loadPlan, version?.id, variantId])
+    void loadSegments()
+    void loadPlan()
+  }, [loadSegments, loadPlan, version?.id, variantId])
 
   /* ---- which segment and which form ---- */
   const candidateSegments = useMemo(() => {
@@ -366,26 +366,28 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
   }
 
   /* ---- subtitle Commands ---- */
-  async function submitSubtitle(action: 'set' | 'reset') {
+  async function submitSubtitle(action: 'set' | 'reset', named?: SegmentRow) {
     const base = baseOf()
     const before = beforeSnapshot()
-    if (!base || !before || !segment || !form || !segments || busy) return
+    const subject = named ?? segment
+    if (!base || !before || !subject || !segments || busy || (action === 'set' && !form)) return
+    const form_: CaptionForm = form ?? { anchor: '', text: subject.effective.text, visible: true, presetId: '', protectedException: false, reason: '' }
     setBusy(true); setFailure(null)
     try {
       let body: ReturnType<typeof subtitleSetBody> | ReturnType<typeof subtitleResetBody>
-      if (action === 'reset') body = subtitleResetBody(base, { segmentId: segment.segmentId, reason: form.reason })
+      if (action === 'reset') body = subtitleResetBody(base, { segmentId: subject.segmentId, reason: named ? '' : form_.reason })
       else {
         const hashes = Object.fromEntries(segments.presets.map((preset) => [preset.presetId, preset.presetHash]))
-        const current = segment.state === 'overridden' && segment.override ? segment.override.dimensions : []
+        const current = subject.state === 'overridden' && subject.override ? subject.override.dimensions : []
         const dimensions = mergeSubtitleDimensions(current, {
-          anchor: form.anchor === '' ? null : form.anchor,
-          text: form.text.trim() === segment.text.trim() ? null : form.text,
-          visible: form.visible,
-          presetId: form.presetId === '' ? null : form.presetId,
+          anchor: form_.anchor === '' ? null : form_.anchor,
+          text: form_.text.trim() === subject.text.trim() ? null : form_.text,
+          visible: form_.visible,
+          presetId: form_.presetId === '' ? null : form_.presetId,
         }, hashes)
         const invalid = validateSubtitleDimensions(dimensions)
         if (invalid) { setFailure({ kind: 'refused', status: 422, code: null, message: invalid, requestId: null }); return }
-        body = subtitleSetBody(base, { segmentId: segment.segmentId, dimensions, protectedException: form.protectedException, reason: form.reason })
+        body = subtitleSetBody(base, { segmentId: subject.segmentId, dimensions, protectedException: form_.protectedException, reason: form_.reason })
       }
       const result = await requestJson<{
         version: { id: string; sequence: number }; command: { id: string }; impact: ImpactView; replayed: boolean
@@ -401,8 +403,8 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
         versionId: result.data.version.id, versionSequence: result.data.version.sequence, commandId: result.data.command.id,
         replayed: result.data.replayed, impact: result.data.impact, before,
         summary: action === 'reset'
-          ? (result.data.resolution.inherited ? `Legenda ${segment.segmentId} voltou ao nível herdado.` : `Legenda ${segment.segmentId} voltou à exceção anterior.`)
-          : `Exceção aplicada à legenda ${segment.segmentId}.`,
+          ? (result.data.resolution.inherited ? `Legenda ${subject.segmentId} voltou ao nível herdado.` : `Legenda ${subject.segmentId} voltou à exceção anterior.`)
+          : `Exceção aplicada à legenda ${subject.segmentId}.`,
         recompile: { phase: 'pending', operationId: null, failure: null, attempt: 1 },
       })
     } finally { setBusy(false) }
@@ -439,18 +441,22 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
     setReframeX(reframeClip.reference?.x ?? 0)
   }, [reframeClip, reframeIssue])
 
-  async function submitReframe(action: 'set' | 'reset', range: { startFrame: number; endFrame: number }) {
+  async function submitReframe(action: 'set' | 'reset', range: { startFrame: number; endFrame: number }, namedClipId?: string) {
     const base = baseOf()
     const before = beforeSnapshot()
-    if (!base || !before || !reframeClip || busy) return
-    const invalid = validateFrameRange(range, { startFrame: reframeClip.startFrame, endFrame: reframeClip.endFrame })
+    const clipRanges = namedClipId && plan?.plan ? plan.plan.renderPlan.ranges.filter((candidate) => candidate.clipId === namedClipId) : []
+    const clipBounds = namedClipId
+      ? (clipRanges.length ? { clipId: namedClipId, startFrame: Math.min(...clipRanges.map((item) => item.startFrame)), endFrame: Math.max(...clipRanges.map((item) => item.endFrame)), reference: null as CropBounds | null } : null)
+      : reframeClip
+    if (!base || !before || !clipBounds || busy) return
+    const invalid = validateFrameRange(range, { startFrame: clipBounds.startFrame, endFrame: clipBounds.endFrame })
     if (invalid) { setFailure({ kind: 'refused', status: 422, code: null, message: invalid, requestId: null }); return }
-    if (action === 'set' && !reframeClip.reference) { setFailure({ kind: 'refused', status: 422, code: null, message: 'Esta faixa não tem um recorte de referência para mover.', requestId: null }); return }
+    if (action === 'set' && !clipBounds.reference) { setFailure({ kind: 'refused', status: 422, code: null, message: 'Esta faixa não tem um recorte de referência para mover.', requestId: null }); return }
     setBusy(true); setFailure(null)
     try {
       const body = action === 'set'
-        ? reframeSetBody(base, { clipId: reframeClip.clipId, ...range, crop: panCrop(reframeClip.reference!, reframeX), reason: reframeReason })
-        : reframeResetBody(base, { clipId: reframeClip.clipId, ...range, reason: reframeReason })
+        ? reframeSetBody(base, { clipId: clipBounds.clipId, ...range, crop: panCrop(clipBounds.reference!, reframeX), reason: reframeReason })
+        : reframeResetBody(base, { clipId: clipBounds.clipId, ...range, reason: namedClipId ? '' : reframeReason })
       const result = await requestJson<{ version: { id: string; sequence: number }; command: { id: string }; impact: ImpactView; replayed: boolean }>(
         `/v1/projects/${encodeURIComponent(projectId)}/variant-reframe-overrides`,
         { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKeys(`reframe-${action}`, body) }, body: JSON.stringify(body) },
@@ -488,6 +494,8 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
     const id = applied?.recompile.operationId
     return id ? props.operations.find((candidate) => candidate.id === id) ?? null : null
   }, [applied?.recompile.operationId, props.operations])
+  const activeSubtitle = useMemo(() => (segments?.segments ?? []).filter((row) => row.override && row.override.dimensions.length > 0), [segments])
+  const activeReframe = useMemo(() => plan?.plan?.overrides.applied ?? [], [plan])
   const operationActive = operation !== null && !(operation.visibleState?.terminal ?? TERMINAL.has(operation.status))
 
   /** Renders THIS output for the current Version (an output whose render belongs to an older Version): the other output is not touched. */
@@ -571,6 +579,26 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
 
       {chips.length ? (
         <IssueChipList chips={chips} fps={props.fps} onSelect={(chip) => { setSelectedKey(chip.key); setFailure(null); if (chip.range) onSeekFrame(chip.range.startFrame) }} selectedKey={selectedKey} />
+      ) : null}
+
+      {(activeSubtitle.length > 0 || activeReframe.length > 0) ? (
+        <div className="border-t border-white/[0.06] px-4 py-3" data-testid="active-exceptions">
+          <p className="text-[8px] uppercase tracking-[0.14em] text-[#625f58]">Exceções ativas desta saída</p>
+          <ul className="mt-2 space-y-1.5">
+            {activeSubtitle.map((row) => (
+              <li className="flex flex-wrap items-center gap-3" data-segment-id={row.segmentId} data-testid="active-subtitle-exception" key={row.segmentId}>
+                <span className="font-mono text-[9px] text-[#aaa49a]">legenda {row.segmentId} · quadros {row.startFrame}–{row.endFrame} · {row.override?.dimensions.map((dimension) => dimension.kind).join(', ')}{row.override?.protected ? ' · protegida' : ''}{row.state === 'stale' ? ' · fora da faixa atual (não desenhada)' : ''}</span>
+                <button className="rounded border border-white/[0.12] px-2 py-1 text-[9px] text-[#aaa49a] disabled:opacity-40" data-testid="active-subtitle-reset" disabled={busy || operationActive || !version} onClick={() => void submitSubtitle('reset', row)} type="button">Reverter exceção</button>
+              </li>
+            ))}
+            {activeReframe.map((row) => (
+              <li className="flex flex-wrap items-center gap-3" data-clip-id={row.clipId} data-testid="active-reframe-exception" key={row.id}>
+                <span className="font-mono text-[9px] text-[#aaa49a]">enquadramento manual · clipe {row.clipId} · quadros {row.startFrame}–{row.endFrame} · x {Math.round(row.crop.x * 100)}%</span>
+                <button className="rounded border border-white/[0.12] px-2 py-1 text-[9px] text-[#aaa49a] disabled:opacity-40" data-testid="active-reframe-reset" disabled={busy || operationActive || !version} onClick={() => void submitReframe('reset', { startFrame: row.startFrame, endFrame: row.endFrame }, row.clipId)} type="button">Voltar ao automático</button>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
 
       {selected && review ? (
