@@ -177,6 +177,32 @@ export async function readSubtitleSegmentOverrideHeads(
   return Object.freeze(rows.map((row) => overrideOf(row)))
 }
 
+/**
+ * The head exception of every segment of one variant AS OF a Version: for each segment the newest override whose result Version is at or before
+ * `versionSequence`. A render is only ever made for the current Version, and every override write makes a new Version, so the heads a render read
+ * are the heads as of its own Version; this is how a reader of a historical render (the sidecar) recovers the exact set the render was drawn
+ * with, and it is checked against the set hash the render's review recorded.
+ */
+export async function readSubtitleSegmentOverrideHeadsAsOf(
+  client: Reader,
+  input: Readonly<{ workspaceId: string; projectId: string; variantId: string; versionSequence: number }>,
+): Promise<readonly Readonly<SubtitleSegmentOverride>[]> {
+  const rows = await client.v2SubtitleSegmentOverride.findMany({
+    where: {
+      workspaceId: input.workspaceId, projectId: input.projectId, variantId: input.variantId,
+      resultVersion: { is: { sequence: { lte: input.versionSequence } } },
+    },
+    include: { resultVersion: { select: { sequence: true } } },
+    orderBy: [{ startFrame: 'asc' }, { segmentId: 'asc' }],
+  })
+  const newest = new Map<string, (typeof rows)[number]>()
+  for (const row of rows) {
+    const previous = newest.get(row.segmentId)
+    if (!previous || row.resultVersion.sequence > previous.resultVersion.sequence) newest.set(row.segmentId, row)
+  }
+  return Object.freeze([...newest.values()].map((row) => overrideOf(row)))
+}
+
 export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentOverrideRepository {
   // An explicit field, not a parameter property: the render source reader imports this module and runs under type stripping.
   private readonly client: PrismaClient

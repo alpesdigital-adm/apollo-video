@@ -9197,7 +9197,7 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.subtitle-sidecars.export": {
-      "version": "2.0.0",
+      "version": "2.1.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
@@ -9205,7 +9205,7 @@
         "projects:write"
       ],
       "inputSchemaRef": "apollo://schemas/export-subtitle-sidecar-request/v2",
-      "outputSchemaRef": "apollo://schemas/subtitle-sidecar-exported/v1",
+      "outputSchemaRef": "apollo://schemas/subtitle-sidecar-exported/v2",
       "endpoint": {
         "method": "POST",
         "path": "/v1/projects/{projectId}/subtitle-sidecars"
@@ -247670,6 +247670,265 @@
                 "lastCueEndMs": {
                   "type": "integer",
                   "minimum": 1
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/subtitle-sidecar-exported/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sidecar",
+            "projectVersion",
+            "alignment",
+            "replayed"
+          ],
+          "properties": {
+            "sidecar": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "projectId",
+                "projectVersionId",
+                "variantId",
+                "outputKind",
+                "outputArtifactId",
+                "outputManifestId",
+                "outputSha256",
+                "format",
+                "locale",
+                "artifactId",
+                "manifestId",
+                "artifactRef",
+                "sha256",
+                "byteSize",
+                "encoding",
+                "cueCount",
+                "lineageHash",
+                "renderElementMapHash",
+                "renderInputHash",
+                "editPlanSnapshotId",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "variantId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "outputKind": {
+                  "type": "string",
+                  "enum": [
+                    "proxy",
+                    "final"
+                  ]
+                },
+                "outputArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "outputManifestId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "outputSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "format": {
+                  "type": "string",
+                  "enum": [
+                    "srt",
+                    "vtt"
+                  ]
+                },
+                "locale": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 32
+                },
+                "artifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "manifestId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "artifactRef": {
+                  "type": "string",
+                  "pattern": "^artifact:[A-Za-z0-9._-]{3,128}$"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "byteSize": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "encoding": {
+                  "const": "utf-8-bom"
+                },
+                "cueCount": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "lineageHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "renderElementMapHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "renderInputHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "editPlanSnapshotId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "projectVersion": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "sequence",
+                "current"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "current": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "alignment": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "renderElementMapHash",
+                "renderInputHash",
+                "outputArtifactId",
+                "outputSha256",
+                "cueCount",
+                "firstCueStartMs",
+                "lastCueEndMs",
+                "omittedCueIds",
+                "subtitleOverridesHash"
+              ],
+              "properties": {
+                "renderElementMapHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "renderInputHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "outputArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "outputSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "cueCount": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "firstCueStartMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "lastCueEndMs": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "omittedCueIds": {
+                  "type": "array",
+                  "maxItems": 5000,
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  }
+                },
+                "subtitleOverridesHash": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               }
             },

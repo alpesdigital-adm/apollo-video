@@ -46,7 +46,7 @@ function render({ versionId, sequence, current, text, proxyChar, renderInputChar
     outputSha256: sha(proxyChar), renderInputHash: sha(renderInputChar),
     editPlanSnapshotId: `snapshot-plan-${versionId}`, editPlanHash: sha(planChar),
     renderElementMapId: `map-${versionId}`, renderElementMapHash: renderElementMapHash(map), map,
-    cueTexts: { 'cue-1': text }, review: { status: 'ready-for-final', finalAllowed: true, reviewHash: sha('d') },
+    cueTexts: { 'cue-1': text }, cueFrames: { 'cue-1': { startFrame: 0, endFrame: 30 } }, subtitleOverridesHash: null, review: { status: 'ready-for-final', finalAllowed: true, reviewHash: sha('d') },
   }
 }
 
@@ -161,7 +161,8 @@ test('a historical render whose artifact, manifest, RenderInput or cue map no lo
     ['manifest is gone', () => ({ ...artifactOf(old), manifests: [] }), old, 'MEDIA_ARTIFACT_MANIFEST_NOT_FOUND'],
     ['cue map hash differs from its stored hash', () => artifactOf(old), { ...old, renderElementMapHash: sha('9') }, 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH'],
     ['cue map is bound to another MP4', () => artifactOf(old), { ...old, outputSha256: sha('8') }, 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH'],
-    ['snapshot texts do not match the cue map', () => artifactOf(old), { ...old, cueTexts: { 'cue-1': 'Texto antigo', 'cue-2': 'Intruso' } }, 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH'],
+    ['a rendered cue has no effective cue of its own', () => artifactOf(old), { ...old, cueTexts: { 'cue-2': 'Intruso' }, cueFrames: { 'cue-2': { startFrame: 0, endFrame: 30 } } }, 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH'],
+    ['the render is drawn outside the frames of its cue', () => artifactOf(old), { ...old, cueFrames: { 'cue-1': { startFrame: 5, endFrame: 20 } } }, 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH'],
   ]
   for (const [label, artifact, alignment, code] of tampered) {
     const stored = artifact()

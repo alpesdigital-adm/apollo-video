@@ -1286,6 +1286,8 @@ test('T-WAVE10 controlled presets/overrides and real proxy; unknown suppresses c
     // ===== Requirement 5: the sidecar comes from THIS render's alignment ======
     const cueTexts = Object.fromEntries(
       overriddenPortrait.renderInput.subtitleCues.map((cue) => [cue.id, cue.text]))
+    const cueFrames = Object.fromEntries(
+      overriddenPortrait.renderInput.subtitleCues.map((cue) => [cue.id, { startFrame: cue.startFrame, endFrame: cue.endFrame }]))
     const alignment = Object.freeze({
       projectId: PROJECT_ID,
       projectVersionId: applied.version.id,
@@ -1306,6 +1308,8 @@ test('T-WAVE10 controlled presets/overrides and real proxy; unknown suppresses c
       renderElementMapHash: mapHash,
       map: overriddenPortrait.elementMap,
       cueTexts,
+      cueFrames,
+      subtitleOverridesHash: null,
       review: { status: 'ready-for-final', finalAllowed: true, reviewHash: 'd'.repeat(64) },
     })
     const alignments = new Map([[`${applied.version.id}:${OVERRIDE_VARIANT_ID}`, alignment]])

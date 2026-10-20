@@ -11,9 +11,11 @@ export type SidecarOutputConsumptionSeal = Readonly<{ seal: Readonly<OutputConsu
  * produced it, the immutable EditPlan snapshot of the same ProjectVersion, and
  * the RenderElementMap that the renderer emitted for that exact artifact.
  *
- * `cueTexts` comes from the EditPlan snapshot referenced by the render operation
- * — never from the project head and never from a transcript. The application
- * service still cross-checks it cue by cue against the map.
+ * `cueTexts` and `cueFrames` are the EFFECTIVE cues of the render: the cues of the EditPlan snapshot referenced by the render operation
+ * with the subtitle exceptions of the output applied (a hidden cue is not among them; a text exception shows its text) - never the
+ * project head and never a transcript. `subtitleOverridesHash` names that set of exceptions (null: none), and the repository has
+ * already checked it against the set the render's own review recorded. The application service cross-checks the cues cue by cue
+ * against the map: a cue of the map must be effective, an effective cue the map does not show was not drawn.
  */
 export interface RenderedSubtitleAlignmentSource {
   projectId: string
@@ -33,6 +35,10 @@ export interface RenderedSubtitleAlignmentSource {
   renderElementMapHash: string
   map: Readonly<RenderElementMap>
   cueTexts: Readonly<Record<string, string>>
+  /** Frames `[startFrame, endFrame)` of every effective cue (same keys as `cueTexts`). */
+  cueFrames: Readonly<Record<string, Readonly<{ startFrame: number; endFrame: number }>>>
+  /** Content address of the subtitle exceptions the render was drawn with; null when it was drawn with none. */
+  subtitleOverridesHash: string | null
   /**
    * The exact Version, State, variant revision and materialization the alignment was admitted from: always the `render`
    * admission, and the `final` one too when the evidence is a final export. `variantId` above is that entry's stable State variant.

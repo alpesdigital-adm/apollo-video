@@ -116,8 +116,12 @@ test('W66 PostgreSQL variant-specific Commands and readers act on the output the
     assert.notEqual(wideAlignment.outputConsumption.render.sealHash, verticalAlignment.outputConsumption.render.sealHash)
     assert.equal(wideAlignment.cueTexts['cue-hook'], 'O dono vira o gargalo')
     await refuse(sidecars.readRenderedAlignment({ ...scope, variantId: '16:9', projectVersionId: H2.version.id }), 'output-variant-unknown')
-    // At the head (H3) neither output has a render yet: there is nothing to align, for either.
-    assert.equal(await sidecars.readRenderedAlignment({ ...scope, variantId: WIDE }), null)
+    // At the head (H3) neither output has a render yet: there is nothing to align, for either. Both outputs have a render of H2, which is
+    // NOT the Version the head plays, so the answer is the precise one - the render is stale for this Version - not a borrowed alignment.
+    for (const variantId of [WIDE, VERTICAL]) {
+      await assert.rejects(sidecars.readRenderedAlignment({ ...scope, variantId }), (error) => error.code === 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH' &&
+        error.details.reason === 'render-stale' && error.details.renderedVersionId === H2.version.id && error.details.requestedVersionId === H3.version.id)
+    }
 
     // ---- 4b. the review preview takes the render of the requested output; only the output with an older render is stale
     const R3 = { wide: await render(H3.version.id, WIDE, 'h3wide') }

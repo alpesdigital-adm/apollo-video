@@ -299,6 +299,8 @@ function alignmentOf(rendered, storedOutput, overrides = {}) {
     renderElementMapHash: renderElementMapHash(rendered.renderElementMap),
     map: rendered.renderElementMap,
     cueTexts: Object.fromEntries(FIXTURE_CUES.map((cue) => [cue.id, cue.text])),
+    cueFrames: Object.fromEntries(FIXTURE_CUES.map((cue) => [cue.id, { startFrame: cue.startFrame, endFrame: cue.endFrame }])),
+    subtitleOverridesHash: null,
     // Controlled verdict of the render's own review; the Postgres reader takes it from the persisted review row.
     review: { status: 'ready-for-final', finalAllowed: true, reviewHash: 'd'.repeat(64) },
     ...overrides,
@@ -486,10 +488,11 @@ test('T-FR-175 reconstruction is byte-identical, replay does not duplicate, tamp
       (error) => error.code === 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
     )
 
-    // Tamper 4: the cue text of the snapshot no longer covers a rendered cue.
+    // Tamper 4: the effective cues of the render no longer include a cue the map shows drawn.
     alignments.set(`${VERSION_CURRENT}:9:16`, {
       ...alignment,
       cueTexts: { 'cue-1': 'Ação e\nclareza' },
+      cueFrames: { 'cue-1': { startFrame: 0, endFrame: 36 } },
     })
     await assert.rejects(
       () => run({ idempotencyKey: 'idem-tamper-4' }),
@@ -538,6 +541,8 @@ test('T-FR-175 a historical version yields its own sidecar and is reported as no
       renderElementMapHash: renderElementMapHash(historical.renderElementMap),
       map: historical.renderElementMap,
       cueTexts: Object.fromEntries(historicalCues.map((cue) => [cue.id, cue.text])),
+      cueFrames: Object.fromEntries(historicalCues.map((cue) => [cue.id, { startFrame: cue.startFrame, endFrame: cue.endFrame }])),
+      subtitleOverridesHash: null,
     })
     const alignments = new Map([
       [`${VERSION_CURRENT}:9:16`, currentAlignment],

@@ -142,7 +142,11 @@ test('T-FR-175 rejects text that would break the sidecar grammar', () => {
   assert.throws(() => normalizeSubtitleCueText('a --> b', 'cue-1'), /timing separator/)
   assert.throws(() => normalizeSubtitleCueText('a\u0000b', 'cue-1'), /control characters/)
   assert.throws(() => normalizeSubtitleCueText('   ', 'cue-1'), /empty or too long/)
-  assert.throws(() => normalizeSubtitleCueText('a\n\n\n\n\nb', 'cue-1'), /line breaks are invalid/)
+  // blank lines are not drawn by the renderer (they are dropped from the canonical text); five written lines are too many
+  assert.equal(normalizeSubtitleCueText('a\n\n\n\n\nb', 'cue-1'), 'a\nb')
+  assert.throws(() => normalizeSubtitleCueText('a\nb\nc\nd\ne', 'cue-1'), /line breaks are invalid/)
+  // the markup characters libass does not draw are not part of the text a sidecar carries either
+  assert.equal(normalizeSubtitleCueText('{\\an8}Ação {x}', 'cue-1'), 'an8Ação x')
 })
 
 test('T-FR-175 a cue present in the map but missing from the snapshot fails closed', () => {
