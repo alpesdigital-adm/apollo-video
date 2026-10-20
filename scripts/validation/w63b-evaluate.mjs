@@ -29,7 +29,7 @@ import { STRATA } from './w63b-thresholds.mjs'
 const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
 const { enqueuePerceptionProducerRunService } = await import('../../src/v2/application/enqueue-perception-producer-run.ts')
 const { enqueueTemporalProducerRunService } = await import('../../src/v2/application/enqueue-temporal-producer-run.ts')
-const { readServerPerceptionSnapshotService } = await import('../../src/v2/application/server-perception-snapshots.ts')
+const { materializeServerPerceptionSnapshotService, readServerPerceptionSnapshotService } = await import('../../src/v2/application/server-perception-snapshots.ts')
 const { assembleServerPerceptionSnapshot } = await import('../../src/v2/domain/server-perception-snapshot.ts')
 const { createPerceptionProducerWorker, createTemporalProducerWorker } = await import('../../src/v2/infrastructure/repository-factory.ts')
 const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
@@ -107,8 +107,10 @@ function services(db, ctx) {
     operations,
     enqueueOcr: enqueuePerceptionProducerRunService({ context: new PrismaPerceptionProducerRequestContextRepository(db), operations, createOperationId }),
     enqueueTemporal: enqueueTemporalProducerRunService({ context: new PrismaTemporalProducerRequestContextRepository(db), operations, createOperationId }),
-    snapshot: readServerPerceptionSnapshotService({ evidence: new PrismaServerPerceptionEvidenceReader(db),
+    // W64: the evaluation assembles and writes the snapshot of the Version (the write side), then reads it back through the read-only service
+    snapshot: materializeServerPerceptionSnapshotService({ evidence: new PrismaServerPerceptionEvidenceReader(db),
       snapshots: new PrismaServerPerceptionSnapshotRepository(db), clock: () => new Date() }),
+    readOnly: readServerPerceptionSnapshotService({ snapshots: new PrismaServerPerceptionSnapshotRepository(db), clock: () => new Date() }),
     evidence: new PrismaServerPerceptionEvidenceReader(db),
     runOcr: ctx.runOcr,
     runTemporal: ctx.runTemporal,
@@ -251,10 +253,11 @@ async function robustness(db, ctx, mainReports, producedByClip, entries) {
       const freshServices = services(fresh, ctx)
       freshRead = await freshServices.snapshot({ workspaceId: world.workspaceId, projectId: world.projectId, projectVersionId: world.versionId })
     } finally { await fresh.$disconnect() }
+    const readOnly = await s.readOnly({ workspaceId: world.workspaceId, projectId: world.projectId, projectVersionId: world.versionId })
     const rows = await db.v2ServerPerceptionSnapshot.count({ where: { workspaceId: world.workspaceId, projectVersionId: world.versionId } })
     record('replay-same-snapshot-hash', 'repeated reads and a fresh connection return the same snapshot hash and the same content-addressed row',
-      new Set([...reads, freshRead].map((item) => item.snapshot.snapshotHash)).size === 1 && new Set([...reads, freshRead].map((item) => item.id)).size === 1 && rows === 1,
-      { hashes: [...reads, freshRead].map((item) => item.snapshot.snapshotHash), rowsForVersion: rows})
+      new Set([...reads, freshRead, readOnly].map((item) => item.snapshot.snapshotHash)).size === 1 && new Set([...reads, freshRead].map((item) => item.id)).size === 1 && rows === 1,
+      { hashes: [...reads, freshRead, readOnly].map((item) => item.snapshot.snapshotHash), readOnlyServiceHash: readOnly.snapshot.snapshotHash, rowsForVersion: rows})
     void actor
   }
 
