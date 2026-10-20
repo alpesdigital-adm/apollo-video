@@ -269,7 +269,8 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       }, { timeoutMs: 30_000 })
       // an attempt to acknowledge a block is refused by the server; the UI never offered it
       const refused = await api('POST', `${projectPath}/proxy-reviews`, { key: `w68-${suffix}-ack-block`, body: { action: 'acknowledge-warnings', proxyReviewId: wide.review.id, projectVersionId: world.headVersionId, baseRevision: wide.review.reviewHash, expectedRevision: wide.review.revision } })
-      assert.ok(refused.status >= 400, `acknowledging a blocked review is refused (${refused.status} ${serialize(refused.body).slice(0, 200)})`)
+      assert.equal(refused.status, 428, `acknowledging a blocked review is refused as a precondition (${serialize(refused.body).slice(0, 200)})`)
+      assert.equal(refused.error?.code, 'PRECONDITION_REQUIRED', 'with the published code')
       assert.equal(await decisionCount(), 0)
       note('wide-evidence-and-ack-refusal', { chips: baselineChips.length, ackStatus: refused.status, ackError: refused.error?.code })
       await panel.screenshot({ path: join(evidenceDir, `w68-16x9-1-before-panel-${wide.review.reviewHash.slice(0, 10)}.png`) })
@@ -312,6 +313,9 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       const fixedReview = await reviewOf(entry.variantId, afterFix.id)
       assert.ok(!issuesOf(fixedReview).some((issue) => issue.code === 'CAPTION_PLACEMENT_MISMATCH'), 'a NEW critic run on NEW pixels no longer reports the hard mismatch')
       assert.notEqual(fixedReview.status, 'blocked')
+      // The approval of a proxy names the set of exceptions it was drawn with (the final export refuses another set); the baseline render was drawn with none.
+      assert.match(fixedReview.formatQuality.subtitleOverridesHash ?? '', /^[a-f0-9]{64}$/, 'the review of a render with an exception names the set')
+      assert.equal(wide.review.formatQuality.subtitleOverridesHash, undefined, 'the baseline render was drawn with none')
       const fixedFrame = await frameAt(fixProxy, cueMid(CUE1)), fixedReference = await frameAt(fixProxy, 5)
       const clustersAfterText = changedClusters(fixedReference, fixedFrame)
       assert.ok(clustersAfterText.length >= 1 && clustersWithin(clustersAfterText, bottom), `the fixed caption sits inside the bottom band on the decoded pixels: ${serialize(clustersAfterText)} vs ${serialize(bottom)}`)

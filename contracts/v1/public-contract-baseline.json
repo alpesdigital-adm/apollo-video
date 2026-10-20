@@ -152840,6 +152840,10 @@
                       ],
                       "pattern": "^[a-f0-9]{64}$"
                     },
+                    "subtitleOverridesHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
                     "mp4Evidence": {
                       "type": "object",
                       "additionalProperties": false,
@@ -154491,6 +154495,10 @@
                         "string",
                         "null"
                       ],
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "subtitleOverridesHash": {
+                      "type": "string",
                       "pattern": "^[a-f0-9]{64}$"
                     },
                     "mp4Evidence": {

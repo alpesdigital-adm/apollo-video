@@ -133,7 +133,8 @@ function parseFormatQuality(value: string | null): Readonly<ProxyReview>['format
     typeof candidate.exportAllowed !== 'boolean' || typeof candidate.explanation !== 'string' ||
     candidate.exportAllowed !== (candidate.status !== 'blocked') ||
     // The verdict is only readable together with the geometry it judged.
-    !geometryHash(candidate.placementPlanHash) || !geometryHash(candidate.reframePlanHash)
+    !geometryHash(candidate.placementPlanHash) || !geometryHash(candidate.reframePlanHash) ||
+    (candidate.subtitleOverridesHash !== undefined && !geometryHash(candidate.subtitleOverridesHash))
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy format quality verdict is invalid')
   return Object.freeze({
     outputPresetHash: candidate.outputPresetHash,
@@ -144,6 +145,7 @@ function parseFormatQuality(value: string | null): Readonly<ProxyReview>['format
     explanation: candidate.explanation,
     reportHash: candidate.reportHash,
     ...(candidate.mp4Evidence !== undefined ? { mp4Evidence: parseMp4Evidence(candidate.mp4Evidence)! } : {}),
+    ...(typeof candidate.subtitleOverridesHash === 'string' ? { subtitleOverridesHash: candidate.subtitleOverridesHash } : {}),
   })
 }
 

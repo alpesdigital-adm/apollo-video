@@ -570,6 +570,8 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           outputSpecId: outputPreset.spec.id,
           placementPlanHash: placementPlan.placementPlanHash,
           reframePlanHash: reframePlan?.reframePlanHash ?? null,
+          // The set of subtitle exceptions these frames were drawn with: the final export refuses an approval that was given for another set.
+          ...(source.subtitleOverridesHash ? { subtitleOverridesHash: source.subtitleOverridesHash } : {}),
           // The localized issues of the persisted plan: a subject the trajectory could not keep, evidence that was missing or uncertain.
           ...(reframeIssues.length ? { reframeIssues, reframeRecordHash: source.reframeRecordHash ?? null } : {}),
           // Subject evidence persisted for this variant. Forwarded untouched: without it the

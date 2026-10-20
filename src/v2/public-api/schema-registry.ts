@@ -6863,6 +6863,8 @@ const proxyReviewSchema = {
         // v3 publishes the geometry the verdict judged, which the stored verdict has always carried (v2 never listed it).
         placementPlanHash: { type: ['string', 'null'], pattern: '^[a-f0-9]{64}$' },
         reframePlanHash: { type: ['string', 'null'], pattern: '^[a-f0-9]{64}$' },
+        // W68. Present only when the proxy was drawn with per-segment subtitle exceptions: the set the final export must match.
+        subtitleOverridesHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
         mp4Evidence: {
           type: 'object',
           additionalProperties: false,
@@ -6931,7 +6933,7 @@ const proxyReviewSchemaV2 = {
     ...proxyReviewSchema.properties,
     formatQuality: {
       ...proxyReviewSchema.properties.formatQuality,
-      properties: Object.fromEntries(Object.entries(proxyReviewSchema.properties.formatQuality.properties).filter(([key]) => !['mp4Evidence', 'placementPlanHash', 'reframePlanHash'].includes(key))),
+      properties: Object.fromEntries(Object.entries(proxyReviewSchema.properties.formatQuality.properties).filter(([key]) => !['mp4Evidence', 'placementPlanHash', 'reframePlanHash', 'subtitleOverridesHash'].includes(key))),
     },
   },
 }

@@ -321,3 +321,14 @@ test('the exceptions that carry a value are part of what a render is; none, or a
   assert.equal(subtitleOverrideSetHash(reset, VARIANT), null)
   assert.equal(projectProxyRenderInputHash({ source: sealedSource(reset), colorPipelineBindings: [] }), hashes.none)
 })
+
+test('the final export refuses an approval that was given for another set of subtitle exceptions (and counts "none" on both sides as the same)', async () => {
+  const { subtitleOverridesMatchApproval } = await import('../../src/v2/infrastructure/prisma/project-final-export-repository.ts')
+  const hash = 'a'.repeat(64)
+  const other = 'b'.repeat(64)
+  assert.equal(subtitleOverridesMatchApproval({}, { approvedSubtitleOverridesHash: null }), true, 'drawn and exported without exceptions')
+  assert.equal(subtitleOverridesMatchApproval({ subtitleOverridesHash: hash }, { approvedSubtitleOverridesHash: hash }), true, 'the same set')
+  assert.equal(subtitleOverridesMatchApproval({ subtitleOverridesHash: hash }, { approvedSubtitleOverridesHash: null }), false, 'exceptions the reviewer never saw')
+  assert.equal(subtitleOverridesMatchApproval({}, { approvedSubtitleOverridesHash: hash }), false, 'exceptions the reviewer saw that the final no longer has')
+  assert.equal(subtitleOverridesMatchApproval({ subtitleOverridesHash: other }, { approvedSubtitleOverridesHash: hash }), false, 'another set')
+})

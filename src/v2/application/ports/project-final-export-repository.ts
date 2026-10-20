@@ -21,6 +21,11 @@ export interface ApprovedProjectFinalExportSource extends ProjectProxyRenderSour
    * is made from the same plan: a plan persisted after the approval is not the geometry the reviewer approved.
    */
   approvedReframePlanHash: string | null
+  /**
+   * W68. The set of per-segment subtitle exceptions the approved proxy was drawn with, or null when it was drawn with none. The final is made
+   * from the same set: an exception applied after the approval is not what the reviewer saw.
+   */
+  approvedSubtitleOverridesHash: string | null
 }
 
 export interface ProjectFinalExportAttemptHistory {

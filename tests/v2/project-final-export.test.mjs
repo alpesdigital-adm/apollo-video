@@ -205,7 +205,7 @@ function approvedSource() {
   })
 }
 
-function finalInputHash(includePolicy = true, source = approvedSource(), captionPolicySha256 = FINAL_CAPTION_CERTIFICATION_POLICY_SHA256) {
+function finalInputHash(includePolicy = true, source = approvedSource(), captionPolicySha256 = FINAL_CAPTION_CERTIFICATION_POLICY_SHA256, extra = {}) {
   return calculateVersionHash({
     kind: 'project-final-export/v2',
     ...(includePolicy ? { assEmissionPolicy: ASS_EMISSION_POLICY } : {}),
@@ -237,6 +237,7 @@ function finalInputHash(includePolicy = true, source = approvedSource(), caption
       quality: 'final',
     },
     outputConsumptionSealHash: source.outputConsumption.sealHash,
+    ...extra,
   })
 }
 
@@ -1764,4 +1765,38 @@ test('W67 MUTATION: each fail-closed rule, removed from a copy of the worker, le
     rmSync(scratch, { recursive: true, force: true })
   }
   assert.equal(typeof realGate, 'function')
+})
+
+test('W68 the subtitle exceptions are part of the final input: none keeps every earlier identity, a set (and another set) addresses another final, and a worker refuses an operation sealed to another set', async () => {
+  const first = 'a'.repeat(64)
+  const second = 'b'.repeat(64)
+  const enqueueHash = async (change, key) => {
+    let created
+    const enqueue = enqueueProjectFinalExportService({
+      projects: { async readApprovedCurrentSource() { return { ...approvedSource(), ...change } } },
+      rights: { async findCurrent() { return { snapshot: rightsSnapshot(), revision: 'revision-1' } } },
+      operations: { async findReplay() { return null }, async createOrReplay(input) { created = input; return { ...input, replayed: false } } },
+      colorPipelines,
+      clock: () => new Date('2026-07-19T01:05:00.000Z'),
+      createId: (kind) => `${kind}-final-export-overrides`,
+    })
+    await enqueue({ workspaceId, projectId, projectVersionId, projectVersionHash: '1'.repeat(64), format: '9:16', approval: { approved: true }, actor: exportActor(), idempotencyKey: key })
+    return created.context.inputHash
+  }
+  const none = await enqueueHash({}, 'final-overrides-none')
+  const withFirst = await enqueueHash({ subtitleOverridesHash: first }, 'final-overrides-first')
+  const withSecond = await enqueueHash({ subtitleOverridesHash: second }, 'final-overrides-second')
+  assert.equal(none, finalInputHash(), 'without exceptions the final is identified exactly as it always was')
+  assert.equal(withFirst, finalInputHash(true, approvedSource(), FINAL_CAPTION_CERTIFICATION_POLICY_SHA256, { subtitleOverridesHash: first }), 'the hash is the independently computed one')
+  assert.equal(withSecond, finalInputHash(true, approvedSource(), FINAL_CAPTION_CERTIFICATION_POLICY_SHA256, { subtitleOverridesHash: second }))
+  assert.equal(new Set([none, withFirst, withSecond]).size, 3, 'no exceptions, one set and another set are three different finals')
+
+  // A worker recomputes the hash from the source it reads: an operation queued without exceptions does not render a source that has them now.
+  const queued = createOperations()
+  const refused = workerDependencies(queued)
+  serveSource(refused.dependencies, () => ({ subtitleOverridesHash: first }))
+  const outcome = await runNextProjectFinalExportOperationService(refused.dependencies)('worker-final-export-overrides-mismatch')
+  assert.equal(outcome.status, 'failed')
+  assert.equal(refused.calls.rendered, 0, 'nothing was rendered')
+  assert.equal(queued.operation.error.code, 'invalid_render_input')
 })
