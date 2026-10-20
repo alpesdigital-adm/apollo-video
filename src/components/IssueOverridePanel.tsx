@@ -193,7 +193,16 @@ function FailureNotice({ failure, onRefresh }: { failure: CommandFailure; onRefr
 /* -------------------------------------------------------------------------- */
 
 export default function IssueOverridePanel(props: IssueOverridePanelProps) {
-  const { projectId, reads, version, variantId, review, onSeekFrame, onChanged } = props
+  const { projectId, reads, version, variantId, onSeekFrame, onChanged } = props
+  // The review of the last render of this output. When the head Version moves (a Command) and the output has no render of it yet, the page has
+  // no review for the new Version; the issues of the last render stay on screen, labelled as older, so the operator can finish what was started.
+  const [remembered, setRemembered] = useState<{ variantId: string; review: ReviewInput; proxyArtifact: { artifactId: string; sha256: string | null } | null } | null>(null)
+  useEffect(() => {
+    if (props.review && variantId) setRemembered({ variantId, review: props.review, proxyArtifact: props.proxyArtifact })
+  }, [props.review, props.proxyArtifact, variantId])
+  const keptReview = remembered && remembered.variantId === variantId ? remembered : null
+  const review = props.review ?? keptReview?.review ?? null
+  const proxyArtifact = props.proxyArtifact ?? keptReview?.proxyArtifact ?? null
   const router = useRouter()
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [segments, setSegments] = useState<SegmentsView | null>(null)
@@ -346,9 +355,9 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
 
   const baseOf = () => (version && variantId ? { baseVersionId: version.id, baseHash: version.baseHash, variantId } : null)
 
-  const beforeSnapshot = () => review && props.proxyArtifact && version ? {
+  const beforeSnapshot = () => review && proxyArtifact && version ? {
     chips, reviewId: review.id, reviewHash: review.reviewHash, proxyArtifactId: review.proxyArtifactId,
-    proxySha256: props.proxyArtifact.artifactId === review.proxyArtifactId ? props.proxyArtifact.sha256 : null, versionId: version.id,
+    proxySha256: proxyArtifact.artifactId === review.proxyArtifactId ? proxyArtifact.sha256 : null, versionId: version.id,
   } : null
 
   const failWith = (result: { failure: CommandFailure }) => {
@@ -526,9 +535,9 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
     return issueChips(review, variantId)
   }, [applied, review, variantId])
   const comparison = useMemo(() => applied ? compareIssues(applied.before.chips, afterChips) : [], [afterChips, applied])
-  const proxyAfter = review && applied && review.projectVersionId === applied.versionId ? { artifactId: review.proxyArtifactId, sha256: props.proxyArtifact?.artifactId === review.proxyArtifactId ? props.proxyArtifact.sha256 : null } : null
+  const proxyAfter = review && applied && review.projectVersionId === applied.versionId ? { artifactId: review.proxyArtifactId, sha256: proxyArtifact?.artifactId === review.proxyArtifactId ? proxyArtifact.sha256 : null } : null
 
-  const selectedProvenance = selected && review && props.proxyArtifact ? issueProvenance(selected, review, props.proxyArtifact) : []
+  const selectedProvenance = selected && review && proxyArtifact ? issueProvenance(selected, review, proxyArtifact) : []
 
   /* ---------------------------------------------------------------------- */
   return (
