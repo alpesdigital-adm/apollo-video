@@ -4184,6 +4184,8 @@ model V2ProjectProxyRenderOperation {
   reuseCommandId            String?  @db.VarChar(128)
   reuseImpactHash           String?  @db.Char(64)
   reuseBaseVersionId        String?  @db.VarChar(128)
+  /// Version-independent content address of the pre-render identity of this proxy (null on rows written before it existed: never carried).
+  renderContentHash         String?  @db.Char(64)
   createdAt                 DateTime @default(now()) @db.Timestamptz(3)
 
   workspace        V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -4209,6 +4211,7 @@ model V2ProjectProxyRenderOperation {
   @@index([workspaceId, outputArtifactId])
   @@index([workspaceId, reusedFromOperationId])
   @@index([workspaceId, projectId, outputVariantId], map: "pp_render_ops_variant_idx")
+  @@index([workspaceId, projectId, outputVariantId, renderContentHash], map: "pp_render_ops_content_idx")
   @@map("project_proxy_render_operations")
 }
 

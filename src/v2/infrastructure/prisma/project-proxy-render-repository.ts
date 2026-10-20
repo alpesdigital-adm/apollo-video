@@ -461,6 +461,14 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     if (!completed) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy completion lost its lease')
   }
 
+  async findAdmittedOperationId(input: { workspaceId: string; projectId: string; projectVersionId: string; inputHash: string }): Promise<string | null> {
+    const row = await this.client.v2ProjectProxyRenderOperation.findFirst({
+      where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.projectVersionId, inputHash: input.inputHash },
+      select: { operationId: true },
+    })
+    return row?.operationId ?? null
+  }
+
   /** The base Version's completed proxy of THE SAME OUTPUT (a render of another output is never offered, whatever its age). */
   private async readReusableProxy(input: {
     workspaceId: string

@@ -809,6 +809,18 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # W70 prep: the untouched output keeps its render and approval by content address, recorded (a decision of its own kind), and any change to
+      # its inputs carries nothing; and a render cancelled while the worker is rendering promotes nothing and leaves no scratch.
+      - name: Run W70 render carry-over and running-cancel proofs
+        run: |
+          set -euo pipefail
+          npm run test:e2e:proxy-carry-over
+          npm run test:e2e:proxy-render-cancel-running
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-render-carry-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_PROXY_CARRY_OVER_E2E: "1"
+          APOLLO_RENDER_CANCEL_RUNNING_E2E: "1"
+
       - name: Run final export integration against the migrated capture database
         run: |
           set -euo pipefail

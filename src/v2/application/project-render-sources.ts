@@ -1,6 +1,8 @@
 import { assertDomain } from '../domain/errors.ts'
 import { REFRAME_COMPOSITION_ID } from '../domain/render-reframe-plan.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
+import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
+import { EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } from './ports/editorial-proxy-renderer.ts'
 import { FINAL_CAPTION_CERTIFICATION_POLICY_SHA256 } from '../domain/final-caption-certification.ts'
 import type {
   ProjectProxyRenderSource,
@@ -126,4 +128,50 @@ export function projectProxyRenderInputHash(input: {
         rangeReuse: source.rangeReuse,
       }
     : { kind: 'project-proxy-render/v4', ...base })
+}
+
+/**
+ * W70 prep. The Version-INDEPENDENT content address of the pre-render identity of one output's proxy: what `projectProxyRenderInputHash` says
+ * about the pixels, less everything that merely names the Version it was read at (the Version id and hash, the EditPlan snapshot id, the State and
+ * materialization of the consumption seal, the identity fields of the EditPlan itself). Two Versions of a project in which an output is drawn from
+ * the same inputs have the same address; any input that moves - the plan content, a source, the colour bindings, the output spec revision, the
+ * reframe record, the subtitle exceptions, the subtitle preset, the OCR evidence the placement reads, a placement asset, the renderer or the
+ * recipe - gives another one. A render is carried from one Version to another only on an exact match.
+ *
+ * What it cannot see, because the render input hash cannot either: face evidence published AFTER the earlier render (the placement plan reads
+ * the sealed face windows at render time). Carrying keeps the pixels and the verdict the output had; it does not re-run perception.
+ */
+export function projectProxyRenderContentHash(input: {
+  source: Readonly<ProjectProxyRenderSource>
+  colorPipelineBindings: readonly Readonly<RenderColorPipelineBinding>[]
+}): string {
+  const source = input.source
+  const seal = source.outputConsumption?.seal
+  assertDomain(seal !== undefined && SEAL_HASH_PATTERN.test(source.outputConsumption.sealHash), 'INVALID_RENDER_INPUT', 'Render input is not sealed to an output consumption verdict')
+  const { id: _id, projectVersionId: _projectVersionId, createdAt: _createdAt, ...planContent } = source.editPlan as unknown as Record<string, unknown>
+  const resolution = source.subtitleResolution
+  return calculateVersionHash({
+    kind: 'project-proxy-render-content/v1',
+    renderer: FFMPEG_EDITORIAL_RENDERER_VERSION,
+    recipe: EDITORIAL_PROXY_RECIPE_VERSION,
+    assEmissionPolicy: ASS_EMISSION_POLICY,
+    projectId: source.projectId,
+    format: source.format,
+    editPlanContentHash: calculateCanonicalHash(planContent),
+    sourceArtifactId: source.sourceArtifactId,
+    sourceManifestId: source.sourceManifestId,
+    sourceSha256: source.sourceSha256,
+    renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
+    colorPipelineBindings: input.colorPipelineBindings,
+    output: { variantId: seal.variantId, outputSpecRevisionId: seal.outputSpecRevisionId, specHash: seal.specHash },
+    subtitleResolution: resolution ? {
+      enabled: resolution.enabled, presetId: resolution.presetId, presetHash: resolution.presetHash, registryHash: resolution.registryHash,
+      presetSnapshotHash: resolution.presetSnapshot?.snapshotHash ?? null,
+    } : null,
+    trustedOcr: source.trustedOcr ? { envelopeHash: source.trustedOcr.envelopeHash, timeMapHash: source.trustedOcr.timeMapHash } : null,
+    formatSubjects: source.formatSubjects ? calculateCanonicalHash(source.formatSubjects) : null,
+    placementAssets: source.placementAssets ? source.placementAssets.map((asset) => asset.sha256).toSorted() : null,
+    reframeRecordHash: source.reframeRecordHash ?? null,
+    subtitleOverridesHash: source.subtitleOverridesHash ?? null,
+  })
 }

@@ -164,6 +164,11 @@ export interface ProjectProxyCompletionLease {
 }
 
 export interface ProjectProxyRenderRepository {
+  /**
+   * The operation already admitted for exactly this Version and pre-render input hash (a render, or a render carried from an earlier Version),
+   * or null. Optional: a repository without it simply never short-circuits an enqueue.
+   */
+  findAdmittedOperationId?(input: { workspaceId: string; projectId: string; projectVersionId: string; inputHash: string }): Promise<string | null>
   /** `variantId`: the State variant to consume; absent means the State's only output. */
   readCurrentSource(input: { workspaceId: string; projectId: string; purpose?: ProjectRenderConsumptionPurpose; variantId?: string }): Promise<Readonly<ProjectProxyRenderSource> | null>
   readImmutableSource(input: {

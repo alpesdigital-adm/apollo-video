@@ -50,8 +50,35 @@ Versões: renderer 1.17.0, receita de proxy 1.18.0, receita de final 1.15.0 (o m
 Provas: `tests/v2/caption-text-layout.test.mjs` (invariante da geometria única para todos os presets x 2 formatos x canvas de proxy e de entrega: as linhas cabem na faixa; a testemunha do defeito antigo); `tests/v2/caption-text-layout-pixels.integration.mjs` (renderer real + FFmpeg + crítico W65 de produção, 16:9 e 9:16: legendas de 16 a 55 caracteres, com `Ação` e `Última cue.`, sem nenhuma issue, glifos dentro da faixa decidida, da safe area e do canvas, nunca mais largos que a estimativa; texto longo demais transborda e é bloqueado).
 O browser proof do W68 dependia do defeito (o baseline 16:9 bloqueava "de graça"): o mundo agora semeia, pelo serviço de produção, uma exceção de texto longa demais na saída 16:9 (`wideOverflow`), que é um bloqueio duro **real**.
 
+### 2.2 "Invalidar so o necessario": a saída intocada herda render, laudo e aprovação
+
+Um Command aimed at one output cria uma Versão nova e a **outra** saída perdia render e aprovação. O hash de entrada do render (`projectProxyRenderInputHash`) nomeia a Versão (id, snapshot, State, materialização), então ele nunca é igual entre Versões; o endereço que vale entre Versões é
+`projectProxyRenderContentHash`: o conteúdo do EditPlan **sem** `id/projectVersionId/createdAt`, as fontes, as ligações de cor, `variantId` + revisão e hash do OutputSpec, o registro de reenquadramento, o conjunto de exceções de legenda, o preset de legenda (e o snapshot), a evidência de OCR, os assets e os sujeitos de posicionamento, o renderer e a receita.
+Ele é gravado na operação de render (`project_proxy_render_operations.renderContentHash`, coluna nova, migração `20261020120000_proxy_render_carry_over_v1`); uma linha anterior não tem endereço e **nunca** é fonte.
+
+`carryOverUntouchedOutputService` (chamado após a confirmação dos Commands de exceção de legenda e de reenquadramento, melhor esforço; e a resposta de um pedido de render de uma saída já herdada é a operação herdada, não um segundo render) herda de uma Versão **ancestral** cuja operação de render concluída tem exatamente o endereço de agora, numa transação Serializable: operação concluída sobre o **mesmo artefato**
+(`reusedFromOperationId`, `reuseBaseVersionId`, `reuseCommandId` = o Command que fez a cabeça), o mapa de cues do mesmo MP4 ligado à Versão nova e um laudo com hash próprio. Um laudo cujas ressalvas uma pessoa reconheceu é criado como o laudo pendente que era e levado a `ready-for-final` por uma **decisão de tipo próprio**, `carry-over-approval`
+(`baseReviewHash` = o laudo herdado, `requestFingerprint` = o endereço que provou a igualdade, ator = quem disparou; a restrição de ação de `proxy_review_decisions` passou a aceitar o novo valor): a aprovação é religada explicitamente, nunca copiada em silêncio, e nenhum "reconhecimento humano" é inventado. Um laudo que ninguém aprovou é herdado como era. O status do projeto não muda.
+
+Provas (`tests/v2/proxy-render-content-hash.test.mjs`; `tests/v2/proxy-carry-over.e2e.mjs`, PostgreSQL + FFmpeg + worker de produção): o endereço é igual para Versões que só diferem na identidade e se move com cada entrada (18 mutações, sem colisão); Command na saída 16:9 -> a 9:16 (aprovada por uma pessoa) é herdada pelo mesmo artefato, hash do laudo recalculado e válido, decisão
+`carry-over-approval` com base/resultado/ator, nenhum segundo `acknowledge-warnings`, mapa de cues ligado, o leitor do sidecar vê a saída herdada, a saída afetada não é herdada, uma segunda tentativa encontra a operação, e pedir o render da saída herdada devolve a mesma operação; Command que muda as entradas da outra saída -> nada é herdado para ela;
+operação sem endereço nunca é fonte; endereço restaurado -> herda de uma Versão ancestral que não é a mãe; cabeça que se moveu -> recusa.
+Limite declarado: o endereço não vê evidência de rosto publicada **depois** do render anterior (o plano de posicionamento a lê na hora de renderizar), como o hash de entrada também não vê; herdar mantém os pixels e o veredito que a saída tinha, não reexecuta percepção. A herança não é exposta no esquema público do laudo (aditivo
+futuro); está na operação (`reusedFrom*`), na decisão e no endereço.
+
+### 2.3 Cancelamento durante um render em execução
+
+`tests/v2/proxy-render-cancel-running.e2e.mjs` (worker de produção, repositórios reais, PostgreSQL, FFmpeg): o renderer real é retido depois que o FFmpeg escreveu o MP4 inteiro no scratch, até a operação ser cancelada, de modo que o cancelamento cai no meio da fase `rendering` com o arquivo pronto e ainda não promovido. Cancelado pelo serviço público: o sinal do render é abortado, o worker retorna, a operação termina `canceled` sem lease, **não** existe linha de artefato, manifesto,
+laudo, mapa de cues nem decisão, nenhum arquivo sob o prefixo do artefato, o diretório de scratch da operação some, e o mesmo pedido não reabre a operação cancelada (a saída é outra Versão).
+
+### 2.4 Aprovação x conjunto de exceções
+
+Já estava no W68 e foi conferida: `subtitleOverridesMatchApproval` (final recusa uma aprovação dada para outro conjunto; "nenhum" dos dois lados é igual) com testes em `tests/v2/w68-subtitle-override-render.test.mjs`. O laudo herdado leva o mesmo `subtitleOverridesHash`, então o portão continua coerente.
+
 ## 3. Lacunas e limites declarados
 
 - A estimativa de largura é calibrada no Arial Bold (e na Liberation Sans, métrica compatível). Um host cujo `Arial` resolva para uma face mais larga (DejaVu) está fora desta alegação.
 - Três linhas de legenda em 16:9 ainda cabem na tolerância de 6 px do crítico W65 (a layout reporta `fits: false`; o pixel não); é do crítico W65, não foi alterado.
-- O crítico de pixels do W67 e o final real (W70) não foram executados aqui.
+- O crítico de pixels do W67 (OpenVINO) e o final real (W70) não foram executados aqui. O final exige um DirectorRun cujo resultado seja a Versão; uma Versão nascida de um Command de exceção não o tem, então a aprovação herdada vale para o portão do laudo, não substitui o Diretor.
+- Uma execução da jornada de browser do W68 (`w69t-w68ui-3`) falhou no passo `tall-hide` ("hide Command is committed: null", depois do reenquadramento), o mesmo ponto em que o W68 relatou uma execução sem saída; ver o relatório final.
+- Uma execução da jornada do sidecar ficou sem saída por 48 min num render que parou em `persisting` (`w69t-sidecar-16`), sem erro registrado; a repetição imediata passou. Não foi reproduzida nem explicada; a jornada agora coleta o estado do banco (`pg_stat_activity`) quando um render não se resolve e o `stop` do pump tem prazo.
