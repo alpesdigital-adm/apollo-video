@@ -1,0 +1,770 @@
+{
+  "schemaVersion": "w67-mp4-critic-results/v1",
+  "protocol": "w67-mp4-critic-preregistration/v1",
+  "frozenManifestHash": "5fe1eaf409f84055d103a714d0d194927910565ef9e5710c60872c74048d4f0a",
+  "harnessRunId": "w67-calibration-run1-4fcf3a8c",
+  "ffmpeg": {
+    "version": "ffmpeg version 6.1.1-essentials_build-www.gyan.dev",
+    "sha256": "04e1307997530f9cf2fe35cba2ca7e8875ca91da02f89d6c7243df819c94ad00"
+  },
+  "summary": {
+    "outputs": 20,
+    "labelledUnits": 24,
+    "detectedUnits": 24,
+    "exactUnits": 24,
+    "recallDetected": 1,
+    "recallExact": 1,
+    "falseSafeUnits": 0,
+    "falsePositiveUnits": 0,
+    "precisionExact": 1,
+    "unmappedHard": 0,
+    "unknownFrames": 0,
+    "decodeFailures": 0
+  },
+  "rows": [
+    {
+      "className": "caption-over-face",
+      "format": "16:9",
+      "labelledUnits": 4,
+      "detectedUnits": 4,
+      "exactUnits": 4,
+      "falseSafeUnits": 0,
+      "unlabelledUnits": 6,
+      "falsePositiveUnits": 0,
+      "extraFrames": 0,
+      "unknownFrames": 0
+    },
+    {
+      "className": "caption-over-face",
+      "format": "9:16",
+      "labelledUnits": 4,
+      "detectedUnits": 4,
+      "exactUnits": 4,
+      "falseSafeUnits": 0,
+      "unlabelledUnits": 6,
+      "falsePositiveUnits": 0,
+      "extraFrames": 0,
+      "unknownFrames": 0
+    },
+    {
+      "className": "crop-lost",
+      "format": "16:9",
+      "labelledUnits": 4,
+      "detectedUnits": 4,
+      "exactUnits": 4,
+      "falseSafeUnits": 0,
+      "unlabelledUnits": 6,
+      "falsePositiveUnits": 0,
+      "extraFrames": 0,
+      "unknownFrames": 0
+    },
+    {
+      "className": "crop-lost",
+      "format": "9:16",
+      "labelledUnits": 4,
+      "detectedUnits": 4,
+      "exactUnits": 4,
+      "falseSafeUnits": 0,
+      "unlabelledUnits": 6,
+      "falsePositiveUnits": 0,
+      "extraFrames": 0,
+      "unknownFrames": 0
+    },
+    {
+      "className": "cta-outside-safe-area",
+      "format": "16:9",
+      "labelledUnits": 4,
+      "detectedUnits": 4,
+      "exactUnits": 4,
+      "falseSafeUnits": 0,
+      "unlabelledUnits": 6,
+      "falsePositiveUnits": 0,
+      "extraFrames": 0,
+      "unknownFrames": 0
+    },
+    {
+      "className": "cta-outside-safe-area",
+      "format": "9:16",
+      "labelledUnits": 4,
+      "detectedUnits": 4,
+      "exactUnits": 4,
+      "falseSafeUnits": 0,
+      "unlabelledUnits": 6,
+      "falsePositiveUnits": 0,
+      "extraFrames": 0,
+      "unknownFrames": 0
+    }
+  ],
+  "replica": {
+    "outputs": 20,
+    "identicalReportHashes": 20
+  },
+  "promotedFiles": [
+    "1e49e97cde78b7a1fd429aaffac4de7588286a13486e9a443e42c3d980a60a0c",
+    "5bd077eff5ec2ba8cbe80bf62f02f0cdff9e297086e4faa3eb0432d7ac2ba99a",
+    "5be30044013cc8fdae7a459b92c07c9f502e5838796c101855ef730795fbc914",
+    "f274fcfe424cfb0d253ed0108fe52037bcbb5725acfc1f9b63d1fab19b4aba6d"
+  ],
+  "outputs": [
+    {
+      "outputId": "1580caef8efed517-9x16-clean",
+      "format": "9:16",
+      "variant": "clean",
+      "deliveredSha256": "5be30044013cc8fdae7a459b92c07c9f502e5838796c101855ef730795fbc914",
+      "deliveredBytes": 84155,
+      "verdict": "passed",
+      "labelledUnits": [],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "f9986e1fcfa200bba43b5a17ca5404d71e14f4972b9a1d995adbadf8dbd3a5f6",
+      "replicaReportHash": "f9986e1fcfa200bba43b5a17ca5404d71e14f4972b9a1d995adbadf8dbd3a5f6",
+      "exportApproved": true,
+      "blockingCodes": [],
+      "promoted": true,
+      "criticMs": 17712,
+      "renderMs": 1070
+    },
+    {
+      "outputId": "1580caef8efed517-9x16-caption",
+      "format": "9:16",
+      "variant": "caption",
+      "deliveredSha256": "bb5ac43e903f391bac4dd51095f33c41567ed255ff233bbe66d360bdaf615e4a",
+      "deliveredBytes": 83858,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "caption-over-face",
+          "interval": [
+            8,
+            28
+          ],
+          "flaggedFrames": 20,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "e5f63849244265a0e11f31a0d60c643c27df70911edb30ea4b105d9c80626be2",
+      "replicaReportHash": "e5f63849244265a0e11f31a0d60c643c27df70911edb30ea4b105d9c80626be2",
+      "exportApproved": false,
+      "blockingCodes": [
+        "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 16918,
+      "renderMs": 886
+    },
+    {
+      "outputId": "1580caef8efed517-9x16-crop",
+      "format": "9:16",
+      "variant": "crop",
+      "deliveredSha256": "d0ec4d4e42da2f370420759d8cc96e1b597a6ea07bc5e09bc3fea339f908b6f3",
+      "deliveredBytes": 111632,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "crop-lost",
+          "interval": [
+            45,
+            90
+          ],
+          "flaggedFrames": 45,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "6b8bd614b45fdf806c6d915f95c9fa8d314da09fb05345c7dd8a9b5bab8a7e24",
+      "replicaReportHash": "6b8bd614b45fdf806c6d915f95c9fa8d314da09fb05345c7dd8a9b5bab8a7e24",
+      "exportApproved": false,
+      "blockingCodes": [
+        "SUBJECT_CLIPPED_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 17327,
+      "renderMs": 938
+    },
+    {
+      "outputId": "1580caef8efed517-9x16-cta",
+      "format": "9:16",
+      "variant": "cta",
+      "deliveredSha256": "91f0b1147b8e0b522a1a1f9c046f18ece569c2f1636146747d22364f60ab5a5f",
+      "deliveredBytes": 89668,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "cta-outside-safe-area",
+          "interval": [
+            31,
+            44
+          ],
+          "flaggedFrames": 13,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "3c5f965639116d86499cce3712790fb11e25482fd098134e40dc2cb700f76a36",
+      "replicaReportHash": "3c5f965639116d86499cce3712790fb11e25482fd098134e40dc2cb700f76a36",
+      "exportApproved": false,
+      "blockingCodes": [
+        "INK_CLIPPED_BY_CANVAS_IN_PIXELS",
+        "INK_OUTSIDE_SAFE_AREA_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 18162,
+      "renderMs": 934
+    },
+    {
+      "outputId": "1580caef8efed517-9x16-combined",
+      "format": "9:16",
+      "variant": "combined",
+      "deliveredSha256": "4c5921d8619478fa0ae21946345f93f74dd05b9b797d9279993ab061205cbb00",
+      "deliveredBytes": 115984,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "caption-over-face",
+          "interval": [
+            8,
+            28
+          ],
+          "flaggedFrames": 20,
+          "exact": true,
+          "falseSafe": false
+        },
+        {
+          "defect": "crop-lost",
+          "interval": [
+            45,
+            90
+          ],
+          "flaggedFrames": 45,
+          "exact": true,
+          "falseSafe": false
+        },
+        {
+          "defect": "cta-outside-safe-area",
+          "interval": [
+            31,
+            44
+          ],
+          "flaggedFrames": 13,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "2de9b20065a491d9557d6b34bd2c79a643a82cc77cb3dd6eb66868dd304b36b4",
+      "replicaReportHash": "2de9b20065a491d9557d6b34bd2c79a643a82cc77cb3dd6eb66868dd304b36b4",
+      "exportApproved": false,
+      "blockingCodes": [
+        "INK_CLIPPED_BY_CANVAS_IN_PIXELS",
+        "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+        "SUBJECT_CLIPPED_IN_PIXELS",
+        "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 18037,
+      "renderMs": 857
+    },
+    {
+      "outputId": "1580caef8efed517-16x9-clean",
+      "format": "16:9",
+      "variant": "clean",
+      "deliveredSha256": "1e49e97cde78b7a1fd429aaffac4de7588286a13486e9a443e42c3d980a60a0c",
+      "deliveredBytes": 77511,
+      "verdict": "passed",
+      "labelledUnits": [],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "4150b7b905d73e9d914e4a629af148dec4fc8cfc6a463fb3ab5672a6936f40d3",
+      "replicaReportHash": "4150b7b905d73e9d914e4a629af148dec4fc8cfc6a463fb3ab5672a6936f40d3",
+      "exportApproved": true,
+      "blockingCodes": [],
+      "promoted": true,
+      "criticMs": 24060,
+      "renderMs": 910
+    },
+    {
+      "outputId": "1580caef8efed517-16x9-caption",
+      "format": "16:9",
+      "variant": "caption",
+      "deliveredSha256": "462f4d718efb11659a6c1b7f154701663a376011b8ef9eb92f3bd9df6b716b4a",
+      "deliveredBytes": 78047,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "caption-over-face",
+          "interval": [
+            8,
+            28
+          ],
+          "flaggedFrames": 20,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "23267525d293bab205e0abf319c86f80ffd8a09d6f351e3683a108d7ce77cf7d",
+      "replicaReportHash": "23267525d293bab205e0abf319c86f80ffd8a09d6f351e3683a108d7ce77cf7d",
+      "exportApproved": false,
+      "blockingCodes": [
+        "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 32541,
+      "renderMs": 894
+    },
+    {
+      "outputId": "1580caef8efed517-16x9-crop",
+      "format": "16:9",
+      "variant": "crop",
+      "deliveredSha256": "b0ab9e03ffbb612666f920bbc6e4551b4864ed6b8f77d8be36252723a480aafc",
+      "deliveredBytes": 107778,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "crop-lost",
+          "interval": [
+            45,
+            90
+          ],
+          "flaggedFrames": 45,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "9dec0b6ea4d4c88e44acc9704ac664a580e6f68eece258f6b1eda6dad115bd26",
+      "replicaReportHash": "9dec0b6ea4d4c88e44acc9704ac664a580e6f68eece258f6b1eda6dad115bd26",
+      "exportApproved": false,
+      "blockingCodes": [
+        "SUBJECT_CLIPPED_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 22320,
+      "renderMs": 841
+    },
+    {
+      "outputId": "1580caef8efed517-16x9-cta",
+      "format": "16:9",
+      "variant": "cta",
+      "deliveredSha256": "faed9a854209153f67f8048a25dc792f45ce5284344a9506b07ba5dfacd369ac",
+      "deliveredBytes": 85302,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "cta-outside-safe-area",
+          "interval": [
+            31,
+            44
+          ],
+          "flaggedFrames": 13,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "c63fbe91b07a3e7314615c670660cba6776e9348e2276b60f11cfb7b21708529",
+      "replicaReportHash": "c63fbe91b07a3e7314615c670660cba6776e9348e2276b60f11cfb7b21708529",
+      "exportApproved": false,
+      "blockingCodes": [
+        "INK_OUTSIDE_SAFE_AREA_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 18495,
+      "renderMs": 907
+    },
+    {
+      "outputId": "1580caef8efed517-16x9-combined",
+      "format": "16:9",
+      "variant": "combined",
+      "deliveredSha256": "4bc61eaf2ac8c1052a647950c743f4f34513cf2495f6cc25a0bc370a5b3fafcd",
+      "deliveredBytes": 114887,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "caption-over-face",
+          "interval": [
+            8,
+            28
+          ],
+          "flaggedFrames": 20,
+          "exact": true,
+          "falseSafe": false
+        },
+        {
+          "defect": "crop-lost",
+          "interval": [
+            45,
+            90
+          ],
+          "flaggedFrames": 45,
+          "exact": true,
+          "falseSafe": false
+        },
+        {
+          "defect": "cta-outside-safe-area",
+          "interval": [
+            31,
+            44
+          ],
+          "flaggedFrames": 13,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "c39b2c5f4d496b7cd754898fdf0f2c7907e5c7b41cae755686f2bbf8595fe3e1",
+      "replicaReportHash": "c39b2c5f4d496b7cd754898fdf0f2c7907e5c7b41cae755686f2bbf8595fe3e1",
+      "exportApproved": false,
+      "blockingCodes": [
+        "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+        "SUBJECT_CLIPPED_IN_PIXELS",
+        "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 18880,
+      "renderMs": 936
+    },
+    {
+      "outputId": "9295ab265fafd8e5-9x16-clean",
+      "format": "9:16",
+      "variant": "clean",
+      "deliveredSha256": "5bd077eff5ec2ba8cbe80bf62f02f0cdff9e297086e4faa3eb0432d7ac2ba99a",
+      "deliveredBytes": 88369,
+      "verdict": "passed",
+      "labelledUnits": [],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "8277fb34c0477ac76819ff01bcce3c1c3b75982c8ef782d7ee740165be52c862",
+      "replicaReportHash": "8277fb34c0477ac76819ff01bcce3c1c3b75982c8ef782d7ee740165be52c862",
+      "exportApproved": true,
+      "blockingCodes": [],
+      "promoted": true,
+      "criticMs": 18879,
+      "renderMs": 887
+    },
+    {
+      "outputId": "9295ab265fafd8e5-9x16-caption",
+      "format": "9:16",
+      "variant": "caption",
+      "deliveredSha256": "95af442eb5928919e87600d7d434ba3f4cd49e19b7dee0c9b023367ab10bd503",
+      "deliveredBytes": 88593,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "caption-over-face",
+          "interval": [
+            8,
+            28
+          ],
+          "flaggedFrames": 20,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "b7972ed78a827abd3a37c67c8a9874fc310317cc10f5fce2e235a8cfe47dd11f",
+      "replicaReportHash": "b7972ed78a827abd3a37c67c8a9874fc310317cc10f5fce2e235a8cfe47dd11f",
+      "exportApproved": false,
+      "blockingCodes": [
+        "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 17971,
+      "renderMs": 876
+    },
+    {
+      "outputId": "9295ab265fafd8e5-9x16-crop",
+      "format": "9:16",
+      "variant": "crop",
+      "deliveredSha256": "25f503dca90c4337b6ca49039456ec755bc7431ba9c1e620e425d75c5d5c3fe9",
+      "deliveredBytes": 131567,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "crop-lost",
+          "interval": [
+            45,
+            90
+          ],
+          "flaggedFrames": 45,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "934067e1a30e6958d2f5d90583a4f942a4aca0e13b4db88dcde05b38f3570d39",
+      "replicaReportHash": "934067e1a30e6958d2f5d90583a4f942a4aca0e13b4db88dcde05b38f3570d39",
+      "exportApproved": false,
+      "blockingCodes": [
+        "SUBJECT_CLIPPED_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 18289,
+      "renderMs": 872
+    },
+    {
+      "outputId": "9295ab265fafd8e5-9x16-cta",
+      "format": "9:16",
+      "variant": "cta",
+      "deliveredSha256": "88bfaa9ef953a13662588736445bb4beadcc6efc5f5e79d8007345d51c2ea28f",
+      "deliveredBytes": 93503,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "cta-outside-safe-area",
+          "interval": [
+            31,
+            44
+          ],
+          "flaggedFrames": 13,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "7185852e0d58df9538cede2e297bc1ebc91eec49f6664e780eface46db7d442f",
+      "replicaReportHash": "7185852e0d58df9538cede2e297bc1ebc91eec49f6664e780eface46db7d442f",
+      "exportApproved": false,
+      "blockingCodes": [
+        "INK_CLIPPED_BY_CANVAS_IN_PIXELS",
+        "INK_OUTSIDE_SAFE_AREA_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 20105,
+      "renderMs": 889
+    },
+    {
+      "outputId": "9295ab265fafd8e5-9x16-combined",
+      "format": "9:16",
+      "variant": "combined",
+      "deliveredSha256": "bb5149be3240c02da95242f129ea894d1286c348954e775af5fd28c758b91535",
+      "deliveredBytes": 136337,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "caption-over-face",
+          "interval": [
+            8,
+            28
+          ],
+          "flaggedFrames": 20,
+          "exact": true,
+          "falseSafe": false
+        },
+        {
+          "defect": "crop-lost",
+          "interval": [
+            45,
+            90
+          ],
+          "flaggedFrames": 45,
+          "exact": true,
+          "falseSafe": false
+        },
+        {
+          "defect": "cta-outside-safe-area",
+          "interval": [
+            31,
+            44
+          ],
+          "flaggedFrames": 13,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "f4fb871d785807a18b927e92a88732801bc42d38ef334f06f828d0d5606cef35",
+      "replicaReportHash": "f4fb871d785807a18b927e92a88732801bc42d38ef334f06f828d0d5606cef35",
+      "exportApproved": false,
+      "blockingCodes": [
+        "INK_CLIPPED_BY_CANVAS_IN_PIXELS",
+        "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+        "SUBJECT_CLIPPED_IN_PIXELS",
+        "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 21684,
+      "renderMs": 889
+    },
+    {
+      "outputId": "9295ab265fafd8e5-16x9-clean",
+      "format": "16:9",
+      "variant": "clean",
+      "deliveredSha256": "f274fcfe424cfb0d253ed0108fe52037bcbb5725acfc1f9b63d1fab19b4aba6d",
+      "deliveredBytes": 89753,
+      "verdict": "passed",
+      "labelledUnits": [],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "b95b0ec1aeffebd08989bbb2ce67155c2f290e5d460583211861d4fae2fd36f2",
+      "replicaReportHash": "b95b0ec1aeffebd08989bbb2ce67155c2f290e5d460583211861d4fae2fd36f2",
+      "exportApproved": true,
+      "blockingCodes": [],
+      "promoted": true,
+      "criticMs": 20476,
+      "renderMs": 891
+    },
+    {
+      "outputId": "9295ab265fafd8e5-16x9-caption",
+      "format": "16:9",
+      "variant": "caption",
+      "deliveredSha256": "de74b3b0c0f9baea058991b1a87faa98ace61e97dc28a663c952d2a1025407e1",
+      "deliveredBytes": 89989,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "caption-over-face",
+          "interval": [
+            8,
+            28
+          ],
+          "flaggedFrames": 20,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "f3084100bbdef101b6291c1a68552d1f48c0309cf0dea6787e70b2462738584f",
+      "replicaReportHash": "f3084100bbdef101b6291c1a68552d1f48c0309cf0dea6787e70b2462738584f",
+      "exportApproved": false,
+      "blockingCodes": [
+        "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 20916,
+      "renderMs": 865
+    },
+    {
+      "outputId": "9295ab265fafd8e5-16x9-crop",
+      "format": "16:9",
+      "variant": "crop",
+      "deliveredSha256": "c47e31de6483587933e7d4ff310c07851c518089b59e8a1588e21a06f7688152",
+      "deliveredBytes": 133324,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "crop-lost",
+          "interval": [
+            45,
+            90
+          ],
+          "flaggedFrames": 45,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "e535f5f36a7fd78e3e8db54fd629287a1d124f2f633f2dfad78604de9701980d",
+      "replicaReportHash": "e535f5f36a7fd78e3e8db54fd629287a1d124f2f633f2dfad78604de9701980d",
+      "exportApproved": false,
+      "blockingCodes": [
+        "SUBJECT_CLIPPED_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 20649,
+      "renderMs": 915
+    },
+    {
+      "outputId": "9295ab265fafd8e5-16x9-cta",
+      "format": "16:9",
+      "variant": "cta",
+      "deliveredSha256": "432c16f5e25faad35f42904be0e2a53bb29a1943d74577ddf3fd6fdf5582c6eb",
+      "deliveredBytes": 98566,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "cta-outside-safe-area",
+          "interval": [
+            31,
+            44
+          ],
+          "flaggedFrames": 13,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "006bc17ff9754eab8369b772b7795155d4f44c930892a8a50c8017ef076bafdd",
+      "replicaReportHash": "006bc17ff9754eab8369b772b7795155d4f44c930892a8a50c8017ef076bafdd",
+      "exportApproved": false,
+      "blockingCodes": [
+        "INK_OUTSIDE_SAFE_AREA_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 21862,
+      "renderMs": 888
+    },
+    {
+      "outputId": "9295ab265fafd8e5-16x9-combined",
+      "format": "16:9",
+      "variant": "combined",
+      "deliveredSha256": "94afb271b36b4cce41d6140ac94a91ce65135be09e8cdbb56a5fba2a17795828",
+      "deliveredBytes": 141087,
+      "verdict": "blocked",
+      "labelledUnits": [
+        {
+          "defect": "caption-over-face",
+          "interval": [
+            8,
+            28
+          ],
+          "flaggedFrames": 20,
+          "exact": true,
+          "falseSafe": false
+        },
+        {
+          "defect": "crop-lost",
+          "interval": [
+            45,
+            90
+          ],
+          "flaggedFrames": 45,
+          "exact": true,
+          "falseSafe": false
+        },
+        {
+          "defect": "cta-outside-safe-area",
+          "interval": [
+            31,
+            44
+          ],
+          "flaggedFrames": 13,
+          "exact": true,
+          "falseSafe": false
+        }
+      ],
+      "unlabelledFlaggedUnits": 0,
+      "unknownByCheck": {},
+      "reportHash": "ee3873e9abd24da3c696c115c045c202f0b9b320be9e1a95788a1b24395d84a3",
+      "replicaReportHash": "ee3873e9abd24da3c696c115c045c202f0b9b320be9e1a95788a1b24395d84a3",
+      "exportApproved": false,
+      "blockingCodes": [
+        "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+        "SUBJECT_CLIPPED_IN_PIXELS",
+        "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+      ],
+      "promoted": false,
+      "criticMs": 20306,
+      "renderMs": 891
+    }
+  ]
+}

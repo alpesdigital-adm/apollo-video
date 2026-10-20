@@ -4,6 +4,8 @@ import { artifactOutputStoragePrefix } from '../domain/artifact-storage-identity
 import { evaluateAssetUse } from '../domain/asset-rights.ts'
 import { createReconstructableMediaArtifactManifest } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
+import { readOutputFormatPreset } from '../domain/output-format-registry.ts'
+import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import { createRenderInputSpec } from '../domain/render-input.ts'
 import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import { createDirectedAudioTimelineHash } from '../domain/director-run.ts'
@@ -30,6 +32,10 @@ import {
   certifyFinalCaptions, describeFinalCaptionCertification, FINAL_CAPTION_CERTIFICATION_POLICY_SHA256, type FinalPixelCheck,
 } from '../domain/final-caption-certification.ts'
 import type { CaptionPixelCritic } from './ports/caption-pixel-critic.ts'
+import type { Mp4PixelCritic } from './ports/mp4-pixel-critic.ts'
+import { critiqueOutputFormat, selectExportableVariants } from '../domain/format-quality-critic.ts'
+import { mp4ExportAcknowledgementRecord, mp4ExportGate, parseMp4ExportAcknowledgement, type Mp4ExportAcknowledgement } from '../domain/mp4-export-gate.ts'
+import { persistMp4ExportAcknowledgement, persistMp4QualityReport, verifyDeliveredMp4 } from './verify-delivered-mp4.ts'
 import type { FaceSourceWindowEvidenceReader } from './ports/face-source-window-evidence-reader.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
@@ -79,6 +85,19 @@ export function runNextProjectFinalExportOperationService(dependencies: {
    * caption is refused (before the encode) without it: a caption is never delivered on the strength of the plan alone.
    */
   captionPixelCritic?: CaptionPixelCritic
+  /**
+   * W67. The independent critic of the delivered MP4. The final FAILS CLOSED on it: the variant's sealed report is stored and its format report
+   * goes through `selectExportableVariants`, and a blocked variant, a critic that could not read the file, a face oracle that failed, a final
+   * with caption/CTA ink over frames the oracle could not read, or NO critic wired at all is never promoted, exported or cataloged
+   * (see `mp4ExportGate`). Another variant's report neither blocks nor authorizes it. The canonical StoryPlan is not touched.
+   */
+  mp4PixelCritic?: Mp4PixelCritic
+  /**
+   * W67. The only way to deliver a final the critic could not fully judge for a reason about the deployment or the footage (no critic wired;
+   * no face anywhere in a frame that carries ink): an explicit, recorded acknowledgement of who accepted it, when and why. It is copied into
+   * the attempt's validator message. It never lifts a crashed oracle, an unreadable frame, a missing model or a blocked report.
+   */
+  mp4ExportAcknowledgement?: Mp4ExportAcknowledgement
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
@@ -396,6 +415,62 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         }
       }
       const certification = certifyFinalCaptions({ plan: placementPlan, pixelCheck })
+      // ---- W67. What the pixels of the delivered file say, by the independent critic; a blocked variant is not promoted ----
+      let mp4Validator: { code: string; passed: boolean; message: string } | null = null
+      const mp4Acknowledgement = dependencies.mp4ExportAcknowledgement ? parseMp4ExportAcknowledgement(dependencies.mp4ExportAcknowledgement) : null
+      if (!dependencies.mp4PixelCritic) {
+        // Not wired: the final is not approved by silence. Only an explicit acknowledgement (actor, time, reason) delivers it.
+        const gate = mp4ExportGate({ report: null, acknowledgement: mp4Acknowledgement })
+        let recorded = ''
+        if (gate.allowed) {
+          // The acknowledgement that delivers this final is stored as a structured record (who, when, why, which operation), not as validator text.
+          const unwiredPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
+          const acknowledgementRecord = mp4ExportAcknowledgementRecord({
+            gate, workspaceId: operation.workspaceId, projectId: context.projectId, variantId: context.outputVariantId ?? sourceOutputVariantId(source),
+            outputSpecId: unwiredPreset.spec.id, operationId: operation.id, reportHash: null,
+          })
+          const stored = await persistMp4ExportAcknowledgement({ storage: dependencies.storage, workspaceId: operation.workspaceId, text: acknowledgementRecord!.text })
+          recorded = `; acknowledgement record ${stored.sha256} stored as ${stored.key}`
+        }
+        mp4Validator = { code: 'FINAL_MP4_CRITIC', passed: gate.allowed, message: `${gate.message.slice(0, 230)}${recorded}.`.slice(0, 500) }
+      } else {
+        const outputPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
+        const outputSpecId = outputPreset.spec.id
+        const verification = await verifyDeliveredMp4({
+          critic: dependencies.mp4PixelCritic, renderer: dependencies.renderer, renderRequest, deliveredPath: rendered.outputPath,
+          identity: {
+            workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
+            variantId: context.outputVariantId ?? sourceOutputVariantId(source), outputSpecId, format: source.format, operationId: operation.id, renderInputHash: context.inputHash,
+          },
+          outputSpec: { width: context.outputSpec.width, height: context.outputSpec.height, safeArea: outputPreset.spec.safeArea },
+          renderSources: source.renderSources, sourcePaths: materializedSources.map((materialized) => materialized.path), clips,
+          overlays: { captions: burnedCaptions > 0, cta: ctaOverlays.length > 0 }, controlOperationPrefix: operation.id, signal: abortController.signal,
+        })
+        if (verification.measurement === 'failed') {
+          mp4Validator = { code: 'FINAL_MP4_CRITIC', passed: false, message: `The MP4 pixel critic could not read the delivered file (${verification.failureCode}); a final is not delivered unverified.` }
+        } else {
+          const stored = await persistMp4QualityReport({ storage: dependencies.storage, workspaceId: operation.workspaceId, report: verification.verification.report })
+          const formatReport = critiqueOutputFormat({
+            outputSpecId, format: source.format as OutputAspectRatio, proxyHash: rendered.sha256, map: rendered.renderElementMap,
+            placementPlanHash: placementPlan.placementPlanHash, reframePlanHash: reframePlan?.reframePlanHash ?? null,
+            mp4PixelIssues: verification.verification.issues, mp4Evidence: verification.evidence,
+          })
+          const selection = selectExportableVariants([formatReport])
+          const reported = selection.approvedOutputSpecIds.includes(outputSpecId)
+          const blocking = selection.decisions.find((decision) => decision.outputSpecId === outputSpecId)?.blockingCodes ?? []
+          // Fail closed on what the report could not establish (a failed oracle, ink over frames it could not read), not only on what it found.
+          const gate = mp4ExportGate({ report: verification.verification.report, acknowledgement: mp4Acknowledgement })
+          const approved = reported && gate.allowed
+          const verdictText = !reported ? `MP4 critic blocked this variant (${blocking.join(', ')})`
+            : !gate.allowed ? `MP4 critic could not fully judge this variant: ${gate.message}`
+              : `MP4 critic did not block this variant${gate.blockers.length > 0 || gate.informational.length > 0 ? `; ${gate.message}` : ''}`
+          // the tail that names the stored evidence is never the part that gets cut
+          mp4Validator = {
+            code: 'FINAL_MP4_CRITIC', passed: approved,
+            message: `${verdictText.slice(0, 300)}; report ${verification.evidence.reportHash} stored as ${stored.key}.`.slice(0, 500),
+          }
+        }
+      }
       const expectedFrames = clips.reduce(
         (total, clip) => total + clip.sourceOutFrame - clip.sourceInFrame,
         0,
@@ -457,6 +532,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             ? describeFinalCaptionCertification(certification.receipt)
             : `Burned captions are not certified: ${certification.failures.slice(0, 3).join('; ')}`.slice(0, 500),
         },
+        ...(mp4Validator ? [mp4Validator] : []),
       ]
       if (validators.some((validator) => !validator.passed)) {
         throw new DomainError('RENDER_OUTPUT_INVALID', 'Final export does not match its approved OutputSpec')

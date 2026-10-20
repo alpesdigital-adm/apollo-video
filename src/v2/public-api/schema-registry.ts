@@ -6860,6 +6860,41 @@ const proxyReviewSchema = {
         exportAllowed: { type: 'boolean' },
         explanation: { type: 'string', minLength: 1, maxLength: 1000 },
         reportHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        // v3 publishes the geometry the verdict judged, which the stored verdict has always carried (v2 never listed it).
+        placementPlanHash: { type: ['string', 'null'], pattern: '^[a-f0-9]{64}$' },
+        reframePlanHash: { type: ['string', 'null'], pattern: '^[a-f0-9]{64}$' },
+        mp4Evidence: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'schemaVersion', 'reportSchemaVersion', 'reportHash', 'reportFileSha256', 'artifactSha256', 'artifactByteSize', 'renderInputHash', 'workspaceId', 'projectId',
+            'projectVersionId', 'variantId', 'outputSpecId', 'operationId', 'policySha256', 'oracleModelDigests', 'sampledFrames', 'totalFrames', 'verdict',
+          ],
+          properties: {
+            schemaVersion: { const: 'mp4-evidence-seal/v1' },
+            reportSchemaVersion: { const: 'mp4-quality-report/v1' },
+            reportHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            reportFileSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            artifactSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            artifactByteSize: { type: 'integer', minimum: 1 },
+            renderInputHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema, variantId: idSchema, outputSpecId: idSchema, operationId: idSchema,
+            policySha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            oracleModelDigests: {
+              type: 'array', minItems: 1, maxItems: 8,
+              items: {
+                type: 'object', additionalProperties: false, required: ['id', 'xmlSha256', 'binSha256', 'scoreFloor'],
+                properties: {
+                  id: idSchema, xmlSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' }, binSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                  scoreFloor: { type: 'number', minimum: 0, maximum: 1 },
+                },
+              },
+            },
+            sampledFrames: { type: 'integer', minimum: 0 },
+            totalFrames: { type: 'integer', minimum: 0 },
+            verdict: { enum: ['passed', 'warning', 'blocked'] },
+          },
+        },
       },
     },
     warningsAcknowledged: { type: 'boolean' },
@@ -6887,6 +6922,18 @@ const proxyQualityIssueSchemaV1 = {
   ...proxyQualityIssueSchema,
   properties: Object.fromEntries(Object.entries(proxyQualityIssueSchema.properties).filter(([key]) =>
     !['outputSpecId', 'outputPresetHash', 'placementPlanHash', 'reframePlanHash', 'format', 'evidenceRange', 'elementIds', 'evidenceIds'].includes(key))),
+}
+// v2 of the review schemas predates the MP4 critic seal and keeps exactly its published shape; v3 (proxyReviewSchema) adds `formatQuality.mp4Evidence`
+// and lists the two geometry hashes of the verdict.
+const proxyReviewSchemaV2 = {
+  ...proxyReviewSchema,
+  properties: {
+    ...proxyReviewSchema.properties,
+    formatQuality: {
+      ...proxyReviewSchema.properties.formatQuality,
+      properties: Object.fromEntries(Object.entries(proxyReviewSchema.properties.formatQuality.properties).filter(([key]) => !['mp4Evidence', 'placementPlanHash', 'reframePlanHash'].includes(key))),
+    },
+  },
 }
 const proxyReviewSchemaV1 = {
   ...proxyReviewSchema,
@@ -25884,6 +25931,12 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
   defineSchema('project-proxy-review-response', 2, 'Version-bound post-render proxy review with output-specific visual evidence',
     successSchema({
       type: 'object', additionalProperties: false, required: ['review'],
+      properties: { review: proxyReviewSchemaV2 },
+    }),
+  ),
+  defineSchema('project-proxy-review-response', 3, 'Output-specific proxy review that carries the seal of the independent MP4 critic report on the delivered file',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['review'],
       properties: { review: proxyReviewSchema },
     }),
   ),
@@ -25933,6 +25986,24 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
     }),
   ),
   defineSchema('project-proxy-review-warning-acknowledgement-result', 2, 'Auditable output-specific proxy warning acknowledgement result',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['review', 'decision', 'replayed'],
+      properties: {
+        review: proxyReviewSchemaV2,
+        decision: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'proxyReviewId', 'action', 'actor', 'baseReviewHash', 'resultReviewHash', 'createdAt'],
+          properties: {
+            id: idSchema, proxyReviewId: idSchema, action: { const: 'acknowledge-warnings' },
+            actor: { type: 'object', additionalProperties: false, required: ['type', 'id'], properties: { type: { const: 'api-client' }, id: idSchema } },
+            baseReviewHash: sha256Schema, resultReviewHash: sha256Schema, createdAt: dateTimeSchema,
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('project-proxy-review-warning-acknowledgement-result', 3, 'Auditable output-specific proxy warning acknowledgement result over a review that carries the MP4 critic seal',
     successSchema({
       type: 'object', additionalProperties: false, required: ['review', 'decision', 'replayed'],
       properties: {

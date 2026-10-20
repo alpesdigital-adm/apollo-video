@@ -520,6 +520,10 @@ import { PrismaFaceWindowEnvelopeRepository } from './prisma/face-window-envelop
 import { PrismaFaceSourceWindowRepository } from './prisma/face-source-window-repository.ts'
 import { PrismaFaceSourceWindowRequestContextRepository } from './prisma/face-source-window-request-context-repository.ts'
 import { FfmpegCaptionPixelCritic } from './media/ffmpeg-caption-pixel-critic.ts'
+import { FfmpegMp4PixelCritic } from './media/ffmpeg-mp4-pixel-critic.ts'
+import { OpenvinoPixelOracle } from './perception/openvino-pixel-oracle.ts'
+import type { Mp4PixelCritic } from '../application/ports/mp4-pixel-critic.ts'
+import { mp4ExportAcknowledgementFromEnvironment, type Mp4ExportAcknowledgement } from '../domain/mp4-export-gate.ts'
 import { faceWorkerPlatformAccepted } from '../domain/face-producer-registry.ts'
 import { YunetCpuFaceDetector } from './perception/yunet-cpu-face-detector.ts'
 import { TelemetryPublicOperationRepository } from './telemetry-public-operation-repository.ts'
@@ -2904,6 +2908,9 @@ export function createProjectProxyRenderWorker(
     // (the candidate's licence is pending), so every placed cue also carries FACE_PIXEL_CHECK_UNAVAILABLE: a warning that never
     // turns an unknown into a pass.
     captionPixelCritic: new FfmpegCaptionPixelCritic(environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {}),
+    // W67. The independent critic of the delivered MP4 (two detectors + feature registration, control encodes). Wired only when the private
+    // OpenVINO runtime is configured; without it the proxy ships the plan's decisions unverified in pixels, as before.
+    ...optionalMp4PixelCritic(environment, artifactRoot),
     // F4.014. The colour verdict is taken on the bytes this worker just wrote
     // and lands on the review it is about to persist. Assembled here because it
     // needs the three things a worker has no business knowing: where FFmpeg is,
@@ -2956,6 +2963,8 @@ export function createProjectFinalExportWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
+  // W67. Before anything connects: an acknowledgement of the missing MP4 critic in the environment of a production deployment is refused outright.
+  const mp4Acknowledgement = optionalMp4ExportAcknowledgement(environment)
   const telemetry = createConfiguredOperationTelemetry(environment)
   const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
   if (!artifactRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Artifact root is not configured')
@@ -2982,6 +2991,10 @@ export function createProjectFinalExportWorker(
     // not delivered. No independent face veto detector is wired, so each burned cue also records FACE_PIXEL_CHECK_UNAVAILABLE in
     // the receipt - a warning that never turns an unknown into a pass.
     captionPixelCritic: new FfmpegCaptionPixelCritic(environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {}),
+    // W67. The final fails closed on the MP4 critic: with no private OpenVINO runtime configured (and no recorded acknowledgement) it
+    // delivers nothing; with one, a blocked variant, an oracle that failed or ink over frames it could not read is never promoted.
+    ...optionalMp4PixelCritic(environment, artifactRoot),
+    ...mp4Acknowledgement,
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
@@ -3404,6 +3417,53 @@ export function createColorCriticEvaluator(environment: NodeJS.ProcessEnv = proc
     storage: createVerifiedMediaStorage(environment),
     ...(environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {}),
   })
+}
+
+const PIXEL_ORACLE_VARIABLES = Object.freeze([
+  'APOLLO_V2_PIXEL_ORACLE_PYTHON', 'APOLLO_V2_PIXEL_ORACLE_PYTHON_SHA256', 'APOLLO_V2_PIXEL_ORACLE_MODULES', 'APOLLO_V2_PIXEL_ORACLE_V9_MODEL_DIR',
+  'APOLLO_V2_PIXEL_ORACLE_RETAIL_MODEL_DIR', 'APOLLO_V2_PIXEL_ORACLE_BRIDGE', 'APOLLO_V2_PIXEL_ORACLE_BRIDGE_SHA256',
+] as const)
+
+type Mp4PixelCriticWiring = Readonly<{ mp4PixelCritic?: Mp4PixelCritic }>
+type Mp4ExportAcknowledgementWiring = Readonly<{ mp4ExportAcknowledgement?: Mp4ExportAcknowledgement }>
+
+/**
+ * W67. The explicit acknowledgement that lets a FINAL be delivered without a fully judging MP4 critic (no critic wired; no face anywhere in a
+ * frame that carries ink): who accepted it, when (canonical UTC instant) and why. All three variables or none; a malformed one throws.
+ * Without it a deployment that does not wire the critic delivers no final.
+ */
+export function optionalMp4ExportAcknowledgement(environment: NodeJS.ProcessEnv): Mp4ExportAcknowledgementWiring {
+  const acknowledgement = mp4ExportAcknowledgementFromEnvironment(environment)
+  return acknowledgement ? { mp4ExportAcknowledgement: acknowledgement } : {}
+}
+
+/**
+ * W67. The MP4 pixel critic of a worker, or nothing when no deployment variable names the private OpenVINO runtime. A deployment that
+ * names some of them and not all is misconfigured and fails closed: a half-wired critic would be a critic nobody can tell is off.
+ * A FINAL that gets no critic here is not delivered at all unless an acknowledgement is recorded (see `optionalMp4ExportAcknowledgement`).
+ */
+export function optionalMp4PixelCritic(environment: NodeJS.ProcessEnv, artifactRoot: string): Mp4PixelCriticWiring {
+  if (PIXEL_ORACLE_VARIABLES.every((name) => !environment[name]?.trim())) return {}
+  const required = (key: string) => {
+    const value = environment[key]?.trim()
+    if (!value) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `${key} is required for the MP4 pixel critic (all of ${PIXEL_ORACLE_VARIABLES.join(', ')} or none)`)
+    return value
+  }
+  const oracle = new OpenvinoPixelOracle({
+    pythonExecutable: required('APOLLO_V2_PIXEL_ORACLE_PYTHON'),
+    pythonExecutableSha256: required('APOLLO_V2_PIXEL_ORACLE_PYTHON_SHA256'),
+    pythonModulePath: required('APOLLO_V2_PIXEL_ORACLE_MODULES'),
+    v9ModelDirectory: required('APOLLO_V2_PIXEL_ORACLE_V9_MODEL_DIR'),
+    retailModelDirectory: required('APOLLO_V2_PIXEL_ORACLE_RETAIL_MODEL_DIR'),
+    bridgePath: required('APOLLO_V2_PIXEL_ORACLE_BRIDGE'),
+    bridgeSha256: required('APOLLO_V2_PIXEL_ORACLE_BRIDGE_SHA256'),
+  })
+  return {
+    mp4PixelCritic: new FfmpegMp4PixelCritic({
+      oracle, workRoot: environment.APOLLO_V2_MP4_CRITIC_WORK_ROOT?.trim() || join(resolve(artifactRoot), '.mp4-critic-work'),
+      ...(environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {}),
+    }),
+  }
 }
 
 /**

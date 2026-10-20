@@ -1760,7 +1760,7 @@
     {
       "uiAction": "src/app/projects/[id]/page.tsx:1898",
       "capabilityId": "apollo.projects.proxy-reviews.read",
-      "capabilityVersion": "2.1.0",
+      "capabilityVersion": "2.2.0",
       "endpoint": "GET /v1/projects/{projectId}/proxy-reviews",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2237,7 +2237,7 @@
     {
       "uiAction": "src/app/projects/[id]/page.tsx:3272",
       "capabilityId": "apollo.projects.proxy-reviews.acknowledge-warnings",
-      "capabilityVersion": "2.0.0",
+      "capabilityVersion": "2.1.0",
       "endpoint": "POST /v1/projects/{projectId}/proxy-reviews",
       "applicationServices": [
         "acknowledgeProxyWarningsService",
@@ -6373,7 +6373,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/projects/{projectId}/proxy-reviews",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/project-proxy-review-response/v2",
+      "outputSchemaRef": "apollo://schemas/project-proxy-review-response/v3",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -6384,7 +6384,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/proxy-reviews",
       "inputSchemaRef": "apollo://schemas/project-proxy-review-warning-acknowledgement-request/v1",
-      "outputSchemaRef": "apollo://schemas/project-proxy-review-warning-acknowledgement-result/v2",
+      "outputSchemaRef": "apollo://schemas/project-proxy-review-warning-acknowledgement-result/v3",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

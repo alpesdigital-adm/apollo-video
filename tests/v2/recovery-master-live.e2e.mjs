@@ -265,7 +265,7 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     assert.equal(readyReview.review.status, 'ready-for-final')
     assert.equal(readyReview.review.finalAllowed, true)
     const exported = await api(`/v1/projects/${projectId}/exports`, { projectVersionId: exportVersion.id, projectVersionHash: exportVersion.baseHash, format: '16:9', approval: { approved: true, note: 'Supervised local technical export; not owner acceptance or production deployment.' } })
-    const finalResult = await factory.createProjectFinalExportWorker(environment)(`recovery-final-${suffix}`, AbortSignal.timeout(420_000))
+    const finalResult = await factory.createProjectFinalExportWorker({ ...environment, APOLLO_API_ENVIRONMENT: 'sandbox', APOLLO_V2_MP4_CRITIC_ACK_ACTOR: 'recovery-live-test', APOLLO_V2_MP4_CRITIC_ACK_AT: '2026-10-20T00:00:00.000Z', APOLLO_V2_MP4_CRITIC_ACK_REASON: 'the live recovery world wires no MP4 critic (W67 fails closed without one)' })(`recovery-final-${suffix}`, AbortSignal.timeout(420_000))
     evidence.finalWorkerResult = finalResult
     evidence.finalOperation = (await api(`/v1/operations/${exported.operation.id}`)).operation
     await checkpoint()
