@@ -196,7 +196,10 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       const id = await waitFor(`${label}: a new result is shown`, async () => {
         const shown = await page.locator('[data-testid="issue-applied"]').getAttribute('data-command-id', { timeout: 500 }).catch(() => null)
         return shown && shown !== lastApplied ? shown : null
-      }, { timeoutMs: 120_000 })
+      }, { timeoutMs: 120_000 }).catch(async (error) => {
+        await page.screenshot({ path: join(evidenceDir, `w68-diagnostic-${label.replaceAll(/[^a-z0-9]+/gi, '-')}.png`), fullPage: true }).catch(() => undefined)
+        throw new Error(`${error.message} :: panel says: ${(await panel.innerText().catch(() => '')).slice(0, 1500)}`)
+      })
       lastApplied = id
       await page.locator('[data-testid="issue-recompile-status"][data-operation-status="succeeded"]').waitFor({ timeout: 300_000 })
       await waitFor(`${label}: the new review is shown`, async () => /depois: .* · laudo [0-9a-f]{12}/.test(await page.getByTestId('issue-comparison-after').innerText()), { timeoutMs: 120_000 })
