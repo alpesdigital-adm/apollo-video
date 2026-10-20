@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { sourceWindowHarness } from './face-source-pg.mjs'
 import { seedTwoOutputIngestedProject } from './multi-output-pg-world.mjs'
 import { commitSealedChild, testActor } from './pg-output-world.mjs'
-import { drawSourceFrame, faceBox, FPS, H, makeBaseFrame, standInDetectorRows, W } from './reframe-gt-oracle.mjs'
+import { drawSourceFrame, FPS, H, makeBaseFrame, standInDetectorRows, W } from './reframe-gt-oracle.mjs'
 import { registerColorPipeline } from './review-edit-world.mjs'
 import { createWorkspaceRow, issueApiClient } from './capture-journey.mjs'
 
@@ -30,10 +30,13 @@ const { PrismaProjectLutSelectionRepository } = await import('../../../src/v2/in
  * against the policy's 0.35) and stays there. The whole step fits inside one crop window, so a manual crop CAN keep the subject, which is what an
  * editor fixes by hand. `kind: 'face'` is what the stand-in detector reports.
  */
+// A small face in the upper part of the frame (0.06 x 0.12 of the frame): once the published clearance dilation is applied it occupies the TOP
+// caption band and leaves the others free, so a caption pinned there is refused and one pinned elsewhere is granted.
+const smallFace = (x) => [x, 0.08, x + 0.06, 0.2]
 export const SCENE = Object.freeze({
   sourceFrames: 150,
   clips: [{ clipId: 'clip-1', sourceInFrame: 0, sourceOutFrame: 150, timelineInFrame: 0, timelineOutFrame: 150 }],
-  subjectsAtSource: (frame) => [{ id: 'A', kind: 'face', color: 'A', box: faceBox(0.2 + 0.1 * Math.min(Math.max(frame - 40, 0), 6) / 6) }],
+  subjectsAtSource: (frame) => [{ id: 'A', kind: 'face', color: 'A', box: smallFace(0.2 + 0.1 * Math.min(Math.max(frame - 40, 0), 6) / 6) }],
 })
 export const CUES = Object.freeze([
   Object.freeze({ id: 'cue-1', startFrame: 10, endFrame: 40, text: 'Primeira legenda do vídeo', anchor: 'bottom' }),

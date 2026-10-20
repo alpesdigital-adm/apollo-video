@@ -4,10 +4,11 @@ import { promisify } from 'node:util'
 
 import sharp from 'sharp'
 
-import { faceBox } from './reframe-gt-oracle.mjs'
+import { faceBox, H, W } from './reframe-gt-oracle.mjs'
 
 const run = promisify(execFile)
 const { readOutputFormatPreset } = await import('../../../src/v2/domain/output-format-registry.ts')
+const { FACE_EVIDENCE_POLICY } = await import('../../../src/v2/domain/face-evidence-policy.ts')
 const { CAPTION_BAND_TOLERANCE_PX } = await import('../../../src/v2/domain/caption-pixel-verdict.ts')
 const { deriveSubtitleAnchorBands } = await import('../../../src/v2/domain/subtitle-anchor-plan.ts')
 const { deriveSubtitleRegion } = await import('../../../src/v2/domain/subtitle-region.ts')
@@ -65,35 +66,45 @@ export function changedClusters(left, right, tolerance = PIXEL_TOLERANCE) {
   return clusters
 }
 
-/** The rows `[top, bottom]` of one band on the proxy canvas of an output, from the registered preset (geometry only). */
-export function bandRows(format, anchor, presetId = 'kinetic') {
+function bandsOf(format, presetId = 'kinetic') {
   const preset = readOutputFormatPreset(format)
   const region = deriveSubtitleRegion({ spec: preset.spec, presetId })
-  const bands = deriveSubtitleAnchorBands({ region, safeArea: preset.spec.safeArea })
-  const height = preset.exportDefaults.proxy.height
+  return { bands: deriveSubtitleAnchorBands({ region, safeArea: preset.spec.safeArea }), canvas: preset.exportDefaults.proxy }
+}
+
+/** The rows `[top, bottom]` of one band on the proxy canvas of an output, from the registered preset (geometry only). */
+export function bandRows(format, anchor, presetId = 'kinetic') {
+  const { bands, canvas } = bandsOf(format, presetId)
   const band = bands[anchor]
-  return Object.freeze({ top: Math.floor(band.y * height), bottom: Math.ceil((band.y + band.height) * height), canvas: Object.freeze({ width: preset.exportDefaults.proxy.width, height }) })
+  return Object.freeze({ top: Math.floor(band.y * canvas.height), bottom: Math.ceil((band.y + band.height) * canvas.height), canvas: Object.freeze({ width: canvas.width, height: canvas.height }) })
 }
 
 export const ANCHORS = Object.freeze(['top', 'upper-third', 'center', 'lower-third', 'bottom'])
 
 /**
- * The bands the GENERATOR's face occupies for a frame range, in the rows of the output canvas. `window` is the normalized x-range of the source the
- * output shows (`[0, 1]` for a whole-frame output, the crop for a reframed one); the picture fills the canvas, so a source y maps to the same
- * canvas y. A band is occupied when the face box and the band overlap, on rows and on the shown columns.
+ * The bands the GENERATOR's face occupies over a frame range, by the PUBLISHED caption-clearance rule and nothing the product decided for this
+ * render: a detection is dilated by max(0.35 x its larger side, 0.015 x the frame side) on each axis (`FACE_EVIDENCE_POLICY.clearance.dilation`),
+ * and a band is occupied when the dilated box and the band overlap as CLOSED rectangles (a box that merely touches occupies it). `window` is the
+ * normalized x-range of the source the output shows (`{ x: 0, width: 1 }` for a whole-frame output, the crop for a reframed one); the picture fills
+ * the canvas, so a source y is the canvas y and a source x maps through the window.
  */
 export function occupiedBands({ scene, format, frames, window = { x: 0, width: 1 } }) {
+  const { largerSideFraction, minFrameFraction } = FACE_EVIDENCE_POLICY.clearance.dilation
+  const { bands } = bandsOf(format)
   const occupied = new Set()
   for (const frame of frames) {
     const subject = scene.subjectsAtSource(frame).find((candidate) => candidate.kind === 'face')
     if (!subject) continue
     const [x1, y1, x2, y2] = subject.box
-    const shown = x2 > window.x && x1 < window.x + window.width
-    if (!shown) continue
-    const { canvas } = bandRows(format, 'bottom')
+    const largerSide = Math.max((x2 - x1) * W, (y2 - y1) * H)
+    const marginX = Math.max(largerSideFraction * largerSide, minFrameFraction * W) / W
+    const marginY = Math.max(largerSideFraction * largerSide, minFrameFraction * H) / H
+    const left = (Math.max(0, x1 - marginX) - window.x) / window.width, right = (Math.min(1, x2 + marginX) - window.x) / window.width
+    const top = Math.max(0, y1 - marginY), bottom = Math.min(1, y2 + marginY)
+    if (right < 0 || left > 1) continue
     for (const anchor of ANCHORS) {
-      const rows = bandRows(format, anchor)
-      if (y2 * canvas.height > rows.top && y1 * canvas.height < rows.bottom) occupied.add(anchor)
+      const band = bands[anchor]
+      if (!(right < band.x || left > band.x + band.width || bottom < band.y || top > band.y + band.height)) occupied.add(anchor)
     }
   }
   return Object.freeze([...occupied])

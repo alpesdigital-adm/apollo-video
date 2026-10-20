@@ -33,7 +33,7 @@ test('a caption moved from one band to another is exactly two clusters, one in e
   assert.throws(() => changedClusters(inBottom, frame(10, 10)), /different sizes/)
 })
 
-test('the bands are ordered top to bottom on both canvases, and the generator face occupies the bands its rows reach, only while it is shown', () => {
+test('the bands are ordered top to bottom on both canvases; the generator face occupies the bands its DILATED box reaches, only while it is shown', () => {
   for (const format of ['9:16', '16:9']) {
     const tops = ANCHORS.map((anchor) => bandRows(format, anchor).top)
     assert.deepEqual([...tops].sort((a, b) => a - b), tops, `${format}: top, upper-third, center, lower-third, bottom`)
@@ -41,11 +41,17 @@ test('the bands are ordered top to bottom on both canvases, and the generator fa
   const scene = { subjectsAtSource: () => [{ kind: 'face', box: [0.2, 0.2, 0.3, 0.5] }] }
   const occupied = occupiedBands({ scene, format: '16:9', frames: [0, 1, 2] })
   assert.ok(occupied.length >= 1 && !occupied.includes('bottom'), occupied.join(','))
+  // restated by hand: the box is 128 x 216 source pixels, so each side grows by 0.35 x 216 = 75.6 px (0.105 of the height): rows 0.095..0.605
   for (const anchor of ANCHORS) {
     const rows = bandRows('16:9', anchor)
-    const reaches = 0.5 * rows.canvas.height > rows.top && 0.2 * rows.canvas.height < rows.bottom
+    const reaches = 0.605 * rows.canvas.height >= rows.top && 0.095 * rows.canvas.height <= rows.bottom
     assert.equal(occupied.includes(anchor), reaches, anchor)
   }
+  // the dilation matters: the raw box (rows 0.2..0.5) reaches only upper-third and center, the dilated one also reaches top and lower-third
+  const raw = ANCHORS.filter((anchor) => { const rows = bandRows('16:9', anchor); return 0.5 * rows.canvas.height >= rows.top && 0.2 * rows.canvas.height <= rows.bottom })
+  assert.ok(occupied.length > raw.length && raw.every((anchor) => occupied.includes(anchor)), `${raw} within ${occupied}`)
+  const small = { subjectsAtSource: () => [{ kind: 'face', box: [0.2, 0.08, 0.26, 0.2] }] }
+  assert.deepEqual(occupiedBands({ scene: small, format: '16:9', frames: [0] }), ['top'], 'the small face of the proof occupies the top band only')
   assert.deepEqual(occupiedBands({ scene, format: '16:9', frames: [0], window: { x: 0.6, width: 0.3 } }), [], 'a face outside the shown columns occupies nothing')
   assert.deepEqual(occupiedBands({ scene: { subjectsAtSource: () => [] }, format: '16:9', frames: [0] }), [])
 })
