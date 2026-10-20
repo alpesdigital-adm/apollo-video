@@ -1,0 +1,3051 @@
+{
+  "schemaVersion": "w67-mp4-critic-corpus/v1",
+  "protocol": "w67-mp4-critic-preregistration/v1",
+  "frozenAtUtc": "2026-10-20T00:05:55.254Z",
+  "purpose": "Controlled corpus for the independent critic of the delivered MP4 (W67): clean controls and seeded defects, per format.",
+  "adjudication": {
+    "statement": "open-images-human-boxes, no project adjudication",
+    "humanAdjudicator": null,
+    "note": "No project adjudicator exists yet (owner decision pending). Ground truth is the unchanged Open Images human box of each photograph. The visual inspection below was made by the Claude writer agent, an automated step; it is NOT a human adjudication."
+  },
+  "selection": {
+    "source": {
+      "manifest": "BASE/openimages-w61-v5-manifest.json",
+      "manifestSha256": "74cc75cf7a188bca692f51c22cbde1ecd8754bd2ef059a613672bef0acfd9927",
+      "set": "calibration",
+      "sourceSplit": "validation",
+      "candidates": 60
+    },
+    "rules": [
+      "R1: status eligible, rights original_landing_confirmed, licence CC BY 2.0 or 4.0 (per-photo audit already done in W61 V5)",
+      "R2: exactly one annotated box in the image, label Human face, Source xclick or activemil, IsOccluded=IsTruncated=IsGroupOf=IsDepiction=0",
+      "R3: mirror width and height even, no EXIF orientation, Rotation 0.0",
+      "R4: the framing rules (corpus-geometry.mjs) can frame the face in BOTH formats: good window, lost window, a caption band covering the framed face, a free bottom band",
+      "R5: rank ascending by sha256(\"w67-mp4-v1|select|<ImageID>\") and take the first N; no result of any detector, renderer or critic enters the selection",
+      "R6: visual exclusion, from the source photograph only: the annotated \"face\" is a depiction (printed or painted portrait) or other faces are plainly visible and unannotated"
+    ],
+    "count": 2,
+    "candidateTable": [
+      {
+        "id": "7efe316eff8c93b1",
+        "stratum": "multiple",
+        "eligible": false,
+        "reasons": [
+          "R2:more-than-one-annotated-box"
+        ],
+        "feasibility": {},
+        "rankKey": "fbb305af8bce3d0adcf448689ed3bab254cd5a2c11e38b885620911002f92272"
+      },
+      {
+        "id": "313630cd968843af",
+        "stratum": "multiple",
+        "eligible": false,
+        "reasons": [
+          "R2:more-than-one-annotated-box",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "5aa4557146a010d1836ab98e8887b37dc2744926a285cb6319f24181356bcb1a"
+      },
+      {
+        "id": "0b9b8845f1b27c1a",
+        "stratum": "multiple",
+        "eligible": false,
+        "reasons": [
+          "R2:more-than-one-annotated-box"
+        ],
+        "feasibility": {},
+        "rankKey": "6b4c4f2d921cccd6f31251d2570f145c492e2b2cee7012255bda460dc39f8c69"
+      },
+      {
+        "id": "6f395c449c4b1ba4",
+        "stratum": "multiple",
+        "eligible": false,
+        "reasons": [
+          "R2:more-than-one-annotated-box",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "b04e6bfdc47882dc9db5139ea506d4478c7386dd4125919a02ef1ed461c92eab"
+      },
+      {
+        "id": "adbb3cf376f76ad4",
+        "stratum": "multiple",
+        "eligible": false,
+        "reasons": [
+          "R2:more-than-one-annotated-box"
+        ],
+        "feasibility": {},
+        "rankKey": "6fa1f7cdd537873257d7c41075952786501d768865178c61a3721de1105d45a8"
+      },
+      {
+        "id": "45c29840b5a4f737",
+        "stratum": "multiple",
+        "eligible": false,
+        "reasons": [
+          "R2:more-than-one-annotated-box",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "db9d972ad2c7078d8004dc52327bb5a6a4123146c4fbecd529fd8ba647c66e44"
+      },
+      {
+        "id": "711f4bda960e3983",
+        "stratum": "multiple",
+        "eligible": false,
+        "reasons": [
+          "R2:more-than-one-annotated-box",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "962ad71cf33329853da7b11b4ab59a82e4b4ae1a5f7f2a3360b6c9fcaae133fa"
+      },
+      {
+        "id": "ab33067c96d4b722",
+        "stratum": "multiple",
+        "eligible": false,
+        "reasons": [
+          "R2:more-than-one-annotated-box"
+        ],
+        "feasibility": {},
+        "rankKey": "5e2f84620508091a07753d0dd8c756fcdb4cec7dad4186c07871990aad7a94d4"
+      },
+      {
+        "id": "35b96417414c8a96",
+        "stratum": "multiple",
+        "eligible": false,
+        "reasons": [
+          "R2:more-than-one-annotated-box",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "d22477019cb6b0e19ff5be14c526c2fef02a41159df2060bb2e9e774322a67f2"
+      },
+      {
+        "id": "ef9672c7cbf698ec",
+        "stratum": "multiple",
+        "eligible": false,
+        "reasons": [
+          "R2:more-than-one-annotated-box",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "d84ddaea819519586e91098aba559f3298df4ec0a35a4c6778d641474f3eecc7"
+      },
+      {
+        "id": "9c14fbd510d0584c",
+        "stratum": "lower",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction"
+        ],
+        "feasibility": {},
+        "rankKey": "7d6b7896289ac53d98057e9b826b2185559cd5a65e89a8c815bf5cc916898ab4"
+      },
+      {
+        "id": "53801c100790b199",
+        "stratum": "lower",
+        "eligible": false,
+        "reasons": [
+          "R4:9:16:good:UPSCALE_TOO_HIGH",
+          "R4:16:9:good:UPSCALE_TOO_HIGH"
+        ],
+        "feasibility": {
+          "9:16": "good:UPSCALE_TOO_HIGH",
+          "16:9": "good:UPSCALE_TOO_HIGH"
+        },
+        "rankKey": "f386270d1adaaed52ca9846a513f92fd2bbda8b4250b5cf9e7d9db944d96b438"
+      },
+      {
+        "id": "a6fba3d8e01d2219",
+        "stratum": "lower",
+        "eligible": false,
+        "reasons": [
+          "R4:9:16:good:FACE_TOO_LARGE_FOR_TARGET_SCALE"
+        ],
+        "feasibility": {
+          "9:16": "good:FACE_TOO_LARGE_FOR_TARGET_SCALE",
+          "16:9": "feasible"
+        },
+        "rankKey": "d3ffe9b2af820e8813155e5b536e6a0a4a74bff46d2c578f0fce65f40dfe88fe"
+      },
+      {
+        "id": "df4a83986db3556b",
+        "stratum": "lower",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction"
+        ],
+        "feasibility": {},
+        "rankKey": "26f8b59935909ee933c78345c70636a597182de2288045b92f5750a6795b302a"
+      },
+      {
+        "id": "bbc06934e9a0df08",
+        "stratum": "lower",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "060ebf469aea8976c582436dd3b40224ef5482a6e37f272185ea58da4611732d"
+      },
+      {
+        "id": "42b991d9d908b5fc",
+        "stratum": "lower",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction"
+        ],
+        "feasibility": {},
+        "rankKey": "5b9e2f6d0e7d4af35e5c591a85fcfa6333552c704ca0b3959b3d69bff4939a3f"
+      },
+      {
+        "id": "968a460084c588a1",
+        "stratum": "lower",
+        "eligible": false,
+        "reasons": [
+          "R6:visual-exclusion:DEPICTION_NOT_FLAGGED"
+        ],
+        "feasibility": {
+          "9:16": "feasible",
+          "16:9": "feasible"
+        },
+        "rankKey": "99cec04519da48e89858c41d2f91e33f56937c7cad5e0eb9efe95d6de6ca9556"
+      },
+      {
+        "id": "dd4755ad15eb01cf",
+        "stratum": "lower",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction"
+        ],
+        "feasibility": {},
+        "rankKey": "7b078805ddcdb2d57d8e18086c90e9aad9288f6f724d0107af9d9a9f3771b805"
+      },
+      {
+        "id": "dbbc35f3abb3b0bf",
+        "stratum": "lower",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "86566b2fd3d3bf07022ba339564cd70762aa55d393056c4c30fe6d5a4337b9a2"
+      },
+      {
+        "id": "4e1a400078db6053",
+        "stratum": "lower",
+        "eligible": false,
+        "reasons": [
+          "R4:9:16:good:FACE_TOO_LARGE_FOR_TARGET_SCALE",
+          "R4:16:9:good:FACE_TOO_LARGE_FOR_TARGET_SCALE"
+        ],
+        "feasibility": {
+          "9:16": "good:FACE_TOO_LARGE_FOR_TARGET_SCALE",
+          "16:9": "good:FACE_TOO_LARGE_FOR_TARGET_SCALE"
+        },
+        "rankKey": "c591509ce476320251d5955f344aa5069f4a4af3878de27aa8d68771df112f5b"
+      },
+      {
+        "id": "f76903f01b94dd98",
+        "stratum": "small",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction"
+        ],
+        "feasibility": {},
+        "rankKey": "6a6eedbf8c2ca0a25ce1c9237bf5d95e12200b4b02e00a212cd312cf8f287429"
+      },
+      {
+        "id": "f36d1ca87e4e7d63",
+        "stratum": "small",
+        "eligible": false,
+        "reasons": [
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "291b20297bf87449a16db124c95262bdd7e04be8d868b028c634be44b9bd332f"
+      },
+      {
+        "id": "e4aef7d0095be27f",
+        "stratum": "small",
+        "eligible": false,
+        "reasons": [
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "8c621fa07bf440e0fac8e5cc8183c87b3314b2cf800f21c0c8acac04c791d452"
+      },
+      {
+        "id": "e596d51e8544928f",
+        "stratum": "small",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction"
+        ],
+        "feasibility": {},
+        "rankKey": "0e0bc49c575135d64dcc9a6f1b38a6adc4b8b2fb8e96cfe43605f1de23e5e4b2"
+      },
+      {
+        "id": "f04b1b8d0d4abb46",
+        "stratum": "small",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction"
+        ],
+        "feasibility": {},
+        "rankKey": "d325c0aa6229e9fc47baded15f5195040c484b20f8ac5c9d3e107aa2d605cfd3"
+      },
+      {
+        "id": "c8af642dc48b0a3a",
+        "stratum": "small",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction"
+        ],
+        "feasibility": {},
+        "rankKey": "388c2cbdb06f109f1e6bb068e8e42843959d26364d3fb03042afceeac37c6a57"
+      },
+      {
+        "id": "8d8f580206a1e8ee",
+        "stratum": "small",
+        "eligible": false,
+        "reasons": [
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "3e39208814541b6e49363e3e0b0fd9471bcfd18601286893a781c9b1757e3d3d"
+      },
+      {
+        "id": "9295ab265fafd8e5",
+        "stratum": "small",
+        "eligible": true,
+        "reasons": [],
+        "feasibility": {
+          "9:16": "feasible",
+          "16:9": "feasible"
+        },
+        "rankKey": "eb66b0d027537c07f40d15a4d116710cf14e3fa24f8edee355ba13fd394031d9"
+      },
+      {
+        "id": "83cdb655cb4a254b",
+        "stratum": "small",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction"
+        ],
+        "feasibility": {},
+        "rankKey": "4ac4063ea6af116f7b438552023de8c5b9e8d5eb5b2849f1a7e05cedcb4a60b4"
+      },
+      {
+        "id": "1580caef8efed517",
+        "stratum": "small",
+        "eligible": true,
+        "reasons": [],
+        "feasibility": {
+          "9:16": "feasible",
+          "16:9": "feasible"
+        },
+        "rankKey": "9af584ecc359972f42082befd4d4e0d76ca3ebde73cc8b83c3880a9253cfa3e2"
+      },
+      {
+        "id": "5e2e72b27dcda54a",
+        "stratum": "single",
+        "eligible": false,
+        "reasons": [
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "538a545f30b859953a8aec9f551beca515f12a203a5f70b63ee057d1e9664f01"
+      },
+      {
+        "id": "ee010409ed0b5e93",
+        "stratum": "single",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction"
+        ],
+        "feasibility": {},
+        "rankKey": "564ab5c7e55a46d8db3bcca20830447f74b102daf8b49e62263bba26d472911a"
+      },
+      {
+        "id": "80fc17a6b8901997",
+        "stratum": "single",
+        "eligible": false,
+        "reasons": [
+          "R4:9:16:good:FACE_TOO_LARGE_FOR_TARGET_SCALE",
+          "R4:16:9:good:FACE_TOO_LARGE_FOR_TARGET_SCALE"
+        ],
+        "feasibility": {
+          "9:16": "good:FACE_TOO_LARGE_FOR_TARGET_SCALE",
+          "16:9": "good:FACE_TOO_LARGE_FOR_TARGET_SCALE"
+        },
+        "rankKey": "a879097ececb6d4dd9004f548b87d5db7c587b5c16ba45087b609d8aa92fead6"
+      },
+      {
+        "id": "f23f43aee564b826",
+        "stratum": "single",
+        "eligible": false,
+        "reasons": [
+          "R4:9:16:good:FACE_TOO_LARGE_FOR_TARGET_SCALE",
+          "R4:16:9:good:FACE_TOO_LARGE_FOR_TARGET_SCALE"
+        ],
+        "feasibility": {
+          "9:16": "good:FACE_TOO_LARGE_FOR_TARGET_SCALE",
+          "16:9": "good:FACE_TOO_LARGE_FOR_TARGET_SCALE"
+        },
+        "rankKey": "a2e940b2014500cbe74c48c0d1a1abcd2cce674082838e1be2184f552e9f169d"
+      },
+      {
+        "id": "f875b252a59ee1e9",
+        "stratum": "single",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "f603dcc0b1fd8fe2470c2acbd681d88d532cfc9e9aa59ac69581328dd6fc0638"
+      },
+      {
+        "id": "18da2f5082dcfbfc",
+        "stratum": "single",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "d2830270f9da880dcc24821393b56785bc918d4776f2e547716cbbd783872e24"
+      },
+      {
+        "id": "a2c3dedcab286534",
+        "stratum": "single",
+        "eligible": false,
+        "reasons": [
+          "R2:box-flagged-occluded-truncated-group-or-depiction"
+        ],
+        "feasibility": {},
+        "rankKey": "cdb8434fac5e1529ee32790aa3b259066559b67e931b6aa190b5fe1765e4abc8"
+      },
+      {
+        "id": "266a3f657957cba7",
+        "stratum": "single",
+        "eligible": false,
+        "reasons": [
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "5507f809b3c8282258128a779b18cefa546aad1a3aaf6f75713c031403ea6113"
+      },
+      {
+        "id": "60a9a89ac85373a9",
+        "stratum": "single",
+        "eligible": false,
+        "reasons": [
+          "R4:9:16:good:FACE_TOO_LARGE_FOR_TARGET_SCALE",
+          "R4:16:9:good:FACE_TOO_LARGE_FOR_TARGET_SCALE"
+        ],
+        "feasibility": {
+          "9:16": "good:FACE_TOO_LARGE_FOR_TARGET_SCALE",
+          "16:9": "good:FACE_TOO_LARGE_FOR_TARGET_SCALE"
+        },
+        "rankKey": "b9752d3aeea2a3f44418ca0769799c61a296286ae4d6cb9f0400941a526784f6"
+      },
+      {
+        "id": "4285819d7ab87d7a",
+        "stratum": "single",
+        "eligible": false,
+        "reasons": [
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "4ddf37b04f1054e8ee4995752050630c6b5b330d0630c8d7f71410bc64adda1e"
+      },
+      {
+        "id": "5f4374522f4812ad",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box"
+        ],
+        "feasibility": {},
+        "rankKey": "83c0f7603bdf8721b291deedeaffff987fd1e28ee88f8224a150b31ebfaa61b8"
+      },
+      {
+        "id": "f3cf92cbbe67bf3c",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "e0077dba23d3897097ba4a4a60856a36ccfab985af9eb6008833870015bf42cb"
+      },
+      {
+        "id": "5a9dd33dabe984d6",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box"
+        ],
+        "feasibility": {},
+        "rankKey": "ced97660dcb877be578fbe9b7d78ad68881ddc2e14b1b040738c914a30d41060"
+      },
+      {
+        "id": "17138e9985769af4",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box"
+        ],
+        "feasibility": {},
+        "rankKey": "675e39b5dadb677e8bd330d086c77ec54e37ea9e1dd342e07ef2304ec5127c2e"
+      },
+      {
+        "id": "55bfd8be07f20774",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "9fc5c6c24025d956bed6ba771c3f4221c7aa15d94ae1a82c8b3535a0580f5de6"
+      },
+      {
+        "id": "869c54ed7a443610",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box"
+        ],
+        "feasibility": {},
+        "rankKey": "8194af3eb3ccd22901d783341434cf15fe6134db1e0732aa4f1fffc6f3dbac23"
+      },
+      {
+        "id": "f215cb000124d954",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box"
+        ],
+        "feasibility": {},
+        "rankKey": "205fe2a507eba83f1e9542765ad123823382e92c0905dadb837734ffaa09bc57"
+      },
+      {
+        "id": "bdac85dd30ae5c19",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box"
+        ],
+        "feasibility": {},
+        "rankKey": "c03aa843e4e2d0812fcf694d439f48a2ccc99ae373871d57d745430c2a196b12"
+      },
+      {
+        "id": "6aa2ed31bc03ef78",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box"
+        ],
+        "feasibility": {},
+        "rankKey": "7bf99cf2a2069fd0072866c795a20e466a2e03baca4341e1ebdfa9a99e89c501"
+      },
+      {
+        "id": "29fea8da4d87ca16",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box"
+        ],
+        "feasibility": {},
+        "rankKey": "9e3a402f3b2b17879cb5748801041d5fd6e41fa96b4b81ce6c3b21cf83c745e5"
+      },
+      {
+        "id": "6c407798d2b5c38d",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "5ecced18ac70d1cd34a1dbf1a49262b1400d79c11ebd4fc07de2cb5e79bcd0da"
+      },
+      {
+        "id": "5ff91ccfc6f15d04",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "ef4de0d164d22dc0521d4e90afcbab0a463fd91a9d61b0a4f5746d9000ded9cb"
+      },
+      {
+        "id": "0ac52440f73b5c80",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box"
+        ],
+        "feasibility": {},
+        "rankKey": "1b72a7354d7b99ba6168c807f1ab58f83b90e232698d18d9d5362f11d56c3850"
+      },
+      {
+        "id": "107f15212a86a661",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "99193b1f8697884dac66dc9b721fc58245ae300fbbcd20ba887f031138f25df3"
+      },
+      {
+        "id": "808dbc7fccdcfec3",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "9cf8d1757b1daf865134d9637b9d7b45a4b91b708f50c849f48fcf3f061b55dd"
+      },
+      {
+        "id": "8bb57d8371d0adc7",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box"
+        ],
+        "feasibility": {},
+        "rankKey": "ef4ec712ccd3367367888a2d410b5f3e69d4b118866a082bd156ffab77d00eef"
+      },
+      {
+        "id": "784797f778334ea7",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box"
+        ],
+        "feasibility": {},
+        "rankKey": "c06eef59bfd6790109c6eda11199fbd1c7a82341fc3977ee0866935880328ff6"
+      },
+      {
+        "id": "e02046d979c64eb1",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box"
+        ],
+        "feasibility": {},
+        "rankKey": "f61440ad941280c18be75ec3f597fe485de75bcd6ee573dc77d4a3ddecc2ff24"
+      },
+      {
+        "id": "537e83b02e6b4677",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box",
+          "R3:odd-dimension"
+        ],
+        "feasibility": {},
+        "rankKey": "d18bb41da118762baf0ec2eeaea4abfa1bd9f6428949893ee06c20f35cfdb882"
+      },
+      {
+        "id": "4cf84aa31d937833",
+        "stratum": "negative",
+        "eligible": false,
+        "reasons": [
+          "R2:no-human-face-box"
+        ],
+        "feasibility": {},
+        "rankKey": "12f42946542e1e0610229d63b3bb5e5e26cd2e014af513d3be7ad36446611c8f"
+      }
+    ],
+    "visualExclusions": [
+      {
+        "id": "968a460084c588a1",
+        "code": "DEPICTION_NOT_FLAGGED",
+        "reason": "The annotated Human face is the engraved portrait on a printed US two-dollar banknote (the photograph shows two banknotes on a table). Open Images has IsDepiction=0 for the box, but the rule R6 excludes depictions. Decided from the source photograph only, before any render or detector run on any calibration photograph.",
+        "inspector": "Claude (Sonnet 5.5) automated visual inspection of the source photograph; not a human inspection",
+        "inspectedAtUtc": "2026-10-19"
+      }
+    ],
+    "selectedImageIds": [
+      "1580caef8efed517",
+      "9295ab265fafd8e5"
+    ]
+  },
+  "independence": {
+    "holdout": "The W62 holdout (V5 sets.holdout, Open Images test split) was never opened, listed or read by this work.",
+    "productDetector": "The product detector OMZ face-detection-0204 (V9) ran in W62 on the 60 DEVELOPMENT images only (owner-receipt 390d3b28d172015f8ed2cb3d416e38625ce4d4efaca8e1eea52d7a8e58aaa817: 60 ids, all in development, none in calibration or holdout).",
+    "calibrationUse": "The calibration split was evaluated in W61 by YuNet (V5, V6) and by face-detection-retail-0004 (V7) with preregistered configurations that were never changed afterwards; the operating points used here (score 0.50) are those preregistered ones. No threshold of this protocol was chosen on calibration pixels.",
+    "engineering": "Policy, geometry and generator were designed and rehearsed on synthetic content and on DEVELOPMENT-split photographs before this freeze; see the preregistration document."
+  },
+  "images": [
+    {
+      "id": "1580caef8efed517",
+      "set": "calibration",
+      "subset": "validation",
+      "stratum": "small",
+      "mirrorSha256": "a1984a325bbc9d3516236bd3a3fc7d82fce55c6d246a2b5f037bcfbb16c1b039",
+      "mirrorBytes": 98754,
+      "mirrorWidth": 1024,
+      "mirrorHeight": 1024,
+      "mirrorExifOrientation": null,
+      "rotation": "0.0",
+      "licence": "https://creativecommons.org/licenses/by/2.0/",
+      "author": "Zaneology",
+      "title": "Zane Aveton shared an Instagram video with you",
+      "landingUrl": "https://www.flickr.com/photos/zaneology/9202606673",
+      "landingSha256": "fa1929964f7544a80cb192f3ca3f6bda3c2df56df96073ad0aa5fa8b1192e8b3",
+      "originalLandingLicence": "https://creativecommons.org/licenses/by/2.0/",
+      "originalMd5": "UsPa93Z70GD9bVGL4vxvEw==",
+      "humanBoxes": [
+        {
+          "ImageID": "1580caef8efed517",
+          "Source": "xclick",
+          "LabelName": "/m/0dzct",
+          "Confidence": "1",
+          "XMin": "0.40794224",
+          "XMax": "0.51805055",
+          "YMin": "0.20036101",
+          "YMax": "0.33212996",
+          "IsOccluded": "0",
+          "IsTruncated": "0",
+          "IsGroupOf": "0",
+          "IsDepiction": "0",
+          "IsInside": "0",
+          "rowSha256": "00ed3c04e6a4c2fd4d0c712f8ca669a0ee5a4def97e50aa7315c9e44fa31b8cc"
+        }
+      ],
+      "groundTruth": {
+        "convention": "Open Images \"Human face\" box (visible face), normalized to the image",
+        "origin": "Open Images validation human-drawn boxes (Source xclick/activemil), preserved verbatim",
+        "eyes": "unknown: no eye annotation, eye checks are out of scope and not counted"
+      }
+    },
+    {
+      "id": "9295ab265fafd8e5",
+      "set": "calibration",
+      "subset": "validation",
+      "stratum": "small",
+      "mirrorSha256": "b3c62f4f9ccbfea418c3e007fce952339ffe6a44b635b888e5457845508aba6a",
+      "mirrorBytes": 493106,
+      "mirrorWidth": 1024,
+      "mirrorHeight": 768,
+      "mirrorExifOrientation": null,
+      "rotation": "0.0",
+      "licence": "https://creativecommons.org/licenses/by/2.0/",
+      "author": "Franco Dal Molin",
+      "title": "Valium B",
+      "landingUrl": "https://www.flickr.com/photos/orsorama/9176313286",
+      "landingSha256": "f7ad862fb799d344173d0b74a6912c3bf05ca40c528a242d15e31f62d83524d0",
+      "originalLandingLicence": "https://creativecommons.org/licenses/by/2.0/",
+      "originalMd5": "mihZTOyh64O3Sn+m8g0JZw==",
+      "humanBoxes": [
+        {
+          "ImageID": "9295ab265fafd8e5",
+          "Source": "xclick",
+          "LabelName": "/m/0dzct",
+          "Confidence": "1",
+          "XMin": "0.5875",
+          "XMax": "0.7015625",
+          "YMin": "0.31875",
+          "YMax": "0.46875",
+          "IsOccluded": "0",
+          "IsTruncated": "0",
+          "IsGroupOf": "0",
+          "IsDepiction": "0",
+          "IsInside": "0",
+          "rowSha256": "10ca379d2fddfaa8367a7361fafc3161355a8abb4d74d29bfb68172fc5463c8e"
+        }
+      ],
+      "groundTruth": {
+        "convention": "Open Images \"Human face\" box (visible face), normalized to the image",
+        "origin": "Open Images validation human-drawn boxes (Source xclick/activemil), preserved verbatim",
+        "eyes": "unknown: no eye annotation, eye checks are out of scope and not counted"
+      }
+    }
+  ],
+  "formats": {
+    "9:16": {
+      "width": 540,
+      "height": 960,
+      "safeArea": {
+        "top": 0.08,
+        "right": 0.06,
+        "bottom": 0.06,
+        "left": 0.06
+      },
+      "bands": {
+        "top": {
+          "x0": 0.06999999999999995,
+          "y0": 0.08,
+          "x1": 0.9299999999999999,
+          "y1": 0.1575
+        },
+        "upper-third": {
+          "x0": 0.06999999999999995,
+          "y0": 0.340833333,
+          "x1": 0.9299999999999999,
+          "y1": 0.41833333300000003
+        },
+        "center": {
+          "x0": 0.06999999999999995,
+          "y0": 0.47125,
+          "x1": 0.9299999999999999,
+          "y1": 0.54875
+        },
+        "lower-third": {
+          "x0": 0.06999999999999995,
+          "y0": 0.601666667,
+          "x1": 0.9299999999999999,
+          "y1": 0.6791666670000001
+        },
+        "bottom": {
+          "x0": 0.06999999999999995,
+          "y0": 0.8025,
+          "x1": 0.9299999999999999,
+          "y1": 0.88
+        }
+      },
+      "outputSpecId": "preset-9x16"
+    },
+    "16:9": {
+      "width": 960,
+      "height": 540,
+      "safeArea": {
+        "top": 0.055,
+        "right": 0.05,
+        "bottom": 0.06,
+        "left": 0.05
+      },
+      "bands": {
+        "top": {
+          "x0": 0.09999999999999994,
+          "y0": 0.055,
+          "x1": 0.9,
+          "y1": 0.15722222222222224
+        },
+        "upper-third": {
+          "x0": 0.09999999999999994,
+          "y0": 0.315925926,
+          "x1": 0.9,
+          "y1": 0.41814814822222224
+        },
+        "center": {
+          "x0": 0.09999999999999994,
+          "y0": 0.446388889,
+          "x1": 0.9,
+          "y1": 0.5486111112222223
+        },
+        "lower-third": {
+          "x0": 0.09999999999999994,
+          "y0": 0.576851852,
+          "x1": 0.9,
+          "y1": 0.6790740742222222
+        },
+        "bottom": {
+          "x0": 0.09999999999999994,
+          "y0": 0.8077777777777778,
+          "x1": 0.9,
+          "y1": 0.91
+        }
+      },
+      "outputSpecId": "preset-16x9"
+    }
+  },
+  "timeline": {
+    "fps": 30,
+    "durationFrames": 90,
+    "clips": [
+      {
+        "id": "clip-a",
+        "sourceArtifactId": "source-1",
+        "sourceInFrame": 0,
+        "sourceOutFrame": 45,
+        "timelineInFrame": 0,
+        "timelineOutFrame": 45,
+        "rate": 1
+      },
+      {
+        "id": "clip-b",
+        "sourceArtifactId": "source-1",
+        "sourceInFrame": 45,
+        "sourceOutFrame": 90,
+        "timelineInFrame": 45,
+        "timelineOutFrame": 90,
+        "rate": 1
+      }
+    ],
+    "cue": {
+      "id": "cue-1",
+      "startFrame": 8,
+      "endFrame": 28,
+      "text": "Veja o que muda",
+      "anchor": "bottom"
+    },
+    "cta": {
+      "id": "cta-1",
+      "startFrame": 31,
+      "endFrame": 44,
+      "text": "Garanta sua vaga",
+      "longText": "Garanta agora a sua vaga na mentoria com desconto exclusivo de lancamento e bonus especiais"
+    }
+  },
+  "framingRules": {
+    "id": "w67-framing-rules/v1",
+    "faceHeightPixels": 170,
+    "maxUpscale": 2.5,
+    "faceCentreX": 0.5,
+    "faceCentreY": {
+      "9:16": 0.45,
+      "16:9": 0.55
+    },
+    "edgeMargin": 0.04,
+    "bottomBandClearance": 0.02,
+    "ctaBottom": {
+      "9:16": 0.19,
+      "16:9": 0.27
+    },
+    "ctaClearance": 0.02,
+    "lostCropVisibleShare": 0.35,
+    "bandCoverShare": 0.5,
+    "bandCoverFaceCentreXRange": [
+      0.3,
+      0.7
+    ]
+  },
+  "defectTable": {
+    "caption-over-face": {
+      "interval": [
+        8,
+        28
+      ],
+      "codes": [
+        "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+      ]
+    },
+    "crop-lost": {
+      "interval": [
+        45,
+        90
+      ],
+      "codes": [
+        "SUBJECT_NOT_VISIBLE_IN_PIXELS",
+        "SUBJECT_CLIPPED_IN_PIXELS"
+      ]
+    },
+    "cta-outside-safe-area": {
+      "interval": [
+        31,
+        44
+      ],
+      "codes": [
+        "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+        "INK_CLIPPED_BY_CANVAS_IN_PIXELS"
+      ]
+    }
+  },
+  "variantDefects": {
+    "clean": [],
+    "caption": [
+      "caption-over-face"
+    ],
+    "crop": [
+      "crop-lost"
+    ],
+    "cta": [
+      "cta-outside-safe-area"
+    ],
+    "combined": [
+      "caption-over-face",
+      "crop-lost",
+      "cta-outside-safe-area"
+    ]
+  },
+  "outputs": [
+    {
+      "id": "1580caef8efed517-9x16-clean",
+      "imageId": "1580caef8efed517",
+      "format": "9:16",
+      "variant": "clean",
+      "face": {
+        "x0": 0.40794224,
+        "y0": 0.20036101,
+        "x1": 0.51805055,
+        "y1": 0.33212996
+      },
+      "source": {
+        "width": 1024,
+        "height": 1024
+      },
+      "defects": [],
+      "windowA": {
+        "x": 0.25371629794117645,
+        "y": 0,
+        "width": 0.41856019411764706,
+        "height": 0.7441070117647058
+      },
+      "windowB": {
+        "x": 0.25371629794117645,
+        "y": 0,
+        "width": 0.41856019411764706,
+        "height": 0.7441070117647058
+      },
+      "evidence": "human-box",
+      "blockers": [],
+      "ctaText": "Garanta sua vaga",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.25371629794117645,
+            "y": 0,
+            "width": 0.41856019411764706,
+            "height": 0.7441070117647058
+          },
+          "placed": {
+            "x0": 0.368467771723831,
+            "y0": 0.26926370378479403,
+            "x1": 0.6315322282761692,
+            "y1": 0.4463470371181274
+          },
+          "upscale": 1.2598994300250552
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.4795126415,
+            "y": 0,
+            "width": 0.41856019411764706,
+            "height": 0.7441070117647058
+          },
+          "placed": {
+            "x0": -0.1709918967590198,
+            "y0": 0.26926370378479403,
+            "x1": 0.09207255979331835,
+            "y1": 0.4463470371181274
+          },
+          "direction": "+x",
+          "visibleShare": 0.35000000000000003
+        },
+        "target": "upper-third",
+        "blockers": [
+          "bottom",
+          "lower-third"
+        ],
+        "covering": [
+          "upper-third"
+        ],
+        "intersecting": [
+          "upper-third"
+        ]
+      },
+      "labels": []
+    },
+    {
+      "id": "1580caef8efed517-9x16-caption",
+      "imageId": "1580caef8efed517",
+      "format": "9:16",
+      "variant": "caption",
+      "face": {
+        "x0": 0.40794224,
+        "y0": 0.20036101,
+        "x1": 0.51805055,
+        "y1": 0.33212996
+      },
+      "source": {
+        "width": 1024,
+        "height": 1024
+      },
+      "defects": [
+        "caption-over-face"
+      ],
+      "windowA": {
+        "x": 0.25371629794117645,
+        "y": 0,
+        "width": 0.41856019411764706,
+        "height": 0.7441070117647058
+      },
+      "windowB": {
+        "x": 0.25371629794117645,
+        "y": 0,
+        "width": 0.41856019411764706,
+        "height": 0.7441070117647058
+      },
+      "evidence": "phantoms",
+      "blockers": [
+        "bottom",
+        "lower-third"
+      ],
+      "ctaText": "Garanta sua vaga",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.25371629794117645,
+            "y": 0,
+            "width": 0.41856019411764706,
+            "height": 0.7441070117647058
+          },
+          "placed": {
+            "x0": 0.368467771723831,
+            "y0": 0.26926370378479403,
+            "x1": 0.6315322282761692,
+            "y1": 0.4463470371181274
+          },
+          "upscale": 1.2598994300250552
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.4795126415,
+            "y": 0,
+            "width": 0.41856019411764706,
+            "height": 0.7441070117647058
+          },
+          "placed": {
+            "x0": -0.1709918967590198,
+            "y0": 0.26926370378479403,
+            "x1": 0.09207255979331835,
+            "y1": 0.4463470371181274
+          },
+          "direction": "+x",
+          "visibleShare": 0.35000000000000003
+        },
+        "target": "upper-third",
+        "blockers": [
+          "bottom",
+          "lower-third"
+        ],
+        "covering": [
+          "upper-third"
+        ],
+        "intersecting": [
+          "upper-third"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "1580caef8efed517-9x16-caption",
+          "defect": "caption-over-face",
+          "format": "9:16",
+          "startFrame": 8,
+          "endFrame": 28,
+          "codes": [
+            "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1580caef8efed517-9x16-crop",
+      "imageId": "1580caef8efed517",
+      "format": "9:16",
+      "variant": "crop",
+      "face": {
+        "x0": 0.40794224,
+        "y0": 0.20036101,
+        "x1": 0.51805055,
+        "y1": 0.33212996
+      },
+      "source": {
+        "width": 1024,
+        "height": 1024
+      },
+      "defects": [
+        "crop-lost"
+      ],
+      "windowA": {
+        "x": 0.25371629794117645,
+        "y": 0,
+        "width": 0.41856019411764706,
+        "height": 0.7441070117647058
+      },
+      "windowB": {
+        "x": 0.4795126415,
+        "y": 0,
+        "width": 0.41856019411764706,
+        "height": 0.7441070117647058
+      },
+      "evidence": "human-box",
+      "blockers": [],
+      "ctaText": "Garanta sua vaga",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.25371629794117645,
+            "y": 0,
+            "width": 0.41856019411764706,
+            "height": 0.7441070117647058
+          },
+          "placed": {
+            "x0": 0.368467771723831,
+            "y0": 0.26926370378479403,
+            "x1": 0.6315322282761692,
+            "y1": 0.4463470371181274
+          },
+          "upscale": 1.2598994300250552
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.4795126415,
+            "y": 0,
+            "width": 0.41856019411764706,
+            "height": 0.7441070117647058
+          },
+          "placed": {
+            "x0": -0.1709918967590198,
+            "y0": 0.26926370378479403,
+            "x1": 0.09207255979331835,
+            "y1": 0.4463470371181274
+          },
+          "direction": "+x",
+          "visibleShare": 0.35000000000000003
+        },
+        "target": "upper-third",
+        "blockers": [
+          "bottom",
+          "lower-third"
+        ],
+        "covering": [
+          "upper-third"
+        ],
+        "intersecting": [
+          "upper-third"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "1580caef8efed517-9x16-crop",
+          "defect": "crop-lost",
+          "format": "9:16",
+          "startFrame": 45,
+          "endFrame": 90,
+          "codes": [
+            "SUBJECT_NOT_VISIBLE_IN_PIXELS",
+            "SUBJECT_CLIPPED_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1580caef8efed517-9x16-cta",
+      "imageId": "1580caef8efed517",
+      "format": "9:16",
+      "variant": "cta",
+      "face": {
+        "x0": 0.40794224,
+        "y0": 0.20036101,
+        "x1": 0.51805055,
+        "y1": 0.33212996
+      },
+      "source": {
+        "width": 1024,
+        "height": 1024
+      },
+      "defects": [
+        "cta-outside-safe-area"
+      ],
+      "windowA": {
+        "x": 0.25371629794117645,
+        "y": 0,
+        "width": 0.41856019411764706,
+        "height": 0.7441070117647058
+      },
+      "windowB": {
+        "x": 0.25371629794117645,
+        "y": 0,
+        "width": 0.41856019411764706,
+        "height": 0.7441070117647058
+      },
+      "evidence": "human-box",
+      "blockers": [],
+      "ctaText": "Garanta agora a sua vaga na mentoria com desconto exclusivo de lancamento e bonus especiais",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.25371629794117645,
+            "y": 0,
+            "width": 0.41856019411764706,
+            "height": 0.7441070117647058
+          },
+          "placed": {
+            "x0": 0.368467771723831,
+            "y0": 0.26926370378479403,
+            "x1": 0.6315322282761692,
+            "y1": 0.4463470371181274
+          },
+          "upscale": 1.2598994300250552
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.4795126415,
+            "y": 0,
+            "width": 0.41856019411764706,
+            "height": 0.7441070117647058
+          },
+          "placed": {
+            "x0": -0.1709918967590198,
+            "y0": 0.26926370378479403,
+            "x1": 0.09207255979331835,
+            "y1": 0.4463470371181274
+          },
+          "direction": "+x",
+          "visibleShare": 0.35000000000000003
+        },
+        "target": "upper-third",
+        "blockers": [
+          "bottom",
+          "lower-third"
+        ],
+        "covering": [
+          "upper-third"
+        ],
+        "intersecting": [
+          "upper-third"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "1580caef8efed517-9x16-cta",
+          "defect": "cta-outside-safe-area",
+          "format": "9:16",
+          "startFrame": 31,
+          "endFrame": 44,
+          "codes": [
+            "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+            "INK_CLIPPED_BY_CANVAS_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1580caef8efed517-9x16-combined",
+      "imageId": "1580caef8efed517",
+      "format": "9:16",
+      "variant": "combined",
+      "face": {
+        "x0": 0.40794224,
+        "y0": 0.20036101,
+        "x1": 0.51805055,
+        "y1": 0.33212996
+      },
+      "source": {
+        "width": 1024,
+        "height": 1024
+      },
+      "defects": [
+        "caption-over-face",
+        "crop-lost",
+        "cta-outside-safe-area"
+      ],
+      "windowA": {
+        "x": 0.25371629794117645,
+        "y": 0,
+        "width": 0.41856019411764706,
+        "height": 0.7441070117647058
+      },
+      "windowB": {
+        "x": 0.4795126415,
+        "y": 0,
+        "width": 0.41856019411764706,
+        "height": 0.7441070117647058
+      },
+      "evidence": "phantoms",
+      "blockers": [
+        "bottom",
+        "lower-third"
+      ],
+      "ctaText": "Garanta agora a sua vaga na mentoria com desconto exclusivo de lancamento e bonus especiais",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.25371629794117645,
+            "y": 0,
+            "width": 0.41856019411764706,
+            "height": 0.7441070117647058
+          },
+          "placed": {
+            "x0": 0.368467771723831,
+            "y0": 0.26926370378479403,
+            "x1": 0.6315322282761692,
+            "y1": 0.4463470371181274
+          },
+          "upscale": 1.2598994300250552
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.4795126415,
+            "y": 0,
+            "width": 0.41856019411764706,
+            "height": 0.7441070117647058
+          },
+          "placed": {
+            "x0": -0.1709918967590198,
+            "y0": 0.26926370378479403,
+            "x1": 0.09207255979331835,
+            "y1": 0.4463470371181274
+          },
+          "direction": "+x",
+          "visibleShare": 0.35000000000000003
+        },
+        "target": "upper-third",
+        "blockers": [
+          "bottom",
+          "lower-third"
+        ],
+        "covering": [
+          "upper-third"
+        ],
+        "intersecting": [
+          "upper-third"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "1580caef8efed517-9x16-combined",
+          "defect": "caption-over-face",
+          "format": "9:16",
+          "startFrame": 8,
+          "endFrame": 28,
+          "codes": [
+            "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+          ]
+        },
+        {
+          "outputId": "1580caef8efed517-9x16-combined",
+          "defect": "crop-lost",
+          "format": "9:16",
+          "startFrame": 45,
+          "endFrame": 90,
+          "codes": [
+            "SUBJECT_NOT_VISIBLE_IN_PIXELS",
+            "SUBJECT_CLIPPED_IN_PIXELS"
+          ]
+        },
+        {
+          "outputId": "1580caef8efed517-9x16-combined",
+          "defect": "cta-outside-safe-area",
+          "format": "9:16",
+          "startFrame": 31,
+          "endFrame": 44,
+          "codes": [
+            "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+            "INK_CLIPPED_BY_CANVAS_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1580caef8efed517-16x9-clean",
+      "imageId": "1580caef8efed517",
+      "format": "16:9",
+      "variant": "clean",
+      "face": {
+        "x0": 0.40794224,
+        "y0": 0.20036101,
+        "x1": 0.51805055,
+        "y1": 0.33212996
+      },
+      "source": {
+        "width": 1024,
+        "height": 1024
+      },
+      "defects": [],
+      "windowA": {
+        "x": 0.09094288911764709,
+        "y": 0.0360373782352941,
+        "width": 0.7441070117647058,
+        "height": 0.41856019411764706
+      },
+      "windowB": {
+        "x": 0.09094288911764709,
+        "y": 0.0360373782352941,
+        "width": 0.7441070117647058,
+        "height": 0.41856019411764706
+      },
+      "evidence": "human-box",
+      "blockers": [],
+      "ctaText": "Garanta sua vaga",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.09094288911764709,
+            "y": 0.0360373782352941,
+            "width": 0.7441070117647058,
+            "height": 0.41856019411764706
+          },
+          "placed": {
+            "x0": 0.4260131215946549,
+            "y0": 0.39259259259259266,
+            "x1": 0.5739868784053451,
+            "y1": 0.7074074074074074
+          },
+          "upscale": 1.2598994300250552
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.09094288911764709,
+            "y": 0.2860108275,
+            "width": 0.7441070117647058,
+            "height": 0.41856019411764706
+          },
+          "placed": {
+            "x0": 0.4260131215946549,
+            "y0": -0.20462962962962963,
+            "x1": 0.5739868784053451,
+            "y1": 0.11018518518518516
+          },
+          "direction": "+y",
+          "visibleShare": 0.35
+        },
+        "target": "lower-third",
+        "blockers": [
+          "bottom"
+        ],
+        "covering": [
+          "lower-third",
+          "center"
+        ],
+        "intersecting": [
+          "lower-third",
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": []
+    },
+    {
+      "id": "1580caef8efed517-16x9-caption",
+      "imageId": "1580caef8efed517",
+      "format": "16:9",
+      "variant": "caption",
+      "face": {
+        "x0": 0.40794224,
+        "y0": 0.20036101,
+        "x1": 0.51805055,
+        "y1": 0.33212996
+      },
+      "source": {
+        "width": 1024,
+        "height": 1024
+      },
+      "defects": [
+        "caption-over-face"
+      ],
+      "windowA": {
+        "x": 0.09094288911764709,
+        "y": 0.0360373782352941,
+        "width": 0.7441070117647058,
+        "height": 0.41856019411764706
+      },
+      "windowB": {
+        "x": 0.09094288911764709,
+        "y": 0.0360373782352941,
+        "width": 0.7441070117647058,
+        "height": 0.41856019411764706
+      },
+      "evidence": "phantoms",
+      "blockers": [
+        "bottom"
+      ],
+      "ctaText": "Garanta sua vaga",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.09094288911764709,
+            "y": 0.0360373782352941,
+            "width": 0.7441070117647058,
+            "height": 0.41856019411764706
+          },
+          "placed": {
+            "x0": 0.4260131215946549,
+            "y0": 0.39259259259259266,
+            "x1": 0.5739868784053451,
+            "y1": 0.7074074074074074
+          },
+          "upscale": 1.2598994300250552
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.09094288911764709,
+            "y": 0.2860108275,
+            "width": 0.7441070117647058,
+            "height": 0.41856019411764706
+          },
+          "placed": {
+            "x0": 0.4260131215946549,
+            "y0": -0.20462962962962963,
+            "x1": 0.5739868784053451,
+            "y1": 0.11018518518518516
+          },
+          "direction": "+y",
+          "visibleShare": 0.35
+        },
+        "target": "lower-third",
+        "blockers": [
+          "bottom"
+        ],
+        "covering": [
+          "lower-third",
+          "center"
+        ],
+        "intersecting": [
+          "lower-third",
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "1580caef8efed517-16x9-caption",
+          "defect": "caption-over-face",
+          "format": "16:9",
+          "startFrame": 8,
+          "endFrame": 28,
+          "codes": [
+            "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1580caef8efed517-16x9-crop",
+      "imageId": "1580caef8efed517",
+      "format": "16:9",
+      "variant": "crop",
+      "face": {
+        "x0": 0.40794224,
+        "y0": 0.20036101,
+        "x1": 0.51805055,
+        "y1": 0.33212996
+      },
+      "source": {
+        "width": 1024,
+        "height": 1024
+      },
+      "defects": [
+        "crop-lost"
+      ],
+      "windowA": {
+        "x": 0.09094288911764709,
+        "y": 0.0360373782352941,
+        "width": 0.7441070117647058,
+        "height": 0.41856019411764706
+      },
+      "windowB": {
+        "x": 0.09094288911764709,
+        "y": 0.2860108275,
+        "width": 0.7441070117647058,
+        "height": 0.41856019411764706
+      },
+      "evidence": "human-box",
+      "blockers": [],
+      "ctaText": "Garanta sua vaga",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.09094288911764709,
+            "y": 0.0360373782352941,
+            "width": 0.7441070117647058,
+            "height": 0.41856019411764706
+          },
+          "placed": {
+            "x0": 0.4260131215946549,
+            "y0": 0.39259259259259266,
+            "x1": 0.5739868784053451,
+            "y1": 0.7074074074074074
+          },
+          "upscale": 1.2598994300250552
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.09094288911764709,
+            "y": 0.2860108275,
+            "width": 0.7441070117647058,
+            "height": 0.41856019411764706
+          },
+          "placed": {
+            "x0": 0.4260131215946549,
+            "y0": -0.20462962962962963,
+            "x1": 0.5739868784053451,
+            "y1": 0.11018518518518516
+          },
+          "direction": "+y",
+          "visibleShare": 0.35
+        },
+        "target": "lower-third",
+        "blockers": [
+          "bottom"
+        ],
+        "covering": [
+          "lower-third",
+          "center"
+        ],
+        "intersecting": [
+          "lower-third",
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "1580caef8efed517-16x9-crop",
+          "defect": "crop-lost",
+          "format": "16:9",
+          "startFrame": 45,
+          "endFrame": 90,
+          "codes": [
+            "SUBJECT_NOT_VISIBLE_IN_PIXELS",
+            "SUBJECT_CLIPPED_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1580caef8efed517-16x9-cta",
+      "imageId": "1580caef8efed517",
+      "format": "16:9",
+      "variant": "cta",
+      "face": {
+        "x0": 0.40794224,
+        "y0": 0.20036101,
+        "x1": 0.51805055,
+        "y1": 0.33212996
+      },
+      "source": {
+        "width": 1024,
+        "height": 1024
+      },
+      "defects": [
+        "cta-outside-safe-area"
+      ],
+      "windowA": {
+        "x": 0.09094288911764709,
+        "y": 0.0360373782352941,
+        "width": 0.7441070117647058,
+        "height": 0.41856019411764706
+      },
+      "windowB": {
+        "x": 0.09094288911764709,
+        "y": 0.0360373782352941,
+        "width": 0.7441070117647058,
+        "height": 0.41856019411764706
+      },
+      "evidence": "human-box",
+      "blockers": [],
+      "ctaText": "Garanta agora a sua vaga na mentoria com desconto exclusivo de lancamento e bonus especiais",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.09094288911764709,
+            "y": 0.0360373782352941,
+            "width": 0.7441070117647058,
+            "height": 0.41856019411764706
+          },
+          "placed": {
+            "x0": 0.4260131215946549,
+            "y0": 0.39259259259259266,
+            "x1": 0.5739868784053451,
+            "y1": 0.7074074074074074
+          },
+          "upscale": 1.2598994300250552
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.09094288911764709,
+            "y": 0.2860108275,
+            "width": 0.7441070117647058,
+            "height": 0.41856019411764706
+          },
+          "placed": {
+            "x0": 0.4260131215946549,
+            "y0": -0.20462962962962963,
+            "x1": 0.5739868784053451,
+            "y1": 0.11018518518518516
+          },
+          "direction": "+y",
+          "visibleShare": 0.35
+        },
+        "target": "lower-third",
+        "blockers": [
+          "bottom"
+        ],
+        "covering": [
+          "lower-third",
+          "center"
+        ],
+        "intersecting": [
+          "lower-third",
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "1580caef8efed517-16x9-cta",
+          "defect": "cta-outside-safe-area",
+          "format": "16:9",
+          "startFrame": 31,
+          "endFrame": 44,
+          "codes": [
+            "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+            "INK_CLIPPED_BY_CANVAS_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1580caef8efed517-16x9-combined",
+      "imageId": "1580caef8efed517",
+      "format": "16:9",
+      "variant": "combined",
+      "face": {
+        "x0": 0.40794224,
+        "y0": 0.20036101,
+        "x1": 0.51805055,
+        "y1": 0.33212996
+      },
+      "source": {
+        "width": 1024,
+        "height": 1024
+      },
+      "defects": [
+        "caption-over-face",
+        "crop-lost",
+        "cta-outside-safe-area"
+      ],
+      "windowA": {
+        "x": 0.09094288911764709,
+        "y": 0.0360373782352941,
+        "width": 0.7441070117647058,
+        "height": 0.41856019411764706
+      },
+      "windowB": {
+        "x": 0.09094288911764709,
+        "y": 0.2860108275,
+        "width": 0.7441070117647058,
+        "height": 0.41856019411764706
+      },
+      "evidence": "phantoms",
+      "blockers": [
+        "bottom"
+      ],
+      "ctaText": "Garanta agora a sua vaga na mentoria com desconto exclusivo de lancamento e bonus especiais",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.09094288911764709,
+            "y": 0.0360373782352941,
+            "width": 0.7441070117647058,
+            "height": 0.41856019411764706
+          },
+          "placed": {
+            "x0": 0.4260131215946549,
+            "y0": 0.39259259259259266,
+            "x1": 0.5739868784053451,
+            "y1": 0.7074074074074074
+          },
+          "upscale": 1.2598994300250552
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.09094288911764709,
+            "y": 0.2860108275,
+            "width": 0.7441070117647058,
+            "height": 0.41856019411764706
+          },
+          "placed": {
+            "x0": 0.4260131215946549,
+            "y0": -0.20462962962962963,
+            "x1": 0.5739868784053451,
+            "y1": 0.11018518518518516
+          },
+          "direction": "+y",
+          "visibleShare": 0.35
+        },
+        "target": "lower-third",
+        "blockers": [
+          "bottom"
+        ],
+        "covering": [
+          "lower-third",
+          "center"
+        ],
+        "intersecting": [
+          "lower-third",
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "1580caef8efed517-16x9-combined",
+          "defect": "caption-over-face",
+          "format": "16:9",
+          "startFrame": 8,
+          "endFrame": 28,
+          "codes": [
+            "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+          ]
+        },
+        {
+          "outputId": "1580caef8efed517-16x9-combined",
+          "defect": "crop-lost",
+          "format": "16:9",
+          "startFrame": 45,
+          "endFrame": 90,
+          "codes": [
+            "SUBJECT_NOT_VISIBLE_IN_PIXELS",
+            "SUBJECT_CLIPPED_IN_PIXELS"
+          ]
+        },
+        {
+          "outputId": "1580caef8efed517-16x9-combined",
+          "defect": "cta-outside-safe-area",
+          "format": "16:9",
+          "startFrame": 31,
+          "endFrame": 44,
+          "codes": [
+            "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+            "INK_CLIPPED_BY_CANVAS_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9295ab265fafd8e5-9x16-clean",
+      "imageId": "9295ab265fafd8e5",
+      "format": "9:16",
+      "variant": "clean",
+      "face": {
+        "x0": 0.5875,
+        "y0": 0.31875,
+        "x1": 0.7015625,
+        "y1": 0.46875
+      },
+      "source": {
+        "width": 1024,
+        "height": 768
+      },
+      "defects": [],
+      "windowA": {
+        "x": 0.4658547794117647,
+        "y": 0.01257352941176465,
+        "width": 0.35735294117647065,
+        "height": 0.8470588235294119
+      },
+      "windowB": {
+        "x": 0.4658547794117647,
+        "y": 0.01257352941176465,
+        "width": 0.35735294117647065,
+        "height": 0.8470588235294119
+      },
+      "evidence": "human-box",
+      "blockers": [],
+      "ctaText": "Garanta sua vaga",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.4658547794117647,
+            "y": 0.01257352941176465,
+            "width": 0.35735294117647065,
+            "height": 0.8470588235294119
+          },
+          "placed": {
+            "x0": 0.3404063786008231,
+            "y0": 0.3614583333333333,
+            "x1": 0.6595936213991769,
+            "y1": 0.5385416666666667
+          },
+          "upscale": 1.4756944444444442
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.27006893382352937,
+            "y": 0.01257352941176465,
+            "width": 0.35735294117647065,
+            "height": 0.8470588235294119
+          },
+          "placed": {
+            "x0": 0.8882844650205761,
+            "y0": 0.3614583333333333,
+            "x1": 1.2074717078189299,
+            "y1": 0.5385416666666667
+          },
+          "direction": "-x",
+          "visibleShare": 0.3500000000000002
+        },
+        "target": "upper-third",
+        "blockers": [
+          "bottom",
+          "lower-third"
+        ],
+        "covering": [
+          "upper-third",
+          "center"
+        ],
+        "intersecting": [
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": []
+    },
+    {
+      "id": "9295ab265fafd8e5-9x16-caption",
+      "imageId": "9295ab265fafd8e5",
+      "format": "9:16",
+      "variant": "caption",
+      "face": {
+        "x0": 0.5875,
+        "y0": 0.31875,
+        "x1": 0.7015625,
+        "y1": 0.46875
+      },
+      "source": {
+        "width": 1024,
+        "height": 768
+      },
+      "defects": [
+        "caption-over-face"
+      ],
+      "windowA": {
+        "x": 0.4658547794117647,
+        "y": 0.01257352941176465,
+        "width": 0.35735294117647065,
+        "height": 0.8470588235294119
+      },
+      "windowB": {
+        "x": 0.4658547794117647,
+        "y": 0.01257352941176465,
+        "width": 0.35735294117647065,
+        "height": 0.8470588235294119
+      },
+      "evidence": "phantoms",
+      "blockers": [
+        "bottom",
+        "lower-third"
+      ],
+      "ctaText": "Garanta sua vaga",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.4658547794117647,
+            "y": 0.01257352941176465,
+            "width": 0.35735294117647065,
+            "height": 0.8470588235294119
+          },
+          "placed": {
+            "x0": 0.3404063786008231,
+            "y0": 0.3614583333333333,
+            "x1": 0.6595936213991769,
+            "y1": 0.5385416666666667
+          },
+          "upscale": 1.4756944444444442
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.27006893382352937,
+            "y": 0.01257352941176465,
+            "width": 0.35735294117647065,
+            "height": 0.8470588235294119
+          },
+          "placed": {
+            "x0": 0.8882844650205761,
+            "y0": 0.3614583333333333,
+            "x1": 1.2074717078189299,
+            "y1": 0.5385416666666667
+          },
+          "direction": "-x",
+          "visibleShare": 0.3500000000000002
+        },
+        "target": "upper-third",
+        "blockers": [
+          "bottom",
+          "lower-third"
+        ],
+        "covering": [
+          "upper-third",
+          "center"
+        ],
+        "intersecting": [
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "9295ab265fafd8e5-9x16-caption",
+          "defect": "caption-over-face",
+          "format": "9:16",
+          "startFrame": 8,
+          "endFrame": 28,
+          "codes": [
+            "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9295ab265fafd8e5-9x16-crop",
+      "imageId": "9295ab265fafd8e5",
+      "format": "9:16",
+      "variant": "crop",
+      "face": {
+        "x0": 0.5875,
+        "y0": 0.31875,
+        "x1": 0.7015625,
+        "y1": 0.46875
+      },
+      "source": {
+        "width": 1024,
+        "height": 768
+      },
+      "defects": [
+        "crop-lost"
+      ],
+      "windowA": {
+        "x": 0.4658547794117647,
+        "y": 0.01257352941176465,
+        "width": 0.35735294117647065,
+        "height": 0.8470588235294119
+      },
+      "windowB": {
+        "x": 0.27006893382352937,
+        "y": 0.01257352941176465,
+        "width": 0.35735294117647065,
+        "height": 0.8470588235294119
+      },
+      "evidence": "human-box",
+      "blockers": [],
+      "ctaText": "Garanta sua vaga",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.4658547794117647,
+            "y": 0.01257352941176465,
+            "width": 0.35735294117647065,
+            "height": 0.8470588235294119
+          },
+          "placed": {
+            "x0": 0.3404063786008231,
+            "y0": 0.3614583333333333,
+            "x1": 0.6595936213991769,
+            "y1": 0.5385416666666667
+          },
+          "upscale": 1.4756944444444442
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.27006893382352937,
+            "y": 0.01257352941176465,
+            "width": 0.35735294117647065,
+            "height": 0.8470588235294119
+          },
+          "placed": {
+            "x0": 0.8882844650205761,
+            "y0": 0.3614583333333333,
+            "x1": 1.2074717078189299,
+            "y1": 0.5385416666666667
+          },
+          "direction": "-x",
+          "visibleShare": 0.3500000000000002
+        },
+        "target": "upper-third",
+        "blockers": [
+          "bottom",
+          "lower-third"
+        ],
+        "covering": [
+          "upper-third",
+          "center"
+        ],
+        "intersecting": [
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "9295ab265fafd8e5-9x16-crop",
+          "defect": "crop-lost",
+          "format": "9:16",
+          "startFrame": 45,
+          "endFrame": 90,
+          "codes": [
+            "SUBJECT_NOT_VISIBLE_IN_PIXELS",
+            "SUBJECT_CLIPPED_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9295ab265fafd8e5-9x16-cta",
+      "imageId": "9295ab265fafd8e5",
+      "format": "9:16",
+      "variant": "cta",
+      "face": {
+        "x0": 0.5875,
+        "y0": 0.31875,
+        "x1": 0.7015625,
+        "y1": 0.46875
+      },
+      "source": {
+        "width": 1024,
+        "height": 768
+      },
+      "defects": [
+        "cta-outside-safe-area"
+      ],
+      "windowA": {
+        "x": 0.4658547794117647,
+        "y": 0.01257352941176465,
+        "width": 0.35735294117647065,
+        "height": 0.8470588235294119
+      },
+      "windowB": {
+        "x": 0.4658547794117647,
+        "y": 0.01257352941176465,
+        "width": 0.35735294117647065,
+        "height": 0.8470588235294119
+      },
+      "evidence": "human-box",
+      "blockers": [],
+      "ctaText": "Garanta agora a sua vaga na mentoria com desconto exclusivo de lancamento e bonus especiais",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.4658547794117647,
+            "y": 0.01257352941176465,
+            "width": 0.35735294117647065,
+            "height": 0.8470588235294119
+          },
+          "placed": {
+            "x0": 0.3404063786008231,
+            "y0": 0.3614583333333333,
+            "x1": 0.6595936213991769,
+            "y1": 0.5385416666666667
+          },
+          "upscale": 1.4756944444444442
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.27006893382352937,
+            "y": 0.01257352941176465,
+            "width": 0.35735294117647065,
+            "height": 0.8470588235294119
+          },
+          "placed": {
+            "x0": 0.8882844650205761,
+            "y0": 0.3614583333333333,
+            "x1": 1.2074717078189299,
+            "y1": 0.5385416666666667
+          },
+          "direction": "-x",
+          "visibleShare": 0.3500000000000002
+        },
+        "target": "upper-third",
+        "blockers": [
+          "bottom",
+          "lower-third"
+        ],
+        "covering": [
+          "upper-third",
+          "center"
+        ],
+        "intersecting": [
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "9295ab265fafd8e5-9x16-cta",
+          "defect": "cta-outside-safe-area",
+          "format": "9:16",
+          "startFrame": 31,
+          "endFrame": 44,
+          "codes": [
+            "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+            "INK_CLIPPED_BY_CANVAS_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9295ab265fafd8e5-9x16-combined",
+      "imageId": "9295ab265fafd8e5",
+      "format": "9:16",
+      "variant": "combined",
+      "face": {
+        "x0": 0.5875,
+        "y0": 0.31875,
+        "x1": 0.7015625,
+        "y1": 0.46875
+      },
+      "source": {
+        "width": 1024,
+        "height": 768
+      },
+      "defects": [
+        "caption-over-face",
+        "crop-lost",
+        "cta-outside-safe-area"
+      ],
+      "windowA": {
+        "x": 0.4658547794117647,
+        "y": 0.01257352941176465,
+        "width": 0.35735294117647065,
+        "height": 0.8470588235294119
+      },
+      "windowB": {
+        "x": 0.27006893382352937,
+        "y": 0.01257352941176465,
+        "width": 0.35735294117647065,
+        "height": 0.8470588235294119
+      },
+      "evidence": "phantoms",
+      "blockers": [
+        "bottom",
+        "lower-third"
+      ],
+      "ctaText": "Garanta agora a sua vaga na mentoria com desconto exclusivo de lancamento e bonus especiais",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.4658547794117647,
+            "y": 0.01257352941176465,
+            "width": 0.35735294117647065,
+            "height": 0.8470588235294119
+          },
+          "placed": {
+            "x0": 0.3404063786008231,
+            "y0": 0.3614583333333333,
+            "x1": 0.6595936213991769,
+            "y1": 0.5385416666666667
+          },
+          "upscale": 1.4756944444444442
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.27006893382352937,
+            "y": 0.01257352941176465,
+            "width": 0.35735294117647065,
+            "height": 0.8470588235294119
+          },
+          "placed": {
+            "x0": 0.8882844650205761,
+            "y0": 0.3614583333333333,
+            "x1": 1.2074717078189299,
+            "y1": 0.5385416666666667
+          },
+          "direction": "-x",
+          "visibleShare": 0.3500000000000002
+        },
+        "target": "upper-third",
+        "blockers": [
+          "bottom",
+          "lower-third"
+        ],
+        "covering": [
+          "upper-third",
+          "center"
+        ],
+        "intersecting": [
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "9295ab265fafd8e5-9x16-combined",
+          "defect": "caption-over-face",
+          "format": "9:16",
+          "startFrame": 8,
+          "endFrame": 28,
+          "codes": [
+            "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+          ]
+        },
+        {
+          "outputId": "9295ab265fafd8e5-9x16-combined",
+          "defect": "crop-lost",
+          "format": "9:16",
+          "startFrame": 45,
+          "endFrame": 90,
+          "codes": [
+            "SUBJECT_NOT_VISIBLE_IN_PIXELS",
+            "SUBJECT_CLIPPED_IN_PIXELS"
+          ]
+        },
+        {
+          "outputId": "9295ab265fafd8e5-9x16-combined",
+          "defect": "cta-outside-safe-area",
+          "format": "9:16",
+          "startFrame": 31,
+          "endFrame": 44,
+          "codes": [
+            "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+            "INK_CLIPPED_BY_CANVAS_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9295ab265fafd8e5-16x9-clean",
+      "imageId": "9295ab265fafd8e5",
+      "format": "16:9",
+      "variant": "clean",
+      "face": {
+        "x0": 0.5875,
+        "y0": 0.31875,
+        "x1": 0.7015625,
+        "y1": 0.46875
+      },
+      "source": {
+        "width": 1024,
+        "height": 768
+      },
+      "defects": [],
+      "windowA": {
+        "x": 0.3268841911764706,
+        "y": 0.1316911764705882,
+        "width": 0.6352941176470588,
+        "height": 0.47647058823529415
+      },
+      "windowB": {
+        "x": 0.3268841911764706,
+        "y": 0.1316911764705882,
+        "width": 0.6352941176470588,
+        "height": 0.47647058823529415
+      },
+      "evidence": "human-box",
+      "blockers": [],
+      "ctaText": "Garanta sua vaga",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.3268841911764706,
+            "y": 0.1316911764705882,
+            "width": 0.6352941176470588,
+            "height": 0.47647058823529415
+          },
+          "placed": {
+            "x0": 0.41022858796296297,
+            "y0": 0.3925925925925926,
+            "x1": 0.589771412037037,
+            "y1": 0.7074074074074075
+          },
+          "upscale": 1.4756944444444444
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.3268841911764706,
+            "y": 0.41625,
+            "width": 0.6352941176470588,
+            "height": 0.47647058823529415
+          },
+          "placed": {
+            "x0": 0.41022858796296297,
+            "y0": -0.2046296296296297,
+            "x1": 0.589771412037037,
+            "y1": 0.11018518518518516
+          },
+          "direction": "+y",
+          "visibleShare": 0.3499999999999998
+        },
+        "target": "lower-third",
+        "blockers": [
+          "bottom"
+        ],
+        "covering": [
+          "lower-third",
+          "center"
+        ],
+        "intersecting": [
+          "lower-third",
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": []
+    },
+    {
+      "id": "9295ab265fafd8e5-16x9-caption",
+      "imageId": "9295ab265fafd8e5",
+      "format": "16:9",
+      "variant": "caption",
+      "face": {
+        "x0": 0.5875,
+        "y0": 0.31875,
+        "x1": 0.7015625,
+        "y1": 0.46875
+      },
+      "source": {
+        "width": 1024,
+        "height": 768
+      },
+      "defects": [
+        "caption-over-face"
+      ],
+      "windowA": {
+        "x": 0.3268841911764706,
+        "y": 0.1316911764705882,
+        "width": 0.6352941176470588,
+        "height": 0.47647058823529415
+      },
+      "windowB": {
+        "x": 0.3268841911764706,
+        "y": 0.1316911764705882,
+        "width": 0.6352941176470588,
+        "height": 0.47647058823529415
+      },
+      "evidence": "phantoms",
+      "blockers": [
+        "bottom"
+      ],
+      "ctaText": "Garanta sua vaga",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.3268841911764706,
+            "y": 0.1316911764705882,
+            "width": 0.6352941176470588,
+            "height": 0.47647058823529415
+          },
+          "placed": {
+            "x0": 0.41022858796296297,
+            "y0": 0.3925925925925926,
+            "x1": 0.589771412037037,
+            "y1": 0.7074074074074075
+          },
+          "upscale": 1.4756944444444444
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.3268841911764706,
+            "y": 0.41625,
+            "width": 0.6352941176470588,
+            "height": 0.47647058823529415
+          },
+          "placed": {
+            "x0": 0.41022858796296297,
+            "y0": -0.2046296296296297,
+            "x1": 0.589771412037037,
+            "y1": 0.11018518518518516
+          },
+          "direction": "+y",
+          "visibleShare": 0.3499999999999998
+        },
+        "target": "lower-third",
+        "blockers": [
+          "bottom"
+        ],
+        "covering": [
+          "lower-third",
+          "center"
+        ],
+        "intersecting": [
+          "lower-third",
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "9295ab265fafd8e5-16x9-caption",
+          "defect": "caption-over-face",
+          "format": "16:9",
+          "startFrame": 8,
+          "endFrame": 28,
+          "codes": [
+            "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9295ab265fafd8e5-16x9-crop",
+      "imageId": "9295ab265fafd8e5",
+      "format": "16:9",
+      "variant": "crop",
+      "face": {
+        "x0": 0.5875,
+        "y0": 0.31875,
+        "x1": 0.7015625,
+        "y1": 0.46875
+      },
+      "source": {
+        "width": 1024,
+        "height": 768
+      },
+      "defects": [
+        "crop-lost"
+      ],
+      "windowA": {
+        "x": 0.3268841911764706,
+        "y": 0.1316911764705882,
+        "width": 0.6352941176470588,
+        "height": 0.47647058823529415
+      },
+      "windowB": {
+        "x": 0.3268841911764706,
+        "y": 0.41625,
+        "width": 0.6352941176470588,
+        "height": 0.47647058823529415
+      },
+      "evidence": "human-box",
+      "blockers": [],
+      "ctaText": "Garanta sua vaga",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.3268841911764706,
+            "y": 0.1316911764705882,
+            "width": 0.6352941176470588,
+            "height": 0.47647058823529415
+          },
+          "placed": {
+            "x0": 0.41022858796296297,
+            "y0": 0.3925925925925926,
+            "x1": 0.589771412037037,
+            "y1": 0.7074074074074075
+          },
+          "upscale": 1.4756944444444444
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.3268841911764706,
+            "y": 0.41625,
+            "width": 0.6352941176470588,
+            "height": 0.47647058823529415
+          },
+          "placed": {
+            "x0": 0.41022858796296297,
+            "y0": -0.2046296296296297,
+            "x1": 0.589771412037037,
+            "y1": 0.11018518518518516
+          },
+          "direction": "+y",
+          "visibleShare": 0.3499999999999998
+        },
+        "target": "lower-third",
+        "blockers": [
+          "bottom"
+        ],
+        "covering": [
+          "lower-third",
+          "center"
+        ],
+        "intersecting": [
+          "lower-third",
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "9295ab265fafd8e5-16x9-crop",
+          "defect": "crop-lost",
+          "format": "16:9",
+          "startFrame": 45,
+          "endFrame": 90,
+          "codes": [
+            "SUBJECT_NOT_VISIBLE_IN_PIXELS",
+            "SUBJECT_CLIPPED_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9295ab265fafd8e5-16x9-cta",
+      "imageId": "9295ab265fafd8e5",
+      "format": "16:9",
+      "variant": "cta",
+      "face": {
+        "x0": 0.5875,
+        "y0": 0.31875,
+        "x1": 0.7015625,
+        "y1": 0.46875
+      },
+      "source": {
+        "width": 1024,
+        "height": 768
+      },
+      "defects": [
+        "cta-outside-safe-area"
+      ],
+      "windowA": {
+        "x": 0.3268841911764706,
+        "y": 0.1316911764705882,
+        "width": 0.6352941176470588,
+        "height": 0.47647058823529415
+      },
+      "windowB": {
+        "x": 0.3268841911764706,
+        "y": 0.1316911764705882,
+        "width": 0.6352941176470588,
+        "height": 0.47647058823529415
+      },
+      "evidence": "human-box",
+      "blockers": [],
+      "ctaText": "Garanta agora a sua vaga na mentoria com desconto exclusivo de lancamento e bonus especiais",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.3268841911764706,
+            "y": 0.1316911764705882,
+            "width": 0.6352941176470588,
+            "height": 0.47647058823529415
+          },
+          "placed": {
+            "x0": 0.41022858796296297,
+            "y0": 0.3925925925925926,
+            "x1": 0.589771412037037,
+            "y1": 0.7074074074074075
+          },
+          "upscale": 1.4756944444444444
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.3268841911764706,
+            "y": 0.41625,
+            "width": 0.6352941176470588,
+            "height": 0.47647058823529415
+          },
+          "placed": {
+            "x0": 0.41022858796296297,
+            "y0": -0.2046296296296297,
+            "x1": 0.589771412037037,
+            "y1": 0.11018518518518516
+          },
+          "direction": "+y",
+          "visibleShare": 0.3499999999999998
+        },
+        "target": "lower-third",
+        "blockers": [
+          "bottom"
+        ],
+        "covering": [
+          "lower-third",
+          "center"
+        ],
+        "intersecting": [
+          "lower-third",
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "9295ab265fafd8e5-16x9-cta",
+          "defect": "cta-outside-safe-area",
+          "format": "16:9",
+          "startFrame": 31,
+          "endFrame": 44,
+          "codes": [
+            "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+            "INK_CLIPPED_BY_CANVAS_IN_PIXELS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9295ab265fafd8e5-16x9-combined",
+      "imageId": "9295ab265fafd8e5",
+      "format": "16:9",
+      "variant": "combined",
+      "face": {
+        "x0": 0.5875,
+        "y0": 0.31875,
+        "x1": 0.7015625,
+        "y1": 0.46875
+      },
+      "source": {
+        "width": 1024,
+        "height": 768
+      },
+      "defects": [
+        "caption-over-face",
+        "crop-lost",
+        "cta-outside-safe-area"
+      ],
+      "windowA": {
+        "x": 0.3268841911764706,
+        "y": 0.1316911764705882,
+        "width": 0.6352941176470588,
+        "height": 0.47647058823529415
+      },
+      "windowB": {
+        "x": 0.3268841911764706,
+        "y": 0.41625,
+        "width": 0.6352941176470588,
+        "height": 0.47647058823529415
+      },
+      "evidence": "phantoms",
+      "blockers": [
+        "bottom"
+      ],
+      "ctaText": "Garanta agora a sua vaga na mentoria com desconto exclusivo de lancamento e bonus especiais",
+      "framing": {
+        "good": {
+          "feasible": true,
+          "window": {
+            "x": 0.3268841911764706,
+            "y": 0.1316911764705882,
+            "width": 0.6352941176470588,
+            "height": 0.47647058823529415
+          },
+          "placed": {
+            "x0": 0.41022858796296297,
+            "y0": 0.3925925925925926,
+            "x1": 0.589771412037037,
+            "y1": 0.7074074074074075
+          },
+          "upscale": 1.4756944444444444
+        },
+        "lost": {
+          "feasible": true,
+          "window": {
+            "x": 0.3268841911764706,
+            "y": 0.41625,
+            "width": 0.6352941176470588,
+            "height": 0.47647058823529415
+          },
+          "placed": {
+            "x0": 0.41022858796296297,
+            "y0": -0.2046296296296297,
+            "x1": 0.589771412037037,
+            "y1": 0.11018518518518516
+          },
+          "direction": "+y",
+          "visibleShare": 0.3499999999999998
+        },
+        "target": "lower-third",
+        "blockers": [
+          "bottom"
+        ],
+        "covering": [
+          "lower-third",
+          "center"
+        ],
+        "intersecting": [
+          "lower-third",
+          "upper-third",
+          "center"
+        ]
+      },
+      "labels": [
+        {
+          "outputId": "9295ab265fafd8e5-16x9-combined",
+          "defect": "caption-over-face",
+          "format": "16:9",
+          "startFrame": 8,
+          "endFrame": 28,
+          "codes": [
+            "SUBTITLE_FACE_OVERLAP_IN_PIXELS"
+          ]
+        },
+        {
+          "outputId": "9295ab265fafd8e5-16x9-combined",
+          "defect": "crop-lost",
+          "format": "16:9",
+          "startFrame": 45,
+          "endFrame": 90,
+          "codes": [
+            "SUBJECT_NOT_VISIBLE_IN_PIXELS",
+            "SUBJECT_CLIPPED_IN_PIXELS"
+          ]
+        },
+        {
+          "outputId": "9295ab265fafd8e5-16x9-combined",
+          "defect": "cta-outside-safe-area",
+          "format": "16:9",
+          "startFrame": 31,
+          "endFrame": 44,
+          "codes": [
+            "INK_OUTSIDE_SAFE_AREA_IN_PIXELS",
+            "INK_CLIPPED_BY_CANVAS_IN_PIXELS"
+          ]
+        }
+      ]
+    }
+  ],
+  "policy": {
+    "id": "w67-mp4-pixel-critic/v1",
+    "sha256": "c7089682fa32b55fd39a16e359e8d92217e8339773995d416627a1cbbaaca687",
+    "body": {
+      "id": "w67-mp4-pixel-critic/v1",
+      "ink": {
+        "lumaThresholdLevels": 40,
+        "minChangedNeighboursOfFour": 2,
+        "minInkPixels": 40
+      },
+      "faceMarginPixels": 0,
+      "safeArea": {
+        "segmentationTolerancePixels": 2
+      },
+      "density": {
+        "limitFractionOfCanvasPixels": 0.2
+      },
+      "subject": {
+        "primary": "largest-source-detection-by-area",
+        "lostBelowVisibleFraction": 0.1,
+        "clippedBelowVisibleFraction": 0.9,
+        "outputConfirmationMinIou": 0.2
+      },
+      "registration": {
+        "algorithm": "orb-2000-ratio0.75-similarity-ransac3px/v1",
+        "minInliers": 25,
+        "minInlierRatio": 0.3,
+        "maxMedianResidualPixels": 2.5,
+        "minScale": 0.25,
+        "maxScale": 6,
+        "maxRotationDegrees": 2
+      },
+      "sampling": {
+        "allFramesUpTo": 600,
+        "strideFrames": 5,
+        "includeInkRunEdges": true,
+        "includeCutBoundaries": true
+      }
+    }
+  },
+  "oracle": {
+    "union": "every box of omz-face-detection-0204-v9 and omz-face-detection-retail-0004 (not merged), plus the registered projection of the source detections; unknown when no face evidence exists",
+    "models": [
+      {
+        "id": "omz-face-detection-0204-v9",
+        "role": "product-detector",
+        "xmlSha256": "33394c03a4c88cbcd2537c5d232c149b69f2a7ad406d85d2323d7303f17d7ee3",
+        "binSha256": "0bbc0e08b297ce385b67ad742fd7612947e855c8f50c625b94835f883a6e4102",
+        "xmlBytes": 185457,
+        "binBytes": 7269196,
+        "inputSize": 448,
+        "faceLabel": 0,
+        "scoreFloor": 0.5,
+        "outputPolicyId": "w62-v9-visible-intersection-continuous/v1",
+        "outputPolicySha256": "a3c641fd9f17c07873ce33a6d655001bddbdbed5c4f72351ce9718ee9cacad03",
+        "licence": "Apache-2.0",
+        "licenceSha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "sourceCommit": "eda1863a6d60b09551df9d039cff2377d6ddd4d6"
+      },
+      {
+        "id": "omz-face-detection-retail-0004",
+        "role": "independent-second-detector",
+        "xmlSha256": "90922d199016d18128bdaba488bdb1628fce50efcc81155ede7949cbba3dd979",
+        "binSha256": "89349ce12dd21c5263fb302cd3ffd4b73c35ea12ed98aff863d03a2cf3a32464",
+        "xmlBytes": 105340,
+        "binBytes": 2352984,
+        "inputSize": 300,
+        "faceLabel": 1,
+        "scoreFloor": 0.5,
+        "outputPolicyId": "w67-ssd-visible-intersection-continuous/v1",
+        "outputPolicySha256": "80ae38ed5757a5130b160567b8ea0b4d0be07e8613b82293dd8f1fb4c1062b10",
+        "licence": "Apache-2.0",
+        "licenceSha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "sourceCommit": "eda1863a6d60b09551df9d039cff2377d6ddd4d6"
+      }
+    ],
+    "registration": {
+      "algorithm": "orb-2000-ratio0.75-similarity-ransac3px/v1",
+      "minInliers": 25,
+      "minInlierRatio": 0.3,
+      "maxMedianResidualPixels": 2.5,
+      "minScale": 0.25,
+      "maxScale": 6,
+      "maxRotationDegrees": 2
+    }
+  },
+  "controls": {
+    "perOutput": [
+      "delivered",
+      "captions-off",
+      "cta-off",
+      "overlays-off"
+    ],
+    "renderer": "FfmpegEditorialProxyRenderer (the product renderer), proxy canvas of each format"
+  },
+  "acceptance": {
+    "unit": "defect x format x interval",
+    "zeroFalseSafe": true,
+    "recallDefects": 1,
+    "precision": 1,
+    "unknownSamples": 0,
+    "decodeFailures": 0,
+    "exactLocalization": "flagged frames of the defect class equal the labelled interval; frames adjacent to it are negatives",
+    "ifNotMet": "the face-related checks FAIL and that is the result: no tuning, no relabelling, no new threshold"
+  },
+  "codeHashes": {
+    "src/v2/domain/mp4-pixel-quality.ts": "e4766339cc05d3b054e0bf1cbca49c731634c717c8acb9fd0fc1c050a2d6c3c0",
+    "src/v2/domain/mp4-pixel-geometry.ts": "68dd071620398f2f3e9dcda2122f72804216ce1fb2fd035ced8e5fb7ec611f43",
+    "src/v2/domain/pixel-face-oracle.ts": "10d45fda9dda82f911c69508e3d3eb315d5feb816488f506111e7745abadd350",
+    "src/v2/domain/face-detector-output.ts": "d63b4df55ebd324488261a692dd7b982d58b68bff6ca3a33f30cd97ccfb84ebe",
+    "src/v2/infrastructure/media/ffmpeg-mp4-pixel-critic.ts": "af37095bc37ecb16cbdf319f37be5901b9598a63cd101fe2cc112a06de8f6558",
+    "src/v2/infrastructure/perception/openvino-pixel-oracle.ts": "e0b9502e5e2a5fc1137bca03f62a88abc6db6a6efdff045eacafef9fa4771877",
+    "src/v2/infrastructure/perception/openvino_pixel_oracle_bridge.py": "0f6e599ad7a3ecbcc52a1c1016fcde9734b26874d6daa938a368365bf32627bb",
+    "tests/v2/w67/corpus-geometry.mjs": "245483f0871f7da2048f9c5f3c249aae407f87b0d254951fa457a447104ed1e7",
+    "tests/v2/w67/render-world.mjs": "205a483a0fb2dccf7616acc27e966bcdbd84774c59c9a4b5a2246f208c6257f5",
+    "tests/v2/w67/corpus-generate.mjs": "788953332b9c9818ef44559d51c471cd7d1ef554396d5a6db63f43cc3844dd50",
+    "tests/v2/w67/corpus-evaluate.mjs": "a042748d20875e82282d39b362fc05c4d1b28b7400d5db47870a7ae60281b965",
+    "tests/v2/w67/corpus-run.mjs": "5c017bfe1211772e419f99ad9ba4336a9715aa1106f55636741a7ffd5dcb2b66",
+    "tests/v2/w67/oracle-config.mjs": "875b684fa9ead81825e5e7e2e0714053f4699d19a45ca4f94fd99b51b191c4aa"
+  },
+  "limits": [
+    "Eyes are unknown (no eye annotation): eye detection and eye safety are not evaluated.",
+    "Twenty outputs from two photographs are mechanical controls, not a population estimate and not natural video: the source is a held still.",
+    "Ground truth completeness (no other face in the photograph) rests on the Open Images validation annotation; it was not adjudicated by a human.",
+    "The caption defect uses face evidence handed to the planner (phantom boxes, omitted real face); the defect position is decided here from public preset geometry, the final band is the planner's ordinary result and is reported against the label.",
+    "Density has no seeded defect: it is measured on every output (false positives only), its recall is not evaluated.",
+    "The proxy canvas (540x960 / 960x540) is the delivered MP4 of these outputs."
+  ],
+  "manifestHash": "5fe1eaf409f84055d103a714d0d194927910565ef9e5710c60872c74048d4f0a"
+}

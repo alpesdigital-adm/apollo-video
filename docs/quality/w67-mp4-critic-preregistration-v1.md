@@ -1,6 +1,6 @@
 # W67 — pré-registro do crítico independente do MP4 entregue (v1)
 
-Estado: **emenda ao protocolo e pré-registro, em duas etapas, ambas commitadas ANTES do primeiro render do corpus registrado (calibration)**. Etapa 1 (este commit): regras, desenho, política, critérios de aceite. Etapa 2 (commit seguinte, também antes de qualquer render do corpus registrado): o manifesto congelado (imagens selecionadas, caixas, janelas, rótulos, hashes de código e da política). Há ensaios de desenho anteriores a esta etapa, e este documento os declara no §9. Este documento emenda `w67-final-pixel-oracle-v1.md` e `w67-corpus-adjudication-sequence-v3.md` sem apagar nenhum dos dois; os bytes, quotas e resultados do caminho CVDF (v2/v3) permanecem como estão (STOP por quotas e direitos). Nada aqui é evidência de qualidade: é o contrato contra o qual o resultado será medido, e o resultado — qualquer que seja — será publicado em `w67-mp4-critic-results-v1.md`.
+Estado: **emenda ao protocolo e pré-registro, em duas etapas, ambas commitadas ANTES do primeiro render do corpus registrado (calibration)** (etapa 1 commit `524755c2`; etapa 2 = o commit que contém este texto e o manifesto). Etapa 1 (este commit): regras, desenho, política, critérios de aceite. Etapa 2 (commit seguinte, também antes de qualquer render do corpus registrado): o manifesto congelado (imagens selecionadas, caixas, janelas, rótulos, hashes de código e da política). Há ensaios de desenho anteriores a esta etapa, e este documento os declara no §9. Este documento emenda `w67-final-pixel-oracle-v1.md` e `w67-corpus-adjudication-sequence-v3.md` sem apagar nenhum dos dois; os bytes, quotas e resultados do caminho CVDF (v2/v3) permanecem como estão (STOP por quotas e direitos). Nada aqui é evidência de qualidade: é o contrato contra o qual o resultado será medido, e o resultado — qualquer que seja — será publicado em `w67-mp4-critic-results-v1.md`.
 
 Manifesto congelado (etapa 2): `docs/quality/w67-mp4-critic-corpus-v1.json`, cujo SHA-256 e `manifestHash` canônico (cobre tudo menos o instante do congelamento) serão registrados no commit da etapa 2. O manifesto contém os IDs e hashes das fontes, as caixas humanas originais, as janelas de crop, os defeitos, os intervalos, os rótulos esperados, a política com todas as tolerâncias e unidades, os pins dos modelos e o SHA-256 de cada arquivo de código que define o oráculo, o crítico, o gerador, o avaliador e o executor. O executor recusa iniciar se o manifesto não se re-deriva byte a byte ou se qualquer desses arquivos mudou.
 
@@ -33,7 +33,69 @@ Regras, aplicadas ao split calibration (60 itens):
 - R5 ordem crescente de `sha256("w67-mp4-v1|select|<ImageID>")`, primeiros N = 2; nenhum resultado de detector, renderer ou crítico entra;
 - R6 exclusão visual, só da foto de origem: o "rosto" anotado é uma representação (retrato impresso ou pintado) ou há outros rostos visíveis sem anotação.
 
-Resultado: registrado na etapa 2 (a regra é determinística; o resultado depende só dos metadados do manifesto V5 e da inspeção visual do §1).
+### Resultado da seleção (etapa 2)
+
+Manifesto congelado: `docs/quality/w67-mp4-critic-corpus-v1.json`, SHA-256 do arquivo `f88584cdd473906544d784b4379bbbc2f04ed52e68a4016915ac2a0b76d90b2f`, `manifestHash` canônico `5fe1eaf409f84055d103a714d0d194927910565ef9e5710c60872c74048d4f0a` (cobre tudo menos o instante do congelamento). O manifesto leva os SHA-256 dos 13 arquivos de código congelados e da política; o executor se recusa a rodar se qualquer um mudar ou se o manifesto não se re-derivar das entradas.
+
+Só **3** imagens do calibration passam R1–R4. A primeira na ordem de R5 (`968a460084c588a1`) foi excluída por R6 depois de eu olhar a foto de origem (e só ela): o "rosto" anotado é o retrato gravado numa cédula de dois dólares (a foto mostra duas cédulas sobre uma mesa). É uma representação, mesmo com `IsDepiction = 0` na anotação. As outras duas foram vistas na mesma inspeção e passam em R6 (um homem de cartola com trompete; um homem deitado numa cama de hospital; na segunda aparece um rosto minúsculo impresso na capa de um livro na borda, não "claramente visível"). A inspeção é do agente redator (Claude), automatizada, **não é inspeção humana**, e foi feita **antes de qualquer render ou detector sobre foto do calibration**. Com a exclusão, restam exatamente 2 elegíveis: o corpus é esse, sem margem de escolha.
+
+Candidatos: 60; elegíveis pelas regras R1–R4: 3; elegíveis finais: 2.
+
+Contagem de motivos de exclusão (uma imagem pode ter mais de um):
+
+| motivo | imagens |
+| --- | ---: |
+| R3:odd-dimension | 23 |
+| R2:no-human-face-box | 20 |
+| R2:box-flagged-occluded-truncated-group-or-depiction | 15 |
+| R2:more-than-one-annotated-box | 10 |
+| R4:9 | 6 |
+| R4:16 | 5 |
+| R6:visual-exclusion | 1 |
+
+Imagens que passam R1–R4 (ordem por chave de ranking `sha256("w67-mp4-v1|select|<ImageID>")`):
+
+| rank | ImageID | estrato | R6 | selecionada |
+| ---: | --- | --- | --- | --- |
+| 1 | `968a460084c588a1` | lower | R6:visual-exclusion:DEPICTION_NOT_FLAGGED | não |
+| 2 | `1580caef8efed517` | small | — | sim |
+| 3 | `9295ab265fafd8e5` | small | — | sim |
+
+Exclusões visuais (R6), feitas pelo agente redator Claude (etapa automatizada, **não adjudicação humana**):
+
+- `968a460084c588a1` — The annotated Human face is the engraved portrait on a printed US two-dollar banknote (the photograph shows two banknotes on a table). Open Images has IsDepiction=0 for the box, but the rule R6 excludes depictions. Decided from the source photograph only, before any render or detector run on any calibration photograph.
+
+Fotos selecionadas (proveniência; mídia só no diretório privado):
+
+| ImageID | autor | título | licença | página original | mirror SHA-256 | dimensões | caixa humana (xmin, ymin, xmax, ymax; fonte) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `1580caef8efed517` | Zaneology | Zane Aveton shared an Instagram video with you | https://creativecommons.org/licenses/by/2.0/ | https://www.flickr.com/photos/zaneology/9202606673 | `a1984a325bbc9d3516236bd3a3fc7d82fce55c6d246a2b5f037bcfbb16c1b039` | 1024×1024 | 0.40794224, 0.20036101, 0.51805055, 0.33212996; xclick |
+| `9295ab265fafd8e5` | Franco Dal Molin | Valium B | https://creativecommons.org/licenses/by/2.0/ | https://www.flickr.com/photos/orsorama/9176313286 | `b3c62f4f9ccbfea418c3e007fce952339ffe6a44b635b888e5457845508aba6a` | 1024×768 | 0.5875, 0.31875, 0.7015625, 0.46875; xclick |
+
+Saídas (20), enquadramento por construção:
+
+| saída | faixa-alvo da cue | bloqueadores fabricados | caixa humana projetada no clipe A (x0, y0, x1, y1) | fração visível no clipe B | intervalos rotulados |
+| --- | --- | --- | --- | ---: | --- |
+| 1580caef8efed517-9x16-clean | upper-third | — | 0.368, 0.269, 0.632, 0.446 | 1.00 | — |
+| 1580caef8efed517-9x16-caption | upper-third | bottom, lower-third | 0.368, 0.269, 0.632, 0.446 | 1.00 | caption-over-face [8, 28) |
+| 1580caef8efed517-9x16-crop | upper-third | — | 0.368, 0.269, 0.632, 0.446 | 0.35 | crop-lost [45, 90) |
+| 1580caef8efed517-9x16-cta | upper-third | — | 0.368, 0.269, 0.632, 0.446 | 1.00 | cta-outside-safe-area [31, 44) |
+| 1580caef8efed517-9x16-combined | upper-third | bottom, lower-third | 0.368, 0.269, 0.632, 0.446 | 0.35 | caption-over-face [8, 28); crop-lost [45, 90); cta-outside-safe-area [31, 44) |
+| 1580caef8efed517-16x9-clean | lower-third | — | 0.426, 0.393, 0.574, 0.707 | 1.00 | — |
+| 1580caef8efed517-16x9-caption | lower-third | bottom | 0.426, 0.393, 0.574, 0.707 | 1.00 | caption-over-face [8, 28) |
+| 1580caef8efed517-16x9-crop | lower-third | — | 0.426, 0.393, 0.574, 0.707 | 0.35 | crop-lost [45, 90) |
+| 1580caef8efed517-16x9-cta | lower-third | — | 0.426, 0.393, 0.574, 0.707 | 1.00 | cta-outside-safe-area [31, 44) |
+| 1580caef8efed517-16x9-combined | lower-third | bottom | 0.426, 0.393, 0.574, 0.707 | 0.35 | caption-over-face [8, 28); crop-lost [45, 90); cta-outside-safe-area [31, 44) |
+| 9295ab265fafd8e5-9x16-clean | upper-third | — | 0.340, 0.361, 0.660, 0.539 | 1.00 | — |
+| 9295ab265fafd8e5-9x16-caption | upper-third | bottom, lower-third | 0.340, 0.361, 0.660, 0.539 | 1.00 | caption-over-face [8, 28) |
+| 9295ab265fafd8e5-9x16-crop | upper-third | — | 0.340, 0.361, 0.660, 0.539 | 0.35 | crop-lost [45, 90) |
+| 9295ab265fafd8e5-9x16-cta | upper-third | — | 0.340, 0.361, 0.660, 0.539 | 1.00 | cta-outside-safe-area [31, 44) |
+| 9295ab265fafd8e5-9x16-combined | upper-third | bottom, lower-third | 0.340, 0.361, 0.660, 0.539 | 0.35 | caption-over-face [8, 28); crop-lost [45, 90); cta-outside-safe-area [31, 44) |
+| 9295ab265fafd8e5-16x9-clean | lower-third | — | 0.410, 0.393, 0.590, 0.707 | 1.00 | — |
+| 9295ab265fafd8e5-16x9-caption | lower-third | bottom | 0.410, 0.393, 0.590, 0.707 | 1.00 | caption-over-face [8, 28) |
+| 9295ab265fafd8e5-16x9-crop | lower-third | — | 0.410, 0.393, 0.590, 0.707 | 0.35 | crop-lost [45, 90) |
+| 9295ab265fafd8e5-16x9-cta | lower-third | — | 0.410, 0.393, 0.590, 0.707 | 1.00 | cta-outside-safe-area [31, 44) |
+| 9295ab265fafd8e5-16x9-combined | lower-third | bottom | 0.410, 0.393, 0.590, 0.707 | 0.35 | caption-over-face [8, 28); crop-lost [45, 90); cta-outside-safe-area [31, 44) |
 
 ## 4. O corpus: 20 saídas, 2 fotos × 2 formatos × 5 variantes
 
@@ -116,7 +178,10 @@ Tudo o que foi renderizado ou inferido antes desta etapa, em ordem, e o que cada
 2. Tentativas do oráculo OpenVINO real sobre fotos do split **development** (só inferência, sem renderer): três falharam antes de inferir por defeitos da ponte (contagem de argumentos, erro de sintaxe num patch, raiz de módulos Python incompleta — OpenVINO e OpenCV/NumPy ficam em duas raízes). Corrigidos; nenhuma medida de detecção foi produzida.
 3. Um passe de ensaio de desenho (`w67-dev-rehearsal-86ad1605`): renderizou, pelo renderer real do produto, as 10 saídas da foto de development `58b5c1b5a4add461` (um reflexo num forno, escolhida pela mesma regra R1–R5 aplicada ao split development, que só tem uma elegível); a avaliação abortou na checagem de congelamento de código (eu havia corrigido a raiz de módulos). **Nenhum resultado foi lido.**
 
-A partir desta etapa, os ensaios (split development, fotos `58b5c1b5a4add461` e `a0f540fd64c97690` — esta última escolhida à mão por ser um rosto nítido, fora da regra, marcado `rehearsal` no manifesto) servem para achar defeitos de encanamento e de desenho; o que mudar por causa deles será dito na etapa 2. **Nenhuma foto do calibration foi renderizada, e nenhum detector foi executado sobre uma foto do calibration, antes do commit da etapa 2.**
+4. Ensaio de desenho 3 (`w67-dev-rehearsal3-64f2669b`, split **development**, fotos `58b5c1b5a4add461` e `a0f540fd64c97690`; a segunda foi escolhida à mão por ser um rosto nítido, fora da regra, e o manifesto de ensaio a marca `rehearsal`): fumaça do oráculo, render de 20 saídas (76 s) e avaliação completa (346 s) com exit 0 em todos os passos e pós-voo limpo. Resultado, **uma única corrida (N = 1 por unidade), sem réplica**: 24 unidades rotuladas, 24 detectadas com intervalo exato, 0 falso seguro, 0 marcação em unidade sem rótulo, 0 quadro `unknown`, 0 falha de decodificação; as 4 saídas limpas passaram. O oráculo achou a caixa humana (IoU ≥ 0,3) em 1440 de 1440 quadros com o rosto inteiro nos dois modelos. Na corrida, o excesso do CTA para fora da safe area foi de 31,9 px (9:16) e de 2,5 a 3,5 px (16:9). Esse 16:9 é um excesso pequeno (2,5 a 3,5 px de 1920), e foi o que o gerador construiu; não ajustei nada por isso.
+5. **O que mudou por causa dos ensaios:** o desenho do gerador, os rótulos, a política e as tolerâncias **não** mudaram depois do ensaio 3 (os SHA-256 dos 13 arquivos de código e da política do manifesto desta etapa são iguais aos do manifesto de ensaio 3, conferido). As mudanças de código feitas durante os ensaios foram de encanamento (ponte do oráculo: contagem de argumentos e raízes de módulos; falha de lote do oráculo vira `unknown` em vez de derrubar o crítico; decodificação do retail-0004 valida id/rótulo só nos slots selecionados), e o selo do relatório passou a registrar os parâmetros de amostragem realmente usados (para medir saídas longas); todas anteriores ao congelamento desta etapa e nenhuma motivada por uma medida de detecção no calibration. Um item de desenho vindo dos ensaios sintéticos está no item 1 (linha do tempo).
+
+Os ensaios servem para achar defeitos de encanamento e de desenho; o que mudou por causa deles está dito acima. **Nenhuma foto do calibration foi renderizada, e nenhum detector foi executado sobre uma foto do calibration, antes do commit da etapa 2.**
 
 ## 10. Limites
 
