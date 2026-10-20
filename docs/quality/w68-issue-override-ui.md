@@ -117,9 +117,28 @@ Ids de run, contagens e mutações: ver o relatório final do wave (seção 9).
 - **Pools de conexão no harness local**: a role do banco descartável do harness (`apollo_s2d`) aceita 12 conexões; a jornada abre o cliente do teste, o cliente do worker em processo e **dois** servidores (o do dono e o do estranho). Com `connection_limit=5` por processo (o que a CI configura), a leitura do workspace do estranho recebeu `FATAL: too many connections` (500, e a página mostrou `project-unavailable` em vez de `project-not-found`) em 5 de 5 execuções com os pools da CI (`full-b2` e as repetições). A jornada agora dá a cada cliente um pool pequeno (2 a 3); com isso passou 2 de 2. A CI do GitHub usa Postgres com 100 conexões e não é afetada, mas a falha era real do ponto de vista do que a página mostra quando o banco recusa: a página não confunde "recusado" com "não encontrado" (diz "A solicitação não pôde ser concluída").
 - **Três passos do lote local que não são do W68** (ver o relatório final): `library-journey` espera MinIO/S3 (`'local' !== 's3'`, ambiente do harness, falha em todas as execuções anteriores); `synthetic-wave24-journey` (passo sem o catálogo W58) falha com o mesmo 409 `PERSISTENCE_CONFLICT` em `origin/main` 229d5a05 sem nenhuma mudança do W68 (executado em worktree limpa do commit base); `podcast-multicam` falhou uma vez por transação do Prisma que passou de 30 s (`color-plan`) e passou na repetição.
 
+## 7b. Validação após a fusão com W67 (33593ff6 e c65c31dc) e os lotes locais, sem filtro
+
+**Correção de relato.** O primeiro `full-b2` pós-fusão (`w68m-full-b2-943d7a13`) teve **seis** passos reprovados, não dois: 038 `podcast-multicam` (transação Prisma passou de 30 s), 039 `teacher-screen` (idem), 042 `wave20-browser`, 043 `editor-reliability` (card do projeto não apareceu em 20 s), 045 `final-export` ("Owned Chromium lifecycle is not terminal") e 052 `integration-api` (card não apareceu em 25 s, 754 s). O resumo anterior só enxergou dois porque o extrator de contagem descartava as linhas de fim de passo quebradas pelo harness; o extrator agora lê por expressão regular e foi conferido contra o log.
+
+| Passo | Lote `w68m-full-b2-943d7a13` | Repetição quieta |
+| --- | --- | --- |
+| 038 podcast-multicam | 288 s, `P2028` (transação 30 s) | passou em `w68-rerun1-b5c925e0`; passou em `w68p-prefix-d3a48701` (151 s) |
+| 039 teacher-screen | 258 s, `P2028` | passou em `w68p-prefix-d3a48701` (107 s) |
+| 042 wave20-browser | 244 s, sem resposta do color-match | passou em `w68o-iso-82a3f3b6` (76 s) e em `w68p-prefix-d3a48701` (92 s) |
+| 043 editor-reliability | 168 s, card ausente | passou em `w68m-dash-95438860` (93 s) e em `w68p-prefix-d3a48701` (62 s) |
+| 045 final-export | 111 s, Chromium não terminal | passou em `w68o-iso-82a3f3b6`, `w68p-prefix-d3a48701`; falha de novo em lotes seguintes (abaixo) |
+| 052 integration-api | 754 s, card ausente | passou em `w68m-dash-95438860` (439 s) |
+
+Os passos eram 2 a 10 vezes mais lentos no meio do lote (inclusive os que este ramo não toca), o que aponta para carga do hospedeiro; não foi medido por outro caminho, é uma inferência. Dois lotes seguintes na mesma cabeça repetiram 042 e 045 (`w68n-full-b2-9bac87e8`: 042 devolveu 429 no lugar de 409 numa chave repetida, 045 de novo o Chromium) e um lote na cabeça final (`w68q-full-b2-9ab8afb4`) reprovou só 045. Isolados, 038-045 inteiros passaram (`w68p-prefix-d3a48701`, 8 passos, 9 testes).
+
+**045 (`prisma-final-export`) é intermitente também em `origin/main`.** A prova passa e a limpeza do Chromium do harness do Windows (prazo de 5 s por etapa, listagem de processos pelo PowerShell) reprova com `Owned Chromium lifecycle is not terminal`, depois de todas as asserções. Controle em worktree limpa de `origin/main` c65c31dc, mesmo passo, 3 execuções: 2 reprovadas (`w68r-ctl-10bc911a`); na cabeça do W68, 3 execuções: 2 reprovadas (`w68r-mine-f6f95101`). Mesma taxa, mesma mensagem. Não é do W68; segue aberto como defeito de infraestrutura de teste local.
+
+**Lotes antes da fusão (cabeça `b962e7cd`/`9cc23283`)**: unit `w68-final-unit-b34fd588` (3710 testes, 0 falha), b1 `w68-final-full-b1-2b916b0d` (41 passos, 0 falha), b3 `w68-final-full-b3-b0802cec` (2 reprovações que não são do W68: `library-journey` espera S3/MinIO; `synthetic-wave24-journey` sem o catálogo W58 falha também em `origin/main` 229d5a05 em worktree limpa, `w68-base3-8daa4e64`, e com o bundle Remotion construído passa isolado: `w68m-w24-df6fbcad`, 25/25), b2 `w68-final2-full-b2-e2c9557b` (52 passos, 0 falha).
+
 ## 8. Lacunas abertas
 
-- Sem render **final** no browser (ver 5). Coberto por unidade: o hash de entrada do final e o do proxy incluem o conjunto de exceções; o impacto lista o final como desatualizado.
+- Sem render **final** no browser (ver 5). Coberto por unidade: o hash de entrada do final e o do proxy incluem o conjunto de exceções (`tests/v2/project-final-export.test.mjs`, `w68-subtitle-override-render.test.mjs`), e o final recusa uma aprovação dada para outro conjunto (`subtitleOverridesMatchApproval`, conferido contra `formatQuality.subtitleOverridesHash` do proxy aprovado, aditivo no esquema v3 de revisão); o impacto lista o final como desatualizado.
 - A saída 16:9 não tem issue de reenquadramento (quadro inteiro sobre fonte 16:9): o par override/reset de reenquadramento é provado só em 9:16.
 - O alvo de reenquadramento do browser proof é o issue `REFRAME_PERCEPTION_UNCERTAIN` (sem evidência); o caso de um bloqueio duro de reenquadramento resolvido à mão não foi montado.
 - Estilo: provado em unidade (ASS) e no recibo; não há captura de browser de um estilo diferente. Texto e visibilidade: provados no browser.
