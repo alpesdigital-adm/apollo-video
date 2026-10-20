@@ -179,3 +179,22 @@ O reconhecimento é um registro de quem aceitou, quando (instante UTC canônico)
 **Proveniência do detector na projeção.** Cada região protegida `source-projection` do relatório selado agora traz `sourceModels` (qual detector produziu o rosto da fonte que ela projeta); `measureSubject` devolve também o índice do rosto de origem de cada projeção mantida, o que vale quando uma projeção anterior sai do quadro. A suíte sintética com o renderer real confere o campo.
 
 **O código depois da corrida registrada (declaração).** Três arquivos congelados mudaram depois da corrida registrada e da de sensibilidade: `mp4-pixel-geometry.ts` (devolve `projectedSourceFaceIndices`), `mp4-pixel-quality.ts` (só o tipo: `sourceModels` opcional) e `ffmpeg-mp4-pixel-critic.ts` (preenche `sourceModels`). Nada da lógica de detecção, de tolerância ou de veredito mudou. Consequências: (1) os SHA-256 de código do manifesto `w67-mp4-critic-corpus-v1.json` **deixam de bater** com a cabeça atual, então `corpus-run.mjs` **recusa rodar** o corpus registrado nesta cabeça; reproduzir a corrida registrada exige o commit `ab3e4918`; (2) os relatórios de uma nova corrida teriam hashes diferentes (campo novo), sem mudar quais quadros são marcados; (3) **o corpus registrado não foi rodado de novo** na cabeça nova: a evidência de detecção continua sendo a corrida `w67-calibration-run1-4fcf3a8c`, e a suíte sintética com o renderer real foi refeita na cabeça nova (§10). Uma nova corrida registrada sob este código seria um novo protocolo com novo congelamento.
+
+## 10. Gates e execuções locais depois da revisão (cabeça `772c568c`, depois do merge de `origin/main` 11823b72; árvore limpa)
+
+Gates diretos, todos exit 0: `typecheck`, `lint`, `lint:code`, `lint:whitespace`, `db:v2:validate`, `api:v1:validate`, `api:parity:validate`. O `next-env.d.ts` regenerado pelo build do harness foi restaurado (`git checkout`) e nunca foi commitado.
+
+| execução (harness, `APOLLO_S2D_CHECKOUT` = o worktree) | testes | passaram | falharam | pulados | resultado |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `w67-full-4-f362c445` (`npm test` completo + suíte sintética com o renderer real, com a asserção nova de `sourceModels`) | 3748 | 3735 | 0 | 13 | verde |
+| `w67-postmerge3-5f86bac1` (088 dashboard runtime journey, 059 export matrix, 070 W24) | 9 | 8 | 1 | 0 | 088 e 059 verdes (o `main` os consertou no W64); 070 falha, ver abaixo |
+| `w67-final-b2-10c562b3` (full-b2, com build) | 109 | 106 | 0 | 3 | verde |
+| `w67-final-b1-3fcec648` + `w67-final-b1tail-491de6dc` (full-b1, com build; o primeiro abortado pelo harness no 16º passo, o resto refeito) | 104 | 103 | 1 | 0 | ver abaixo (086 verde isolado: `w67-final-086-20345e57`) |
+| `w67-final-b3-97a1b370` (full-b3, com build) | 39 | 33 | 3 | 3 | 066 verde isolado (`w67-final-066-74364765`); 069 e 070 herdadas |
+
+O que cada falha foi:
+
+- **Abortos do harness, não do teste:** a consulta `Get-CimInstance Win32_Process` do observador de processos foi cancelada pelo WMI no meio do b1 (o passo `papi-051`, que passou na repetição, `w67-final-b1tail`). A mesma execução registrou uma consulta de identidade de 3 608 403 ms e o passo 066 do b3 durou 3 664 445 ms: a máquina ficou parada por cerca de uma hora (suspensão), o que estourou o `066 synthetic-production-journey` sem erro de asserção. O 066 verde isolado: `w67-final-066-74364765`.
+- **086 library-journey** (`'failed'` em vez de `'succeeded'` no upload, na repetição do b1): verde isolado (`w67-final-086-20345e57`); no b1 anterior à revisão ele também passou. Tratado como instabilidade sob carga, sem causa isolada.
+- **Herdadas:** `069 library-journey.e2e` (`'local' !== 's3'`: o ambiente local não tem o S3 versionado; igual na base `ba56e0db`, `w67-basecheck-b3-86a2660b`) e `070 synthetic-wave24-journey` (409 `PERSISTENCE_CONFLICT` no enqueue de render do project-a-final). **O 070 também falha no `origin/main` puro** (11823b72, sem nenhum commit do W67): `w67-maincheck-070-79564c34`; portanto o conserto do W64 no `main` não o resolveu e ele não vem deste trabalho.
+- O corpus registrado **não** foi rodado de novo (os arquivos congelados mudaram, §9); a suíte sintética com o renderer real foi, e passou 10 de 10 dentro de `w67-full-4`.
