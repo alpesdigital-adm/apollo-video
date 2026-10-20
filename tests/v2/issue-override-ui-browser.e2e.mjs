@@ -221,7 +221,7 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
         // Name what the page showed instead: a timeout alone says nothing about which of the editor's states it was in.
         const seen = await strangerPage.evaluate(() => ({ url: location.pathname, testids: [...document.querySelectorAll('[data-testid]')].map((node) => node.getAttribute('data-testid')).slice(0, 12), text: document.body.innerText.slice(0, 400) })).catch(() => null)
         await strangerPage.screenshot({ path: join(evidenceDir, 'w68-diagnostic-stranger-page.png'), fullPage: true }).catch(() => undefined)
-        throw new Error(`${error.message} :: the stranger's page showed ${serialize(seen)}`)
+        throw new Error(`${error.message} :: the stranger's page showed ${serialize(seen)} :: its server said ${other.logs.text.slice(-2500)}`)
       })
       assert.equal(await strangerPage.getByTestId('issue-override-panel').count(), 0, 'another workspace sees no panel')
       assert.ok(!(await strangerPage.getByTestId('project-not-found').innerText()).includes(world.projectId), 'the page does not echo the project it refused')
