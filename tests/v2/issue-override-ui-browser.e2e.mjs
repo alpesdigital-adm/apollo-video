@@ -190,8 +190,14 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       const expected = issuesOf(review).map((issue) => [issue.code, issue.severity === 'hard' ? 'block' : 'review', issue.elementIds?.find((id) => id.startsWith('subtitle:'))?.slice(9) ?? ''])
       assert.deepEqual(shown.map((row) => serialize(row)).sort(), expected.map((row) => serialize(row)).sort(), 'every issue of the persisted review is a chip: none hidden, none invented')
     }
+    // Every Command the editor sends ends in a NEW result block (its own command id); the block of the previous Command is never mistaken for it.
+    let lastApplied = null
     const waitRecompiled = async (label) => {
-      await page.getByTestId('issue-applied').waitFor()
+      const id = await waitFor(`${label}: a new result is shown`, async () => {
+        const shown = await page.locator('[data-testid="issue-applied"]').getAttribute('data-command-id', { timeout: 500 }).catch(() => null)
+        return shown && shown !== lastApplied ? shown : null
+      }, { timeoutMs: 120_000 })
+      lastApplied = id
       await page.locator('[data-testid="issue-recompile-status"][data-operation-status="succeeded"]').waitFor({ timeout: 300_000 })
       await waitFor(`${label}: the new review is shown`, async () => /depois: .* · laudo [0-9a-f]{12}/.test(await page.getByTestId('issue-comparison-after').innerText()), { timeoutMs: 120_000 })
     }
@@ -587,8 +593,11 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       await fillForm({ visible: false })
       pump.pause()
       await page.getByTestId('caption-apply').click()
-      await page.getByTestId('issue-applied').waitFor()
-      const hiddenTall = await afterCommand({ entry, ...snap, label: 'tall hide', type: 'apply-subtitle-segment-override', rendered: false })
+      const hiddenTall = await waitFor('the hide Command is committed', async () => { const version = await head(); return version.sequence === snap.beforeVersion.sequence + 1 ? version : null })
+      await page.locator(`[data-testid="issue-applied"][data-command-id="${hiddenTall.commandId}"]`).waitFor()
+      lastApplied = hiddenTall.commandId
+      await afterCommand({ entry, ...snap, label: 'tall hide', type: 'apply-subtitle-segment-override', rendered: false })
+      await page.locator('[data-testid="issue-recompile"][data-recompile-phase="queued"]').waitFor()
       await page.getByTestId('issue-recompile-status').waitFor()
       await page.getByTestId('issue-recompile-cancel').click()
       assert.equal(await page.getByTestId('issue-recompile-cancel').innerText(), 'Confirmar o cancelamento', 'cancelling asks for a confirmation')
