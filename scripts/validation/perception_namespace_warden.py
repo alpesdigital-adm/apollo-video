@@ -908,7 +908,7 @@ def init_main(expected_unshare):
         report["errors"].append({"stage": report["order"][-1] if report["order"] else "startup",
                                  "type": type(error).__name__, "code": getattr(error, "errno", None),
                                  # Names the fixed guard that raised, never its free text (CI run 39446701464 attempt 1 recorded only "RuntimeError").
-                                 **({"guardCode": CARRIER_GUARD_CODES.get(str(error), "UNCLASSIFIED_GUARD")} if type(error) is RuntimeError else {})})
+                                 **({"guardCode": guard_code(error)} if type(error) is RuntimeError else {})})
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         cleanup_deadline = min(deadline, time.monotonic() + 25)
@@ -987,6 +987,12 @@ CARRIER_GUARD_CODES = {
     "owner died without authenticated finish": "OWNER_DIED_WITHOUT_FINISH",
     "inner Node failed": "INNER_NODE_FAILED",
 }
+
+
+def guard_code(error):
+    # A stable name for the guard that raised: the table's code, else a digest of its (fixed, code-constant) message, never the text itself.
+    message = str(error)
+    return CARRIER_GUARD_CODES.get(message) or "GUARD_" + hashlib.sha256(message.encode("utf-8", "replace")).hexdigest()[:12]
 
 
 def carrier_diagnostic_fact(value):

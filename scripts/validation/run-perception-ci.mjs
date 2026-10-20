@@ -196,7 +196,7 @@ export async function createLinuxObservationContext(ownerPid = process.pid, io =
   assert.ok(Number.isSafeInteger(owner.uid) && owner.uid >= 0, 'Supervisor owner UID is unavailable')
   return { ownerIdentity: { ...verified }, ownerUid: owner.uid, baseline: new Map(),
     captureBaseline: true, observed: new Map(), knownMarkers: new Set(), exclusions: new Map(),
-    environmentDenials: new Map(), terminalEnvironmentRechecks: new Map(), rootPid: undefined, observationIo: io }
+    environmentDenials: new Map(), settledEnvironmentDenials: new Map(), terminalEnvironmentRechecks: new Map(), rootPid: undefined, observationIo: io }
 }
 
 function snapshotParentIdentities(entry, entriesByPid, prior) {
@@ -292,8 +292,12 @@ export async function observeLinuxProcesses(runId, context, io = linuxObservatio
     } catch (error) {
       if (['ENOENT', 'ESRCH'].includes(error.code)) { absent.add(identityKey(entry)); continue }
       if (error.code === 'EACCES') {
+        // The command name is read at the FIRST denial, before any re-read, so a settled denial still says what the process was (an execve
+        // changes it): cc1 vs a long-lived non-dumpable peer is exactly what the next occurrence must tell apart.
+        const comm = io.comm ? await io.comm(entry.pid).catch(() => null) : null
+        const facts0 = { comm: typeof comm === 'string' ? comm : null, firstState: entry.state }
         // Only a process born after the frozen baseline can be mid-exec under this run; a baseline peer keeps its single read.
-        let environReads = 1, gone = false
+        let environReads = 1, gone = false, rereadFailure
         if (!context.baseline.has(identityKey(entry))) {
           const startedAt = Date.now(), startedMonotonic = performance.now()
           for (let attempt = 0; attempt < ENVIRON_RECHECK_ATTEMPTS; attempt += 1) {
@@ -304,14 +308,26 @@ export async function observeLinuxProcesses(runId, context, io = linuxObservatio
             environReads += 1
             try { facts = await readFacts(); break } catch (again) {
               if (['ENOENT', 'ESRCH'].includes(again.code)) { gone = true; break }
-              if (again.code !== 'EACCES') break
+              if (again.code !== 'EACCES') { rereadFailure = again; break }
             }
           }
         }
+        if (environReads > 1 && (gone || facts)) {
+          // A denial that did not persist is evidence too, and it is kept in the receipt: settled (readable once the exec completed) or gone.
+          context.settledEnvironmentDenials ??= new Map()
+          context.settledEnvironmentDenials.set(identityKey(entry), { pid: entry.pid, starttime: entry.starttime, code: error.code,
+            outcome: gone ? 'gone' : 'settled', environReads, ...facts0, ppid: entry.ppid, uid: entry.uid, observedAt: new Date().toISOString() })
+          assert.ok(context.settledEnvironmentDenials.size <= 16_384, 'Settled environment denial inventory exceeds observation bound')
+        }
         if (gone) { absent.add(identityKey(entry)); continue }
+        if (rereadFailure) {
+          // A re-read error that is not EACCES keeps its own code and is reported as itself, never under the first EACCES.
+          denialFacts.set(identityKey(entry), { ...facts0, environReads, firstCode: error.code })
+          denialReceipt(entry, rereadFailure, null, 'environment-error-not-eligible')
+          failures.push(rereadFailure); continue
+        }
         if (!facts) {
-          const comm = io.comm ? await io.comm(entry.pid).catch(() => null) : null
-          denialFacts.set(identityKey(entry), { comm: typeof comm === 'string' ? comm : null, environReads })
+          denialFacts.set(identityKey(entry), { ...facts0, environReads })
           denied.push({ entry, error }); continue
         }
       } else {
@@ -624,6 +640,7 @@ export async function supervisePerceptionCommand({ command = process.execPath, a
     report.observedProcesses = [...observed.values()]
     report.excludedPreexistingProcesses = [...(observationContext?.exclusions.values() ?? [])]
     report.environmentDenials = [...(observationContext?.environmentDenials.values() ?? [])]
+    report.settledEnvironmentDenials = [...(observationContext?.settledEnvironmentDenials?.values() ?? [])]
     report.terminalEnvironmentRechecks = [...(observationContext?.terminalEnvironmentRechecks.values() ?? [])]
     report.processBaseline = observationContext ? {
       ownerIdentity: observationContext.ownerIdentity, ownerUid: observationContext.ownerUid,

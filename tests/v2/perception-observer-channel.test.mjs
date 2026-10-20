@@ -193,11 +193,15 @@ test('root receipt descriptor supports coalesced frames with fatal UTF-8 and a b
 
 // CI run 39446701464 attempt 2: the suite passed, the warden's final receipt succeeded and it closed with 0; a heartbeat byte written to its already
 // closed control pipe answered EPIPE and was the only error.
-test('an EPIPE on the warden control pipe is benign only after its successful final receipt and a zero close; before that it is an error', () => {
-  const epipe = { name: 'Error', code: 'EPIPE', message: 'write EPIPE' }
-  const settled = settleControlPipeErrors({ pipeErrors: [epipe], rootFinal: { success: true }, code: 0, childCloseObserved: true })
-  assert.deepEqual(settled, { errors: [], afterFinal: [epipe] })
+test('an EPIPE on the warden control pipe is benign only when captured AFTER the final receipt, and the final succeeded with a zero close', () => {
+  const after = { name: 'Error', code: 'EPIPE', message: 'write EPIPE', afterFinal: true }
+  const before = { ...after, afterFinal: false }
+  const closed = { rootFinal: { success: true }, code: 0, childCloseObserved: true }
+  assert.deepEqual(settleControlPipeErrors({ pipeErrors: [after], ...closed }), { errors: [], afterFinal: [after] })
   assert.deepEqual(settleControlPipeErrors({ pipeErrors: [], rootFinal: null, code: null, childCloseObserved: false }), { errors: [], afterFinal: null })
+  // an EPIPE before the final stays an error even though the final later succeeds, alone or beside a benign one
+  assert.deepEqual(settleControlPipeErrors({ pipeErrors: [before], ...closed }), { errors: [before], afterFinal: null })
+  assert.deepEqual(settleControlPipeErrors({ pipeErrors: [after, before], ...closed }), { errors: [after, before], afterFinal: null })
   for (const [label, input] of Object.entries({
     'no final receipt': { rootFinal: undefined, code: 0, childCloseObserved: true },
     'failed final receipt': { rootFinal: { success: false }, code: 0, childCloseObserved: true },
@@ -205,9 +209,9 @@ test('an EPIPE on the warden control pipe is benign only after its successful fi
     'signal close': { rootFinal: { success: true }, code: null, childCloseObserved: true },
     'close not observed': { rootFinal: { success: true }, code: 0, childCloseObserved: false },
   })) {
-    assert.deepEqual(settleControlPipeErrors({ pipeErrors: [epipe], ...input }), { errors: [epipe], afterFinal: null }, label)
+    assert.deepEqual(settleControlPipeErrors({ pipeErrors: [after], ...input }), { errors: [after], afterFinal: null }, label)
   }
-  const other = { name: 'Error', code: 'ECONNRESET', message: 'reset' }
-  assert.deepEqual(settleControlPipeErrors({ pipeErrors: [epipe, other], rootFinal: { success: true }, code: 0, childCloseObserved: true }),
-    { errors: [epipe, other], afterFinal: null }, 'only EPIPE is ever tolerated')
+  const other = { name: 'Error', code: 'ECONNRESET', message: 'reset', afterFinal: true }
+  assert.deepEqual(settleControlPipeErrors({ pipeErrors: [after, other], ...closed }), { errors: [after, other], afterFinal: null }, 'only EPIPE is ever tolerated')
+  assert.deepEqual(settleControlPipeErrors({ pipeErrors: [{ ...after, afterFinal: undefined }], ...closed }).errors.length, 1, 'an untagged EPIPE is an error')
 })

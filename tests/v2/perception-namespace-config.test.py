@@ -714,10 +714,31 @@ class ObserverMetadataRaces(unittest.TestCase):
 
     def test_the_init_error_names_the_guard_that_raised_never_its_text(self):
         source = WARDEN.read_text(encoding="utf-8")
-        self.assertIn('"guardCode": CARRIER_GUARD_CODES.get(str(error), "UNCLASSIFIED_GUARD")', source)
+        self.assertIn('"guardCode": guard_code(error)', source)
         for message in ("identity changed during status read", "marker credentials changed", "marker identity mismatch",
                         "inner Node failed", "owner died without authenticated finish"):
             self.assertIn('"%s": "' % message, source)
+
+
+    def test_every_guard_message_gets_a_stable_code_and_an_unmapped_one_a_digest_never_its_text(self):
+        tree = ast.parse(WARDEN.read_text(encoding="utf-8"), filename=str(WARDEN))
+        selected = [node for node in tree.body
+                    if (isinstance(node, ast.FunctionDef) and node.name == "guard_code")
+                    or (isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "CARRIER_GUARD_CODES")]
+        self.assertEqual(len(selected), 2)
+        namespace = {"hashlib": hashlib}
+        exec(compile(ast.Module(body=selected, type_ignores=[]), str(WARDEN), "exec"), namespace)
+        guard_code = namespace["guard_code"]
+        self.assertEqual(guard_code(RuntimeError("identity changed during status read")), "PROC_STATUS_IDENTITY_CHANGED")
+        # an IPC guard that has no table entry: a digest of the message
+        message = "root receipt channel truncated"
+        expected = "GUARD_" + hashlib.sha256(message.encode()).hexdigest()[:12]
+        self.assertEqual(guard_code(RuntimeError(message)), expected)
+        self.assertRegex(expected, r"^GUARD_[0-9a-f]{12}$")
+        self.assertNotIn("truncated", expected)
+        self.assertEqual(guard_code(RuntimeError(message)), guard_code(RuntimeError(message)))
+        self.assertNotEqual(guard_code(RuntimeError("root receipt channel closed")), expected)
+        self.assertNotIn("UNCLASSIFIED_GUARD", {guard_code(RuntimeError(text)) for text in ("a", "b", "")})
 
 
 if __name__ == "__main__":

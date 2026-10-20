@@ -252,8 +252,25 @@ test('Linux EACCES on a child born after the baseline that is mid-exec is re-rea
   const snapshot = await observeLinuxProcesses('controlled-run', context, world.io)
   assert.equal(reads.get(31), 3, 'two denials while the exec completes, then the read')
   assert.equal(snapshot.find((identity) => identity.pid === 31).runMarked, true)
-  assert.equal(context.environmentDenials.size, 0, 'a settled read leaves no denial')
+  assert.equal(context.environmentDenials.size, 0, 'a settled read leaves no failure receipt')
   assert.ok(context.observed.has('31:131'))
+  // but the denial that settled is still evidence: what the process was, how many reads, and that it settled
+  const settledReceipt = context.settledEnvironmentDenials.get('31:131')
+  assert.deepEqual([settledReceipt.outcome, settledReceipt.environReads, settledReceipt.comm, settledReceipt.firstState, settledReceipt.code, settledReceipt.ppid, settledReceipt.uid],
+    ['settled', 3, 'cc1', 'D', 'EACCES', 30, 600])
+})
+
+test('Linux a re-read error that is not EACCES keeps its own code and is not reported under the first EACCES', async () => {
+  const reads = new Map(), world = bornChildWorld(reads), context = await world.context()
+  await spawnBornChild(world, context)
+  const eio = Object.assign(new Error('controlled re-read I/O failure'), { code: 'EIO' })
+  const environment = world.io.environment
+  let calls = 0
+  world.io.environment = async (pid) => { if (pid === 31) { calls += 1; throw calls === 1 ? world.permission : eio } return environment(pid) }
+  await assert.rejects(observeLinuxProcesses('controlled-run', context, world.io), (error) => error === eio)
+  const receipt = context.environmentDenials.get('31:131')
+  assert.equal(receipt.code, 'EIO'); assert.equal(receipt.guardReason, 'environment-error-not-eligible')
+  assert.deepEqual([receipt.firstCode, receipt.comm, receipt.environReads], ['EACCES', 'cc1', 2])
 })
 
 test('Linux EACCES on a born child that disappears while it is re-read is an absence, not a failure', async () => {
@@ -265,6 +282,7 @@ test('Linux EACCES on a born child that disappears while it is re-read is an abs
   const snapshot = await observeLinuxProcesses('controlled-run', context, world.io)
   assert.equal(snapshot.some((identity) => identity.pid === 31), false)
   assert.equal(context.environmentDenials.size, 0)
+  assert.deepEqual([context.settledEnvironmentDenials.get('31:131').outcome, context.settledEnvironmentDenials.get('31:131').comm], ['gone', 'cc1'])
 })
 
 test('Linux EACCES that persists on a born, owned child is still a failure, and the receipt names the process and the reads', async () => {

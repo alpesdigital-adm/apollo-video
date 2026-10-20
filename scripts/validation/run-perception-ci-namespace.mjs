@@ -54,12 +54,14 @@ const errorFact = (error) => ({ name: error.name, code: error.code ?? null,
   ...(error.admissionLockDiagnostic ? { admissionLockDiagnostic: error.admissionLockDiagnostic } : {}) })
 
 // A write to the warden's control pipe (the abort byte or the 1 s heartbeat) that lands after the warden has already finished and exited answers
-// EPIPE. That is the warden having closed, not a fault of this proof, but only when its authenticated final receipt succeeded and it closed
-// with code 0 (CI run 39446701464 attempt 2: the suite passed, the final receipt succeeded, code 0, and the only error was this EPIPE). Any EPIPE
-// before that, or beside a failed final, stays an error.
+// EPIPE. That is the warden having closed, not a fault of this proof, but only for an EPIPE CAPTURED after the warden's authenticated final
+// receipt was already in hand (`afterFinal`, tagged at capture time), and only when that final succeeded and the warden closed with code 0
+// (CI run 39446701464 attempt 2: the suite passed, the final succeeded, code 0, and the only error was this EPIPE). An EPIPE captured before the
+// final, even one beside a final that later succeeds, stays an error, and so does anything that is not EPIPE.
 export function settleControlPipeErrors({ pipeErrors, rootFinal, code, childCloseObserved }) {
   if (pipeErrors.length === 0) return { errors: [], afterFinal: null }
-  const benign = rootFinal?.success === true && code === 0 && childCloseObserved === true && pipeErrors.every((error) => error.code === 'EPIPE')
+  const benign = rootFinal?.success === true && code === 0 && childCloseObserved === true &&
+    pipeErrors.every((error) => error.code === 'EPIPE' && error.afterFinal === true)
   return benign ? { errors: [], afterFinal: pipeErrors } : { errors: pipeErrors, afterFinal: null }
 }
 
@@ -283,7 +285,7 @@ export async function runNamespaceSuite({ suite, pattern = null, env = process.e
       })
     })
     child.once('error', (error) => { report.errors.push(errorFact(error)); abort() })
-    child.stdin.on('error', (error) => { if (!closed) (error?.code === 'EPIPE' ? controlPipeErrors : report.errors).push(errorFact(error)) })
+    child.stdin.on('error', (error) => { if (!closed) (error?.code === 'EPIPE' ? controlPipeErrors : report.errors).push({ ...errorFact(error), afterFinal: rootFinal !== undefined }) })
     child.stderr.pipe(process.stderr, { end: false })
     child.stdout.on('data', (chunk) => {
       try {
