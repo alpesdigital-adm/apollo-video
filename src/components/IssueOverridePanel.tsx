@@ -102,7 +102,7 @@ interface AppliedCommand {
     proxySha256: string | null
     versionId: string
   }
-  recompile: { phase: 'pending' | 'queued' | 'failed'; operationId: string | null; failure: string | null }
+  recompile: { phase: 'pending' | 'queued' | 'failed'; operationId: string | null; failure: string | null; attempt: number }
 }
 
 export interface IssueOverridePanelProps {
@@ -317,20 +317,20 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
   }
 
   /* ---- recompile ---- */
-  const enqueueRecompile = useCallback(async (command: AppliedCommand): Promise<void> => {
+  const enqueueRecompile = useCallback(async (command: AppliedCommand, attempt = 1): Promise<void> => {
     const body = { variantId: command.variantId }
     const result = await requestJson<{ operation: OperationView; replayed: boolean }>(
       `/v1/projects/${encodeURIComponent(projectId)}/proxy-renders`,
-      { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKeys(`recompile-${command.versionId}`, body) }, body: JSON.stringify(body) },
+      { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKeys(`recompile-${command.versionId}-${attempt}`, body) }, body: JSON.stringify(body) },
     )
     if (!result.ok) {
       if (result.failure.kind === 'session-expired') { sessionExpired(); return }
       setApplied((current) => current && current.commandId === command.commandId
-        ? { ...current, recompile: { phase: 'failed', operationId: null, failure: result.failure.message } } : current)
+        ? { ...current, recompile: { phase: 'failed', operationId: null, failure: result.failure.message, attempt } } : current)
       return
     }
     setApplied((current) => current && current.commandId === command.commandId
-      ? { ...current, recompile: { phase: 'queued', operationId: result.data.operation.id, failure: null } } : current)
+      ? { ...current, recompile: { phase: 'queued', operationId: result.data.operation.id, failure: null, attempt } } : current)
     await refresh()
   }, [projectId, refresh, sessionExpired])
 
@@ -394,7 +394,7 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
         summary: action === 'reset'
           ? (result.data.resolution.inherited ? `Legenda ${segment.segmentId} voltou ao nível herdado.` : `Legenda ${segment.segmentId} voltou à exceção anterior.`)
           : `Exceção aplicada à legenda ${segment.segmentId}.`,
-        recompile: { phase: 'pending', operationId: null, failure: null },
+        recompile: { phase: 'pending', operationId: null, failure: null, attempt: 1 },
       })
     } finally { setBusy(false) }
   }
@@ -454,7 +454,7 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
         summary: action === 'reset'
           ? `Enquadramento do trecho ${range.startFrame}–${range.endFrame} voltou ao nível automático.`
           : `Enquadramento manual aplicado ao trecho ${range.startFrame}–${range.endFrame}.`,
-        recompile: { phase: 'pending', operationId: null, failure: null },
+        recompile: { phase: 'pending', operationId: null, failure: null, attempt: 1 },
       })
     } finally { setBusy(false) }
   }
@@ -497,7 +497,10 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
   async function retryRecompile() {
     if (!applied || busy) return
     setBusy(true)
-    try { await enqueueRecompile(applied) } finally { setBusy(false) }
+    try {
+      setCancelledOperationId(null)
+      await enqueueRecompile(applied, applied.recompile.attempt + 1)
+    } finally { setBusy(false) }
   }
 
   /* ---- before / after: only against a review made AFTER the command, for the new Version ---- */
@@ -529,6 +532,11 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
 
       {props.reviewFailure ? <p className="px-4 py-3 text-[10px] text-[#c97870]" data-testid="issue-review-unavailable">{props.reviewFailure}</p> : null}
       {!review && !props.reviewFailure ? <p className="px-4 py-3 text-[10px] text-[#716d65]" data-testid="issue-no-review">{props.reviewLoading ? 'Lendo o laudo desta saída…' : 'Esta saída ainda não tem laudo para esta versão. Renderize o proxy para que o critic aponte problemas.'}</p> : null}
+      {review && version && review.projectVersionId !== version.id ? (
+        <p className="border-l-2 border-[#d9aa3d] bg-[#d9aa3d]/[0.05] px-4 py-2 text-[10px] leading-4 text-[#c9ad6c]" data-testid="issue-review-older">
+          Este laudo é de um render de uma versão anterior; a versão atual (V{version.sequence}) ainda não foi renderizada nesta saída. As exceções valem para a versão atual.
+        </p>
+      ) : null}
       {review && chips.length === 0 ? <p className="px-4 py-3 text-[10px] text-[#78aa87]" data-testid="issue-none">O critic não reportou problemas neste render ({review.reviewHash.slice(0, 12)}).</p> : null}
 
       {chips.length ? (
@@ -687,6 +695,9 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
                   {operation?.phase ? ` · ${operation.phase}` : ''}
                 </p>
                 {operation?.status === 'failed' ? <p className="mt-1 text-[10px] text-[#c97870]">{operation.error?.message ?? 'O render falhou.'}</p> : null}
+                {!operationActive && operation && operation.status !== 'succeeded' ? (
+                  <button className="mt-2 rounded border border-[#d9aa3d]/30 px-2 py-1 text-[9px] text-[#ddb858] disabled:opacity-40" data-testid="issue-recompile-retry" disabled={busy} onClick={() => void retryRecompile()} type="button">Recompilar de novo</button>
+                ) : null}
                 {operationActive ? (
                   <button className={`mt-2 rounded border px-2 py-1 text-[9px] ${cancelArmed ? 'border-[#c66f68] text-[#df8a82]' : 'border-white/[0.12] text-[#aaa49a]'} disabled:opacity-40`} data-testid="issue-recompile-cancel" disabled={busy} onClick={() => void cancelRecompile()} type="button">
                     {cancelArmed ? 'Confirmar o cancelamento' : 'Cancelar recompilação'}
