@@ -178,7 +178,12 @@ export async function readSubtitleSegmentOverrideHeads(
 }
 
 export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentOverrideRepository {
-  constructor(private readonly client: PrismaClient = getV2PostgresClient()) {}
+  // An explicit field, not a parameter property: the render source reader imports this module and runs under type stripping.
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
+  }
 
   async findIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string }) {
     const command = await this.client.v2EditCommand.findUnique({
