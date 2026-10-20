@@ -2601,6 +2601,8 @@
         "applySubtitleSegmentOverrideService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "carryOverUntouchedOutputService",
+        "carryOverUntouchedOutputs",
         "governanceAnomalyPolicyFromEnvironment",
         "governanceDefaultLimitsFromEnvironment",
         "requireScope"
@@ -2621,6 +2623,8 @@
         "applyVariantReframeOverrideService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "carryOverUntouchedOutputService",
+        "carryOverUntouchedOutputs",
         "governanceAnomalyPolicyFromEnvironment",
         "governanceDefaultLimitsFromEnvironment",
         "presentVariantReframePlan",
