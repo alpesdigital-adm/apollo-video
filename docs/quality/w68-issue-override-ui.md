@@ -114,6 +114,9 @@ Ids de run, contagens e mutações: ver o relatório final do wave (seção 9).
 - O alarme de anomalia de requisições da governança (piso 20, 3x a linha de base) barra o proof (dezenas de leituras por minuto de um só cliente). O piso foi elevado **só no servidor do teste**
   (`APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM`); o limite de taxa (10000/min) não foi tocado e `editor-reliability-browser.e2e.mjs` segue com os padrões.
 
+- **Pools de conexão no harness local**: a role do banco descartável do harness (`apollo_s2d`) aceita 12 conexões; a jornada abre o cliente do teste, o cliente do worker em processo e **dois** servidores (o do dono e o do estranho). Com `connection_limit=5` por processo (o que a CI configura), a leitura do workspace do estranho recebeu `FATAL: too many connections` (500, e a página mostrou `project-unavailable` em vez de `project-not-found`) em 4 de 4 execuções do lote `full-b2`/`rerun`. A jornada agora dá a cada cliente um pool pequeno (2 a 3); com isso passou 2 de 2. A CI do GitHub usa Postgres com 100 conexões e não é afetada, mas a falha era real do ponto de vista do que a página mostra quando o banco recusa: a página não confunde "recusado" com "não encontrado" (diz "A solicitação não pôde ser concluída").
+- **Três passos do lote local que não são do W68** (ver o relatório final): `library-journey` espera MinIO/S3 (`'local' !== 's3'`, ambiente do harness, falha em todas as execuções anteriores); `synthetic-wave24-journey` (passo sem o catálogo W58) falha com o mesmo 409 `PERSISTENCE_CONFLICT` em `origin/main` 229d5a05 sem nenhuma mudança do W68 (executado em worktree limpa do commit base); `podcast-multicam` falhou uma vez por transação do Prisma que passou de 30 s (`color-plan`) e passou na repetição.
+
 ## 8. Lacunas abertas
 
 - Sem render **final** no browser (ver 5). Coberto por unidade: o hash de entrada do final e o do proxy incluem o conjunto de exceções; o impacto lista o final como desatualizado.
