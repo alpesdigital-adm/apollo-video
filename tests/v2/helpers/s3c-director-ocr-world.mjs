@@ -21,16 +21,16 @@ import { seedReviewProject } from './review-edit-world.mjs'
  * the same way). An output variant id is unique across the database, so a database that already holds one by that id (another
  * suite's run, in a supervised run that shares one database) is emptied first - when, and only when, it is disposable.
  */
-export async function seedDirectorOcrWorld(db, { suffix, artifactKey, sourceSha256, byteSize, aspectRatio = '9:16', durationFrames = 120 }) {
+export async function seedDirectorOcrWorld(db, { suffix, artifactKey, sourceSha256, byteSize, aspectRatio = '9:16', durationFrames = 120, variantId = aspectRatio }) {
   const workspaceId = `w61-admission-${suffix}`
   const otherWorkspaceId = `w61-other-${suffix}`
   const clientId = `w61-client-${suffix}`
   const projectId = `w61-project-${suffix}`
   const actor = testActor({ workspaceId, clientId, credentialId: `w61-credential-${suffix}`, environment: 'production',
     scopes: ['projects:write', 'projects:read', 'operations:read', 'operations:cancel', 'operations:retry'] })
-  if (await db.v2OutputVariant.findUnique({ where: { id: aspectRatio }, select: { id: true } })) await resetDisposableDatabase(db)
+  if (await db.v2OutputVariant.findUnique({ where: { id: variantId }, select: { id: true } })) await resetDisposableDatabase(db)
   await db.v2Workspace.create({ data: { id: otherWorkspaceId, slug: otherWorkspaceId, name: 'W61 other' } })
-  const sealed = await seedReviewProject(db, { workspaceId, actor, prefix: 'w61', ids: { project: projectId, 'output-variant': aspectRatio },
+  const sealed = await seedReviewProject(db, { workspaceId, actor, prefix: 'w61', ids: { project: projectId, 'output-variant': variantId },
     name: 'Director OCR project', objective: 'discovery', aspectRatio,
     briefing: 'Público: equipes criativas. Tom: direto e natural.' })
   // The master's grant is the one the product's own ingest writes (media ingest worker): no library reuse.

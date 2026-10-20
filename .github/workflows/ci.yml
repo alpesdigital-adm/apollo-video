@@ -2194,6 +2194,7 @@ jobs:
         run: |
           node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/prisma-server-perception-snapshot.integration.mjs
           node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/prisma-director-server-perception.integration.mjs
+          node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/prisma-director-perception-evidence.integration.mjs
           node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/server-perception-snapshot-server.integration.mjs
       # Only these three offline assertions run here. Face PG/HTTP and the real
       # failed-gate YuNet runner remain local, with licensed development inputs.

@@ -22,10 +22,21 @@ import {
   type DesiredActionInput,
 } from '../domain/desired-action.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
-import type { PerceptionKind } from '../domain/perception-timeline.ts'
+import type { PerceptionKind, PerceptionRange } from '../domain/perception-timeline.ts'
+import { frameRangesToCoverageMs } from '../domain/perception-frame-time.ts'
 import {
-  assembleServerPerceptionSnapshot, type ServerPerceptionAssemblyInput, type ServerPerceptionSnapshot,
+  assembleServerPerceptionSnapshot, serverPerceptionSnapshotId,
+  type PerceptionSnapshotClip, type ServerPerceptionAssemblyInput, type ServerPerceptionSnapshot,
 } from '../domain/server-perception-snapshot.ts'
+import {
+  DECISION_BAND_POLICY_REF, assessDecisionEvidence, evaluateSourceRightsCertainty,
+  type DecisionPerceptionEvidence, type SourceRightsVerdict,
+} from '../domain/director-evidence-rubric.ts'
+import {
+  createDirectorPerceptionEvidenceReport, digestOfDecisionEvidence,
+  type DirectorPerceptionEvidenceReport,
+} from '../domain/director-perception-evidence.ts'
+import { requestDirectorFaceWindows, type DirectorFaceWindowRequester } from './director-face-window-requests.ts'
 import type { PerceptionProducerEnvelope } from '../domain/perception-producer-envelope.ts'
 import { createProjectSnapshot, type ProjectSnapshot, type ProjectSnapshotKind } from '../domain/project-snapshot.ts'
 import { offeredObservationsFor } from './adoptable-observations.ts'
@@ -127,6 +138,20 @@ export interface RunProjectDirectorDependencies {
     text: string
     guardrails?: readonly string[]
   }) => Promise<Readonly<BriefCompilation>>
+  /**
+   * W64. How the Director asks for the face windows its plan needs (the face source window admission, as the run's own actor). Absent
+   * where a Director has no way to ask (a controlled context): the windows it lacks are then reported as not requested, and nothing is
+   * pending.
+   */
+  faceWindows?: DirectorFaceWindowRequester
+  /**
+   * W64. Writes the perception snapshot of the Version a run has just created (the run's own commit already wrote the snapshot of the
+   * Version it directed). BEST EFFORT and outside the commit: a failure here never fails a run that is already sealed - the public
+   * read answers `SNAPSHOT_NOT_MATERIALIZED` for that Version until something writes it.
+   */
+  materializeSnapshot?: (input: Readonly<{ workspaceId: string; projectId: string; projectVersionId: string }>) => Promise<unknown>
+  /** Where the structured warning of a failed best-effort materialization goes (default: `console.warn` of one JSON line). */
+  warn?: (event: Readonly<Record<string, unknown>>) => void
 }
 
 function normalizedIdentifier(value: string, field: string): string {
@@ -371,6 +396,23 @@ function buildStoryPlan(input: {
   return Object.freeze({ ...plan, acts: Object.freeze(plan.acts), blocks: Object.freeze(plan.blocks.map((block) => Object.freeze(block))) })
 }
 
+/**
+ * The planner's own confidence in the choice it makes, before any evidence is weighed. It is a prior, and the band is not graded on it
+ * alone: crop, caption and insert are graded on (evidence tier, this prior) by `confidence-band-policy/v2`, so a decision whose
+ * evidence is absent is never auto-applied however sure the planner is. The 0.82 of the caption is the transcript prior the snapshot
+ * assembler gives words (policy-prior, not measured); it replaces the 0.5 that used to stand in for "the face detector has not looked".
+ */
+export const DIRECTOR_PLANNER_PRIORS = Object.freeze({ crop: 0.82, caption: 0.82, insert: 1 })
+
+const tierLine = (evidence: Readonly<DecisionPerceptionEvidence>) => evidence.modalities.length === 0
+  ? 'nothing to examine'
+  : evidence.modalities.map((item) => `${item.modality} ${item.tier} (${item.reasonCode})`).join(', ')
+
+/** The refs a decision stands on: what it already named, the snapshot, and the sealed envelopes its evidence was taken from. */
+function evidenceRefsOf(existing: readonly string[], evidence: Readonly<DecisionPerceptionEvidence>): readonly string[] {
+  return Object.freeze([...new Set([...existing, evidence.snapshot.id, ...evidence.modalities.flatMap((item) => item.envelopeIds)])].slice(0, 32))
+}
+
 function buildDecisions(input: {
   briefRef: string
   transcriptRef: string
@@ -381,13 +423,23 @@ function buildDecisions(input: {
   mediaOnly: boolean
   ocrEnvelopeRef?: string
   ocrLowerRiskCount: number
+  evidence: Readonly<{
+    crop: Readonly<DecisionPerceptionEvidence>
+    caption: Readonly<DecisionPerceptionEvidence>
+    insert: Readonly<DecisionPerceptionEvidence>
+  }>
 }): readonly Readonly<DirectorDecision>[] {
+  const bandPolicy = DECISION_BAND_POLICY_REF
+  const captionFace = input.evidence.caption.modalities.find((item) => item.modality === 'face')
+  const faceSentence = captionFace === undefined ? 'Face observations are unavailable.'
+    : captionFace.tier === 'absent' ? `Face observations are unavailable (${captionFace.reasonCode}).`
+      : `Face evidence is a partial, unverified candidate (${captionFace.reasonCode}).`
   const decisions: readonly DirectorDecisionInput[] = [
     {
       id: 'decision-narrative-linear', category: 'narrative', choice: 'preserve-linear-narrative',
       reason: 'The retained source already opens with context and develops one continuous argument; reordering would weaken attribution.',
       evidenceRefs: [input.transcriptRef, input.editPlanRef], confidence: 0.94,
-      alternatives: ['cold-open-reference'],
+      alternatives: ['cold-open-reference'], bandPolicy,
     },
     {
       id: 'decision-motion-none', category: 'movement', choice: 'no_effect',
@@ -395,38 +447,43 @@ function buildDecisions(input: {
         ? 'No owner brief or observed semantic event justifies camera simulation; the conservative media-only choice is no effect.'
         : 'The owner requested a direct, natural tone and no semantic event justifies camera simulation.',
       evidenceRefs: [input.briefRef, ...(input.briefCompilationRef ? [input.briefCompilationRef] : []), input.policyRef], confidence: 0.99,
-      alternatives: ['single-punch-in-after-opening'],
+      alternatives: ['single-punch-in-after-opening'], bandPolicy,
     },
     {
       id: 'decision-layout-inset', category: 'layout', choice: 'landscape-inset-on-blurred-source',
-      reason: 'Preserves the full head and shoulders in 9:16 without the aggressive crop that previously cut the face.',
-      evidenceRefs: [input.briefRef, ...(input.briefCompilationRef ? [input.briefCompilationRef] : []), input.editPlanRef], confidence: 0.82,
-      alternatives: ['center-crop', 'top-aligned-inset'],
+      reason: 'Preserves the full head and shoulders in 9:16 without the aggressive crop that previously cut the face. It applies no ' +
+        `face-driven crop, so it needs no face box; a face-driven crop would need high face evidence. Evidence: ${tierLine(input.evidence.crop)}.`,
+      evidenceRefs: evidenceRefsOf([input.briefRef, ...(input.briefCompilationRef ? [input.briefCompilationRef] : []), input.editPlanRef], input.evidence.crop),
+      confidence: DIRECTOR_PLANNER_PRIORS.crop,
+      alternatives: ['center-crop', 'top-aligned-inset'], bandPolicy, perceptionEvidence: input.evidence.crop,
     },
     {
       id: 'decision-subtitle-bottom', category: 'subtitle', choice: 'reserved-bottom-review-required',
       reason: input.ocrLowerRiskCount > 0
-        ? `Face observations are unavailable. ${input.ocrLowerRiskCount} sampled OCR frame(s) include text in the lower source region; source-to-canvas placement requires localized review. Facial safety remains unknown.`
-        : 'Face observations are unavailable. Captions use the reserved bottom region for proxy review; facial safety remains unknown.',
-      evidenceRefs: [input.transcriptRef, input.policyRef,
-        ...(input.ocrEnvelopeRef ? [input.ocrEnvelopeRef] : [])], confidence: 0.5,
-      alternatives: ['lower-third-dynamic', 'manual-anchor-review'],
+        ? `${faceSentence} ${input.ocrLowerRiskCount} sampled OCR frame(s) include text in the lower source region; source-to-canvas placement requires localized review. Facial safety remains unknown. Evidence: ${tierLine(input.evidence.caption)}.`
+        : `${faceSentence} Captions use the reserved bottom region for proxy review; facial safety remains unknown. Evidence: ${tierLine(input.evidence.caption)}.`,
+      evidenceRefs: evidenceRefsOf([input.transcriptRef, input.policyRef,
+        ...(input.ocrEnvelopeRef ? [input.ocrEnvelopeRef] : [])], input.evidence.caption),
+      confidence: DIRECTOR_PLANNER_PRIORS.caption,
+      alternatives: ['lower-third-dynamic', 'manual-anchor-review'], bandPolicy, perceptionEvidence: input.evidence.caption,
     },
     {
       id: 'decision-transition-straight', category: 'transition', choice: 'straight-cut-with-audio-edge-fade',
       reason: 'All retained clips show the same speaker and setting; an ornamental transition would draw attention to the edit.',
       evidenceRefs: [input.editPlanRef], confidence: 0.97,
-      alternatives: ['short-dissolve'],
+      alternatives: ['short-dissolve'], bandPolicy,
     },
     {
       id: 'decision-insert-selection',
       category: 'insert',
       choice: input.hasSelectedInsert ? 'use_selected_insert' : 'no_insert',
-      reason: input.hasSelectedInsert
+      reason: (input.hasSelectedInsert
         ? 'The compiled timeline contains a rights-approved selected insert; preserve it as an intentional B-roll cutaway.'
-        : 'No rights-approved supporting asset is linked to the project, so the Director omits B-roll instead of fabricating relevance.',
-      evidenceRefs: [input.editPlanRef, input.policyRef], confidence: 1,
-      alternatives: ['request-library-search'],
+        : 'No rights-approved supporting asset is linked to the project, so the Director omits B-roll instead of fabricating relevance.') +
+        ` Evidence: ${tierLine(input.evidence.insert)}.`,
+      evidenceRefs: evidenceRefsOf([input.editPlanRef, input.policyRef], input.evidence.insert),
+      confidence: DIRECTOR_PLANNER_PRIORS.insert,
+      alternatives: ['request-library-search'], bandPolicy, perceptionEvidence: input.evidence.insert,
     },
   ]
   return validateDirectorDecisions(decisions)
@@ -499,6 +556,12 @@ function buildQualityReport(input: {
   >
   evaluatedAt: string
   ocrLowerRisks: readonly OcrLowerRisk[]
+  /** The rights verdict of every source the plan plays (the master and each insert): integral, any uncertain one is a block. */
+  rightsVerdicts: readonly SourceRightsVerdict[]
+  /** The planned decisions with their bands (the crop, caption and insert decisions carry the evidence they stand on). */
+  decisions: readonly Readonly<DirectorDecision>[]
+  /** The critic's account of the perception behind the plan, sealed in the report. */
+  perceptionEvidence: Readonly<DirectorPerceptionEvidenceReport>
 }): Readonly<DirectorQualityReport> {
   const cues = input.plan.subtitleTracks.flatMap((track) => track.cues)
   const allSubtitleText = normalizedSpeech(cues.map((cue) => cue.text).join(' '))
@@ -514,15 +577,12 @@ function buildQualityReport(input: {
     forbiddenSpeechAbsent,
     timelineContinuous,
   })
-  const evaluatedAtMs = new Date(input.evaluatedAt).getTime()
-  const unexpired = (value?: string) => value === undefined || (
-    !Number.isNaN(new Date(value).getTime()) && new Date(value).getTime() > evaluatedAtMs
-  )
-  const rightsPassed = input.sourceRights.state === 'present' &&
-    input.sourceRights.status === 'approved' &&
-    ['approved', 'not-required'].includes(input.sourceRights.consentStatus) &&
-    unexpired(input.sourceRights.expiresAt) &&
-    unexpired(input.sourceRights.consentExpiresAt)
+  // Rights are integral (W64): the master and every insert the plan plays must be certain. One source that is revoked, expired, in a
+  // consent that is not approved or simply unknown is a failed gate - there is no partial certainty to average over the others.
+  const rightsPassed = input.rightsVerdicts.length > 0 && input.rightsVerdicts.every((verdict) => verdict.certain)
+  const uncertainRights = input.rightsVerdicts.filter((verdict) => !verdict.certain)
+  const rightsSummary = `rights-all-sources:certain=${input.rightsVerdicts.length - uncertainRights.length}/${input.rightsVerdicts.length}` +
+    (uncertainRights.length > 0 ? `:first-refusal=${uncertainRights[0]!.artifactId}:${uncertainRights[0]!.reasonCode}` : '')
   const narrativeIntegrity = hardChecks.openingMotionProtected &&
     hardChecks.automaticZoomDisabled && hardChecks.forbiddenSpeechAbsent &&
     hardChecks.timelineContinuous
@@ -565,6 +625,7 @@ function buildQualityReport(input: {
       'trust-building': [narrativeIntegrity && rightsPassed ? 90 : 30, [
         `edit-plan:${input.plan.id}:narrative-integrity=${narrativeIntegrity}`,
         `rights:${input.sourceRights.state === 'present' ? input.sourceRights.snapshotId : 'missing'}`,
+        rightsSummary,
       ]],
       'offer-clarity': [hasDestination ? 85 : 0, [
         `desired-action:${input.desiredAction.kind}:destination=${hasDestination}`,
@@ -593,6 +654,7 @@ function buildQualityReport(input: {
         input.sourceRights.state === 'present'
           ? `rights:${input.sourceRights.snapshotId}:${input.sourceRights.snapshotHash}:status=${input.sourceRights.status}:consent=${input.sourceRights.consentStatus}`
           : 'rights:missing',
+        rightsSummary,
       ]],
     }
     const [score, evidence] = values[criterionId]
@@ -612,20 +674,51 @@ function buildQualityReport(input: {
       legibility: [`edit-plan:${input.plan.id}:legibility=${legibility}`],
       'rights-compliance': [input.sourceRights.state === 'present'
         ? `rights:${input.sourceRights.snapshotId}:eligible=${rightsPassed}`
-        : 'rights:missing'],
+        : 'rights:missing', rightsSummary],
       'cta-required': [`story:${input.storyPlan.id}:cta=${input.ctaPresent && structuredCta && ctaAligned}`],
     },
     evaluatedAt: input.evaluatedAt,
   })
-  const baseIssues: DirectorQualityIssue[] = [{
-    code: 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED',
-    severity: 'warning' as const,
-    category: 'editorial' as const,
-    message: 'Face detector evidence is unavailable. Caption placement requires review before approval or final export.',
-    rangeMs: [0, Math.round(input.plan.durationFrames / input.plan.fps * 1000)] as const,
-    targetId: input.plan.subtitleTracks[0]?.id ?? 'subtitle-track',
-    correctable: true,
-  }]
+  // The face tier is the caption decision's (its own ranges): absent keeps the historical code; a partial tier - V9 candidates, which
+  // are never face-safe proof - is a distinct, honest warning. Neither is ever "approved".
+  const captionDecision = input.decisions.find((decision) => decision.perceptionEvidence?.decisionType === 'caption')
+  const captionFace = captionDecision?.perceptionEvidence?.modalities.find((item) => item.modality === 'face')
+  const timelineEndMs = Math.round(input.plan.durationFrames / input.plan.fps * 1000)
+  const baseIssues: DirectorQualityIssue[] = [captionFace !== undefined && captionFace.tier !== 'absent'
+    ? {
+        code: 'FACE_EVIDENCE_PARTIAL_REVIEW_REQUIRED',
+        severity: 'warning' as const,
+        category: 'editorial' as const,
+        message: `Face evidence is partial and unverified (${captionFace.reasonCode}; ${captionFace.denseMs} of ${captionFace.rangeMs} ms of the caption ranges densely examined, ${captionFace.observationCount} face observation(s)). Candidates are not face-safe proof: caption placement requires review before approval or final export.`,
+        rangeMs: [0, timelineEndMs] as const,
+        targetId: input.plan.subtitleTracks[0]?.id ?? 'subtitle-track',
+        correctable: true,
+      }
+    : {
+        code: 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED',
+        severity: 'warning' as const,
+        category: 'editorial' as const,
+        message: `Face detector evidence is unavailable${captionFace ? ` (${captionFace.reasonCode})` : ''}. Caption placement requires review before approval or final export.`,
+        rangeMs: [0, timelineEndMs] as const,
+        targetId: input.plan.subtitleTracks[0]?.id ?? 'subtitle-track',
+        correctable: true,
+      }]
+  for (const decision of input.decisions) {
+    const evidence = decision.perceptionEvidence
+    if (!evidence || decision.confidenceBand === 'auto-apply') continue
+    const digest = digestOfDecisionEvidence(evidence, decision.confidenceBand, decision.confidence)
+    const [firstRange] = evidence.rangesMs
+    const lastRange = evidence.rangesMs.at(-1)!
+    baseIssues.push(Object.freeze({
+      code: decision.confidenceBand === 'block' ? 'DECISION_EVIDENCE_BLOCKED' : 'DECISION_EVIDENCE_REVIEW_REQUIRED',
+      severity: decision.confidenceBand === 'block' ? 'hard' as const : 'warning' as const,
+      category: decision.confidenceBand === 'block' ? 'policy' as const : 'editorial' as const,
+      message: `${decision.decisionType} decision ${decision.id} is ${decision.confidenceBand} under confidence-band-policy/v2: evidence tier ${evidence.tier} ` +
+        `(${digest.reasonCodes.join(', ') || 'no reservation'}), confidence ${decision.confidence}. Evidence ${evidence.snapshot.id}.`,
+      rangeMs: [firstRange![0], lastRange[1]] as const,
+      targetId: decision.id, correctable: true,
+    }))
+  }
   for (const risk of input.ocrLowerRisks.slice(0, 32)) baseIssues.push(Object.freeze({
     code: 'OCR_SOURCE_LOWER_REGION_REVIEW_REQUIRED',
     severity: 'warning' as const, category: 'editorial' as const,
@@ -658,9 +751,11 @@ function buildQualityReport(input: {
     }))
   }
   const issues = Object.freeze(baseIssues)
-  const blocked = !strategic.passed || Object.entries(hardChecks).some(([key, value]) => key !== 'subtitlesFaceSafe' && !value)
+  // A decision whose band is `block` under the policy blocks the plan: nothing the evidence cannot stand behind is emitted.
+  const decisionBlocked = input.decisions.some((decision) => decision.perceptionEvidence !== undefined && decision.confidenceBand === 'block')
+  const blocked = !strategic.passed || decisionBlocked || Object.entries(hardChecks).some(([key, value]) => key !== 'subtitlesFaceSafe' && !value)
   return Object.freeze({
-    schemaVersion: 'director-quality-report/v3' as const,
+    schemaVersion: 'director-quality-report/v4' as const,
     id: input.id,
     desiredActionRef: input.desiredActionRef,
     status: blocked ? 'blocked' as const : 'review-required' as const,
@@ -669,6 +764,7 @@ function buildQualityReport(input: {
     strategic,
     hardChecks,
     issues,
+    perceptionEvidence: input.perceptionEvidence,
     criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
     evaluatedAt: input.evaluatedAt,
   })
@@ -956,27 +1052,6 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       fps: context.editPlan.fps,
       durationFrames: context.editPlan.durationFrames,
     })
-    const decisions = buildDecisions({
-      briefRef: proposedBriefSnapshotId,
-      transcriptRef: context.transcript.id,
-      editPlanRef: context.currentVersion.snapshotRefs.editPlan,
-      policyRef: context.currentVersion.snapshotRefs.policies,
-      hasSelectedInsert,
-      ...(briefCompilation
-        ? { briefCompilationRef: briefCompilation.audit.outputHash }
-        : {}),
-      mediaOnly: Boolean(mediaOnlyTreatment),
-      ...(ocrEnvelope ? { ocrEnvelopeRef: ocrEnvelope.id } : {}),
-      ocrLowerRiskCount: lowerOcrRisks.length,
-    })
-    const assumptions = Object.freeze([...new Set([
-      'Face evidence is unavailable; reserve the bottom caption region for human visual review.',
-      hasSelectedInsert
-        ? 'The selected insert already passed the asset-selection and rights gates.'
-        : 'No rights-approved B-roll candidate is linked; omission is safer than an irrelevant insert.',
-      ...(briefCompilation?.compiled.assumptions ?? []),
-      ...(mediaOnlyTreatment?.assumptions ?? []),
-    ])])
     const indexOf = transcriptWordIndexer(context.transcript.words)
     const generatedSubtitleCues = buildSubtitleCues({
       words: context.editPlan.retimedTranscript.words,
@@ -1005,6 +1080,79 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         }), 'INVALID_RENDER_INPUT', 'Reviewed caption timing must match the current transcript alignment')
       subtitleCues = Object.freeze(reviewedCues.map((cue) => Object.freeze({ ...cue })))
     }
+
+    // ---- W64. What the plan stands on, from the snapshot of the Version it directs (resolved above, at claim) and from the rights of
+    // every source it plays. Face windows the plan needs and the sealed evidence lacks are requested now and never waited for.
+    const snapshotId = serverPerceptionSnapshotId(serverPerception.snapshotHash)
+    const planClips: readonly PerceptionSnapshotClip[] = context.perceptionEvidence?.editPlan.clips ?? Object.freeze(clips.map((clip) =>
+      Object.freeze({ id: clip.id, sourceArtifactId: clip.sourceArtifactId, sourceInFrame: clip.sourceInFrame, sourceOutFrame: clip.sourceOutFrame,
+        timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame, rate: clip.rate })))
+    const faceOutcome = await requestDirectorFaceWindows(
+      { ...(dependencies.faceWindows ? { requester: dependencies.faceWindows } : {}) },
+      {
+        workspaceId, projectId, baseVersionId, authenticationAudit,
+        fps: context.editPlan.fps, durationFrames: context.editPlan.durationFrames, clips: planClips,
+        refusedSources: (context.perceptionEvidence?.faceWindowRefusals ?? []).map((refusal) => refusal.sourceArtifactId),
+        sealedWindows: (context.perceptionEvidence?.faceWindows ?? []).map((window) => ({
+          sourceArtifactId: window.sourceArtifactId, startSourceFrame: window.window.startSourceFrame, endSourceFrame: window.window.endSourceFrame })),
+      },
+    )
+    const planSourceIds = [...new Set(clips.flatMap((clip) => [clip.sourceArtifactId, ...(clip.audioSourceArtifactId ? [clip.audioSourceArtifactId] : [])]))].toSorted()
+    const rightsNow = new Date(createdAt)
+    const rightsVerdicts: readonly SourceRightsVerdict[] = Object.freeze(planSourceIds.map((artifactId) => evaluateSourceRightsCertainty(
+      artifactId,
+      context.timelineSourceRights
+        ? context.timelineSourceRights.find((entry) => entry.artifactId === artifactId)?.rights
+        // A controlled context states the master's rights only: every other source is unknown, and unknown is not certain.
+        : artifactId === context.transcript.sourceArtifactId ? context.sourceRights : undefined,
+      rightsNow)))
+    const durationMs = serverPerception.timeline.durationMs
+    const wholeTimeline: readonly PerceptionRange[] = Object.freeze([Object.freeze([0, durationMs] as const)])
+    const captionRanges = subtitleCues.length === 0 ? wholeTimeline
+      : frameRangesToCoverageMs(subtitleCues.map((cue) => ({ startFrame: cue.startFrame, endFrame: cue.endFrame })),
+        context.editPlan.fps, context.editPlan.durationFrames, durationMs)
+    const insertClips = clips.filter((clip) => clip.sourceArtifactId !== context.transcript.sourceArtifactId)
+    const insertRanges = insertClips.length === 0 ? wholeTimeline
+      : frameRangesToCoverageMs(insertClips.map((clip) => ({ startFrame: clip.timelineInFrame, endFrame: clip.timelineOutFrame })),
+        context.editPlan.fps, context.editPlan.durationFrames, durationMs)
+    const insertSourceIds = new Set(insertClips.map((clip) => clip.sourceArtifactId))
+    const evidenceBase = { snapshot: serverPerception, snapshotId, faceRequests: faceOutcome.state } as const
+    const decisions = buildDecisions({
+      briefRef: proposedBriefSnapshotId,
+      transcriptRef: context.transcript.id,
+      editPlanRef: context.currentVersion.snapshotRefs.editPlan,
+      policyRef: context.currentVersion.snapshotRefs.policies,
+      hasSelectedInsert,
+      ...(briefCompilation
+        ? { briefCompilationRef: briefCompilation.audit.outputHash }
+        : {}),
+      mediaOnly: Boolean(mediaOnlyTreatment),
+      ...(ocrEnvelope ? { ocrEnvelopeRef: ocrEnvelope.id } : {}),
+      ocrLowerRiskCount: lowerOcrRisks.length,
+      evidence: {
+        crop: assessDecisionEvidence({ ...evidenceBase, decisionId: 'decision-layout-inset', decisionType: 'crop', rangesMs: wholeTimeline }),
+        caption: assessDecisionEvidence({ ...evidenceBase, decisionId: 'decision-subtitle-bottom', decisionType: 'caption', rangesMs: captionRanges }),
+        insert: assessDecisionEvidence({ ...evidenceBase, decisionId: 'decision-insert-selection', decisionType: 'insert', rangesMs: insertRanges,
+          inserted: hasSelectedInsert, rights: rightsVerdicts.filter((verdict) => insertSourceIds.has(verdict.artifactId)) }),
+      },
+    })
+    const captionFaceEvidence = decisions.find((decision) => decision.id === 'decision-subtitle-bottom')?.perceptionEvidence
+      ?.modalities.find((item) => item.modality === 'face')
+    const perceptionEvidenceReport = createDirectorPerceptionEvidenceReport({
+      snapshot: serverPerception, rights: rightsVerdicts, faceWindows: faceOutcome.report, faceRequests: faceOutcome.state,
+      decisions: decisions.flatMap((decision) => decision.perceptionEvidence
+        ? [digestOfDecisionEvidence(decision.perceptionEvidence, decision.confidenceBand, decision.confidence)] : []),
+    })
+    const assumptions = Object.freeze([...new Set([
+      captionFaceEvidence?.tier === 'partial'
+        ? `Face evidence is a partial, unverified candidate (${captionFaceEvidence.reasonCode}); keep the bottom caption region reserved for human visual review.`
+        : `Face evidence is unavailable${captionFaceEvidence ? ` (${captionFaceEvidence.reasonCode})` : ''}; reserve the bottom caption region for human visual review.`,
+      hasSelectedInsert
+        ? 'The selected insert already passed the asset-selection and rights gates.'
+        : 'No rights-approved B-roll candidate is linked; omission is safer than an irrelevant insert.',
+      ...(briefCompilation?.compiled.assumptions ?? []),
+      ...(mediaOnlyTreatment?.assumptions ?? []),
+    ])])
     const transitions = Object.freeze(clips.slice(0, -1).map((clip, index) => Object.freeze({
       id: `transition-${index + 1}`,
       fromClipId: clip.id,
@@ -1078,6 +1226,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       sourceRights: context.sourceRights,
       evaluatedAt: createdAt,
       ocrLowerRisks: lowerOcrRisks,
+      rightsVerdicts,
+      decisions,
+      perceptionEvidence: perceptionEvidenceReport,
     })
     assertDomain(
       qualityReport.status !== 'blocked',
@@ -1088,6 +1239,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         score: qualityReport.strategic.score,
         threshold: qualityReport.strategic.rubric.threshold,
         gateFailures: qualityReport.strategic.gateFailures,
+        blockedDecisions: decisions.filter((decision) => decision.perceptionEvidence !== undefined && decision.confidenceBand === 'block')
+          .map((decision) => decision.id),
+        uncertainRights: rightsVerdicts.filter((verdict) => !verdict.certain).map((verdict) => `${verdict.artifactId}:${verdict.reasonCode}`),
       },
     )
     const proposedPerceptionSnapshotId = dependencies.createId('project-snapshot')
@@ -1126,7 +1280,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     // the owner transaction opens; the transition adopts their persisted receipts and nothing else.
     const adoptable = await offeredObservationsFor(dependencies.repository, context.parent, plannedEditPlan as unknown as Record<string, unknown>)
     const eventId = dependencies.createEventId()
-    return dependencies.repository.commitWithCanonicalSnapshots({
+    const committed = await dependencies.repository.commitWithCanonicalSnapshots({
       workspaceId, projectId, baseVersionId, baseHash: request.baseHash, resultVersionId: versionId,
       idempotencyKey, requestFingerprint, actorContextHash: authenticationAudit.contextHash,
       ...(request.operationFence ? { operationFence: request.operationFence } : {}),
@@ -1145,6 +1299,8 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         alternatives: decision.alternatives,
         evidenceRefs: decision.evidenceRefs.map((ref) =>
           ref === proposedBriefSnapshotId ? briefSnapshotId : ref),
+        ...(decision.bandPolicy ? { bandPolicy: decision.bandPolicy } : {}),
+        ...(decision.perceptionEvidence ? { perceptionEvidence: decision.perceptionEvidence } : {}),
       })))
       const editPlan: DirectedEditPlan = Object.freeze({
         ...plannedEditPlan,
@@ -1156,7 +1312,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         snapshot({ id: proposedTreatmentSnapshotId, workspaceId, projectId, kind: 'treatment', contentSchemaVersion: treatmentPlan.schemaVersion, value: treatmentPlan, createdAt }),
         snapshot({ id: proposedStorySnapshotId, workspaceId, projectId, kind: 'story', contentSchemaVersion: 1, value: storyPlan, createdAt }),
         snapshot({ id: proposedEditPlanSnapshotId, workspaceId, projectId, kind: 'edit-plan', contentSchemaVersion: 2, value: editPlan, createdAt }),
-        snapshot({ id: proposedQualitySnapshotId, workspaceId, projectId, kind: 'quality-report', contentSchemaVersion: 3, value: qualityReport, createdAt }),
+        snapshot({ id: proposedQualitySnapshotId, workspaceId, projectId, kind: 'quality-report', contentSchemaVersion: 4, value: qualityReport, createdAt }),
       ])
       const snapshots = bindDirectorSnapshotIdentities(candidates, await resolveSnapshots(candidates))
       const byKind = new Map(snapshots.map((item) => [item.kind, item.id]))
@@ -1283,6 +1439,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
           transcriptId: context.transcript.id,
           transcriptHash: context.transcript.transcriptHash,
           sourceArtifactId: context.transcript.sourceArtifactId,
+          // The rights the plan was judged on: the commit re-reads them and refuses the run if any moved or stopped being certain.
+          rights: Object.freeze(rightsVerdicts.map((verdict) => Object.freeze({
+            artifactId: verdict.artifactId, snapshotId: verdict.snapshotId, snapshotHash: verdict.snapshotHash }))),
           ...(ocrEnvelope ? { ocrEnvelope: Object.freeze({ id: ocrEnvelope.id,
             envelopeHash: ocrEnvelope.envelopeHash, inputVersionId: baseVersionId,
             sourceArtifactId: ocrEnvelope.sourceArtifactId, timeMapHash: ocrEnvelope.timeMapHash }) } : {}),
@@ -1290,5 +1449,24 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         ...(request.operationFence ? { operationFence: request.operationFence } : {}),
       }
     })
+    if (!committed.replayed && dependencies.materializeSnapshot) {
+      try {
+        await dependencies.materializeSnapshot({ workspaceId, projectId, projectVersionId: committed.version.id })
+      } catch (error) {
+        // Best effort by design (see the dependency): the run is sealed, and an unwritten snapshot reads as SNAPSHOT_NOT_MATERIALIZED.
+        // It is not silent: one structured warning names the run and the Version and the kind of failure - never the message, which
+        // may carry data the log must not.
+        const emit = dependencies.warn ?? ((event: Readonly<Record<string, unknown>>) => { console.warn(JSON.stringify(event)) })
+        try {
+          emit(Object.freeze({
+            level: 'warn', kind: 'director-snapshot-materialization-failed', workspaceId, projectId, directorRunId,
+            projectVersionId: committed.version.id,
+            errorName: error instanceof Error ? error.name : 'NonError',
+            errorCode: error instanceof DomainError ? error.code : null,
+          }))
+        } catch { /* a failing log sink must not fail a sealed run either */ }
+      }
+    }
+    return committed
   }
 }

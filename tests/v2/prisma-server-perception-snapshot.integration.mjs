@@ -15,7 +15,7 @@ import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-
 const { calculateCanonicalHash, stableSerialize } = await import('../../src/v2/domain/canonical-hash.ts')
 const { createPerceptionTimeline, PERCEPTION_KINDS } = await import('../../src/v2/domain/perception-timeline.ts')
 const { serverPerceptionSnapshotId } = await import('../../src/v2/domain/server-perception-snapshot.ts')
-const { readServerPerceptionSnapshotService } = await import('../../src/v2/application/server-perception-snapshots.ts')
+const { materializeServerPerceptionSnapshotService } = await import('../../src/v2/application/server-perception-snapshots.ts')
 const { PrismaFaceSourceWindowRepository } = await import('../../src/v2/infrastructure/prisma/face-source-window-repository.ts')
 const { PrismaServerPerceptionEvidenceReader } = await import('../../src/v2/infrastructure/prisma/server-perception-evidence-reader.ts')
 const { getPublicSchema } = await import('../../src/v2/public-api/schema-registry.ts')
@@ -403,7 +403,7 @@ test('W63a PostgreSQL server perception snapshot: more than 200 face windows are
 
       // the keyset pages exactly: a page size that falls inside runs of windows sharing a start gives the very same evidence
       const smallPages = new PrismaServerPerceptionEvidenceReader(db, { faceWindowPageSize: 7 })
-      const viaSmallPages = await readServerPerceptionSnapshotService({ evidence: smallPages, snapshots: built.snapshots, clock: () => new Date() })(ask)
+      const viaSmallPages = await materializeServerPerceptionSnapshotService({ evidence: smallPages, snapshots: built.snapshots, clock: () => new Date() })(ask)
       assert.equal(viaSmallPages.snapshot.snapshotHash, complete.snapshot.snapshotHash)
       const evidence = await smallPages.readForVersion({ ...ask, projectVersionId: null, now: new Date() })
       assert.equal(evidence.faceWindows.length, total)
@@ -412,7 +412,7 @@ test('W63a PostgreSQL server perception snapshot: more than 200 face windows are
       assert.equal(await db.v2ServerPerceptionSnapshot.count({ where: { workspaceId: world.workspaceId } }), 1, 'the same evidence is the same row')
 
       // exactly the cap is read; one window over it is a refusal of the source's face coverage, never a truncation
-      const withCap = (faceWindowCap) => readServerPerceptionSnapshotService({
+      const withCap = (faceWindowCap) => materializeServerPerceptionSnapshotService({
         evidence: new PrismaServerPerceptionEvidenceReader(db, { faceWindowCap }), snapshots: built.snapshots, clock: () => new Date() })
       assert.equal((await withCap(total)(ask)).snapshot.snapshotHash, complete.snapshot.snapshotHash)
       const over = await withCap(total - 1)(ask)

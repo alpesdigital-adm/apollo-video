@@ -3,8 +3,10 @@ import {
 } from '../../../../generated/prisma-v2/index.js'
 
 import type {
-  PersistedServerPerceptionSnapshot, ServerPerceptionSnapshotRepository,
+  LatestServerPerceptionSnapshot, PersistedServerPerceptionSnapshot, ServerPerceptionSnapshotRepository,
 } from '../../application/ports/server-perception-snapshot-repository.ts'
+import { evaluateSourceRightsCertainty } from '../../domain/director-evidence-rubric.ts'
+import { sourceRightsOf } from './source-rights-record.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { PERCEPTION_KINDS } from '../../domain/perception-timeline.ts'
@@ -105,6 +107,45 @@ export class PrismaServerPerceptionSnapshotRepository implements ServerPerceptio
 
   async findByHash(input: { workspaceId: string; projectId: string; projectVersionId: string; snapshotHash: string }) {
     return readServerPerceptionSnapshot(this.client, input)
+  }
+
+  async findLatestForVersion(input: { workspaceId: string; projectId: string; projectVersionId: string | null }): Promise<LatestServerPerceptionSnapshot> {
+    const project = await this.client.v2Project.findFirst({
+      where: { id: input.projectId, workspaceId: input.workspaceId }, select: { currentVersionId: true },
+    })
+    if (!project) return Object.freeze({ status: 'not-found' as const })
+    const versionId = input.projectVersionId ?? project.currentVersionId
+    if (!versionId) return Object.freeze({ status: 'not-found' as const })
+    const version = await this.client.v2ProjectVersion.findFirst({
+      where: { id: versionId, projectId: input.projectId, workspaceId: input.workspaceId },
+      select: { id: true, editPlanSnapshot: { select: { contentJson: true } } },
+    })
+    if (!version) return Object.freeze({ status: 'not-found' as const })
+    const row = await this.client.v2ServerPerceptionSnapshot.findFirst({
+      where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: version.id },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], include: { coverage: true },
+    })
+    if (row) return Object.freeze({ status: 'found' as const, record: hydrate(row) })
+    let plan: unknown
+    try { plan = JSON.parse(version.editPlanSnapshot.contentJson) } catch { return conflict('the Version EditPlan JSON') }
+    const tracks = typeof plan === 'object' && plan !== null ? (plan as { videoTracks?: unknown }).videoTracks : undefined
+    const plays = Array.isArray(tracks) && tracks.some((track) => Array.isArray((track as { clips?: unknown }).clips) &&
+      ((track as { clips: unknown[] }).clips.length > 0))
+    return Object.freeze({ status: plays ? 'not-materialized' as const : 'plays-nothing' as const, projectVersionId: version.id })
+  }
+
+  async assertSourcesStillHold(input: { workspaceId: string; snapshot: Readonly<ServerPerceptionSnapshot>; now: Date }) {
+    const ids = input.snapshot.sources.map((source) => source.artifactId)
+    const artifacts = await this.client.v2MediaArtifact.findMany({
+      where: { workspaceId: input.workspaceId, id: { in: ids } }, include: { currentRightsSnapshot: true },
+    })
+    for (const source of input.snapshot.sources) {
+      const artifact = artifacts.find((candidate) => candidate.id === source.artifactId)
+      if (!artifact) conflict('a source the snapshot played is not in this workspace')
+      const verdict = evaluateSourceRightsCertainty(source.artifactId, sourceRightsOf(artifact!.currentRightsSnapshot), input.now)
+      if (!verdict.certain) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'A source of the perception snapshot no longer has certain rights')
+      if (source.sha256 === null || artifact!.sha256 !== source.sha256) conflict('a source of the snapshot has other bytes than the ones it sealed')
+    }
   }
 
   async persistIfAbsent(input: { snapshot: Readonly<ServerPerceptionSnapshot>; createdAt: string }) {

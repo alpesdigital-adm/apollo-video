@@ -47,7 +47,9 @@ import {
 import { SpecializedSyntheticProviderResultCritic } from '../application/synthetic-provider-critic.ts'
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
 import { runNextPerceptionProducerOperationService } from '../application/run-perception-producer-worker.ts'
-import { readServerPerceptionSnapshotService } from '../application/server-perception-snapshots.ts'
+import { ensureServerPerceptionSnapshotService, materializeServerPerceptionSnapshotService, readServerPerceptionSnapshotService } from '../application/server-perception-snapshots.ts'
+import { enqueueFaceSourceWindowRunAsAudit } from '../application/enqueue-face-source-window-run.ts'
+import type { DirectorFaceWindowRequester } from '../application/director-face-window-requests.ts'
 import { runNextTemporalProducerOperationService } from '../application/run-temporal-producer-worker.ts'
 import { runNextFaceProducerOperationService } from '../application/run-face-producer-worker.ts'
 import { runNextFaceWindowOperationService } from '../application/run-face-window-worker.ts'
@@ -1696,8 +1698,17 @@ export function createPerceptionTimelineRepository(): PerceptionTimelineReposito
   return new PrismaPerceptionTimelineRepository(resolveV2Client())
 }
 
+/** The READ of `GET .../perception/snapshot`: it serves the newest stored snapshot and writes nothing (W64). */
 export function createServerPerceptionSnapshotService(clock: () => Date = () => new Date()) {
   return readServerPerceptionSnapshotService({
+    snapshots: new PrismaServerPerceptionSnapshotRepository(resolveV2Client()),
+    clock,
+  })
+}
+
+/** The WRITE: assembles the snapshot of a Version from its sealed evidence and stores the row, once (a Director commit does the same). */
+export function createServerPerceptionSnapshotMaterializer(clock: () => Date = () => new Date()) {
+  return materializeServerPerceptionSnapshotService({
     evidence: new PrismaServerPerceptionEvidenceReader(resolveV2Client()),
     snapshots: new PrismaServerPerceptionSnapshotRepository(resolveV2Client()),
     clock,
@@ -2088,6 +2099,39 @@ export function createFaceWindowEnvelopeRepository() {
 /** W65b. The source-keyed face windows: written by the source worker, read by the proxy and final caption planners. */
 export function createFaceSourceWindowRepository() {
   return new PrismaFaceSourceWindowRepository(resolveV2Client())
+}
+
+/**
+ * W64. How the Director asks for the face windows its plan needs: the face source window admission the public route uses, as the actor
+ * the run was admitted under. The idempotency key is the Director's (a pure function of the plan), so asking twice is one operation.
+ */
+export function createDirectorFaceWindowRequester(clock: () => Date = () => new Date()): DirectorFaceWindowRequester {
+  const enqueue = enqueueFaceSourceWindowRunAsAudit({
+    context: createFaceSourceWindowRequestContextRepository(),
+    operations: createPublicOperationRepository(),
+    createOperationId: () => `perception-face-run-${randomUUID()}`,
+    clock,
+  })
+  const requester: DirectorFaceWindowRequester = {
+    async request(input) {
+      const result = await enqueue({
+        workspaceId: input.workspaceId, projectId: input.projectId, sourceArtifactId: input.sourceArtifactId, window: input.window,
+        audit: input.authenticationAudit, idempotencyKey: input.idempotencyKey,
+      })
+      return Object.freeze({ operationId: result.operation.id, replayed: result.replayed })
+    },
+  }
+  return Object.freeze(requester)
+}
+
+/** W64. The best-effort write of the snapshot of the Version a Director run created (outside its commit). */
+export function createDirectorSnapshotMaterializer(clock: () => Date = () => new Date()) {
+  const ensure = ensureServerPerceptionSnapshotService({
+    evidence: new PrismaServerPerceptionEvidenceReader(resolveV2Client()),
+    snapshots: new PrismaServerPerceptionSnapshotRepository(resolveV2Client()),
+    clock,
+  })
+  return (input: Readonly<{ workspaceId: string; projectId: string; projectVersionId: string }>) => ensure(input)
 }
 
 export function createFaceSourceWindowRequestContextRepository() {
@@ -2891,6 +2935,8 @@ export function createProjectDirectorWorker(
     createId: (kind) => `${kind}-${randomUUID()}`,
     createEventId: randomUUID,
     compileBrief: createEvidenceBoundBriefCompiler(),
+    faceWindows: createDirectorFaceWindowRequester(clock),
+    materializeSnapshot: createDirectorSnapshotMaterializer(clock),
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0
       ? { leaseDurationMs: configuredLease }
       : {}),

@@ -58,8 +58,11 @@ import { readPerceptionProducerEnvelope } from './perception-producer-envelope-r
 import type { PerceptionProducerEnvelope } from '../../domain/perception-producer-envelope.ts'
 import { expectedOcrTimeline } from '../../domain/projected-ocr-timeline.ts'
 import { createPerceptionTimeline, type PerceptionTimeline } from '../../domain/perception-timeline.ts'
-import { assembleServerPerceptionSnapshot, verifyServerPerceptionSnapshot } from '../../domain/server-perception-snapshot.ts'
+import { assembleServerPerceptionSnapshot, serverPerceptionSnapshotId, verifyServerPerceptionSnapshot } from '../../domain/server-perception-snapshot.ts'
 import { PrismaServerPerceptionEvidenceReader } from './server-perception-evidence-reader.ts'
+import { evaluateSourceRightsCertainty } from '../../domain/director-evidence-rubric.ts'
+import { sourceRightsOf } from './source-rights-record.ts'
+import { assertDirectorRunEvidenceConsistency, parseDirectorPerceptionEvidenceReport } from '../../domain/director-perception-evidence.ts'
 import { insertServerPerceptionSnapshot } from './server-perception-snapshot-repository.ts'
 
 const directorRunInclude = Prisma.validator<Prisma.V2DirectorRunInclude>()({
@@ -278,9 +281,12 @@ export function parseDirectorQualityReport(input: {
         range.every((value) => typeof value === 'number' && Number.isFinite(value) && value >= 0)
       ))
   })
+  // W64. v3 is the report born before the evidence rubric (read, never written); v4 carries the perception evidence section.
+  const v4 = record.schemaVersion === 'director-quality-report/v4'
   if (
-    input.contentSchemaVersion !== 3 ||
-    record.schemaVersion !== 'director-quality-report/v3' ||
+    input.contentSchemaVersion !== (v4 ? 4 : 3) ||
+    (!v4 && record.schemaVersion !== 'director-quality-report/v3') ||
+    (v4 ? record.perceptionEvidence === undefined : record.perceptionEvidence !== undefined) ||
     typeof record.id !== 'string' ||
     !['approved', 'approved-with-warnings', 'review-required', 'blocked'].includes(String(record.status)) ||
     typeof record.score !== 'number' || !Number.isFinite(record.score) ||
@@ -301,6 +307,7 @@ export function parseDirectorQualityReport(input: {
   if (calculateCanonicalHash(report) !== input.contentHash) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Director quality report hash is inconsistent')
   }
+  if (v4) parseDirectorPerceptionEvidenceReport(record.perceptionEvidence)
   return report
 }
 
@@ -387,16 +394,25 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
     editPlan.projectVersionId !== version.id || editPlan.directorRunId !== row.id ||
     treatmentPlan.id !== editPlan.treatmentPlanId || storyPlan.id !== editPlan.storyPlanId ||
     treatmentPlan.objective !== objective.id || storyPlan.objective !== objective.id ||
-    qualityReport.schemaVersion !== 'director-quality-report/v3' ||
+    !['director-quality-report/v3', 'director-quality-report/v4'].includes(qualityReport.schemaVersion) ||
     !qualityReport.strategic ||
     qualityReport.strategic.rubric.id + `/v${qualityReport.strategic.rubric.version}` !== row.rubricRef ||
     qualityReport.strategic.rubric.objective !== objective.id ||
     qualityReport.strategic.rubric.purpose !== 'editorial-quality-proxy' ||
     qualityReport.score !== qualityReport.strategic.score / 100 ||
     qualityReport.strategic.passed !== ['approved', 'approved-with-warnings', 'review-required'].includes(qualityReport.status) ||
-    row.qualitySnapshot.schemaVersion !== 3 ||
+    row.qualitySnapshot.schemaVersion !== (qualityReport.schemaVersion === 'director-quality-report/v4' ? 4 : 3) ||
     qualityReport.status === 'blocked' || row.initiatedByType !== 'api-client'
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored DirectorRun references are inconsistent')
+  // W64. A run graded by the evidence rubric: its report, its perception and its decisions must tell the same story.
+  if (qualityReport.schemaVersion === 'director-quality-report/v4') {
+    assertDirectorRunEvidenceConsistency({
+      evidence: parseDirectorPerceptionEvidenceReport(qualityReport.perceptionEvidence), baseVersionId: row.baseVersionId,
+      perception: perception as unknown as Parameters<typeof assertDirectorRunEvidenceConsistency>[0]['perception'], decisions,
+    })
+  } else if (decisions.some((decision) => decision.bandPolicy !== undefined || decision.perceptionEvidence !== undefined)) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'A run without perception evidence carries decisions graded by the evidence policy')
+  }
   const run: DirectorRun = Object.freeze({
     schemaVersion: 2 as const,
     id: row.id,
@@ -569,8 +585,8 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
             latestDirectorRun.rubricRef !== `${storedObjective.rubricId}/v1` ||
             !Number.isSafeInteger(latestDirectorRun.objectiveVersion) ||
             latestDirectorRun.objectiveVersion < 1 ||
-            latestDirectorRun.qualitySnapshot.schemaVersion !== 3 ||
-            quality.schemaVersion !== 'director-quality-report/v3' ||
+            ![3, 4].includes(latestDirectorRun.qualitySnapshot.schemaVersion) ||
+            !['director-quality-report/v3', 'director-quality-report/v4'].includes(quality.schemaVersion) ||
             !quality.strategic ||
             quality.strategic.rubric.id + `/v${quality.strategic.rubric.version}` !== latestDirectorRun.rubricRef ||
             quality.strategic.rubric.objective !== storedObjective.id ||
@@ -668,6 +684,15 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           inputVersionId: versionRow.id, now: this.clock() })
       : null
     if (latestOcr && !ocrEnvelope) throw new DomainError('PERSISTENCE_CONFLICT', 'Selected OCR envelope disappeared')
+    // W64. The rights of EVERY source the plan plays, as the database holds them now (integral: the Director blocks on any that is not certain).
+    const planSourceIds = [...new Set(editPlan.videoTracks.flatMap((track) => track.clips.flatMap((clip) =>
+      [clip.sourceArtifactId, ...(clip.audioSourceArtifactId ? [clip.audioSourceArtifactId] : [])])))].sort()
+    const sourceArtifacts = await this.client.v2MediaArtifact.findMany({
+      where: { workspaceId: project.workspaceId, id: { in: planSourceIds } }, include: { currentRightsSnapshot: true },
+    })
+    const timelineSourceRights = Object.freeze(planSourceIds.map((artifactId) => Object.freeze({
+      artifactId, rights: sourceRightsOf(sourceArtifacts.find((artifact) => artifact.id === artifactId)?.currentRightsSnapshot),
+    })))
     // The rest of the sealed evidence of this Version (temporal, source-keyed face windows, the plan's own transcript), read by the
     // same reader the public snapshot uses, so the Director's perception and the API's are the same bytes (W63a).
     const evidence = await new PrismaServerPerceptionEvidenceReader(this.client).readForVersion({
@@ -683,21 +708,8 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       editPlan: Object.freeze(editPlan),
       currentDurationFrames,
       variantIds: Object.freeze(variantIds),
-      sourceRights: master.artifact.currentRightsSnapshot
-        ? Object.freeze({
-            state: 'present' as const,
-            snapshotId: master.artifact.currentRightsSnapshot.id,
-            snapshotHash: master.artifact.currentRightsSnapshot.snapshotHash,
-            status: master.artifact.currentRightsSnapshot.status,
-            consentStatus: master.artifact.currentRightsSnapshot.consentStatus,
-            ...(master.artifact.currentRightsSnapshot.expiresAt
-              ? { expiresAt: master.artifact.currentRightsSnapshot.expiresAt.toISOString() }
-              : {}),
-            ...(master.artifact.currentRightsSnapshot.consentExpiresAt
-              ? { consentExpiresAt: master.artifact.currentRightsSnapshot.consentExpiresAt.toISOString() }
-              : {}),
-          })
-        : Object.freeze({ state: 'missing' as const }),
+      sourceRights: sourceRightsOf(master.artifact.currentRightsSnapshot),
+      timelineSourceRights,
       outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: versionRow.id, proxies: proxyOutputs, finals: finalOutputs }),
       transcript: Object.freeze({
         id: transcriptRow.id,
@@ -1044,6 +1056,31 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       }
     }
     if (!project?.currentVersion || !transcriptHeld || !sourceMaster) throw new DomainError('PERSISTENCE_CONFLICT', 'Director source evidence disappeared before commit')
+    // W64. Rights are integral and are judged again where the run is born: every source the plan plays must STILL be certain, on the
+    // rights snapshot the plan was judged on. A right that was revoked (or expired, or whose consent changed) between the claim and
+    // here refuses the run for good; a right that was re-approved on a newer snapshot refuses it as retryable, so the next attempt
+    // reads the new one. The producers' readers re-check rights only for the sources that have an envelope; this is for all of them.
+    if (bundle.run.qualityReport.schemaVersion === 'director-quality-report/v4') {
+      const judged = bundle.sourceEvidence.rights
+      const artifacts = await transaction.v2MediaArtifact.findMany({
+        where: { workspaceId: bundle.command.workspaceId, id: { in: judged.map((entry) => entry.artifactId) } },
+        include: { currentRightsSnapshot: true },
+      })
+      const clocks = await transaction.$queryRaw<readonly { now: Date }[]>(Prisma.sql`SELECT clock_timestamp() AS "now"`)
+      const rightsNow = clocks[0]?.now
+      if (!(rightsNow instanceof Date) || !Number.isFinite(rightsNow.getTime()) || judged.length === 0) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Director rights re-verification is unavailable')
+      }
+      for (const entry of judged) {
+        const verdict = evaluateSourceRightsCertainty(entry.artifactId,
+          sourceRightsOf(artifacts.find((artifact) => artifact.id === entry.artifactId)?.currentRightsSnapshot), rightsNow)
+        if (!verdict.certain) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'A source the Director plan plays no longer has certain rights', {
+          artifactId: entry.artifactId, reasonCode: verdict.reasonCode })
+        if (verdict.snapshotId !== entry.snapshotId || verdict.snapshotHash !== entry.snapshotHash) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'The rights of a source the Director plan plays changed before commit')
+        }
+      }
+    }
     const latestOcr = await transaction.v2PerceptionProducerEnvelope.findFirst({
       where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
         projectVersionId: bundle.command.baseVersionId,
@@ -1107,6 +1144,16 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       await insertServerPerceptionSnapshot(transaction, snapshot, this.clock())
     } else if (attachedSnapshot !== undefined) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception names a server snapshot the commit does not carry')
+    }
+    // W64. The evidence ids of a run graded by the rubric name a snapshot: that snapshot is the very row this commit writes.
+    if (bundle.run.qualityReport.schemaVersion === 'director-quality-report/v4') {
+      const evidenceSnapshot = bundle.run.qualityReport.perceptionEvidence.snapshot
+      if (!bundle.serverPerception || evidenceSnapshot.snapshotHash !== bundle.serverPerception.snapshotHash ||
+          evidenceSnapshot.id !== serverPerceptionSnapshotId(bundle.serverPerception.snapshotHash) ||
+          bundle.run.decisions.some((decision) => decision.perceptionEvidence !== undefined &&
+            decision.perceptionEvidence.snapshot.id !== evidenceSnapshot.id)) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'The evidence ids of the Director run name a snapshot this commit does not write')
+      }
     }
     const targetObjective = resolveStrategicObjective(bundle.command.payload.objective)
     const latestRun = project.directorRuns[0]
