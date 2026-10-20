@@ -50,8 +50,8 @@ test('the bands are ordered top to bottom on both canvases; the generator face o
   // the dilation matters: the raw box (rows 0.2..0.5) reaches only upper-third and center, the dilated one also reaches top and lower-third
   const raw = ANCHORS.filter((anchor) => { const rows = bandRows('16:9', anchor); return 0.5 * rows.canvas.height >= rows.top && 0.2 * rows.canvas.height <= rows.bottom })
   assert.ok(occupied.length > raw.length && raw.every((anchor) => occupied.includes(anchor)), `${raw} within ${occupied}`)
-  const small = { subjectsAtSource: () => [{ kind: 'face', box: [0.2, 0.08, 0.26, 0.2] }] }
-  assert.deepEqual(occupiedBands({ scene: small, format: '16:9', frames: [0] }), ['top'], 'the small face of the proof occupies the top band only')
+  const top = { subjectsAtSource: () => [{ kind: 'face', box: [0.2, 0.02, 0.3, 0.32] }] }
+  assert.deepEqual(occupiedBands({ scene: top, format: '16:9', frames: [0] }), ['top', 'upper-third'], 'the face of the proof occupies the top two bands and leaves the rest free')
   assert.deepEqual(occupiedBands({ scene, format: '16:9', frames: [0], window: { x: 0.6, width: 0.3 } }), [], 'a face outside the shown columns occupies nothing')
   assert.deepEqual(occupiedBands({ scene: { subjectsAtSource: () => [] }, format: '16:9', frames: [0] }), [])
 })

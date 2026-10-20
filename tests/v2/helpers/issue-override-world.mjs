@@ -30,9 +30,9 @@ const { PrismaProjectLutSelectionRepository } = await import('../../../src/v2/in
  * against the policy's 0.35) and stays there. The whole step fits inside one crop window, so a manual crop CAN keep the subject, which is what an
  * editor fixes by hand. `kind: 'face'` is what the stand-in detector reports.
  */
-// A small face in the upper part of the frame (0.06 x 0.12 of the frame): once the published clearance dilation is applied it occupies the TOP
-// caption band and leaves the others free, so a caption pinned there is refused and one pinned elsewhere is granted.
-const smallFace = (x) => [x, 0.08, x + 0.06, 0.2]
+// The generator's usual face (0.1 x 0.3 of the frame) at the TOP of the picture: once the published clearance dilation is applied it occupies the top
+// and upper-third caption bands and leaves the others free, so a caption pinned there is refused and one pinned lower is granted.
+const smallFace = (x) => [x, 0.02, x + 0.1, 0.32]
 export const SCENE = Object.freeze({
   sourceFrames: 150,
   clips: [{ clipId: 'clip-1', sourceInFrame: 0, sourceOutFrame: 150, timelineInFrame: 0, timelineOutFrame: 150 }],
