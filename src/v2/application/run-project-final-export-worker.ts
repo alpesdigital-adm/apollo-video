@@ -34,6 +34,7 @@ import {
 import type { CaptionPixelCritic } from './ports/caption-pixel-critic.ts'
 import type { Mp4PixelCritic } from './ports/mp4-pixel-critic.ts'
 import { critiqueOutputFormat, selectExportableVariants } from '../domain/format-quality-critic.ts'
+import { mp4ExportGate, parseMp4ExportAcknowledgement, type Mp4ExportAcknowledgement } from '../domain/mp4-export-gate.ts'
 import { persistMp4QualityReport, verifyDeliveredMp4 } from './verify-delivered-mp4.ts'
 import type { FaceSourceWindowEvidenceReader } from './ports/face-source-window-evidence-reader.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
@@ -85,11 +86,18 @@ export function runNextProjectFinalExportOperationService(dependencies: {
    */
   captionPixelCritic?: CaptionPixelCritic
   /**
-   * W67. The independent critic of the delivered MP4. When wired it gates the promotion of THIS variant: the report is sealed and stored, the
-   * variant's format report goes through `selectExportableVariants`, and a blocked variant (or a critic that could not read the file) is
-   * never promoted, exported or cataloged. Another variant's report neither blocks nor authorizes it. The canonical StoryPlan is not touched.
+   * W67. The independent critic of the delivered MP4. The final FAILS CLOSED on it: the variant's sealed report is stored and its format report
+   * goes through `selectExportableVariants`, and a blocked variant, a critic that could not read the file, a face oracle that failed, a final
+   * with caption/CTA ink over frames the oracle could not read, or NO critic wired at all is never promoted, exported or cataloged
+   * (see `mp4ExportGate`). Another variant's report neither blocks nor authorizes it. The canonical StoryPlan is not touched.
    */
   mp4PixelCritic?: Mp4PixelCritic
+  /**
+   * W67. The only way to deliver a final the critic could not fully judge for a reason about the deployment or the footage (no critic wired;
+   * no face anywhere in a frame that carries ink): an explicit, recorded acknowledgement of who accepted it, when and why. It is copied into
+   * the attempt's validator message. It never lifts a crashed oracle, an unreadable frame, a missing model or a blocked report.
+   */
+  mp4ExportAcknowledgement?: Mp4ExportAcknowledgement
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
@@ -408,7 +416,12 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       const certification = certifyFinalCaptions({ plan: placementPlan, pixelCheck })
       // ---- W67. What the pixels of the delivered file say, by the independent critic; a blocked variant is not promoted ----
       let mp4Validator: { code: string; passed: boolean; message: string } | null = null
-      if (dependencies.mp4PixelCritic) {
+      const mp4Acknowledgement = dependencies.mp4ExportAcknowledgement ? parseMp4ExportAcknowledgement(dependencies.mp4ExportAcknowledgement) : null
+      if (!dependencies.mp4PixelCritic) {
+        // Not wired: the final is not approved by silence. Only an explicit acknowledgement (actor, time, reason) delivers it.
+        const gate = mp4ExportGate({ report: null, acknowledgement: mp4Acknowledgement })
+        mp4Validator = { code: 'FINAL_MP4_CRITIC', passed: gate.allowed, message: gate.message }
+      } else {
         const outputPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
         const outputSpecId = outputPreset.spec.id
         const verification = await verifyDeliveredMp4({
@@ -431,11 +444,17 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             mp4PixelIssues: verification.verification.issues, mp4Evidence: verification.evidence,
           })
           const selection = selectExportableVariants([formatReport])
-          const approved = selection.approvedOutputSpecIds.includes(outputSpecId)
+          const reported = selection.approvedOutputSpecIds.includes(outputSpecId)
           const blocking = selection.decisions.find((decision) => decision.outputSpecId === outputSpecId)?.blockingCodes ?? []
+          // Fail closed on what the report could not establish (a failed oracle, ink over frames it could not read), not only on what it found.
+          const gate = mp4ExportGate({ report: verification.verification.report, acknowledgement: mp4Acknowledgement })
+          const approved = reported && gate.allowed
+          const verdictText = !reported ? `MP4 critic blocked this variant (${blocking.join(', ')})`
+            : !gate.allowed ? `MP4 critic could not fully judge this variant: ${gate.message}`
+              : gate.blockers.length > 0 ? `MP4 critic did not block this variant; ${gate.message}` : 'MP4 critic did not block this variant'
           mp4Validator = {
             code: 'FINAL_MP4_CRITIC', passed: approved,
-            message: `${approved ? 'MP4 critic did not block this variant' : `MP4 critic blocked this variant (${blocking.join(', ')})`}; report ${verification.evidence.reportHash} stored as ${stored.key}.`.slice(0, 500),
+            message: `${verdictText}; report ${verification.evidence.reportHash} stored as ${stored.key}.`.slice(0, 500),
           }
         }
       }

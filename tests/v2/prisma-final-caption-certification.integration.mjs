@@ -265,6 +265,7 @@ test('T-W65B final export through the real gate: a certified cue is burned and c
     format: '9:16', approval: { approved: true, note: 'W65b: face safety stays unknown; captions are certified per burned cue.' },
     actor: world.actor, idempotencyKey: `w65b-final-${world.key}-${tag}-${suffix}` })
   const worker = () => runNextProjectFinalExportOperationService({
+    mp4ExportAcknowledgement: { actor: 'test-world', recordedAt: '2026-10-20T00:00:00.000Z', reason: 'this world wires no MP4 critic (W67 fails closed without one)' },
     operations, projects: finalRepository, rights, artifacts: createMediaArtifactPersistenceRepository(workerEnvironment),
     storage: createLocalMediaUploadStorageFromEnvironment(workerEnvironment),
     renderer: createFfmpegEditorialProxyRendererFromEnvironment(workerEnvironment),

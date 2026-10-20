@@ -108,6 +108,8 @@ export type ProtectedRegionFacts = Readonly<{
   /** Ink pixels inside the box, expanded by the policy's face margin. */
   captionInkPixels: number
   ctaInkPixels: number
+  /** For `source-projection`: the model(s) whose detection on the SOURCE frame this region is the registered projection of. */
+  sourceModels?: readonly ('oracle-0204-v9' | 'oracle-retail-0004')[]
 }>
 export type SubjectFacts = Readonly<
   | { state: 'not-applicable'; reason: 'NO_SOURCE_FACE' | 'NO_SOURCE_FRAME' }

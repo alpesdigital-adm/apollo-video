@@ -812,6 +812,7 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     function controlledWorker(ffmpegPath) {
       return runNextProjectFinalExportOperationService({
         operations, projects: controlledProjects, rights,
+        mp4ExportAcknowledgement: { actor: 'test-world', recordedAt: '2026-10-20T00:00:00.000Z', reason: 'this world wires no MP4 critic (W67 fails closed without one)' },
         artifacts: createMediaArtifactPersistenceRepository(workerEnvironment),
         storage: createLocalMediaUploadStorageFromEnvironment(workerEnvironment),
         renderer: createFfmpegEditorialProxyRendererFromEnvironment({ ...workerEnvironment, FFMPEG_PATH: ffmpegPath }),

@@ -15,6 +15,7 @@ const { FfmpegMp4PixelCritic } = await import('../../src/v2/infrastructure/media
 const { PIXEL_ORACLE_MODELS, decodeV9Output } = await import('../../src/v2/domain/pixel-face-oracle.ts')
 const { sealMp4Evidence, verifyMp4QualityReport } = await import('../../src/v2/domain/mp4-pixel-quality.ts')
 const { critiqueOutputFormat, selectExportableVariants } = await import('../../src/v2/domain/format-quality-critic.ts')
+const { mp4ExportGate } = await import('../../src/v2/domain/mp4-export-gate.ts')
 
 /**
  * W67 critic, plumbing proof on synthetic pixels and the REAL renderer, in both canvases.
@@ -123,6 +124,12 @@ for (const [format, variants] of [['9:16', ['clean', 'caption', 'crop', 'cta', '
       assert.equal(report.verdict, labelled.length === 0 ? 'passed' : 'blocked', JSON.stringify(verification.issues.map((issue) => [issue.code, issue.severity, issue.evidenceRange])))
       assert.equal(report.exportAllowed, labelled.length === 0)
       assert.ok(report.noiseProbe, 'the noise floor between a delivered encode and its control is measured')
+      // W67 fail-closed gate: this stand-in oracle read every frame, so the final gate has nothing to block on (no false block)
+      assert.deepEqual(mp4ExportGate({ report }).blockers, [], 'the final gate does not block a report whose oracle ran on every frame')
+      // every projected region says which detector produced the source face it projects (the stand-in's only reader is the V9 slot)
+      const projected = report.samples.flatMap((sample) => sample.facts.protectedRegions).filter((region) => region.origin === 'source-projection')
+      assert.ok(projected.length > 0, 'the registered projection of the source face protects some frames')
+      for (const region of projected) assert.deepEqual(region.sourceModels, ['oracle-0204-v9'])
     })
   }
 }

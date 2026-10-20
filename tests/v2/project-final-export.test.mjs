@@ -412,6 +412,8 @@ function createOperations(inputHash = finalInputHash()) {
   }
 }
 
+const MP4_TEST_ACKNOWLEDGEMENT = Object.freeze({ actor: 'test-harness', recordedAt: '2026-07-19T00:00:00.000Z', reason: 'the unit world wires no MP4 critic' })
+
 function workerDependencies(
   operations,
   rightsProvider = () => rightsSnapshot(),
@@ -591,6 +593,8 @@ function workerDependencies(
       clock: () => new Date((now += 100)),
       leaseDurationMs: 10_000,
       heartbeatIntervalMs: 1_000,
+      // W67: no MP4 critic is wired in this world, and a final without one is delivered only on an explicit, recorded acknowledgement.
+      mp4ExportAcknowledgement: { ...MP4_TEST_ACKNOWLEDGEMENT },
     },
   }
 }
@@ -1513,7 +1517,7 @@ const { pixelOracleModelPins: oraclePins } = await import('../../src/v2/domain/p
  * A stand-in MP4 critic that seals a report for what the request says it is judging. `overFaceFrames` are frames whose caption ink
  * touches a face (a hard issue); `identityOverrides` lets a test present the report of another variant or file.
  */
-function fakeMp4Critic({ overFaceFrames = [], identityOverrides = {}, artifactSha256 = '6'.repeat(64), throws = false } = {}) {
+function fakeMp4Critic({ overFaceFrames = [], identityOverrides = {}, artifactSha256 = '6'.repeat(64), throws = false, oracleFailures = [], uncertainInk = null } = {}) {
   const critic = {
     requests: [], controls: [],
     async verify(request) {
@@ -1523,6 +1527,17 @@ function fakeMp4Critic({ overFaceFrames = [], identityOverrides = {}, artifactSh
       const frames = 300
       const samples = Array.from({ length: frames }, (_unused, frameIndex) => {
         const over = overFaceFrames.includes(frameIndex)
+        if (uncertainInk && frameIndex >= 40 && frameIndex < 50) {
+          // caption ink over frames with no face evidence: the oracle could not read them ('unreadable') or saw no face anywhere ('absent')
+          const unreadable = uncertainInk === 'unreadable'
+          return {
+            sampleId: `sample-${frameIndex}`, frameIndex, ptsTicks: frameIndex * 512, frameSha256: 'a'.repeat(64),
+            caption: { pixels: 4000, bbox: { x0: 100, y0: 800, x1: 900, y1: 860 }, touchesCanvasEdge: false },
+            cta: { pixels: 0, bbox: null, touchesCanvasEdge: false }, inkDensity: 0.02,
+            oracle: { state: unreadable ? 'unknown' : 'observed', outputFaceCount: 0, sourceFaceCount: 0 }, registration: null, protectedRegions: [],
+            subject: unreadable ? { state: 'unknown', reason: 'SOURCE_FACE_ORACLE_UNREADABLE' } : { state: 'not-applicable', reason: 'NO_SOURCE_FACE' },
+          }
+        }
         return {
           sampleId: `sample-${frameIndex}`, frameIndex, ptsTicks: frameIndex * 512, frameSha256: 'a'.repeat(64),
           caption: over ? { pixels: 4000, bbox: { x0: 100, y0: 800, x1: 900, y1: 860 }, touchesCanvasEdge: false } : { pixels: 0, bbox: null, touchesCanvasEdge: false },
@@ -1537,7 +1552,7 @@ function fakeMp4Critic({ overFaceFrames = [], identityOverrides = {}, artifactSh
         artifact: { sha256: artifactSha256, byteSize: 8192, container: 'mov,mp4,m4a,3gp,3g2,mj2', videoCodec: 'h264', pixelFormat: 'yuv420p', width: request.outputSpec.width, height: request.outputSpec.height, frameRate: { num: 30, den: 1 }, timeBase: { num: 1, den: 15360 }, frameCount: frames, durationTicks: frames * 512 },
         decode: { status: 'complete', framesExpected: frames, framesDecoded: frames, frameListSha256: 'e'.repeat(64), stderrSha256: 'd'.repeat(64), ffmpegBinarySha256: null },
         outputSpec: request.outputSpec, controls: [], noiseProbe: null,
-        oracle: { protocol: 'apollo-pixel-oracle/v1', models: oraclePins(), bridgeSha256: '1'.repeat(64), pythonSha256: '2'.repeat(64), runtime: {}, registration: MP4_POLICY.registration, perSample: [] },
+        oracle: { protocol: 'apollo-pixel-oracle/v1', models: oraclePins(), bridgeSha256: '1'.repeat(64), pythonSha256: '2'.repeat(64), runtime: {}, registration: MP4_POLICY.registration, failures: oracleFailures, perSample: [] },
         samples,
       })
       return { report, issues: report.issues }
@@ -1614,13 +1629,115 @@ test('W67 a critic that could not read the file, or that reports another variant
   }
 })
 
-test('W67 without an MP4 critic wired the final is exactly what it was: nothing is gated and no control is rendered', async () => {
+const { mp4ExportGate: realGate } = await import('../../src/v2/domain/mp4-export-gate.ts')
+
+/** Runs one final through the real worker, with a critic (or none) and an acknowledgement (or none). */
+async function finalWith({ critic = null, acknowledgement = null, label }) {
   const operations = createOperations()
   const { calls, dependencies } = workerDependencies(operations)
   const seen = capture(dependencies)
-  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-mp4-absent')
-  assert.equal(outcome.status, 'succeeded')
-  assert.equal(mp4Validator(seen.attempt), undefined)
-  assert.equal(seen.rendered.filter((input) => input.operationId.includes('-mp4-')).length, 0)
-  assert.equal(calls.persisted, 1)
+  delete dependencies.mp4ExportAcknowledgement
+  if (acknowledgement) dependencies.mp4ExportAcknowledgement = acknowledgement
+  if (critic) wireMp4Critic(dependencies, critic)
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)(`worker-final-export-w67-${label}`)
+  return { outcome, calls, seen }
+}
+const promotedNothing = (result) => result.outcome.status === 'failed' && result.calls.persisted === 0 && result.calls.attached === 0 && result.calls.cataloged === 0 && result.calls.mapped === 0
+const promotedOnce = (result) => result.outcome.status === 'succeeded' && result.calls.persisted === 1 && result.calls.attached === 1 && result.calls.cataloged === 1
+const ACK = Object.freeze({ actor: 'leandro@example.invalid', recordedAt: '2026-10-20T12:00:00.000Z', reason: 'footage without any face; reviewed by hand' })
+
+test('W67 FAIL CLOSED: a final with no MP4 critic wired is not delivered; only an explicit acknowledgement (actor, time, reason) delivers it, and says so', async () => {
+  const blocked = await finalWith({ label: 'unwired' })
+  assert.ok(promotedNothing(blocked), 'no critic and no acknowledgement: nothing is promoted, attached or cataloged')
+  assert.equal(blocked.seen.rendered.filter((input) => input.operationId.includes('-mp4-')).length, 0)
+  const validator = mp4Validator(blocked.seen.attempt)
+  assert.equal(validator.passed, false)
+  assert.match(validator.message, /MP4_CRITIC_NOT_CONFIGURED/)
+  assert.match(validator.message, /not delivered unverified without an explicit acknowledgement/)
+  const acknowledged = await finalWith({ acknowledgement: ACK, label: 'unwired-ack' })
+  assert.ok(promotedOnce(acknowledged))
+  const recorded = mp4Validator(acknowledged.seen.attempt)
+  assert.equal(recorded.passed, true)
+  assert.match(recorded.message, /acknowledged by leandro@example\.invalid at 2026-10-20T12:00:00\.000Z: footage without any face/)
+  // a malformed acknowledgement is not one: nothing is promoted
+  for (const bad of [{ ...ACK, actor: '' }, { ...ACK, recordedAt: '2026-10-20' }, { ...ACK, reason: 'ok' }, { ...ACK, extra: true }]) {
+    const { calls, dependencies } = workerDependencies(createOperations())
+    dependencies.mp4ExportAcknowledgement = bad
+    const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-w67-bad-ack').then((value) => value, (error) => ({ status: 'threw', error }))
+    assert.notEqual(outcome.status, 'succeeded', JSON.stringify(bad))
+    assert.equal(calls.persisted, 0, JSON.stringify(bad))
+  }
+})
+
+test('W67 FAIL CLOSED: a face oracle that failed (a crashed OpenVINO bridge) never delivers the final, with or without ink, and no acknowledgement lifts it', async () => {
+  for (const [label, uncertainInk] of [['crash-no-ink', null], ['crash-over-ink', 'unreadable']]) {
+    for (const acknowledgement of [null, ACK]) {
+      const result = await finalWith({ critic: fakeMp4Critic({ oracleFailures: ['BRIDGE_EXIT_NONZERO'], uncertainInk }), acknowledgement, label: `${label}-${acknowledgement ? 'ack' : 'plain'}` })
+      assert.ok(promotedNothing(result), `${label} ${acknowledgement ? 'with' : 'without'} acknowledgement`)
+      const validator = mp4Validator(result.seen.attempt)
+      assert.equal(validator.passed, false)
+      assert.match(validator.message, /MP4_ORACLE_FAILED \(the face oracle could not run \(BRIDGE_EXIT_NONZERO\)\)/)
+      assert.match(validator.message, /report [a-f0-9]{64} stored as /, 'the sealed report is kept as evidence')
+    }
+  }
+})
+
+test('W67 FAIL CLOSED: caption ink over frames the oracle could not read blocks the final (unreadable: always; no face anywhere: unless acknowledged)', async () => {
+  const unreadable = await finalWith({ critic: fakeMp4Critic({ uncertainInk: 'unreadable' }), label: 'unreadable' })
+  assert.ok(promotedNothing(unreadable))
+  assert.match(mp4Validator(unreadable.seen.attempt).message, /MP4_FACE_ORACLE_UNREADABLE_UNDER_INK \(10 sampled frame\(s\)/)
+  const stillBlocked = await finalWith({ critic: fakeMp4Critic({ uncertainInk: 'unreadable' }), acknowledgement: ACK, label: 'unreadable-ack' })
+  assert.ok(promotedNothing(stillBlocked), 'an acknowledgement never lifts an unreadable frame')
+  const absent = await finalWith({ critic: fakeMp4Critic({ uncertainInk: 'absent' }), label: 'absent' })
+  assert.ok(promotedNothing(absent))
+  assert.match(mp4Validator(absent.seen.attempt).message, /MP4_FACE_EVIDENCE_ABSENT_UNDER_INK \(10 sampled frame\(s\)[^)]*\); a final is not delivered unverified without an explicit acknowledgement/)
+  const acknowledged = await finalWith({ critic: fakeMp4Critic({ uncertainInk: 'absent' }), acknowledgement: ACK, label: 'absent-ack' })
+  assert.ok(promotedOnce(acknowledged))
+  assert.match(mp4Validator(acknowledged.seen.attempt).message, /MP4 critic did not block this variant; MP4_FACE_EVIDENCE_ABSENT_UNDER_INK .* acknowledged by leandro@example\.invalid at 2026-10-20T12:00:00\.000Z/)
+  // and a critic that had everything it needs needs no acknowledgement
+  assert.ok(promotedOnce(await finalWith({ critic: fakeMp4Critic(), label: 'clean-plain' })))
+})
+
+test('W67 MUTATION: each fail-closed rule, removed from a copy of the worker, lets the same final through (so the tests above would catch it)', async () => {
+  const { readFileSync, mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+  const { pathToFileURL, fileURLToPath } = await import('node:url')
+  const sourcePath = fileURLToPath(new URL('../../src/v2/application/run-project-final-export-worker.ts', import.meta.url))
+  const original = readFileSync(sourcePath, 'utf8')
+  const applicationRoot = pathToFileURL(sourcePath).href.replace(/run-project-final-export-worker\.ts$/, '')
+  const scratch = mkdtempSync(join(tmpdir(), 'apollo-w67-mutant-'))
+  const mutate = (label, from, to) => {
+    assert.ok(original.includes(from), `mutation anchor missing: ${label}`)
+    // the copy lives outside src/ (nothing in the repository ever sees it); its relative imports point back at the real modules
+    const text = original.replace(from, () => to).replaceAll("from '../", `from '${applicationRoot}../`).replaceAll("from './", `from '${applicationRoot}`)
+    const path = join(scratch, `mutant-${label}.ts`)
+    writeFileSync(path, text)
+    return import(pathToFileURL(path).href)
+  }
+  const unwired = async (module) => {
+    const { calls, dependencies } = workerDependencies(createOperations())
+    delete dependencies.mp4ExportAcknowledgement
+    return { outcome: await module.runNextProjectFinalExportOperationService(dependencies)('worker-final-export-w67-mutant-unwired'), calls }
+  }
+  const crashed = async (module) => {
+    const { calls, dependencies } = workerDependencies(createOperations())
+    wireMp4Critic(dependencies, fakeMp4Critic({ oracleFailures: ['BRIDGE_EXIT_NONZERO'], uncertainInk: 'unreadable' }))
+    return { outcome: await module.runNextProjectFinalExportOperationService(dependencies)('worker-final-export-w67-mutant-crashed'), calls }
+  }
+  const cases = [
+    ['unwired-gate', unwired, "mp4Validator = { code: 'FINAL_MP4_CRITIC', passed: gate.allowed, message: gate.message }", "mp4Validator = { code: 'FINAL_MP4_CRITIC', passed: true, message: gate.message }"],
+    ['oracle-gate', crashed, 'const approved = reported && gate.allowed', 'const approved = reported'],
+  ]
+  try {
+    for (const [label, scenario, from, to] of cases) {
+      const real = await scenario({ runNextProjectFinalExportOperationService })
+      assert.equal(real.outcome.status, 'failed', `the real worker refuses: ${label}`)
+      assert.equal(real.calls.persisted, 0, label)
+      const mutated = await scenario(await mutate(label, from, to))
+      assert.equal(mutated.outcome.status, 'succeeded', `the worker without the "${label}" rule delivers the final the real worker refuses`)
+      assert.equal(mutated.calls.persisted, 1, label)
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true })
+  }
+  assert.equal(typeof realGate, 'function')
 })

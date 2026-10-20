@@ -174,27 +174,30 @@ export function measureSubject(input: Readonly<{
   outputDimensions: Readonly<{ width: number; height: number }>
   outputFaces: readonly Readonly<NormalizedBounds>[]
   policy?: typeof MP4_PIXEL_CRITIC_POLICY
-}>): Readonly<{ subject: SubjectFacts; registration: RegistrationFacts | null; projectedSourceFaces: readonly Readonly<NormalizedBounds>[] }> {
+}>): Readonly<{ subject: SubjectFacts; registration: RegistrationFacts | null; projectedSourceFaces: readonly Readonly<NormalizedBounds>[]; projectedSourceFaceIndices: readonly number[] }> {
   const policy = input.policy ?? MP4_PIXEL_CRITIC_POLICY
-  if (!input.sourceFrameAvailable) return Object.freeze({ subject: Object.freeze({ state: 'not-applicable' as const, reason: 'NO_SOURCE_FRAME' as const }), registration: null, projectedSourceFaces: Object.freeze([]) })
-  if (input.sourceOracle === 'unknown') return Object.freeze({ subject: Object.freeze({ state: 'unknown' as const, reason: 'SOURCE_FACE_ORACLE_UNREADABLE' }), registration: null, projectedSourceFaces: Object.freeze([]) })
-  if (input.sourceFaces.length === 0) return Object.freeze({ subject: Object.freeze({ state: 'not-applicable' as const, reason: 'NO_SOURCE_FACE' as const }), registration: null, projectedSourceFaces: Object.freeze([]) })
+  if (!input.sourceFrameAvailable) return Object.freeze({ subject: Object.freeze({ state: 'not-applicable' as const, reason: 'NO_SOURCE_FRAME' as const }), registration: null, projectedSourceFaces: Object.freeze([]), projectedSourceFaceIndices: Object.freeze([]) })
+  if (input.sourceOracle === 'unknown') return Object.freeze({ subject: Object.freeze({ state: 'unknown' as const, reason: 'SOURCE_FACE_ORACLE_UNREADABLE' }), registration: null, projectedSourceFaces: Object.freeze([]), projectedSourceFaceIndices: Object.freeze([]) })
+  if (input.sourceFaces.length === 0) return Object.freeze({ subject: Object.freeze({ state: 'not-applicable' as const, reason: 'NO_SOURCE_FACE' as const }), registration: null, projectedSourceFaces: Object.freeze([]), projectedSourceFaceIndices: Object.freeze([]) })
   if (!input.registration || !input.sourceDimensions) {
-    return Object.freeze({ subject: Object.freeze({ state: 'unknown' as const, reason: 'REGISTRATION_NOT_ATTEMPTED' }), registration: null, projectedSourceFaces: Object.freeze([]) })
+    return Object.freeze({ subject: Object.freeze({ state: 'unknown' as const, reason: 'REGISTRATION_NOT_ATTEMPTED' }), registration: null, projectedSourceFaces: Object.freeze([]), projectedSourceFaceIndices: Object.freeze([]) })
   }
   const registration = registrationFacts(input.registration, policy.registration)
   if (!registration.usable || !input.registration.matrix) {
-    return Object.freeze({ subject: Object.freeze({ state: 'unknown' as const, reason: `REGISTRATION_${registration.facts.reason ?? 'FAILED'}` }), registration: registration.facts, projectedSourceFaces: Object.freeze([]) })
+    return Object.freeze({ subject: Object.freeze({ state: 'unknown' as const, reason: `REGISTRATION_${registration.facts.reason ?? 'FAILED'}` }), registration: registration.facts, projectedSourceFaces: Object.freeze([]), projectedSourceFaceIndices: Object.freeze([]) })
   }
   const projected = input.sourceFaces.map((face) => projectSourceBox(input.registration!.matrix!, input.sourceDimensions!, input.outputDimensions, face))
   const primaryIndex = input.sourceFaces.reduce((best, face, index) => (face.width * face.height > input.sourceFaces[best]!.width * input.sourceFaces[best]!.height ? index : best), 0)
   const primary = projected[primaryIndex]!
+  const kept = projected.map((box, index) => ({ index, bounds: boundsOf(clipToCanvas(box)) })).filter((entry) => entry.bounds.width > 0 && entry.bounds.height > 0)
   const visible = visibleFractionOf(primary)
   const inside = clipToCanvas(primary)
   const confirmed = input.outputFaces.some((face) => iou(inside, boxOf(face)) >= policy.subject.outputConfirmationMinIou)
   return Object.freeze({
     subject: Object.freeze({ state: 'measured' as const, visibleFraction: visible, outputConfirmed: confirmed, projected: primary }),
     registration: registration.facts,
-    projectedSourceFaces: Object.freeze(projected.map((box) => boundsOf(clipToCanvas(box))).filter((bounds) => bounds.width > 0 && bounds.height > 0)),
+    projectedSourceFaces: Object.freeze(kept.map((entry) => entry.bounds)),
+    /** For each kept projected face, the index of the source face it came from (so a report can say which detector produced it). */
+    projectedSourceFaceIndices: Object.freeze(kept.map((entry) => entry.index)),
   })
 }

@@ -338,9 +338,13 @@ export class FfmpegMp4PixelCritic implements Mp4PixelCritic {
           const counts = countIn(face.box)
           regions.push(Object.freeze({ origin: face.models[0] === 'omz-face-detection-0204-v9' ? 'oracle-0204-v9' as const : 'oracle-retail-0004' as const, box: face.box, captionInkPixels: counts.caption, ctaInkPixels: counts.cta }))
         }
-        for (const box of subject.projectedSourceFaces) {
+        for (const [position, box] of subject.projectedSourceFaces.entries()) {
           const counts = countIn(box)
-          regions.push(Object.freeze({ origin: 'source-projection' as const, box, captionInkPixels: counts.caption, ctaInkPixels: counts.cta }))
+          const sourceFace = sourceUnion?.faces[subject.projectedSourceFaceIndices[position]!]
+          regions.push(Object.freeze({
+            origin: 'source-projection' as const, box, captionInkPixels: counts.caption, ctaInkPixels: counts.cta,
+            sourceModels: Object.freeze((sourceFace?.models ?? []).map((model) => (model === 'omz-face-detection-0204-v9' ? 'oracle-0204-v9' as const : 'oracle-retail-0004' as const))),
+          }))
         }
         facts.push(Object.freeze({
           sampleId, frameIndex: frame, ptsTicks: pts, frameSha256: frameShas[frame]!,

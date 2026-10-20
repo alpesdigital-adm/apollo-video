@@ -745,6 +745,7 @@ test('T-F2-GATE/F2.028 admits the real API per burned caption without a global f
       const renderer = createFfmpegEditorialProxyRendererFromEnvironment({ ...workerEnvironment, FFMPEG_PATH: ffmpegPath })
       return runNextProjectFinalExportOperationService({
         operations, projects: controlledProjects, rights,
+        mp4ExportAcknowledgement: { actor: 'test-world', recordedAt: '2026-10-20T00:00:00.000Z', reason: 'this world wires no MP4 critic (W67 fails closed without one)' },
         artifacts: createMediaArtifactPersistenceRepository(workerEnvironment),
         storage: createLocalMediaUploadStorageFromEnvironment(workerEnvironment),
         renderer: trace ? tracedRenderer(renderer) : renderer,
