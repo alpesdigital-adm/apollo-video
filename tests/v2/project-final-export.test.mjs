@@ -1691,27 +1691,54 @@ test('W67 FAIL CLOSED: a final with no MP4 critic wired is not delivered; only a
   }
 })
 
-test('W67 an acknowledgement is stored only for a final that is delivered: a codec, canvas or persistence failure after the gate leaves no record and the attempt says it was not used', async () => {
-  const failures = {
+test('W67 the acknowledgement record is stored after the verified promotion and BEFORE the artifact exists: whenever the artifact exists, so does the record', async () => {
+  // failures before the artifact can exist: no record, and the attempt says the final was not promoted
+  const before = {
     codec: (dependencies) => { const render = dependencies.renderer.render; dependencies.renderer.render = async (input) => { const out = await render(input); return { ...out, probe: { ...out.probe, codec: 'vp9' } } } },
     canvas: (dependencies) => { const render = dependencies.renderer.render; dependencies.renderer.render = async (input) => { const out = await render(input); return { ...out, probe: { ...out.probe, width: 720 } } } },
-    persistence: (dependencies) => { dependencies.artifacts.persistOrReplay = async () => { throw new Error('artifact persistence is down') } },
+    'checksum-changed-by-promotion': (dependencies) => { const promote = dependencies.storage.promoteDerived; dependencies.storage.promoteDerived = async (input) => input.prefix.startsWith('mp4-') ? promote(input) : { ...(await promote(input)), sha256: '9'.repeat(64) } },
   }
-  for (const [label, sabotage] of Object.entries(failures)) {
+  for (const [label, sabotage] of Object.entries(before)) {
     const operations = createOperations()
     const { calls, dependencies } = workerDependencies(operations)
     const seen = capture(dependencies)
-    sabotage(dependencies)
     dependencies.mp4ExportAcknowledgement = { ...ACK }
     const stored = captureMp4Storage(dependencies)
-    const outcome = await runNextProjectFinalExportOperationService(dependencies)(`worker-final-export-w67-ack-late-${label}`)
+    sabotage(dependencies)
+    const outcome = await runNextProjectFinalExportOperationService(dependencies)(`worker-final-export-w67-ack-early-${label}`)
     assert.notEqual(outcome.status, 'succeeded', label)
-    assert.equal(calls.attached, 0, label)
-    assert.equal(stored.filter((entry) => entry.prefix === 'mp4-export-acknowledgements').length, 0, `${label}: the final was not delivered, so no acknowledgement record is written`)
-    assert.equal(seen.attempt.status, 'failed', label)
-    const validator = mp4Validator(seen.attempt)
-    assert.equal(validator.passed, true, `${label}: the gate itself allowed it`)
-    assert.match(validator.message, /acknowledgement record [a-f0-9]{64} not stored: the final was not delivered.$/, label)
+    assert.equal(calls.persisted, 0, `${label}: no artifact`)
+    assert.equal(stored.filter((entry) => entry.prefix === 'mp4-export-acknowledgements').length, 0, `${label}: no record`)
+    assert.match(mp4Validator(seen.attempt).message, /acknowledgement record [a-f0-9]{64} not stored: the final was not promoted.$/, label)
+  }
+  // a failure to store the record happens while nothing is downloadable yet
+  {
+    const { calls, dependencies } = workerDependencies(createOperations())
+    const seen = capture(dependencies)
+    dependencies.mp4ExportAcknowledgement = { ...ACK }
+    const promote = dependencies.storage.promoteDerived
+    dependencies.storage.promoteDerived = async (input) => { if (input.prefix === 'mp4-export-acknowledgements') throw new Error('acknowledgement store is down'); return promote(input) }
+    const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-w67-ack-store-down')
+    assert.notEqual(outcome.status, 'succeeded')
+    assert.equal(calls.persisted, 0, 'the artifact does not exist when the record could not be stored')
+    assert.equal(calls.attached, 0)
+    assert.match(mp4Validator(seen.attempt).message, /not stored: the final was not promoted.$/)
+  }
+  // failures at and after the artifact: the record already exists
+  const after = {
+    'artifact-persistence': (dependencies) => { dependencies.artifacts.persistOrReplay = async () => { throw new Error('artifact persistence is down') } },
+    'render-element-map': (dependencies) => { dependencies.renderElementMaps.persistOrReplay = async () => { throw new Error('element map store is down') } },
+    'attempt-record': (dependencies) => { dependencies.projects.recordAttempt = async () => { throw new Error('attempt record store is down') } },
+  }
+  for (const [label, sabotage] of Object.entries(after)) {
+    const { dependencies } = workerDependencies(createOperations())
+    capture(dependencies)
+    dependencies.mp4ExportAcknowledgement = { ...ACK }
+    const stored = captureMp4Storage(dependencies)
+    sabotage(dependencies)
+    const outcome = await runNextProjectFinalExportOperationService(dependencies)(`worker-final-export-w67-ack-late-${label}`).then((value) => value, (error) => ({ status: 'threw', error }))
+    assert.notEqual(outcome.status, 'succeeded', label)
+    assert.equal(stored.filter((entry) => entry.prefix === 'mp4-export-acknowledgements').length, 1, `${label}: the record exists whenever the artifact can`)
   }
 })
 
