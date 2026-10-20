@@ -168,11 +168,15 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
     const projectUrl = `/projects/${world.projectId}`
     await login(page, server.baseUrl, projectUrl)
     const panel = page.getByTestId('issue-override-panel')
-    const openOutput = async (entry) => {
+    const openOutput = async (entry, { mayBeUnrendered = false } = {}) => {
       await page.goto(`${server.baseUrl}${projectUrl}`)
       await page.getByTestId(`output-option-${entry.variantId}`).click()
       await page.locator(`[data-testid="issue-override-panel"][data-variant-id="${entry.variantId}"]`).waitFor()
-      await page.locator('[data-testid="issue-chip"], [data-testid="issue-none"], [data-testid="issue-no-review"]').first().waitFor()
+      if (mayBeUnrendered) await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => undefined)
+      await page.locator(mayBeUnrendered ? '[data-testid="issue-chip"], [data-testid="issue-none"], [data-testid="issue-render-current"]' : '[data-testid="issue-chip"], [data-testid="issue-none"]').first().waitFor({ timeout: 60_000 }).catch(async (error) => {
+        await page.screenshot({ path: join(evidenceDir, 'w68-diagnostic-open-output.png'), fullPage: true }).catch(() => undefined)
+        throw new Error(`the panel never showed a chip, an empty verdict or a render action: ${(await panel.innerText().catch(() => '')).slice(0, 600)} / ${error}`)
+      })
     }
     const chipFor = (code, cue) => page.locator(`[data-testid="issue-chip"][data-issue-code="${code}"]${cue ? `[data-cue-id="${cue}"]` : ''}`).first()
     const chipCodes = async () => page.locator('[data-testid="issue-chip"]').evaluateAll((nodes) => nodes.map((node) => [node.getAttribute('data-issue-code'), node.getAttribute('data-severity'), node.getAttribute('data-cue-id')]))
@@ -456,7 +460,7 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
     /* ====== 9:16 : render the current Version, pin with an expired session, reframe set/reset, hide + cancel the recompile ====== */
     {
       const entry = VARIANTS[0]
-      await openOutput(entry)
+      await openOutput(entry, { mayBeUnrendered: true })
       assert.ok(await page.getByTestId('issue-render-current').isVisible(), 'the vertical output has no render of the current Version yet')
       const current = await head()
       assert.equal(await proxyOf(current.id, entry.variantId), null)

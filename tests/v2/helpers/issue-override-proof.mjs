@@ -8,6 +8,7 @@ import { faceBox } from './reframe-gt-oracle.mjs'
 
 const run = promisify(execFile)
 const { readOutputFormatPreset } = await import('../../../src/v2/domain/output-format-registry.ts')
+const { CAPTION_BAND_TOLERANCE_PX } = await import('../../../src/v2/domain/caption-pixel-verdict.ts')
 const { deriveSubtitleAnchorBands } = await import('../../../src/v2/domain/subtitle-anchor-plan.ts')
 const { deriveSubtitleRegion } = await import('../../../src/v2/domain/subtitle-region.ts')
 
@@ -23,8 +24,12 @@ export const PIXEL_TOLERANCE = Object.freeze({
   rowPixels: 6,
   /** Clusters closer than this many canvas rows are one drawn caption (two lines of one cue). */
   clusterGapRows: 14,
-  /** Slack, in canvas rows, around a band for the glyph outline, the opaque box and the anti-aliasing (the product critic uses 6; this is wider on purpose). */
-  bandSlackRows: 16,
+  /**
+   * Slack, in canvas rows, around a band for the glyph outline, the opaque box and the anti-aliasing. It is the product's PUBLISHED constant
+   * (`CAPTION_BAND_TOLERANCE_PX`), not a number chosen for this proof: a caption is inside its band when it is inside the band the plan
+   * decided plus that tolerance, which is what the critic says and what this oracle measures independently.
+   */
+  bandSlackRows: CAPTION_BAND_TOLERANCE_PX,
 })
 
 export const sha256Hex = (bytes) => createHash('sha256').update(bytes).digest('hex')
