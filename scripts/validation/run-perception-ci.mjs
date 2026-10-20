@@ -166,8 +166,24 @@ async function readMarkerFacts(pid, runId) {
     knownMarker: variables.some((value) => value.startsWith(`${RUN_MARKER}=`) && value !== `${RUN_MARKER}=`) }
 }
 
+// A task between the exec_mmap and the dumpability restore of an execve answers /proc/<pid>/environ with EACCES for a few
+// microseconds even to its own uid. A process born after the frozen baseline (a child of the run being supervised) gets a bounded re-read
+// before the denial is acted on; a denial that persists is exactly what it was before (the denied-peer rules below).
+export const LINUX_ENVIRON_RECHECK_MS = 150
+const ENVIRON_RECHECK_PAUSE_MS = 10
+const ENVIRON_RECHECK_ATTEMPTS = 4
+
+// Best effort, receipt-only: the kernel's 15-character command name of a process whose environment was denied.
+export const sanitizeCommName = (text) => {
+  const name = String(text).replace(/\n$/, '')
+  return /^[\x21-\x7e][\x20-\x7e]{0,14}$/.test(name) ? name : null
+}
+async function readCommName(pid) {
+  try { return sanitizeCommName(await readFile(`/proc/${pid}/comm`, 'utf8')) } catch { return null }
+}
+
 const linuxObservationIo = {
-  entries: () => readdir('/proc'), identity: readLinuxProcessIdentity,
+  entries: () => readdir('/proc'), identity: readLinuxProcessIdentity, comm: readCommName,
   owner: async (pid) => ({ ...parseLinuxProcessCredentials(await readFile(`/proc/${pid}/status`, 'utf8')),
     inodeUid: (await stat(`/proc/${pid}`)).uid }), markerFacts: readMarkerFacts,
 }
@@ -226,10 +242,12 @@ export async function observeLinuxProcesses(runId, context, io = linuxObservatio
   assert.ok(context?.ownerIdentity && context.baseline instanceof Map, 'Missing supervisor observation baseline')
   const started = Date.now(), entries = await io.entries(), result = [], denied = [], failures = []
   const ownershipVerified = new Set(), absent = new Set()
+  // What the first EACCES of an identity said about it (command name, how many times the environment was read), so a denial names the process.
+  const denialFacts = new Map()
   const denialReceipt = (entry, error, recheck, guardReason) => {
     context.environmentDenials.set(identityKey(entry), { pid: entry.pid, starttime: entry.starttime,
       code: error.code ?? null, before: { ...entry }, recheck: recheck ? { ...recheck } : null,
-      guardReason, observedAt: new Date().toISOString() })
+      guardReason, observedAt: new Date().toISOString(), ...(denialFacts.get(identityKey(entry)) ?? {}) })
     assert.ok(context.environmentDenials.size <= 16_384, 'Environment denial inventory exceeds observation bound')
   }
   try {
@@ -261,20 +279,45 @@ export async function observeLinuxProcesses(runId, context, io = linuxObservatio
     assert.ok(Date.now() - started < 3000, 'Linux observation exceeded its deadline')
     if (entry.uid !== context.ownerUid || !live(entry)) continue
     let facts
+    const readFacts = async () => {
+      if (io.markerFacts) return io.markerFacts(entry.pid, runId)
+      const environment = await io.environment(entry.pid)
+      assert.ok(environment.length <= 2 * 1024 * 1024, 'Linux process environment exceeds observation bound')
+      const variables = environment.toString('utf8').split('\0')
+      return { runMarked: variables.includes(`${RUN_MARKER}=${runId}`),
+        knownMarker: variables.some((value) => value.startsWith(`${RUN_MARKER}=`) && value !== `${RUN_MARKER}=`) }
+    }
     try {
-      if (io.markerFacts) facts = await io.markerFacts(entry.pid, runId)
-      else {
-        const environment = await io.environment(entry.pid)
-        assert.ok(environment.length <= 2 * 1024 * 1024, 'Linux process environment exceeds observation bound')
-        const variables = environment.toString('utf8').split('\0')
-        facts = { runMarked: variables.includes(`${RUN_MARKER}=${runId}`),
-          knownMarker: variables.some((value) => value.startsWith(`${RUN_MARKER}=`) && value !== `${RUN_MARKER}=`) }
-      }
+      facts = await readFacts()
     } catch (error) {
       if (['ENOENT', 'ESRCH'].includes(error.code)) { absent.add(identityKey(entry)); continue }
-      if (error.code === 'EACCES') { denied.push({ entry, error }); continue }
-      denialReceipt(entry, error, null, 'environment-error-not-eligible')
-      failures.push(error); continue
+      if (error.code === 'EACCES') {
+        // Only a process born after the frozen baseline can be mid-exec under this run; a baseline peer keeps its single read.
+        let environReads = 1, gone = false
+        if (!context.baseline.has(identityKey(entry))) {
+          const startedAt = Date.now(), startedMonotonic = performance.now()
+          for (let attempt = 0; attempt < ENVIRON_RECHECK_ATTEMPTS; attempt += 1) {
+            await delay(ENVIRON_RECHECK_PAUSE_MS)
+            const finishedAt = Date.now(), finishedMonotonic = performance.now()
+            if (!(finishedAt >= startedAt && finishedAt - startedAt < LINUX_ENVIRON_RECHECK_MS &&
+                finishedMonotonic - startedMonotonic < LINUX_ENVIRON_RECHECK_MS)) break
+            environReads += 1
+            try { facts = await readFacts(); break } catch (again) {
+              if (['ENOENT', 'ESRCH'].includes(again.code)) { gone = true; break }
+              if (again.code !== 'EACCES') break
+            }
+          }
+        }
+        if (gone) { absent.add(identityKey(entry)); continue }
+        if (!facts) {
+          const comm = io.comm ? await io.comm(entry.pid).catch(() => null) : null
+          denialFacts.set(identityKey(entry), { comm: typeof comm === 'string' ? comm : null, environReads })
+          denied.push({ entry, error }); continue
+        }
+      } else {
+        denialReceipt(entry, error, null, 'environment-error-not-eligible')
+        failures.push(error); continue
+      }
     }
     try {
       assert.equal(typeof facts.runMarked, 'boolean'); assert.equal(typeof facts.knownMarker, 'boolean')

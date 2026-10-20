@@ -9,7 +9,7 @@ import {
   CLEANUP_BUDGET_MS, attachSupervisorSignals, collectOwnedIdentities, containObservedIdentities, createPerceptionRunId,
   parseLinuxProcessStat, readLinuxProcessIdentity, requireJobBudget, signalObservedIdentity, linuxProcessSnapshot,
   supervisePerceptionCommand,
-  createLinuxObservationContext, observeLinuxProcesses,
+  createLinuxObservationContext, observeLinuxProcesses, sanitizeCommName,
 } from '../../scripts/validation/run-perception-ci.mjs'
 
 const entry = (pid, starttime, extra = {}) => ({ pid, starttime, ppid: 1,
@@ -223,6 +223,80 @@ test('Linux live denied owned child remains a failure but survives reparenting f
   assert.deepEqual(signaled.sort(), [30, 31])
   assert.ok(contained.signals.every((signal) => signal.result === 'signaled'))
   assert.deepEqual(contained.errors, [])
+})
+
+// CI run 39353740559 attempt 1 (Dashboard "Build unprivileged CI pidfd addon"): pid 3324, a child born inside the build (parent 3322 marked, same
+// uid), answered EACCES on /proc/<pid>/environ while it was state D, was state R at the recheck and was gone at the terminality read.
+function bornChildWorld(reads) {
+  const world = observationWorld()
+  const environment = world.io.environment
+  world.io.environment = async (pid) => { reads.set(pid, (reads.get(pid) ?? 0) + 1); return environment(pid) }
+  world.io.comm = async (pid) => pid === 31 ? 'cc1' : null
+  return world
+}
+async function spawnBornChild(world, context) {
+  await observeLinuxProcesses('controlled-run', context, world.io)
+  world.states.set(30, { ...entry(30, '130'), uid: 600 })
+  world.states.set(31, { ...entry(31, '131', { ppid: 30, state: 'D' }), uid: 600 })
+  context.rootPid = 30
+  world.environments.set(30, 'APOLLO_PERCEPTION_RUN_ID=controlled-run\0')
+  world.environments.set(31, 'APOLLO_PERCEPTION_RUN_ID=controlled-run\0')
+}
+
+test('Linux EACCES on a child born after the baseline that is mid-exec is re-read once it settles, and the child is observed as marked', async () => {
+  const reads = new Map(), world = bornChildWorld(reads), context = await world.context()
+  await spawnBornChild(world, context)
+  let left = 2
+  const environment = world.io.environment
+  world.io.environment = async (pid) => { if (pid === 31 && left-- > 0) { reads.set(pid, (reads.get(pid) ?? 0) + 1); throw world.permission } return environment(pid) }
+  const snapshot = await observeLinuxProcesses('controlled-run', context, world.io)
+  assert.equal(reads.get(31), 3, 'two denials while the exec completes, then the read')
+  assert.equal(snapshot.find((identity) => identity.pid === 31).runMarked, true)
+  assert.equal(context.environmentDenials.size, 0, 'a settled read leaves no denial')
+  assert.ok(context.observed.has('31:131'))
+})
+
+test('Linux EACCES on a born child that disappears while it is re-read is an absence, not a failure', async () => {
+  const reads = new Map(), world = bornChildWorld(reads), context = await world.context()
+  await spawnBornChild(world, context)
+  const gone = Object.assign(new Error('gone'), { code: 'ENOENT' })
+  const environment = world.io.environment
+  world.io.environment = async (pid) => { if (pid === 31) { reads.set(pid, (reads.get(pid) ?? 0) + 1); throw reads.get(pid) === 1 ? world.permission : gone } return environment(pid) }
+  const snapshot = await observeLinuxProcesses('controlled-run', context, world.io)
+  assert.equal(snapshot.some((identity) => identity.pid === 31), false)
+  assert.equal(context.environmentDenials.size, 0)
+})
+
+test('Linux EACCES that persists on a born, owned child is still a failure, and the receipt names the process and the reads', async () => {
+  const reads = new Map(), world = bornChildWorld(reads), context = await world.context()
+  await spawnBornChild(world, context)
+  world.denied.set(31, world.permission)
+  await assert.rejects(observeLinuxProcesses('controlled-run', context, world.io), (error) => error === world.permission)
+  assert.equal(reads.get(31), 5, 'the first read and the bounded re-reads, no more')
+  const receipt = context.environmentDenials.get('31:131')
+  assert.equal(receipt.guardReason, 'owned-or-marker-protected')
+  assert.equal(receipt.comm, 'cc1')
+  assert.equal(receipt.environReads, 5)
+  assert.equal(receipt.before.ppid, 30); assert.equal(receipt.before.uid, 600); assert.equal(receipt.before.state, 'D')
+  assert.equal(receipt.recheck.uid, 600)
+})
+
+test('Linux EACCES on a peer of the frozen baseline keeps its single read (no re-read) and still carries its command name', async () => {
+  const reads = new Map(), world = bornChildWorld(reads), context = await world.context()
+  world.io.comm = async (pid) => pid === 20 ? 'runner-helper' : null
+  world.denied.set(20, world.permission)
+  await observeLinuxProcesses('controlled-run', context, world.io)
+  assert.equal(reads.get(20), 1)
+  assert.equal(context.exclusions.get('20:40').reason, 'environ-eacces-preexisting-before-owner-unrelated')
+  const receipt = context.environmentDenials.get('20:40')
+  assert.equal(receipt.guardReason, 'preexisting-exclusion-guards-confirmed')
+  assert.deepEqual([receipt.comm, receipt.environReads], ['runner-helper', 1])
+})
+
+test('Linux the command name of a denied process is printable ASCII of at most 15 characters, else null', () => {
+  assert.equal(sanitizeCommName('cc1\n'), 'cc1')
+  assert.equal(sanitizeCommName('Web Content\n'), 'Web Content')
+  for (const bad of ['', '\n', ' lead', 'has\nnewline', 'a'.repeat(16), 'tab\there', 'éclair', 'nul\u0000byte']) assert.equal(sanitizeCommName(bad), null, JSON.stringify(bad))
 })
 
 test('Linux ancestry refuses a reused numeric parent and a child older than its newly marked parent', async () => {
