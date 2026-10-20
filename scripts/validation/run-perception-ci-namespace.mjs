@@ -53,6 +53,18 @@ const errorFact = (error) => ({ name: error.name, code: error.code ?? null,
   message: String(error.message).slice(0, 512),
   ...(error.admissionLockDiagnostic ? { admissionLockDiagnostic: error.admissionLockDiagnostic } : {}) })
 
+// A write to the warden's control pipe (the abort byte or the 1 s heartbeat) that lands after the warden has already finished and exited answers
+// EPIPE. That is the warden having closed, not a fault of this proof, but only for an EPIPE CAPTURED after the warden's authenticated final
+// receipt was already in hand (`afterFinal`, tagged at capture time), and only when that final succeeded and the warden closed with code 0
+// (CI run 39446701464 attempt 2: the suite passed, the final succeeded, code 0, and the only error was this EPIPE). An EPIPE captured before the
+// final, even one beside a final that later succeeds, stays an error, and so does anything that is not EPIPE.
+export function settleControlPipeErrors({ pipeErrors, rootFinal, code, childCloseObserved }) {
+  if (pipeErrors.length === 0) return { errors: [], afterFinal: null }
+  const benign = rootFinal?.success === true && code === 0 && childCloseObserved === true &&
+    pipeErrors.every((error) => error.code === 'EPIPE' && error.afterFinal === true)
+  return benign ? { errors: [], afterFinal: pipeErrors } : { errors: pipeErrors, afterFinal: null }
+}
+
 export function namespaceLaunchConfig({ suite, pattern = null, env = process.env,
   uid = process.getuid(), gid = process.getgid(), node = process.execPath, now = Date.now(), controlledFault = null }) {
   assertPerceptionSuite(suite, pattern)
@@ -243,7 +255,7 @@ export async function runNamespaceSuite({ suite, pattern = null, env = process.e
   }
   let child, sudoIdentity, heartbeat, receiptBuffer = Buffer.alloc(0), protocolError, interrupted
   let closed = false, closePromise, closeTimer, rootFinal, guardianBirthVerified = false, sudoBirthToken, binding
-  const ownedPidfds = new Map()
+  const ownedPidfds = new Map(), controlPipeErrors = []
   const abort = () => { if (child?.stdin.writable) child.stdin.write('A') }
   const handlers = ['SIGINT', 'SIGTERM'].map((name) => {
     const handler = () => { interrupted ??= name; report.interruptedBy = name; abort() }
@@ -273,7 +285,7 @@ export async function runNamespaceSuite({ suite, pattern = null, env = process.e
       })
     })
     child.once('error', (error) => { report.errors.push(errorFact(error)); abort() })
-    child.stdin.on('error', (error) => { if (!closed) report.errors.push(errorFact(error)) })
+    child.stdin.on('error', (error) => { if (!closed) (error?.code === 'EPIPE' ? controlPipeErrors : report.errors).push({ ...errorFact(error), afterFinal: rootFinal !== undefined }) })
     child.stderr.pipe(process.stderr, { end: false })
     child.stdout.on('data', (chunk) => {
       try {
@@ -286,7 +298,7 @@ export async function runNamespaceSuite({ suite, pattern = null, env = process.e
           assert.ok(['guardian-ready', 'guardian-final'].includes(packet.stage))
           assert.ok(report.rootReceipts.length < 2, 'Too many root receipts')
           assert.ok(!rootFinal, 'Root packet after final receipt')
-          if (packet.stage === 'guardian-final') rootFinal = packet
+          if (packet.stage === 'guardian-final') { rootFinal = packet; clearInterval(heartbeat) }
           else {
             assert.equal(report.rootReceipts.length, 0, 'Duplicate root startup receipt')
           }
@@ -377,6 +389,9 @@ export async function runNamespaceSuite({ suite, pattern = null, env = process.e
       catch (error) { report.errors.push(errorFact(error)); report.inventoryInconclusive = true }
     }
     clearInterval(heartbeat); clearTimeout(closeTimer)
+    const settled = settleControlPipeErrors({ pipeErrors: controlPipeErrors, rootFinal, code: report.code, childCloseObserved: report.childCloseObserved })
+    report.errors.push(...settled.errors)
+    if (settled.afterFinal) report.controlPipeClosedAfterFinal = settled.afterFinal
     for (const [name, handler] of handlers) process.removeListener(name, handler)
     const ready = report.rootReceipts.find((packet) => packet.stage === 'guardian-ready')
     report.faultEvidence ??= rootFinal?.faultEvidence ?? rootFinal?.initFinal?.faultEvidence

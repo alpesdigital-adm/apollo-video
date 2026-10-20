@@ -417,20 +417,25 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       const certification = certifyFinalCaptions({ plan: placementPlan, pixelCheck })
       // ---- W67. What the pixels of the delivered file say, by the independent critic; a blocked variant is not promoted ----
       let mp4Validator: { code: string; passed: boolean; message: string } | null = null
+      let pendingAcknowledgement: Readonly<{ text: string; sha256: string; gateMessage: string }> | null = null
       const mp4Acknowledgement = dependencies.mp4ExportAcknowledgement ? parseMp4ExportAcknowledgement(dependencies.mp4ExportAcknowledgement) : null
       if (!dependencies.mp4PixelCritic) {
         // Not wired: the final is not approved by silence. Only an explicit acknowledgement (actor, time, reason) delivers it.
         const gate = mp4ExportGate({ report: null, acknowledgement: mp4Acknowledgement })
         let recorded = ''
         if (gate.allowed) {
-          // The acknowledgement that delivers this final is stored as a structured record (who, when, why, which operation), not as validator text.
+          // The acknowledgement that delivers this final is a structured record (who, when, why, which operation), not validator text.
+          // It is only BUILT here: it is stored after the codec/canvas/duration validators, the rights check and the verified promotion, and
+          // before the artifact is persisted as available, so it is never recorded for a final that failed and never missing for one that exists.
           const unwiredPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
           const acknowledgementRecord = mp4ExportAcknowledgementRecord({
             gate, workspaceId: operation.workspaceId, projectId: context.projectId, variantId: context.outputVariantId ?? sourceOutputVariantId(source),
             outputSpecId: unwiredPreset.spec.id, operationId: operation.id, reportHash: null,
           })
-          const stored = await persistMp4ExportAcknowledgement({ storage: dependencies.storage, workspaceId: operation.workspaceId, text: acknowledgementRecord!.text })
-          recorded = `; acknowledgement record ${stored.sha256} stored as ${stored.key}`
+          const recordSha256 = createHash('sha256').update(acknowledgementRecord!.text).digest('hex')
+          // until it is stored, the attempt says so explicitly: the acknowledgement was not used
+          recorded = `; acknowledgement record ${recordSha256} not stored: the final was not promoted`
+          pendingAcknowledgement = Object.freeze({ text: acknowledgementRecord!.text, sha256: recordSha256, gateMessage: gate.message })
         }
         mp4Validator = { code: 'FINAL_MP4_CRITIC', passed: gate.allowed, message: `${gate.message.slice(0, 230)}${recorded}.`.slice(0, 500) }
       } else {
@@ -552,6 +557,16 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         stored.sha256 !== rendered.sha256 ||
         stored.byteSize !== rendered.byteSize
       ) throw new DomainError('RENDER_OUTPUT_INVALID', 'Promoted final output checksum or byte size changed')
+      // W67. The acknowledgement that lifted the critic's absence is recorded HERE: after every validator, the rights check and the verified
+      // promotion, and BEFORE the artifact exists. `persistOrReplay` creates it as 'available' and `/v1/artifacts/{id}/content` serves any available
+      // artifact by the id the client got at enqueue, so from there on a crash or a lost lease must never leave a downloadable final without its
+      // record. A failure to store it fails the attempt while nothing is downloadable yet.
+      if (pendingAcknowledgement) {
+        const acknowledgement = pendingAcknowledgement
+        const recordedAcknowledgement = await persistMp4ExportAcknowledgement({ storage: dependencies.storage, workspaceId: operation.workspaceId, text: acknowledgement.text })
+        const message = `${acknowledgement.gateMessage.slice(0, 230)}; acknowledgement record ${recordedAcknowledgement.sha256} stored as ${recordedAcknowledgement.key}.`.slice(0, 500)
+        validators = validators.map((validator) => validator.code === 'FINAL_MP4_CRITIC' ? { ...validator, message } : validator)
+      }
       const toolDigest = createHash('sha256')
         .update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`)
         .digest('hex')

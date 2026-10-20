@@ -3428,9 +3428,10 @@ type Mp4PixelCriticWiring = Readonly<{ mp4PixelCritic?: Mp4PixelCritic }>
 type Mp4ExportAcknowledgementWiring = Readonly<{ mp4ExportAcknowledgement?: Mp4ExportAcknowledgement }>
 
 /**
- * W67. The explicit acknowledgement that lets a FINAL be delivered without a fully judging MP4 critic (no critic wired; no face anywhere in a
- * frame that carries ink): who accepted it, when (canonical UTC instant) and why. All three variables or none; a malformed one throws.
- * Without it a deployment that does not wire the critic delivers no final.
+ * W67. The explicit acknowledgement that lets a FINAL be delivered with no MP4 critic wired (`MP4_CRITIC_NOT_CONFIGURED`, the only blocker an
+ * acknowledgement lifts): who accepted it, when (canonical UTC instant) and why. All three variables or none; a malformed one throws.
+ * Without it a deployment that does not wire the critic delivers no final. A frame with ink and no face anywhere is NOT an acknowledgement
+ * case: when both models read it and the registration is usable it is a recorded pass (`NO_FACE_DETECTED_UNDER_INK`).
  */
 export function optionalMp4ExportAcknowledgement(environment: NodeJS.ProcessEnv): Mp4ExportAcknowledgementWiring {
   const acknowledgement = mp4ExportAcknowledgementFromEnvironment(environment)
