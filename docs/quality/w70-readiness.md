@@ -88,6 +88,25 @@ Antes/depois, com a mesma regressão: contra o código anterior à correção (w
 exatamente nela - o painel da saída 9:16 mostrava os chips da 16:9 (`FACE_PIXEL_CHECK_UNAVAILABLE` cue-1 e cue-2) enquanto o laudo da 9:16 era lido; com a correção
 (`w70r-ui-after`) passa, assim como sidecar, carry e herança. A guarda estrutural W22 checa o nome `setProxyReview` no caminho de falha; b5bcd975 manteve esse nome.
 
-## 7. Execuções
+## 7. Execuções (cabeça final 653264c2, árvore limpa; harness `run-local-pg-s2d.mjs`, lock global; os planos vêm do `ci.yml` deste ramo)
 
-(preenchido no commit seguinte, depois das execuções da cabeça final)
+Portões em 653264c2: `typecheck`, `lint`, `lint:code`, `lint:whitespace`, `db:v2:validate`, `api:v1:validate`, `api:parity:validate` verdes; `npm test` 3847 testes, 3834
+passam, 0 falham, 13 pulados (suítes com portão).
+
+| Execução | Resultado |
+| --- | --- |
+| `full-b1` `w70r-final-b1-46aff9fb` | 41 passos, 115/115 |
+| `full-b2` `w70r-final-b2-afa4c4dd` | 56 passos (inclui a herança do Director, agora um passo da CI), 110 passam, 3 pulados, 1 reprovado: `wave20-browser`, na limpeza (`Owned Wave20 browser cleanup must observe real closes without warnings`), com a jornada já concluída. Repetição isolada `w70r-rerun-w20-4f0bb7f8`: reprova igual; o mesmo passo na árvore de `main` (`w69t-w70p`, `w70r-w20-main-*`) reprova com o
+mesmo aviso do observador de processos do navegador (mesmo `messageSha256` beaa6cf9...), então é do host neste momento, não deste ramo (passou no `b2` intermediário de b5bcd975). A jornada W68 (com a regressão nova), sidecar, carry, cancelamento, herança e final export passam |
+| `full-b3` `w70r-final-b3-f9c44086` | 27 passos, 59 passam, 3 pulados, 1 reprovado: `library-journey` (S3/MinIO, ambiente, como no W68/W69). `synthetic-wave24-journey` 25/25 com o bundle Remotion |
+| alvo: pixels de layout, renderer, posicionamento, final W65b (`w70r-r3-1-eda6eda9`) | 6 suítes verdes (a jornada W68 dessa execução reprovou no próprio `route.continue` do teste novo, corrigido) |
+| alvo: W68 antes/depois (`w70r-ui-before-*`, `w70r-ui-after-97aad1a7`) | antes: reprova na regressão (chips da 16:9 sob a 9:16); depois: 4/4 |
+
+Achados de ambiente, registrados para quem rodar depois:
+
+- `synthetic-wave24-journey` exige árvore **limpa** (a atestação de build lê `git status`; um arquivo não rastreado basta para `VERSION_CONFLICT` no enfileiramento do render, que
+  a API publica só como "Version conflict"). Duas execuções intermediárias reprovaram assim (o rascunho desta nota estava não rastreado); na mesma árvore de `main` passou. Alguns
+  passos do `b3` (block-plan, synthetic-production, hybrid-search) regravam `next-env.d.ts` com caminhos `.next/dev`; durante o `b3` final ele foi restaurado ao conteúdo
+  commitado (3 vezes) para não sujar a árvore.
+- O disco do host chegou a 70 MB livres no meio do trabalho (um build reprovou com `ENOSPC`); cada execução do `b1` deixa ~0,5 GB em `%TEMP%\apollo-w39-artifacts-*`.
+- Uma execução do harness abortou ao observar processos (`powershell ... Falha na inicialização do CLR`), sem relação com o produto.
