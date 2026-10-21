@@ -1391,6 +1391,31 @@ test('W65b a cue that cannot be certified is omitted and listed: the final is de
   assert.equal(calls.persisted, 1); assert.equal(calls.attached, 1)
 })
 
+test('W70 R3 a cue whose text does not fit its band is omitted and listed before the encode; the cue that fits is burned and nothing else is lost', async () => {
+  const operations = createOperations()
+  const { calls, critic, dependencies } = workerDependencies(operations)
+  const seen = capture(dependencies)
+  const base = approvedSource()
+  // cue-final-1: three lines of the 9:16 kinetic band (two allowed); cue-final-2: one line.
+  dependencies.projects.readImmutableApprovedSource = async () => Object.freeze({ ...base, editPlan: Object.freeze({ ...base.editPlan, subtitleTracks: Object.freeze([{ presetId: 'kinetic', cues: Object.freeze([
+    Object.freeze({ id: 'cue-final-1', startFrame: 0, endFrame: 60, text: 'Ação imediata para o seu canal crescer de verdade com conteúdo', anchor: 'bottom' }),
+    Object.freeze({ id: 'cue-final-2', startFrame: 150, endFrame: 210, text: 'Legenda final segura', anchor: 'bottom' }),
+  ]) }]) }) })
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-overflow')
+  assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
+  const [final] = seen.rendered
+  assert.deepEqual(final.subtitleCues.map((cue) => cue.id), ['cue-final-2'], 'the encode is not given the cue that does not fit')
+  assert.deepEqual(final.placementPlan.subtitleAnchorPlan.decisions.map((decision) => decision.cueId), ['cue-final-2'], 'nor does the plan place it')
+  assert.equal(critic.requests.length, 1, 'the burned cue is still confirmed in the pixels')
+  const receipt = JSON.parse(seen.persisted.recipeParameters.canonicalJson).captionCertification
+  assert.deepEqual(receipt.burned.map((entry) => entry.cueId), ['cue-final-2'])
+  assert.deepEqual(receipt.omitted.map((entry) => [entry.cueId, entry.code, entry.disposition]), [['cue-final-1', 'CAPTION_TEXT_DOES_NOT_FIT', 'review-required']])
+  const validator = certificationValidator(seen.attempt)
+  assert.equal(validator.passed, true)
+  assert.match(validator.message, /1 caption\(s\) burned.*1 omitted and listed for review: cue-final-1 \(CAPTION_TEXT_DOES_NOT_FIT\)/)
+  assert.equal(calls.persisted, 1); assert.equal(calls.attached, 1)
+})
+
 test('W65b a hard disagreement of the delivered pixels with the plan stops the final: it is not published', async () => {
   const operations = createOperations()
   const { calls, critic, dependencies } = workerDependencies(operations)

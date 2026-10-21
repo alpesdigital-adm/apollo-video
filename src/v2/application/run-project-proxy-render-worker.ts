@@ -259,8 +259,11 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       // canvas differs, because a placement plan is addressed against the pixels it is drawn on.
       // W70 readiness (R2): `deriveProxyRenderGeometry` is also what a carry runs, so the digest of the face windows read here is the one a
       // later Version is compared with. The W65b rule applies (an uncertifiable cue is omitted and listed).
+      // W70 readiness (R3): `captionOverflows` are the drawn cues whose text does not fit the band the plan certified, decided here, before the
+      // render, by the layout the renderer draws with. The proxy draws them as they are and its review is BLOCKED by them (a hard issue).
       const {
         subtitleCues, subtitleResolution, ctaOverlays, placementPlan, reframePlan, reframeIssues, subtitleOverrideReceipt, outputPreset, faceEvidenceDigest,
+        captionOverflows,
       } = await deriveProxyRenderGeometry({
         source, workspaceId: operation.workspaceId, projectId: context.projectId,
         ...(dependencies.faceEvidence ? { faceEvidence: dependencies.faceEvidence } : {}),
@@ -583,6 +586,8 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           // blocks this output instead of shipping a subtitle over a face.
           subtitleAnchorPlan: placementPlan.subtitleAnchorPlan,
           ...(captionPixelIssues.length ? { captionPixelIssues } : {}),
+          // A text that does not fit its band blocks this output whatever the pixel critic's tolerance let through.
+          ...(captionOverflows.length ? { captionLayoutOverflows: captionOverflows } : {}),
           ...(mp4Verification?.measurement === 'completed' ? { mp4PixelIssues: mp4Verification.verification.issues, mp4Evidence: mp4Verification.evidence } : {}),
         },
       })

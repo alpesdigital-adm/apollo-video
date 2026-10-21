@@ -2209,6 +2209,28 @@ test('W70 R2 proxy worker: the content address written at enqueue is recomputed,
   assert.equal((await runEvidenceWorker(sealed, [faceWindow(() => [FAR_FACE])])).outcome.status, 'succeeded')
 })
 
+// ---- W70 readiness (R3): a caption that does not fit its band blocks the proxy, decided before the render ----
+test('W70 R3 proxy worker: a three-line caption in the two-line band is a hard issue before the render; it is drawn, and the review is blocked', async () => {
+  // 62 characters lay out in three lines of the 9:16 kinetic band (two lines allowed); the far face leaves the bottom band certified free.
+  const overflowing = portraitMasterSource({ editPlan: Object.freeze({ ...source().editPlan, subtitleTracks: Object.freeze([{ presetId: 'kinetic', cues: Object.freeze([
+    Object.freeze({ id: 'cue-1', startFrame: 0, endFrame: 60, text: 'Ação imediata para o seu canal crescer de verdade com conteúdo', anchor: 'bottom' }),
+  ]) }]) }) })
+  const result = await runCaptionWorker(overflowing, [faceWindow(() => [FAR_FACE])])
+  assert.equal(result.outcome.status, 'succeeded', 'a render was made: the person sees the caption as it is')
+  assert.equal(subtitleAnchorDecisionFor(result.rendered.placementPlan.subtitleAnchorPlan, 'cue-1').disposition, 'placed')
+  assert.deepEqual(result.rendered.subtitleCues.map((cue) => cue.id), ['cue-1'], 'the proxy draws it')
+  assert.equal(result.review.status, 'blocked')
+  assert.equal(result.review.finalAllowed, false)
+  const issue = result.review.criticIssues.find((entry) => entry.code === 'CAPTION_TEXT_DOES_NOT_FIT')
+  assert.ok(issue, JSON.stringify(result.review.criticIssues.map((entry) => entry.code)))
+  assert.equal(issue.severity, 'hard')
+  assert.deepEqual(issue.elementIds, ['subtitle:cue-1'])
+  assert.match(issue.message, /needs 3 lines/)
+  // the same caption, shortened to two lines, is not an issue
+  const fitting = await runCaptionWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE])])
+  assert.ok(!fitting.review.criticIssues.some((entry) => entry.code === 'CAPTION_TEXT_DOES_NOT_FIT'))
+})
+
 // ---- W67: the independent MP4 critic reads the pixels of the delivered proxy ----
 const { createMp4QualityReport: createMp4ProxyReport, MP4_PIXEL_CRITIC_POLICY: MP4_PROXY_POLICY } = await import('../../src/v2/domain/mp4-pixel-quality.ts')
 const { pixelOracleModelPins: proxyOraclePins } = await import('../../src/v2/domain/pixel-face-oracle.ts')

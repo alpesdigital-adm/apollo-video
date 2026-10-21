@@ -68,6 +68,8 @@ export const CHIP_LABELS: Readonly<Record<IssueSeverityChip, string>> = Object.f
 export const CAPTION_ISSUE_CODES = Object.freeze([
   'FACE_PERCEPTION_UNAVAILABLE', 'NO_SAFE_SUBTITLE_REGION', 'SUBTITLE_ANCHOR_FALLBACK', 'SUBTITLE_ANCHOR_UNSTABLE',
   'CAPTION_PLACEMENT_MISMATCH', 'SUBTITLE_FACE_OVERLAP_IN_PIXELS', 'FACE_PIXEL_CHECK_UNAVAILABLE',
+  // W70 readiness (R3): the text of a drawn caption does not fit its band (a block; fixed by a shorter text exception).
+  'CAPTION_TEXT_DOES_NOT_FIT',
 ] as const)
 
 const SUBTITLE_ELEMENT = /^subtitle:(.+)$/

@@ -122,7 +122,8 @@ jobs:
       - name: Use the distribution ffprobe, as the deployment image does
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg
+          # fonts-liberation: the face libass resolves `Arial` to, metric-compatible with it (the caption text layout proof measures against it).
+          sudo apt-get install -y ffmpeg fonts-liberation
           test -x /usr/bin/ffprobe
           echo "FFPROBE_PATH=/usr/bin/ffprobe" >> "$GITHUB_ENV"
           /usr/bin/ffprobe -version | head -1
@@ -375,6 +376,14 @@ jobs:
 
       - name: Run editorial renderer goldens
         run: npm run test:integration:editorial-renderer
+
+      # W70 readiness (R3): the caption text layout on the real renderer, real FFmpeg and the production W65 pixel critic, in both canvases -
+      # captions drawn inside their certified band, a text that cannot fit is not cut, and a three-line 16:9 caption the critic's tolerance
+      # lets through is blocked by the layout. libass draws the `Arial` style with Liberation Sans (metric-compatible) on the runner.
+      - name: Run caption text layout pixel proof
+        run: |
+          fc-match Arial || true
+          npm run test:integration:caption-text-layout
 
       - name: Run reframe trajectory goldens on the rendered mp4
         run: npm run test:integration:reframe-trajectory

@@ -17,9 +17,9 @@ import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { parseProjectColorPlan } from '../../domain/project-color-plan.ts'
 import { buildRenderElementMap } from '../../domain/review-system.ts'
 import { subtitleAnchorDecisionFor, type SubtitleAnchorPlan } from '../../domain/subtitle-anchor-plan.ts'
-import { applyAssCasing, assPresetOutlineWidth, assPresetStyle, type AssPresetStyle } from '../../domain/subtitle-ass-preset-style.ts'
-import { canonicalCaptionText, captionFontPx, captionTextWidthPx, layoutCaption } from '../../domain/caption-text-layout.ts'
-import { readSubtitlePreset, resolveSubtitleMvpFormat, resolveSubtitleRenderMetrics } from '../../domain/subtitle-system.ts'
+import { assPresetStyle, type AssPresetStyle } from '../../domain/subtitle-ass-preset-style.ts'
+import { deriveCaptionGeometry, layoutBurnedCaption } from '../../domain/caption-burn-layout.ts'
+import { canonicalCaptionText } from '../../domain/caption-text-layout.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
 import { FfmpegColorPipelineProcessor } from './ffmpeg-color-pipeline-processor.ts'
@@ -60,24 +60,9 @@ function wrapCtaText(value: string, maxCharacters = 28): string {
   return lines.slice(0, 2).join('\\N')
 }
 
-/**
- * The geometry every caption of a render is drawn with, derived from the placement plan that certified its bands (single geometry): the
- * font is the preset's own size at this canvas (reduced only when the certified band is too short for `maxLines` lines of it) and a line
- * may take the width of the band. The plan must describe this canvas, or the render does not start.
- */
-export function deriveCaptionGeometry(plan: Readonly<SubtitleAnchorPlan>, canvas: Readonly<{ width: number; height: number }>): Readonly<{
-  fontPx: number; maxLines: number; bandWidthPx: number; bandHeightPx: number
-}> {
-  if (plan.canvas.width !== canvas.width || plan.canvas.height !== canvas.height) {
-    throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle anchor plan was decided on another canvas than the one being drawn')
-  }
-  const preset = readSubtitlePreset(plan.presetId)
-  const metrics = resolveSubtitleRenderMetrics(preset, resolveSubtitleMvpFormat(plan.format), canvas.height)
-  const bandWidthPx = plan.bands.bottom.width * canvas.width
-  const bandHeightPx = plan.bands.bottom.height * canvas.height
-  const maxLines = preset.lineBreaking.maxLines
-  return Object.freeze({ fontPx: captionFontPx({ metrics, bandHeightPx, maxLines }), maxLines, bandWidthPx, bandHeightPx })
-}
+// The caption geometry and the lines of a burned caption live in the domain (`caption-burn-layout.ts`): the render workers decide from the very
+// same layout, before rendering, what a caption that does not fit its band costs (W70 readiness, R3).
+export { deriveCaptionGeometry }
 
 export function buildAssSubtitles(input: {
   width: number
@@ -122,20 +107,14 @@ export function buildAssSubtitles(input: {
       const centreY = Math.round((decision.bounds.y + decision.bounds.height / 2) * input.height)
       const time = stamps(cue.startFrame, cue.endFrame)
       let styleName = 'Default'
-      let text = canonicalCaptionText(cue.text)
-      let outlinePx = 1
       if (cue.presetId) {
         const style = presetStyles.get(cue.presetId) ?? assPresetStyle(cue.presetId, { fontSize, marginHorizontal, marginVertical })
         presetStyles.set(cue.presetId, style)
         styleName = style.name
-        outlinePx = assPresetOutlineWidth(cue.presetId, fontSize)
-        text = applyAssCasing(text, style.casing)
       }
-      // Lines come from the measured width of the text against the band the plan certified; every line is drawn (nothing is cut).
-      const layout = layoutCaption({
-        text, fontPx: fontSize, maxLines: captionGeometry!.maxLines,
-        maxWidthPx: captionTextWidthPx(captionGeometry!.bandWidthPx, outlinePx),
-      })
+      // Lines come from the measured width of the text against the band the plan certified; every line is drawn (nothing is cut). A text
+      // that does not fit was already decided upon by the worker before this render started (a hard issue in a proxy, omitted in a final).
+      const { layout } = layoutBurnedCaption({ text: cue.text, ...(cue.presetId ? { presetId: cue.presetId } : {}), geometry: captionGeometry! })
       return [`Dialogue: 0,${time.start},${time.end},${styleName},,0,0,0,,{\\an5\\pos(${centreX},${centreY})}${layout.lines.join('\\N')}`]
     }
     throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle cue review decision has no drawable bounds')

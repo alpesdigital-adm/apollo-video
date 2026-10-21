@@ -326,7 +326,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       // the export before the encode is anything else - a hard issue, a band that is not free-certified under a placed cue, or a
       // burned caption that nothing would confirm in the delivered pixels. When the geometry cannot be derived the export stops here;
       // rendering the cut without its captions is not an option.
-      const { subtitleCues, ctaOverlays, placementPlan, reframePlan, subtitleOverrideReceipt } = await deriveEditorialRenderGeometry({
+      // W70 readiness (R3): a cue whose text does not fit its band on the FINAL canvas is omitted the same way (never burned) and listed in the
+      // receipt as a review item (`captionOverflows`), decided before the encode by the layout the renderer draws with.
+      const { subtitleCues, ctaOverlays, placementPlan, reframePlan, subtitleOverrideReceipt, captionOverflows } = await deriveEditorialRenderGeometry({
         source,
         canvas: { width: context.outputSpec.width, height: context.outputSpec.height },
         workspaceId: operation.workspaceId, projectId: context.projectId, clips,
@@ -334,6 +336,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         ...(dependencies.faceEvidence ? { faceEvidence: dependencies.faceEvidence } : {}),
         clock,
         uncertifiedCues: 'omit-and-list',
+        captionTextOverflow: 'omit-and-list',
       })
       const hardCaptionIssues = placementPlan.subtitleAnchorPlan?.issues.filter((issue) => issue.severity === 'hard') ?? []
       if (hardCaptionIssues.length > 0) {
@@ -341,7 +344,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           `Final export has ${hardCaptionIssues.length} caption(s) that could not be placed (${[...new Set(hardCaptionIssues.map((issue) => issue.code))].join(', ')}); review is required`)
       }
       // Everything about the plan that does not need pixels. `completed` with no issues stands for "the delivered pixels agree".
-      const preflight = certifyFinalCaptions({ plan: placementPlan, pixelCheck: { measurement: 'completed', issues: [] } })
+      const preflight = certifyFinalCaptions({ plan: placementPlan, pixelCheck: { measurement: 'completed', issues: [] }, layoutOmitted: captionOverflows })
       if (!preflight.admissible) {
         throw new DomainError('INVALID_RENDER_INPUT', `Final export captions are not certified (${preflight.failures.slice(0, 3).join('; ')})`)
       }
@@ -425,7 +428,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           await dependencies.renderer.cleanup(controlOperationId).catch(() => undefined)
         }
       }
-      const certification = certifyFinalCaptions({ plan: placementPlan, pixelCheck })
+      const certification = certifyFinalCaptions({ plan: placementPlan, pixelCheck, layoutOmitted: captionOverflows })
       // ---- W67. What the pixels of the delivered file say, by the independent critic; a blocked variant is not promoted ----
       let mp4Validator: { code: string; passed: boolean; message: string } | null = null
       let pendingAcknowledgement: Readonly<{ text: string; sha256: string; gateMessage: string }> | null = null
