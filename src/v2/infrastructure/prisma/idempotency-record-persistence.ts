@@ -62,3 +62,43 @@ export function readCompletedIdempotencyResponse(
   }
   return Object.freeze(response as Record<string, unknown>)
 }
+
+/**
+ * A Serializable loser can exhaust its immediate retries while the winner of
+ * the same idempotency key is still in flight (SSI cancels the loser on
+ * identification as a pivot without waiting for the winner to commit). The
+ * winner's record is only visible once it commits, so reconciliation must wait
+ * for it for a bounded time instead of reading once.
+ */
+export interface IdempotencyWinnerWait {
+  readonly delaysMs: readonly number[]
+  readonly sleep: (milliseconds: number) => Promise<void>
+}
+
+export const DEFAULT_IDEMPOTENCY_WINNER_WAIT: Readonly<IdempotencyWinnerWait> =
+  Object.freeze({
+    delaysMs: Object.freeze([25, 50, 100, 200, 400, 800]),
+    sleep: (milliseconds: number) =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, milliseconds)
+      }),
+  })
+
+/**
+ * Reads the committed winner through `read`, re-reading after each configured
+ * delay while `read` reports that nothing is visible yet. Errors thrown by
+ * `read` (payload mismatch, corrupted record) are final and never retried.
+ */
+export async function awaitCommittedIdempotencyWinner<T>(
+  read: () => Promise<T | null | undefined>,
+  wait: Readonly<IdempotencyWinnerWait> = DEFAULT_IDEMPOTENCY_WINNER_WAIT,
+): Promise<T | null> {
+  const first = await read()
+  if (first != null) return first
+  for (const delay of wait.delaysMs) {
+    await wait.sleep(delay)
+    const next = await read()
+    if (next != null) return next
+  }
+  return null
+}

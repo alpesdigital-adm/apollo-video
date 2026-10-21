@@ -132,6 +132,7 @@ function webhookAdministratorActor(credentialId = 'credential-1') {
 }
 
 const WEBHOOK_ADMINISTRATOR = webhookAdministratorActor()
+const INSTANT_WINNER_WAIT = { delaysMs: [0, 0], async sleep() {} }
 
 function replayAdministration({ id, action, targetId, idempotencyKey, requestFingerprint }) {
   return createWebhookAdministrationCommand({
@@ -416,7 +417,7 @@ test('webhook endpoint creation reconciles the committed winner after serializat
         expiresAt: new Date(bundle.idempotency.requestedAt),
       },
     })
-    const repository = new PrismaWebhookEndpointCreationRepository(controlled.client)
+    const repository = new PrismaWebhookEndpointCreationRepository(controlled.client, INSTANT_WINNER_WAIT)
     await assert.rejects(
       () => repository.createOrReplay(bundle),
       (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
@@ -426,7 +427,7 @@ test('webhook endpoint creation reconciles the committed winner after serializat
 
   await context.test('keeps persistence conflict when no winner committed', async () => {
     const controlled = clientFor({ record: null })
-    const repository = new PrismaWebhookEndpointCreationRepository(controlled.client)
+    const repository = new PrismaWebhookEndpointCreationRepository(controlled.client, INSTANT_WINNER_WAIT)
     await assert.rejects(
       () => repository.createOrReplay(bundle),
       (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
@@ -442,6 +443,136 @@ test('webhook endpoint creation reconciles the committed winner after serializat
       (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
     )
     assert.equal(controlled.attempts(), 3)
+  })
+})
+
+test('webhook subscription creation answers an exhausted serialization loser from the late-committed winner', async (context) => {
+  const idsFor = (sequence) => ({
+    'webhook-subscription': `00000000-0000-4000-8000-0000000001${sequence}0`,
+    'webhook-administration-command': `00000000-0000-4000-8000-0000000001${sequence}1`,
+    'idempotency-record': `idempotency-webhook-subscription-race-${sequence}`,
+  })
+  const bundleFor = async (eventTypes, sequence) => {
+    let captured
+    const create = createWebhookSubscriptionService({
+      repository: {
+        async createOrReplay(value) {
+          captured = value
+          return { subscription: value.subscription, replayed: false }
+        },
+      },
+      clock: () => new Date('2026-07-15T20:02:00.000Z'),
+      createId: (kind) => idsFor(sequence)[kind],
+    })
+    await create({
+      workspaceId: 'workspace-1',
+      endpointId: '00000000-0000-4000-8000-000000000145',
+      eventTypes,
+      actor: WEBHOOK_ADMINISTRATOR,
+      idempotencyKey: 'subscription-race-request-1',
+    })
+    return captured
+  }
+  const winnerBundle = await bundleFor(['operation.succeeded'], 4)
+  const sameBundle = await bundleFor(['operation.succeeded'], 5)
+  const divergentBundle = await bundleFor(['operation.failed'], 6)
+  assert.notEqual(winnerBundle.subscription.id, sameBundle.subscription.id)
+  assert.equal(
+    winnerBundle.idempotency.requestFingerprint,
+    sameBundle.idempotency.requestFingerprint,
+  )
+  assert.notEqual(
+    winnerBundle.idempotency.requestFingerprint,
+    divergentBundle.idempotency.requestFingerprint,
+  )
+
+  const subscriptionRow = {
+    ...winnerBundle.subscription,
+    filterEventTypesJson: JSON.stringify(winnerBundle.subscription.filter.eventTypes),
+    filterResourceIdsJson: null,
+    filterHash: winnerBundle.subscription.filter.hash,
+    createdAt: new Date(winnerBundle.subscription.createdAt),
+    updatedAt: new Date(winnerBundle.subscription.updatedAt),
+    pausedAt: null,
+    revokedAt: null,
+  }
+  const completedRecord = {
+    id: winnerBundle.idempotency.id,
+    workspaceId: winnerBundle.idempotency.workspaceId,
+    clientId: winnerBundle.idempotency.clientId,
+    key: winnerBundle.idempotency.key,
+    requestFingerprint: winnerBundle.idempotency.requestFingerprint,
+    status: 'completed',
+    responseStatus: 201,
+    responseJson: JSON.stringify({ subscriptionId: winnerBundle.subscription.id }),
+    expiresAt: new Date(winnerBundle.idempotency.expiresAt),
+    createdAt: new Date(winnerBundle.idempotency.requestedAt),
+  }
+  const serializationFailure = () =>
+    Object.assign(new Error('serialization conflict'), { code: 'P2034' })
+  // The loser exhausts its three Serializable attempts while the winner is
+  // still in flight: its idempotency record becomes readable only after
+  // `invisibleReads` empty reads, i.e. after the loser has already given up.
+  const raceFor = ({ invisibleReads }) => {
+    let transactionAttempts = 0
+    let reads = 0
+    const sleeps = []
+    const client = {
+      async $transaction() {
+        transactionAttempts += 1
+        throw serializationFailure()
+      },
+      v2IdempotencyRecord: {
+        async findUnique() {
+          reads += 1
+          return reads > invisibleReads ? completedRecord : null
+        },
+      },
+      v2WebhookAdministrationCommand: {
+        async findFirst() { return webhookAdministrationCommandData(winnerBundle.command) },
+      },
+      v2WebhookSubscription: { async findFirst() { return subscriptionRow } },
+    }
+    const winnerWait = {
+      delaysMs: [1, 2, 3, 4],
+      async sleep(milliseconds) { sleeps.push(milliseconds) },
+    }
+    return {
+      repository: new PrismaWebhookSubscriptionCreationRepository(client, winnerWait),
+      attempts: () => transactionAttempts,
+      reads: () => reads,
+      sleeps,
+    }
+  }
+
+  await context.test('replays the winner when the loser carries the same payload', async () => {
+    const race = raceFor({ invisibleReads: 2 })
+    const replay = await race.repository.createOrReplay(sameBundle)
+    assert.equal(replay.replayed, true)
+    assert.equal(replay.subscription.id, winnerBundle.subscription.id)
+    assert.equal(race.attempts(), 3)
+    assert.deepEqual(race.sleeps, [1, 2])
+  })
+
+  await context.test('reports payload mismatch when the loser carries a different payload', async () => {
+    const race = raceFor({ invisibleReads: 2 })
+    await assert.rejects(
+      () => race.repository.createOrReplay(divergentBundle),
+      (error) => error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
+    assert.equal(race.attempts(), 3)
+    assert.deepEqual(race.sleeps, [1, 2])
+  })
+
+  await context.test('keeps persistence conflict when no winner ever commits, after a bounded wait', async () => {
+    const race = raceFor({ invisibleReads: Number.MAX_SAFE_INTEGER })
+    await assert.rejects(
+      () => race.repository.createOrReplay(sameBundle),
+      (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+    )
+    assert.equal(race.attempts(), 3)
+    assert.deepEqual(race.sleeps, [1, 2, 3, 4])
+    assert.equal(race.reads(), 5)
   })
 })
 
@@ -873,13 +1004,14 @@ test('webhook subscription creation retries serialization conflicts before faili
   })
   let attempts = 0
   const repository = new PrismaWebhookSubscriptionCreationRepository({
+    v2IdempotencyRecord: { async findUnique() { return null } },
     async $transaction() {
       attempts += 1
       const error = new Error('serialization conflict')
       error.code = 'P2034'
       throw error
     },
-  })
+  }, INSTANT_WINNER_WAIT)
 
   await assert.rejects(
     () => repository.createOrReplay(bundle),
