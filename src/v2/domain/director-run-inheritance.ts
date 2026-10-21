@@ -54,7 +54,15 @@ export interface DirectorInheritanceReader {
   /** Whether a succeeded DirectorRun produced this Version. */
   isDirectorResult(versionId: string): Promise<boolean>
   readVersion(versionId: string): Promise<Readonly<DirectorInheritanceVersionFacts> | null>
+  /**
+   * Whether a succeeded DirectorRun produced this Version or any Version it descends from. Optional: without it the walk asks
+   * `isDirectorResult` and `readVersion` Version by Version (a reader with the whole line at hand answers it at once).
+   */
+  isDirectedAtOrAbove?(versionId: string): Promise<boolean>
 }
+
+/** How far up a line the walk looks for a Director run once it stopped (only to tell a refusal from a Version nothing directed). */
+export const MAX_DIRECTOR_ANCESTOR_SCAN = 10_000
 
 export const DIRECTOR_INHERITANCE_BLOCK_REASONS = Object.freeze([
   'command-not-inheriting', 'version-without-command', 'command-base-mismatch', 'parent-missing', 'edit-plan-moved', 'chain-too-long',
@@ -160,13 +168,31 @@ export function describeDirectorInheritanceBlock(block: Extract<DirectorInherita
   }
 }
 
+/** Whether a Director run produced `versionId` or any Version above it (bounded; a cycle or a missing Version ends the scan). */
+async function directedAtOrAbove(reader: DirectorInheritanceReader, versionId: string): Promise<boolean> {
+  if (reader.isDirectedAtOrAbove) return reader.isDirectedAtOrAbove(versionId)
+  const visited = new Set<string>()
+  for (let cursor: string | null = versionId; cursor !== null && !visited.has(cursor) && visited.size < MAX_DIRECTOR_ANCESTOR_SCAN;) {
+    visited.add(cursor)
+    if (await reader.isDirectorResult(cursor)) return true
+    cursor = (await reader.readVersion(cursor))?.parentVersionId ?? null
+  }
+  return false
+}
+
 /**
  * The walk. Pure over a reader, so the rule is tested without a database and the PostgreSQL reader only supplies facts.
+ *
+ * A stop is a refusal only when there IS a Director quality behind it that does not carry: when no Version above the one the walk stopped at
+ * was ever directed, the Version is simply not directed (`none`), exactly as before inheritance existed - nothing approves it, and nothing
+ * about inheritance is to be said.
  */
 export async function walkDirectorInheritance(reader: DirectorInheritanceReader, versionId: string): Promise<Readonly<DirectorInheritanceWalk>> {
   const links: { versionId: string; commandId: string }[] = []
   let cursor = versionId
   const seen = new Set<string>()
+  const stop = async (above: string, block: Extract<DirectorInheritanceWalk, { kind: 'blocked' }>): Promise<Readonly<DirectorInheritanceWalk>> =>
+    await directedAtOrAbove(reader, above) ? Object.freeze(block) : Object.freeze({ kind: 'none' as const })
   for (;;) {
     if (seen.has(cursor)) return Object.freeze({ kind: 'blocked' as const, reason: 'parent-missing' as const, versionId: cursor })
     seen.add(cursor)
@@ -178,21 +204,21 @@ export async function walkDirectorInheritance(reader: DirectorInheritanceReader,
     const facts = await reader.readVersion(cursor)
     if (!facts || facts.parentVersionId === null) return Object.freeze({ kind: 'none' as const })
     if (facts.commandId === null || facts.commandType === null) {
-      return Object.freeze({ kind: 'blocked' as const, reason: 'version-without-command' as const, versionId: cursor })
+      return stop(facts.parentVersionId, { kind: 'blocked', reason: 'version-without-command', versionId: cursor })
     }
     if (!INHERITING_COMMAND_TYPES.includes(facts.commandType)) {
-      return Object.freeze({ kind: 'blocked' as const, reason: 'command-not-inheriting' as const, versionId: cursor, commandId: facts.commandId, commandType: facts.commandType })
+      return stop(facts.parentVersionId, { kind: 'blocked', reason: 'command-not-inheriting', versionId: cursor, commandId: facts.commandId, commandType: facts.commandType })
     }
     if (facts.commandBaseVersionId !== facts.parentVersionId) {
-      return Object.freeze({ kind: 'blocked' as const, reason: 'command-base-mismatch' as const, versionId: cursor, commandId: facts.commandId, commandType: facts.commandType })
+      return stop(facts.parentVersionId, { kind: 'blocked', reason: 'command-base-mismatch', versionId: cursor, commandId: facts.commandId, commandType: facts.commandType })
     }
     const parent = await reader.readVersion(facts.parentVersionId)
     if (!parent) return Object.freeze({ kind: 'blocked' as const, reason: 'parent-missing' as const, versionId: cursor, commandId: facts.commandId, commandType: facts.commandType })
     if (parent.planContentHash !== facts.planContentHash) {
-      return Object.freeze({ kind: 'blocked' as const, reason: 'edit-plan-moved' as const, versionId: cursor, commandId: facts.commandId, commandType: facts.commandType })
+      return stop(parent.versionId, { kind: 'blocked', reason: 'edit-plan-moved', versionId: cursor, commandId: facts.commandId, commandType: facts.commandType })
     }
     if (links.length >= MAX_DIRECTOR_INHERITANCE_DEPTH) {
-      return Object.freeze({ kind: 'blocked' as const, reason: 'chain-too-long' as const, versionId: cursor, commandId: facts.commandId, commandType: facts.commandType })
+      return stop(parent.versionId, { kind: 'blocked', reason: 'chain-too-long', versionId: cursor, commandId: facts.commandId, commandType: facts.commandType })
     }
     links.push({ versionId: cursor, commandId: facts.commandId })
     cursor = parent.versionId

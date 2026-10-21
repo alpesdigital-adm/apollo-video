@@ -116,6 +116,20 @@ test('W70 a Version that is not the Director result but has no Command, a Comman
 test('W70 no reachable Director run is "none", not a refusal; the chain is bounded', async () => {
   assert.deepEqual(await walkDirectorInheritance(world(line([SUBTITLE])).reader, 'version-1'), { kind: 'none' }, 'the root is reached and no run exists')
   assert.deepEqual(await walkDirectorInheritance(world(line([])).reader, 'version-unknown'), { kind: 'none' })
+  // A stop is a refusal only when a Director quality is behind it: a manual edit, a review patch or a Director Command whose run did not
+  // succeed, on a line nothing ever directed, is simply not directed (nothing approves it, as before inheritance existed).
+  for (const type of ['apply-review-patch', 'run-director', 'set-project-lut-selection']) {
+    assert.deepEqual(await walkDirectorInheritance(world(line([type, SUBTITLE])).reader, 'version-2'), { kind: 'none' }, `${type} on an undirected line`)
+    assert.deepEqual(await walkDirectorInheritance(world(line([type])).reader, 'version-1'), { kind: 'none' }, `${type} asked for directly`)
+  }
+  assert.deepEqual(await walkDirectorInheritance(world([{ versionId: 'v-0', parentVersionId: null }, { versionId: 'v-1', parentVersionId: 'v-0' }]).reader, 'v-1'), { kind: 'none' },
+    'a Version without a Command on an undirected line')
+  // and a reader that knows the whole line answers the same question at once
+  const directedAbove = []
+  const fast = world(line(['apply-review-patch']), { directed: ['version-0'] })
+  const reader = { ...fast.reader, async isDirectedAtOrAbove(versionId) { directedAbove.push(versionId); return versionId === 'version-0' } }
+  assert.equal((await walkDirectorInheritance(reader, 'version-1')).kind, 'blocked')
+  assert.deepEqual(directedAbove, ['version-0'], 'asked once, for the Version above the stop')
 
   const many = MAX_DIRECTOR_INHERITANCE_DEPTH
   const exactly = await walkDirectorInheritance(world(line(Array.from({ length: many }, () => SUBTITLE)), { directed: ['version-0'] }).reader, `version-${many}`)

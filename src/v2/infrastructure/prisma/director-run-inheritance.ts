@@ -61,6 +61,21 @@ function prismaDirectorInheritanceReader(client: Reader, scope: Readonly<{ works
       facts.set(versionId, read)
       return read
     },
+    // Asked only once the walk stopped: the whole line of the project and its directed Versions, read once, answer it without a query per Version.
+    async isDirectedAtOrAbove(versionId) {
+      const [versions, runs] = await Promise.all([
+        client.v2ProjectVersion.findMany({ where: { workspaceId: scope.workspaceId, projectId: scope.projectId }, select: { id: true, parentVersionId: true } }),
+        client.v2DirectorRun.findMany({ where: { workspaceId: scope.workspaceId, projectId: scope.projectId, status: 'succeeded' }, select: { resultVersionId: true } }),
+      ])
+      const directed = new Set(runs.map((run) => run.resultVersionId))
+      const parentOf = new Map(versions.map((row) => [row.id, row.parentVersionId]))
+      const visited = new Set<string>()
+      for (let cursor: string | null = versionId; cursor !== null && parentOf.has(cursor) && !visited.has(cursor); cursor = parentOf.get(cursor) ?? null) {
+        visited.add(cursor)
+        if (directed.has(cursor)) return true
+      }
+      return false
+    },
   }
 }
 
