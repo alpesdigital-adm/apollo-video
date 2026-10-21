@@ -327,7 +327,10 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
           typeof resource !== 'object' || resource === null || Array.isArray(resource) ||
           (resource as Record<string, unknown>).type !== 'media-artifact' ||
           (resource as Record<string, unknown>).id !== input.outputArtifactId ||
-          (resource as Record<string, unknown>).manifestId !== input.outputManifestId) {
+          (resource as Record<string, unknown>).manifestId !== input.outputManifestId ||
+          // W70 readiness (R2): a replay names the evidence the committed completion stored, or it is not the same completion.
+          ('renderEvidence' in input && input.renderEvidence !== undefined &&
+            (detail.faceEvidenceDigest !== input.renderEvidence.faceEvidenceDigest || detail.criticIssuesDigest !== input.renderEvidence.criticIssuesDigest))) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Completed proxy replay identity did not converge')
       }
       assertSealedProxyRecipe(input, detail, artifact, manifest)
@@ -631,6 +634,16 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       ])
       if (!artifact || !manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed project proxy output is inconsistent')
       assertSealedProxyRecipe(input, operation, artifact, manifest)
+      if (input.renderEvidence) {
+        // W70 readiness (R2). The evidence the content address cannot see, as this render read it: what a carry from it is compared with.
+        const { faceEvidenceDigest, criticIssuesDigest } = input.renderEvidence
+        if (![faceEvidenceDigest, criticIssuesDigest].every((digest) => /^[a-f0-9]{64}$/.test(digest))) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Completed project proxy evidence digests are invalid')
+        }
+        await transaction.v2ProjectProxyRenderOperation.update({
+          where: { operationId: input.operationId }, data: { faceEvidenceDigest, criticIssuesDigest },
+        })
+      }
       // The Version is consumed for the output the render was made for: the stable variant the worker names.
       const project = await this.queryProject({ workspaceId: input.workspaceId,
         projectId: input.projectId, projectVersionId: input.projectVersionId, variantId: input.variantId }, transaction)

@@ -945,6 +945,8 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
         outputManifestId: projectRenderDetail!.outputManifestId,
         originalFileName: projectRenderDetail!.originalFileName,
         ...(projectRenderDetail!.outputVariantId ? { outputVariantId: projectRenderDetail!.outputVariantId } : {}),
+        // W70 readiness (R2): the worker recomputes it and refuses to render when it moved since enqueue.
+        ...(projectRenderDetail!.renderContentHash ? { renderContentHash: projectRenderDetail!.renderContentHash } : {}),
         ...(projectRenderDetail!.renderablePlanHash ? { renderableSnapshot: {
           planId: projectRenderDetail!.renderablePlanId!,
           planHash: projectRenderDetail!.renderablePlanHash,

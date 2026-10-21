@@ -5,8 +5,6 @@ import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import { createDirectedAudioTimelineHash } from '../domain/director-run.ts'
-import { readOutputFormatPreset } from '../domain/output-format-registry.ts'
-import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import { plannedCaptionsOverKeptFrames } from './plan-caption-placement.ts'
 import type { FaceSourceWindowEvidenceReader } from './ports/face-source-window-evidence-reader.ts'
 import type { CaptionPixelCritic } from './ports/caption-pixel-critic.ts'
@@ -36,8 +34,8 @@ import {
   type EvaluateColorCriticResult,
 } from './color-critic.ts'
 import { evaluateRenderedProxy, type ProxyQualityIssue } from './render-workflow.ts'
-import { contextVariantSelection, projectProxyRenderInputHash, sourceOutputVariantId } from './project-render-sources.ts'
-import { deriveEditorialRenderGeometry } from './derive-editorial-render-geometry.ts'
+import { contextVariantSelection, projectProxyRenderContentHash, projectProxyRenderInputHash, sourceOutputVariantId } from './project-render-sources.ts'
+import { deriveProxyRenderGeometry, proxyDirectorCriticIssuesDigest } from './proxy-render-evidence.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
@@ -241,6 +239,13 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         source.editPlan.movementPolicy.automaticZoom || clips.length < 1 ||
         source.editPlan.movementPolicy.protectedOpeningFrames < Math.round(source.editPlan.fps * 4)
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Compiled EditPlan is not safe to render')
+      // W70 readiness (R2). The content address written at enqueue is what a later Version carries this render by: it must be the address
+      // of what is rendered now, or the carry would vouch for inputs nobody rendered. Recomputed here from the sealed source; a row written
+      // before the address existed has none (and is never a carry source).
+      if (!context.renderableSnapshot && context.renderContentHash !== undefined &&
+          projectProxyRenderContentHash({ source, colorPipelineBindings: context.colorPipelineBindings }) !== context.renderContentHash) {
+        throw new DomainError('INVALID_RENDER_INPUT', 'The content address of this proxy moved between enqueue and render')
+      }
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
       const musicTracks = 'audioTracks' in source.editPlan && Array.isArray(source.editPlan.audioTracks) ? source.editPlan.audioTracks : []
@@ -252,17 +257,14 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       // The same derivation the final export worker runs (one authority: cues, CTA overlays, the
       // placement plan with its unknown-face anchor plan, and the persisted reframe plan); only the
       // canvas differs, because a placement plan is addressed against the pixels it is drawn on.
-      const outputPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
-      const { subtitleCues, subtitleResolution, ctaOverlays, placementPlan, reframePlan, reframeIssues, subtitleOverrideReceipt } = await deriveEditorialRenderGeometry({
-        source,
-        canvas: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height },
-        workspaceId: operation.workspaceId, projectId: context.projectId, clips,
-        ...(composition ? { composition } : {}),
+      // W70 readiness (R2): `deriveProxyRenderGeometry` is also what a carry runs, so the digest of the face windows read here is the one a
+      // later Version is compared with. The W65b rule applies (an uncertifiable cue is omitted and listed).
+      const {
+        subtitleCues, subtitleResolution, ctaOverlays, placementPlan, reframePlan, reframeIssues, subtitleOverrideReceipt, outputPreset, faceEvidenceDigest,
+      } = await deriveProxyRenderGeometry({
+        source, workspaceId: operation.workspaceId, projectId: context.projectId,
         ...(dependencies.faceEvidence ? { faceEvidence: dependencies.faceEvidence } : {}),
         clock,
-        // W65b. The proxy is what the final is approved from, so it plans under the final's rule: a cue that cannot be certified
-        // is left out and LISTED (a warning the reviewer acknowledges), instead of making the whole proxy unapprovable.
-        uncertifiedCues: 'omit-and-list',
       })
       // The kept ranges of a reuse are base bytes without any caption; a plan that draws one over them needs the full render.
       const rangeReuse = source.rangeReuse && !reframePlan && !plannedCaptionsOverKeptFrames(placementPlan, source.rangeReuse.ranges) ? source.rangeReuse : undefined
@@ -600,6 +602,9 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
             // `variantId` is the stable State variant the render was made for; `format` is the aspect ratio the recipe records.
             ...completion, projectVersionId: context.projectVersionId,
             variantId: outputVariantId, format: source.format, ocrReceipt,
+            // W70 readiness (R2). What the content address cannot see, as it was when these frames were decided: the face windows the
+            // placement read (and the ones it still needs) and the Director's issues this review is built over. A carry compares both.
+            renderEvidence: { faceEvidenceDigest, criticIssuesDigest: proxyDirectorCriticIssuesDigest(source.criticIssues) },
           }))
       await verifyCommittedCompletion()
       stopHeartbeat()

@@ -4191,6 +4191,11 @@ model V2ProjectProxyRenderOperation {
   /// is never mistaken for a human acknowledgement made on this Version.
   carriedFromReviewId       String?  @db.VarChar(128)
   carriedFromReviewHash     String?  @db.Char(64)
+  /// W70 readiness (R2). What the content address cannot see, as the render read it (written at completion; a carry copies its source's): the
+  /// digest of the face windows the caption placement read (with the pending ones) and of the Director's issues the review is built over. Null
+  /// on rows written before they existed, which are never a carry source. Set together or not at all.
+  faceEvidenceDigest        String?  @db.Char(64)
+  criticIssuesDigest        String?  @db.Char(64)
   createdAt                 DateTime @default(now()) @db.Timestamptz(3)
 
   workspace        V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)

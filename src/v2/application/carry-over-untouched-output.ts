@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto'
 
 import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
+import type { FaceSourceWindowEvidenceReader } from './ports/face-source-window-evidence-reader.ts'
 import type { ProjectProxyRenderRepository } from './ports/project-proxy-render-repository.ts'
 import type { ProxyCarryOverRepository, ProxyCarryOverResult } from './ports/proxy-carry-over-repository.ts'
 import { projectProxyRenderContentHash, projectProxyRenderInputHash } from './project-render-sources.ts'
+import { deriveProxyRenderGeometry, proxyDirectorCriticIssuesDigest } from './proxy-render-evidence.ts'
 import { resolveRenderColorPipelineBindings } from './resolve-render-color-pipelines.ts'
 import { assertDomain } from '../domain/errors.ts'
 
@@ -18,6 +20,10 @@ import { assertDomain } from '../domain/errors.ts'
  * Nothing is assumed from the Command's scope: an output whose inputs moved in any way has another address and is not carried, and a render
  * written before the address existed has none and is never a source. A carry is recorded on the operation it writes (`reusedFrom*`) and, for
  * an approved review, by a `carry-over-approval` decision that names the review it carries and the actor who triggered it.
+ *
+ * W70 readiness (R2). The address cannot see what a render READS when it runs: the face windows of its caption placement and the Director's
+ * issues of its review. They are read here for the head exactly as the render worker reads them (`deriveProxyRenderGeometry`, with the same
+ * face evidence reader the worker is wired with) and handed to the repository as digests; a source render that read other ones is not carried.
  */
 export function carryOverUntouchedOutputService(dependencies: {
   projects: ProjectProxyRenderRepository
@@ -25,6 +31,8 @@ export function carryOverUntouchedOutputService(dependencies: {
   colorPipelines: ColorPipelineCompilationRepository
   clock: () => Date
   createId?: () => string
+  /** The sealed face windows reader the proxy render worker is wired with (absent: as absent as it is for the worker). */
+  faceEvidence?: FaceSourceWindowEvidenceReader
 }) {
   const createId = dependencies.createId ?? randomUUID
   return async function carryOver(request: Readonly<{
@@ -45,10 +53,16 @@ export function carryOverUntouchedOutputService(dependencies: {
     const colorPipelineBindings = await resolveRenderColorPipelineBindings({
       repository: dependencies.colorPipelines, workspaceId: request.workspaceId, projectId: request.projectId, sources: source.renderSources,
     })
+    // What the content address cannot see, as a render of the head would read it now.
+    const { faceEvidenceDigest } = await deriveProxyRenderGeometry({
+      source, workspaceId: request.workspaceId, projectId: request.projectId, clock: dependencies.clock,
+      ...(dependencies.faceEvidence ? { faceEvidence: dependencies.faceEvidence } : {}),
+    })
     const stamp = createId()
     return dependencies.carryOvers.carry({
       workspaceId: request.workspaceId, projectId: request.projectId, toProjectVersionId: source.projectVersionId, variantId: request.variantId,
       renderContentHash: projectProxyRenderContentHash({ source, colorPipelineBindings }),
+      faceEvidenceDigest, criticIssuesDigest: proxyDirectorCriticIssuesDigest(source.criticIssues),
       inputHash: projectProxyRenderInputHash({ source, colorPipelineBindings }),
       editPlanSnapshotId: source.editPlanSnapshotId, sourceArtifactId: source.sourceArtifactId, sourceManifestId: source.sourceManifestId,
       originalFileName: `${source.originalFileName.replace(/\.[^.]+$/, '').slice(0, 200)}-editorial.mp4`,

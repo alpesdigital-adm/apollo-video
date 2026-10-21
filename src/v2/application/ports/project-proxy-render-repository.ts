@@ -164,6 +164,15 @@ export interface ProjectProxyOcrReceipt {
   editPlanHash: string
 }
 
+/**
+ * W70 readiness (R2). The digests a completed render stores beside its content address (`proxy-render-evidence.ts`): the face windows its
+ * caption placement read, with the pending ones, and the Director's quality issues its review is built over.
+ */
+export interface ProjectProxyRenderEvidence {
+  faceEvidenceDigest: string
+  criticIssuesDigest: string
+}
+
 export interface ProjectProxyCompletionLease {
   readonly owner: string
   readonly attempt: number
@@ -221,6 +230,12 @@ export interface ProjectProxyRenderRepository {
     createdAt: string
     recipeParameters: Readonly<Record<string, unknown>>
     ocrReceipt: Readonly<ProjectProxyOcrReceipt> | null
+    /**
+     * W70 readiness (R2). The digests of what the content address cannot see, taken when these frames were decided: the face windows the
+     * placement read (with the ones it still needs) and the Director's issues the review is built over. Stored on the render's operation row;
+     * a carry from this render is refused when the head's are not the same (`face-evidence-moved`, `critic-issues-moved`).
+     */
+    renderEvidence?: Readonly<ProjectProxyRenderEvidence>
   }): Promise<void>
   attachCompletedSnapshotOutput(input: {
     lease: Readonly<ProjectProxyCompletionLease>

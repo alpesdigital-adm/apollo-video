@@ -2155,6 +2155,60 @@ test('W65 proxy worker: no control render is paid for when the plan draws nothin
   assert.deepEqual(review.criticIssues.filter((entry) => entry.code === 'FACE_PIXEL_CHECK_UNAVAILABLE').map((entry) => entry.severity), ['warning'])
 })
 
+// ---- W70 readiness (R2): what the content address cannot see is stored at completion, and the address itself is re-checked ----
+const { projectProxyRenderContentHash } = await import('../../src/v2/application/project-render-sources.ts')
+const { deriveProxyRenderGeometry, proxyDirectorCriticIssuesDigest } = await import('../../src/v2/application/proxy-render-evidence.ts')
+
+async function runEvidenceWorker(immutableSource, envelopes, contextOverride = {}) {
+  const operations = createOperations(immutableSource, contextOverride)
+  const reader = { async listSourceWindows() { return envelopes.map((envelope) => ({ envelope, authentication: { authenticated: true, reasons: [] } })) } }
+  const base = dependencies(operations, { faceEvidence: reader })
+  let completion = null
+  let renders = 0
+  const attach = base.deps.projects.attachCompletedOutput
+  base.deps.projects = { ...base.deps.projects, async readImmutableSource() { return immutableSource }, async attachCompletedOutput(input) { completion = input; return attach(input) } }
+  const render = base.deps.renderer.render
+  base.deps.renderer = { ...base.deps.renderer, async render(input) { renders += 1; return render(input) } }
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-w70-evidence')
+  return { outcome, completion, renders, reader, operation: operations.operation }
+}
+
+test('W70 R2 proxy worker: the completion stores the digests of the face windows the placement read and of the Director issues, the ones a carry computes', async () => {
+  const one = await runEvidenceWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE])])
+  assert.equal(one.outcome.status, 'succeeded')
+  const evidence = one.completion.renderEvidence
+  assert.match(evidence.faceEvidenceDigest, /^[a-f0-9]{64}$/)
+  assert.equal(evidence.criticIssuesDigest, proxyDirectorCriticIssuesDigest([]))
+  // the carry runs the same derivation, with the same reader, for the same source: the same digest
+  const carried = await deriveProxyRenderGeometry({ source: portraitMasterSource(), workspaceId: SEALED_SCOPE.workspaceId, projectId: SEALED_SCOPE.projectId, faceEvidence: one.reader, clock: () => new Date() })
+  assert.equal(carried.faceEvidenceDigest, evidence.faceEvidenceDigest, 'what the worker stored is what a carry recomputes when nothing moved')
+  // a window published later, or no reader at all, is other evidence
+  const two = await runEvidenceWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE]), faceWindow(() => [FAR_FACE], { id: 'face-source-envelope-later' })])
+  assert.notEqual(two.completion.renderEvidence.faceEvidenceDigest, evidence.faceEvidenceDigest, 'one more window read moves the face digest')
+  const unwired = await deriveProxyRenderGeometry({ source: portraitMasterSource(), workspaceId: SEALED_SCOPE.workspaceId, projectId: SEALED_SCOPE.projectId, clock: () => new Date() })
+  assert.notEqual(unwired.faceEvidenceDigest, evidence.faceEvidenceDigest, 'no reader is not the same evidence as a reader')
+  // the Director's issues the review is built over are in the critic digest, and nothing else is
+  const issue = Object.freeze({ code: 'DIRECTOR_PACING_WARNING', severity: 'warning', category: 'editorial', message: 'Pacing needs review.', correctable: true })
+  const directed = await runEvidenceWorker(portraitMasterSource({ criticIssues: Object.freeze([issue]) }), [faceWindow(() => [FAR_FACE])])
+  assert.equal(directed.completion.renderEvidence.criticIssuesDigest, proxyDirectorCriticIssuesDigest([issue]))
+  assert.notEqual(directed.completion.renderEvidence.criticIssuesDigest, evidence.criticIssuesDigest)
+  assert.equal(directed.completion.renderEvidence.faceEvidenceDigest, evidence.faceEvidenceDigest)
+})
+
+test('W70 R2 proxy worker: the content address written at enqueue is recomputed, and a render whose address moved is refused before anything is rendered', async () => {
+  const sealed = portraitMasterSource()
+  const address = projectProxyRenderContentHash({ source: sealed, colorPipelineBindings })
+  const same = await runEvidenceWorker(sealed, [faceWindow(() => [FAR_FACE])], { renderContentHash: address })
+  assert.equal(same.outcome.status, 'succeeded', 'the address of what is rendered is the address the operation was queued with')
+  const moved = await runEvidenceWorker(sealed, [faceWindow(() => [FAR_FACE])], { renderContentHash: 'e'.repeat(64) })
+  assert.equal(moved.outcome.status, 'failed')
+  assert.equal(moved.renders, 0, 'nothing was rendered')
+  assert.equal(moved.completion, null, 'nothing was attached')
+  assert.equal(moved.operation.error?.code, 'invalid_render_input')
+  // a row written before the address existed has none: it is rendered as before (and is never a carry source)
+  assert.equal((await runEvidenceWorker(sealed, [faceWindow(() => [FAR_FACE])])).outcome.status, 'succeeded')
+})
+
 // ---- W67: the independent MP4 critic reads the pixels of the delivered proxy ----
 const { createMp4QualityReport: createMp4ProxyReport, MP4_PIXEL_CRITIC_POLICY: MP4_PROXY_POLICY } = await import('../../src/v2/domain/mp4-pixel-quality.ts')
 const { pixelOracleModelPins: proxyOraclePins } = await import('../../src/v2/domain/pixel-face-oracle.ts')

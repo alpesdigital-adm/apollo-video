@@ -5,7 +5,7 @@ import { carryOverUntouchedOutputs, carryOverUntouchedOutputService } from '../a
 import { outputVariantsOf } from '../domain/output-consumption.ts'
 import { readStoredOutputStateV3 } from './prisma/output-state-consumption.ts'
 import { PrismaProxyCarryOverRepository } from './prisma/proxy-carry-over-repository.ts'
-import { createColorPipelineCompilationRepository, createProjectProxyRenderRepository } from './repository-factory.ts'
+import { createColorPipelineCompilationRepository, createFaceSourceWindowRepository, createProjectProxyRenderRepository } from './repository-factory.ts'
 import { getV2PostgresClient } from './prisma-postgres/client.ts'
 
 /**
@@ -31,6 +31,8 @@ export async function carryOverAfterCommand(input: Readonly<{
     const carry = carryOverUntouchedOutputService({
       projects: createProjectProxyRenderRepository(), carryOvers: new PrismaProxyCarryOverRepository(client),
       colorPipelines: createColorPipelineCompilationRepository(), clock: () => new Date(), createId: randomUUID,
+      // The reader the proxy render worker is wired with: the face windows a carry compares are read exactly as a render reads them.
+      faceEvidence: createFaceSourceWindowRepository(),
     })
     const outcomes = await carryOverUntouchedOutputs({
       carry: ({ variantId }) => carry({ workspaceId: input.workspaceId, projectId: input.projectId, variantId, actor: input.actor,

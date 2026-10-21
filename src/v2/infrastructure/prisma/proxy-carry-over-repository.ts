@@ -85,10 +85,12 @@ export class PrismaProxyCarryOverRepository implements ProxyCarryOverRepository 
     })
     if (present) return { status: 'present', operationId: present.operationId }
 
-    // The newest completed render of this output, in an earlier Version, whose own content address is the one this output has now.
+    // The newest completed render of this output, in an earlier Version, whose own content address is the one this output has now. A render
+    // stored without the digests of what the address cannot see (written before they existed) proves nothing about them and is never a source.
     const source = await transaction.v2ProjectProxyRenderOperation.findFirst({
       where: {
         workspaceId, projectId, outputVariantId: request.variantId, renderContentHash: request.renderContentHash,
+        faceEvidenceDigest: { not: null }, criticIssuesDigest: { not: null },
         projectVersionId: { not: request.toProjectVersionId }, operation: { status: 'succeeded', phase: 'completed' },
       },
       orderBy: [{ createdAt: 'desc' }, { operationId: 'desc' }],
@@ -105,6 +107,10 @@ export class PrismaProxyCarryOverRepository implements ProxyCarryOverRepository 
       cursor = row.parentVersionId
     }
     if (!ancestor) return { status: 'not-eligible', reason: 'source-not-ancestor' }
+    // W70 readiness (R2). The address says the inputs of the output are equal; it cannot say the same of what the render READ: the face
+    // windows its placement read (and the ones it still needed) and the Director's issues its review was built over. Either moved: not carried.
+    if (source.faceEvidenceDigest !== request.faceEvidenceDigest) return { status: 'not-eligible', reason: 'face-evidence-moved' }
+    if (source.criticIssuesDigest !== request.criticIssuesDigest) return { status: 'not-eligible', reason: 'critic-issues-moved' }
 
     const [artifact, manifest, map, version] = await Promise.all([
       transaction.v2MediaArtifact.findFirst({ where: { id: source.outputArtifactId, workspaceId, status: 'available' }, select: { id: true } }),
@@ -158,6 +164,8 @@ export class PrismaProxyCarryOverRepository implements ProxyCarryOverRepository 
         // visible as what it is: carried from this review, which had this hash when it was carried (the public review's `carriedFrom`)
         carriedFromReviewId: source.review.id,
         carriedFromReviewHash: source.review.reviewHash,
+        // the evidence the carried render read, which is (just checked) the evidence the head has: a later carry from this row compares with it
+        faceEvidenceDigest: source.faceEvidenceDigest, criticIssuesDigest: source.criticIssuesDigest,
       },
     })
     const created = await transaction.v2PublicOperation.findUnique({ where: { id: operation.id }, include: OPERATION_INCLUDE })

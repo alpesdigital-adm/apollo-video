@@ -7,7 +7,9 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { sourceWindowHarness } from './helpers/face-source-pg.mjs'
 import { runProxyWorkerOnce, seedIssueOverrideWorld } from './helpers/issue-override-world.mjs'
+import { standInDetectorRows } from './helpers/reframe-gt-oracle.mjs'
 
 const require = createRequire(import.meta.url)
 const { enqueueProjectProxyRenderService } = await import('../../src/v2/application/enqueue-project-proxy-render.ts')
@@ -21,6 +23,7 @@ const { PrismaSubtitleSegmentOverrideRepository } = await import('../../src/v2/i
 const { calculateProxyReviewHash } = await import('../../src/v2/application/render-workflow.ts')
 const factory = await import('../../src/v2/infrastructure/repository-factory.ts')
 const { presentProxyReview } = await import('../../src/v2/public-api/proxy-review-presenter.ts')
+const { proxyDirectorCriticIssuesDigest } = await import('../../src/v2/application/proxy-render-evidence.ts')
 const { getPublicSchema } = await import('../../src/v2/public-api/schema-registry.ts')
 const { default: Ajv2020 } = await import('ajv/dist/2020.js')
 const { default: addFormats } = await import('ajv-formats')
@@ -39,6 +42,11 @@ const { default: addFormats } = await import('ajv-formats')
  *  3. a render written without the address (before it existed), or a head that moved, is never a source;
  *  4. after the 16:9 output is rendered for its current inputs, a Command aimed at 9:16 carries the 16:9 render (a chain of carries is fine);
  *  5. the sidecar of a carried output names the very MP4 the earlier Version rendered.
+ * W70 readiness (R2) - what the content address cannot see:
+ *  6. a face window published after the render (the window the plan was still waiting for) is evidence the render never read: the address
+ *     is unchanged and the carry is refused with face-evidence-moved;
+ *  7. the Director issues the head's review would be built over are not the ones the render's was: refused with critic-issues-moved (the
+ *     stored digest is moved by hand - in this world no Director run exists to move them); restored, the carry is made and copies the digests.
  */
 const enabled = process.env.APOLLO_PROXY_CARRY_OVER_E2E === '1'
 const delay = (ms) => new Promise((done) => setTimeout(done, ms))
@@ -99,6 +107,8 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     const carryService = carryOverUntouchedOutputService({
       projects: factory.createProjectProxyRenderRepository(), carryOvers: new PrismaProxyCarryOverRepository(db),
       colorPipelines: factory.createColorPipelineCompilationRepository(), clock: () => new Date(),
+      // the reader the render worker reads with (as `carryOverAfterCommand` wires it)
+      faceEvidence: factory.createFaceSourceWindowRepository(),
     })
     const opAt = (versionId, variantId) => db.v2ProjectProxyRenderOperation.findFirst({ where: { ...scope, projectVersionId: versionId, outputVariantId: variantId, operation: { status: 'succeeded' } } })
 
@@ -107,6 +117,10 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     const wideV0 = await renderOf(WIDE), tallV0 = await renderOf(TALL)
     assert.match(wideV0.renderContentHash ?? '', /^[a-f0-9]{64}$/, 'a render written now carries its content address')
     assert.notEqual(wideV0.renderContentHash, tallV0.renderContentHash)
+    for (const render of [wideV0, tallV0]) {
+      assert.match(render.faceEvidenceDigest ?? '', /^[a-f0-9]{64}$/, 'and the digest of the face windows its placement read')
+      assert.equal(render.criticIssuesDigest, proxyDirectorCriticIssuesDigest([]), 'and of the Director issues it was reviewed over (none: no Director run here)')
+    }
     const tallReview0 = await reviewAt(TALL, V0.id)
     assert.equal(tallReview0.status, 'warning-ack-required', 'the 9:16 render has warnings a person must acknowledge')
     const acknowledged = await acknowledgeProxyWarningsService({ repository: reviews, clock: () => new Date(), createId: () => randomUUID() })({
@@ -130,6 +144,8 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     assert.equal(tallV1.reuseBaseVersionId, V0.id, 'and from that Version')
     assert.equal(tallV1.reuseCommandId, c1.command.id, 'by the Command that made the head')
     assert.equal(tallV1.renderContentHash, tallV0.renderContentHash, 'the content address of the inputs is the same one')
+    assert.deepEqual([tallV1.faceEvidenceDigest, tallV1.criticIssuesDigest], [tallV0.faceEvidenceDigest, tallV0.criticIssuesDigest],
+      'and so is what the render read (checked, then copied to the carried row)')
     assert.notEqual(tallV1.inputHash, tallV0.inputHash, 'while the pre-render input hash names the new Version')
     assert.equal(await opAt(V1.id, WIDE), null, 'the affected 16:9 output is not carried (it must be rendered for its new text)')
     const carriedReview = await reviewAt(TALL, V1.id)
@@ -225,6 +241,35 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
       ids: { operation: `operation-${randomUUID()}`, review: `review-${randomUUID()}`, decision: `decision-${randomUUID()}`, map: randomUUID() },
     })
     assert.deepEqual([moved.status, moved.reason], ['not-eligible', 'head-moved'], 'a carry to a Version that is no longer the head writes nothing')
+
+    /* ---------------------------------------------------------- 6. (R2) a face window published after the render: the address cannot see it, the carry does */
+    // The cover window spans source frames [0, 100); cue-3 plays over [105, 140), so the plan was still waiting for a window there. Publishing
+    // it changes what the caption placement of the 16:9 output reads, while nothing its content address is made of moves.
+    const faces = sourceWindowHarness(db, { suffix: `w70c${suffix}`, workspaceId, clientId: world.owner.clientId, projectId, sourceId: world.source.artifactId, actor })
+    await faces.publish('late', { startSourceFrame: 100, endSourceFrame: 150 }, (frame) => standInDetectorRows(world.scene, frame))
+    const c6 = await command(TALL, 'cue-2', 'Sexta', 'text-6')
+    assert.equal(await opAt(c6.version.id, WIDE), null, 'the 16:9 render read other face windows than the head has now: it is not carried')
+    const faceMoved = await carryService({ ...scope, variantId: WIDE, actor })
+    assert.deepEqual([faceMoved.status, faceMoved.reason], ['not-eligible', 'face-evidence-moved'])
+    const wideV6 = await renderOf(WIDE)
+    assert.equal(wideV6.renderContentHash, wideV2.renderContentHash, 'the content address did not move')
+    assert.notEqual(wideV6.faceEvidenceDigest, wideV2.faceEvidenceDigest, 'the evidence the new render read did')
+    assert.equal(wideV6.criticIssuesDigest, wideV2.criticIssuesDigest)
+    console.log(`W70-EVIDENCE ${JSON.stringify({ label: 'face-evidence-moved', version: c6.version.id, before: wideV2.faceEvidenceDigest, after: wideV6.faceEvidenceDigest })}`)
+
+    /* ---------------------------------------------------------- 7. (R2) the Director issues moved: refused; restored, carried with the digests */
+    await db.v2ProjectProxyRenderOperation.update({ where: { operationId: wideV6.operationId }, data: { criticIssuesDigest: proxyDirectorCriticIssuesDigest([{
+      code: 'DIRECTOR_PACING_WARNING', severity: 'warning', category: 'editorial', message: 'Pacing needs review.', correctable: true }]) } })
+    const c7 = await command(TALL, 'cue-2', 'Sétima', 'text-7')
+    assert.equal(await opAt(c7.version.id, WIDE), null, 'a render reviewed over other Director issues than the head has is not carried')
+    const criticMoved = await carryService({ ...scope, variantId: WIDE, actor })
+    assert.deepEqual([criticMoved.status, criticMoved.reason], ['not-eligible', 'critic-issues-moved'])
+    await db.v2ProjectProxyRenderOperation.update({ where: { operationId: wideV6.operationId }, data: { criticIssuesDigest: wideV6.criticIssuesDigest } })
+    const c8 = await command(TALL, 'cue-2', 'Oitava', 'text-8')
+    const wideV8 = await opAt(c8.version.id, WIDE)
+    assert.ok(wideV8, 'with the same evidence, the render is carried')
+    assert.equal(wideV8.reusedFromOperationId, wideV6.operationId)
+    assert.deepEqual([wideV8.faceEvidenceDigest, wideV8.criticIssuesDigest], [wideV6.faceEvidenceDigest, wideV6.criticIssuesDigest], 'and the carried row names the evidence it was carried under')
   } finally {
     await db.$disconnect().catch(() => undefined)
     const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
