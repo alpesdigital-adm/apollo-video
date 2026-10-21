@@ -8,7 +8,7 @@ import { evaluateAssetUse } from '../../domain/asset-rights.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import type { OutputConsumptionPurpose } from '../../domain/output-consumption.ts'
-import type { DirectorRunInheritance } from '../../domain/director-run-inheritance.ts'
+import { INHERITING_COMMAND_TYPES, type DirectorRunInheritance } from '../../domain/director-run-inheritance.ts'
 import { requirePersistedOutputConsumptionV3 } from './output-state-consumption.ts'
 import { readEffectiveDirectorRun } from './director-run-inheritance.ts'
 
@@ -48,9 +48,11 @@ export async function queryProxySourceProject(client: PrismaClient | Prisma.Tran
   }
   // W70 readiness. A Version made by an exception Command (subtitle segment, manual reframe) has no DirectorRun of its own; the quality the
   // Director certified for the ancestor it descends from, through allowed exception Commands only, is the one that describes it. Looked up
-  // only when the Version has no run itself, and never copied: the row is the ancestor's.
+  // only when the Version has no run itself, and never copied: the row is the ancestor's. A Version whose own Command is not one the
+  // quality carries through (or that has none) inherits nothing - the walk would stop at it - so nothing more is read for it.
   const version = project.versions[0]
-  const inheritedDirectorRun = version && version.directorRunAsResult === null
+  const inheritedDirectorRun = version && version.directorRunAsResult === null &&
+    typeof version.command?.type === 'string' && INHERITING_COMMAND_TYPES.includes(version.command.type)
     ? await readEffectiveDirectorRun(client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: version.id })
     : null
   return {
