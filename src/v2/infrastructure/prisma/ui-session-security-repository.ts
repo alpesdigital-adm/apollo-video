@@ -100,7 +100,7 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
       input.rotateAfterSeconds >= input.identifierMaxAgeSeconds || input.recoverySeconds > input.identifierMaxAgeSeconds
     ) throw new DomainError('INVALID_ARGUMENT', 'Periodic UI session rotation input is invalid')
     try {
-      return await this.client.$transaction(async (transaction) => {
+      const outcome = await this.client.$transaction(async (transaction) => {
         const current = await transaction.v2UiSession.findUnique({
           where: { nonceHash: input.currentNonceHash },
           include: { member: { include: { identity: true } } },
@@ -134,13 +134,11 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
           current.issuedAt.getTime() + input.identifierMaxAgeSeconds * 1000 <= now.getTime()
         ) return null
         if (current.issuedAt.getTime() + input.rotateAfterSeconds * 1000 > now.getTime()) {
-          const idleExpiresAt = new Date(Math.min(current.expiresAt.getTime(), now.getTime() + input.idleTtlSeconds * 1000))
-          const touched = await transaction.v2UiSession.update({
-            where: { nonceHash: current.nonceHash },
-            data: { lastSeenAt: now, idleExpiresAt },
-            include: { member: true },
-          })
-          return Object.freeze({ session: hydrate(touched, touched.member.role, touched.member.identityId), rotated: false })
+          // Not due for rotation: the only write is the idle touch. It must not run inside this Serializable transaction:
+          // every concurrent GET /v1/session of one browser page would then conflict on the same row (write-write 40001),
+          // and the fourth would exhaust the retries and answer PERSISTENCE_CONFLICT. It is applied after the commit by
+          // touchAfterRead, exactly as readActiveAndTouch does.
+          return Object.freeze({ touchPending: true as const })
         }
 
         const revoked = await transaction.v2UiSession.updateMany({
@@ -165,6 +163,20 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
         })
         return Object.freeze({ session: hydrate(successor, successor.member.role, successor.member.identityId), rotated: true })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      if (outcome !== null && 'touchPending' in outcome) {
+        const touched = await this.touchAfterRead(input, now)
+        if (touched === 'changed') {
+          // The row was rotated or revoked between the read and the touch: decide again through the transaction, which
+          // knows the rotation recovery window.
+          if (retry < 3) {
+            await retryDelay(retry)
+            return this.refreshActiveSession(input, retry + 1)
+          }
+          throw new DomainError('PERSISTENCE_CONFLICT', 'UI session could not be rotated periodically')
+        }
+        return touched
+      }
+      return outcome
     } catch (error) {
       if (
         (error instanceof RetryableUiSessionConflict || prismaCode(error, 'P2034') || prismaCode(error, 'P2002')) &&
@@ -178,6 +190,46 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
       }
       throw error
     }
+  }
+
+  /**
+   * Idle touch of a session that was just read as active and not due for rotation. A single guarded UPDATE (READ
+   * COMMITTED): concurrent touches never conflict, lastSeenAt only moves forward, and a session revoked, expired or
+   * suspended in the meantime is not extended.
+   */
+  private async touchAfterRead(
+    input: Parameters<UiSessionSecurityRepository['refreshActiveSession']>[0],
+    now: Date,
+  ): Promise<Awaited<ReturnType<UiSessionSecurityRepository['refreshActiveSession']>> | 'changed'> {
+    const identifierCutoff = new Date(now.getTime() - input.identifierMaxAgeSeconds * 1000)
+    const rotateCutoff = new Date(now.getTime() - input.rotateAfterSeconds * 1000)
+    const row = await this.client.v2UiSession.findUnique({ where: { nonceHash: input.currentNonceHash }, select: { expiresAt: true } })
+    if (!row) return null
+    const idleExpiresAt = new Date(Math.min(row.expiresAt.getTime(), now.getTime() + input.idleTtlSeconds * 1000))
+    await this.client.v2UiSession.updateMany({
+      where: {
+        nonceHash: input.currentNonceHash,
+        revokedAt: null,
+        expiresAt: { gt: now },
+        idleExpiresAt: { gt: now },
+        issuedAt: { gt: identifierCutoff },
+        lastSeenAt: { lt: now },
+        member: { status: 'active', identity: { status: 'active' } },
+      },
+      data: { lastSeenAt: now, idleExpiresAt },
+    })
+    const current = await this.client.v2UiSession.findUnique({
+      where: { nonceHash: input.currentNonceHash },
+      include: { member: { include: { identity: true } } },
+    })
+    if (
+      !current || current.expiresAt <= now || current.idleExpiresAt <= now ||
+      current.issuedAt <= identifierCutoff || current.member.status !== 'active' ||
+      current.member.identity.status !== 'active'
+    ) return null
+    // Revoked (rotated) or now due for rotation since the read: let the transaction decide.
+    if (current.revokedAt || current.issuedAt <= rotateCutoff) return 'changed'
+    return Object.freeze({ session: hydrate(current, current.member.role, current.member.identityId), rotated: false })
   }
 
   async revokeSession(input: Parameters<UiSessionSecurityRepository['revokeSession']>[0]): Promise<void> {

@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
 
 import { variantBodyFor } from './explicit-project-http.mjs'
+import { createOwnedTempRoot, removeOwnedTempRoot } from './owned-temp-root.mjs'
 import { calculateCanonicalHash, stableSerialize } from '../../../src/v2/domain/canonical-hash.ts'
 import {
   apiCall, assertRefusal, cardIds, cardSnapshot, createProjectViaApi, dashboardUrl,
@@ -20,9 +21,16 @@ const ROOT_PREFIX = 'apollo-w39-artifacts-'
 
 /** Creates the artifact root the journey server is started with (local driver). */
 export async function createW39ArtifactRoot() {
-  const root = join(tmpdir(), `${ROOT_PREFIX}${randomUUID()}`)
-  await mkdir(root, { recursive: true })
-  return root
+  return createOwnedTempRoot(ROOT_PREFIX)
+}
+
+/**
+ * Removes the root createW39ArtifactRoot made, on every path (the proofs below only drop their own fixture directory, and
+ * the root only when it is empty; the journey server also writes other artifacts under it). Only a root this process
+ * created is removed. Stop the server that serves it first.
+ */
+export async function removeW39ArtifactRoot(root) {
+  return removeOwnedTempRoot(root)
 }
 
 async function inventory(root) {

@@ -98,6 +98,17 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
     const notDue = await first.refreshActiveSession(refreshInput('2026-08-02T02:14:00.000Z'))
     assert.equal(notDue.rotated, false)
     assert.equal(notDue.session.nonceHash, nextNonceHash)
+    // GET /v1/session of one browser page is concurrent (every component asks for it): the idle touch of a session that is
+    // not due for rotation must not conflict in the Serializable transaction, whatever the number of parallel requests.
+    const concurrentNotDue = await Promise.all(Array.from({ length: 16 }, (_, index) =>
+      (index % 2 === 0 ? first : second).refreshActiveSession(refreshInput(`2026-08-02T02:14:00.${String(index).padStart(3, '0')}Z`)),
+    ))
+    assert.equal(concurrentNotDue.every((result) => result?.rotated === false && result.session.nonceHash === nextNonceHash), true)
+    assert.equal(
+      (await client.v2UiSession.findUniqueOrThrow({ where: { nonceHash: nextNonceHash } })).lastSeenAt.toISOString(),
+      '2026-08-02T02:14:00.015Z',
+      'the idle touch only moves forward to the newest request',
+    )
     const concurrentRefresh = await Promise.all(Array.from({ length: 8 }, (_, index) =>
       (index % 2 === 0 ? first : second).refreshActiveSession(refreshInput('2026-08-02T02:15:00.000Z')),
     ))

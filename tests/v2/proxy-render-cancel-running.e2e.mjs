@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readdir, stat } from 'node:fs/promises'
+import { mkdir, readdir, stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { runProxyWorkerOnce, seedIssueOverrideWorld } from './helpers/issue-override-world.mjs'
+import { createOwnedTempRoot, removeOwnedTempRoot } from './helpers/owned-temp-root.mjs'
 
 const require = createRequire(import.meta.url)
 const { enqueueProjectProxyRenderService } = await import('../../src/v2/application/enqueue-project-proxy-render.ts')
@@ -56,7 +56,7 @@ test('W70 prep: cancelling a render while the worker is rendering promotes no ar
   const poolOf = (limit) => { const url = new URL(harnessUrl); url.searchParams.set('connection_limit', String(limit)); return url.toString() }
   process.env.V2_DATABASE_URL = poolOf(3)
   const db = new PrismaClient({ datasources: { db: { url: poolOf(2) } } })
-  const root = await mkdtemp(join(tmpdir(), 'apollo-w70-cancel-'))
+  const root = await createOwnedTempRoot('apollo-w70-cancel-')
   const artifactRoot = join(root, 'artifacts')
   await mkdir(artifactRoot, { recursive: true })
   const suffix = randomUUID().replaceAll('-', '').slice(0, 8)
@@ -138,6 +138,7 @@ test('W70 prep: cancelling a render while the worker is rendering promotes no ar
     await db.$disconnect().catch(() => undefined)
     const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
     await disconnectV2PostgresClient().catch(() => undefined)
+    await removeOwnedTempRoot(root)
   }
 })
 
