@@ -48,8 +48,7 @@ Provas: digests (independentes de ordem, todo movimento da evidência os move); 
 rosto pendente publicada depois do render (recusado; renderizado de novo e carregado) e com o digest de issues do Director movido (recusado; restaurado, carregado). O digest de
 issues é movido à mão na jornada: nesse mundo não existe DirectorRun para movê-lo de verdade.
 
-Não feito / limite: o endereço também não inclui o plano de cor da Versão (`colorPlans.readEffectiveForVersion`, que o worker aplica) além do que as compilações ligadas às fontes
-já carregam. Não verifiquei se um Command de plano de cor entre um render ancestral e a cabeça pode deixar o endereço igual; registro para o Opus validar.
+O limite registrado aqui (o endereço não via o plano de cor nem a seleção de LUT da Versão) foi o REJECT da validação do Opus; corrigido em 8e63d11a, ver seção 8.
 
 ## 4. R3 - legenda que não cabe bloqueia antes do render (52913dbb)
 
@@ -110,3 +109,41 @@ Achados de ambiente, registrados para quem rodar depois:
   commitado (3 vezes) para não sujar a árvore.
 - O disco do host chegou a 70 MB livres no meio do trabalho (um build reprovou com `ENOSPC`); cada execução do `b1` deixa ~0,5 GB em `%TEMP%\apollo-w39-artifacts-*`.
 - Uma execução do harness abortou ao observar processos (`powershell ... Falha na inicialização do CLR`), sem relação com o produto.
+
+## 8. Validação do Opus: REJECT (R2) e notas (8e63d11a, 6c05033b)
+
+**Obrigatório - a cor estava fora do endereço.** Um Command de ColorPlan ou de seleção de LUT copia o EditPlan do pai; nem o endereço de conteúdo nem o hash de entrada do
+proxy viam a cor, então um render anterior a uma mudança de cor podia ser carregado por cima dela, com a aprovação religada a pixels de outra cor. 8e63d11a:
+
+- `render-color-grade/v1` (`render-color-grade.ts`): o ColorPlan efetivo (id, hash do registro, hash do plano, hash do manifesto compilado, ou null) e a seleção de LUT efetiva
+  (id, hash da seleção, modo, versão e registro da LUT, hash do conteúdo do cube, intensidade, ou null), lidos por ancestralidade para a Versão da fonte (leitura atual e
+  imutável; o final lê a mesma fonte).
+- O hash de entrada nomeia as linhas que guardam a cor; o endereço (agora `project-proxy-render-content/v2`) guarda o que a cor faz (hashes do plano e do manifesto; modo,
+  registro, cube e intensidade da LUT): a mesma cor regravada em outra Versão é o mesmo conteúdo, não a mesma entrada.
+- Os workers de proxy e de final recalculam a cor a partir do que aplicam (o ColorPlan que leem, a seleção que o materializador resolveu) e recusam com
+  `invalid_render_input`, antes de renderizar, quando não é a cor com que a fonte foi lida.
+- Defesa em profundidade: o carry recusa `intermediate-command-not-carriable` quando qualquer Versão entre o render de origem e a cabeça foi feita por um Command que não é uma
+  das duas exceções, diga o endereço o que disser.
+- Provas: unitárias (o endereço e o hash de entrada se movem com a cor; os dois workers recusam uma cor que não aplicam) e a jornada PostgreSQL de carry, passos 8-9: um Command
+  de LUT que regrava a MESMA cor entre o render e a cabeça é recusado pela defesa em profundidade (o endereço concorda); um ColorPlan entre eles move o endereço
+  (`no-source-render`). Mutações, cada uma reprovando exatamente a sua prova: sem a defesa em profundidade, a jornada reprova no passo 8 (`w70r-mut-m1-5313b4c5`, "a render made
+  before a LUT Command is not carried past it"); com a cor fora do endereço, 2 testes unitários reprovam e a jornada reprova no passo 9 (`w70r-mut-m2-6842874f`, o motivo vira
+  a defesa em profundidade); sem a conferência dos workers, os 2 testes de worker reprovam.
+
+**Nota 4 - políticas no endereço.** O endereço fixa `PROXY_REVIEW_POLICY_SHA256`, o hash das identidades do laudo de proxy, do relatório de qualidade de formato (e seus
+códigos), do crítico de pixels de legenda (códigos e tolerância de faixa), do layout de texto de legenda, do crítico MP4, da política de evidência de rosto, do crítico de cor e
+das políticas de âncora. Mudou qualquer uma, nenhum render anterior é carregado.
+
+**Nota 3 - quem reconheceu.** A linha de um laudo cuja aprovação o carry religou guarda o reconhecimento da pessoa que reconheceu o laudo de ORIGEM (o banco exige que um laudo
+reconhecido nomeie um cliente de API), e ele saía como `acknowledgedBy` do laudo carregado, como se essa pessoa tivesse reconhecido esta Versão. 6c05033b: a leitura o move para
+`carriedFrom.acknowledgedBy` (sempre presente; null quando o carry não religou nada) e o reconhecimento do laudo passa a ser o carry automático
+(`{ type: 'automatic-carry', id: <decisão carry-over-approval>, at: <quando foi feita> }`). Quem reconheceu um laudo carregado que o carry não aprovou o fez nesta Versão e
+continua nomeado. `project-proxy-review-response/v4` e `project-proxy-review-warning-acknowledgement-result/v4` foram editados no lugar: só existem neste ramo (`origin/main`
+não publica nenhum dos dois), não há v4 publicado de onde subir. v3 mantém os bytes; baseline regenerado no mesmo commit (só esses dois schemas mudam); paridade inalterada.
+
+**Nota 2 - exceção empilhada sobre LUT/cor, documentada (sem rótulo).** Uma Versão de exceção cuja caminhada para numa Versão de LUT ou de cor atrás de uma Versão dirigida não
+herda o DirectorRun (seção 1): o laudo de proxy dela é montado sem as issues do Director (nenhuma ressalva do Director para reconhecer) e o final é recusado
+(`EDITORIAL_ACCEPTANCE_FAILED`, `director-run-not-inherited`). O rótulo "qualidade do Diretor não herdada" no laudo não foi feito: o laudo não carrega o resultado da
+herança, e mostrá-lo exige levar esse resultado até o laudo e ao schema público - não é pequeno. Quem vê o laudo sem issues do Director nessa situação só descobre a recusa
+ao pedir o final. O que está provado e o que é leitura de código: a jornada de herança prova a recusa do final na exceção empilhada sobre a LUT; que o laudo de proxy sai sem
+as issues do Director vem da leitura (`readEffectiveDirectorRun` devolve null numa parada e `parseProxySourceCriticIssues(undefined)` é `[]`), sem execução que o mostre.
