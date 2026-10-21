@@ -294,7 +294,7 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
     // the very function the geometry derivation applied to the render. The exceptions are those in force as of the rendered Version, and the
     // set must be the one the review of the render recorded: another set would make the sidecar describe pixels nobody drew.
     const heads = await readSubtitleSegmentOverrideHeadsAsOf(this.client, {
-      workspaceId: input.workspaceId, projectId: input.projectId, variantId: outputVariantId, versionSequence: version.sequence,
+      workspaceId: input.workspaceId, projectId: input.projectId, variantId: outputVariantId, versionId: version.id,
     })
     const overridesHash = subtitleOverrideSetHash(heads, outputVariantId)
     if (reviewRow && reviewedOverridesHash(reviewRow.formatQualityJson) !== overridesHash) {
