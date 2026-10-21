@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-20",
+  "updatedAt": "2026-10-21",
   "audit": {
     "delivered": 380,
     "total": 1259,
     "source": "TODO.md"
   },
-  "evidenceBaseCommit": "c65c31dcf5c63b325cf789e833e2177e0787b49d",
+  "evidenceBaseCommit": "04c4e01f4af3bf28578d3f096d1cca39d5a9f4d2",
   "coverage": {
     "unit": "todo-section",
     "total": 250,
@@ -2068,20 +2068,20 @@
         "afac8c37ae94-1",
         "99221a4bc2bd-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
-      "integration": "not-integrated",
-      "validation": "none",
+      "state": "pendente-validacao",
+      "construction": "implemented",
+      "integration": "main",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Execução não iniciada. W65 e W66 estão no head integrado (fora de main); o W67 (critic independente dos pixels finais) segue na fila e bloqueia o ciclo issue, override, recompilação e critic."
+          "kind": "validation",
+          "text": "Prova em navegador real (Chromium próprio, next start, PostgreSQL, worker, FFmpeg, gravação real) em 9:16 e 16:9 (run w68-explore-22-26dd3abd): override seguro move a legenda, reset volta ao quadro herdado, hide, reframe manual a 0,2 px do pedido; negativos (pin inseguro, replay, sessão expirada, cancelamento na fila, base stale, 404 entre workspaces, ack de bloqueio = 428); imutabilidade por hash. Sem export final pelo navegador (o mundo de teste não tem Director run); estilo só em teste unitário; override de reframe só em 9:16; cancelamento provado só na fila."
         },
         {
-          "kind": "validation",
-          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+          "kind": "implementation",
+          "text": "Um Command cria nova ProjectVersion, então a saída não tocada precisa ser re-renderizada e revisada de novo (linhas imutáveis, mas a aprovação não é reaproveitada). Legenda 16:9 com mais de 20 caracteres é bloqueio duro do critic W65 (wrapAssText quebra em 20 caracteres em todo formato). Reaplicar exceção protegida após recompilação do Diretor não implementado. Os três itens estão no próximo PR (W69-tail/W70-prep)."
         },
         {
           "kind": "deployment",
@@ -2098,10 +2098,46 @@
           "ref": "docs/PLANO-WAVES-61-70.md",
           "scope": "W68: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
           "role": "planned-not-started"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/89",
+          "scope": "W68 issue chips, per-variant overrides and selective recompile merged into main.",
+          "role": "integration"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/quality/w68-issue-override-ui.md",
+          "scope": "W68 design, browser proof, negatives, immutability and all local batch failures with reruns.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/s2d-runs/w68-explore-22-26dd3abd/summary.json",
+          "scope": "W68 real-browser journey in 9:16 and 16:9, green.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39515480189",
+          "scope": "main 04c4e01f CI green after PRs #89 and #90.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39515480135",
+          "scope": "main 04c4e01f CI green after PRs #89 and #90.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/39515480163",
+          "scope": "main 04c4e01f CI green after PRs #89 and #90.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Fila W68 depois do critic do W67: issue por frame, range e elemento, override como Command por variante e range (base version, reset para o nível herdado), recompilação do proxy e do final da variante e critic repetido com pixels novos, provados em browser real com API, PostgreSQL e worker em 9:16 e 16:9. Nenhuma capability integrada é alegada; registrar a evidência por ID antes de promover.",
-      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Historico da nextAction substituida em13/10: Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID."
+      "nextAction": "Reaproveitar a aprovação da saída não tocada por hash de RenderInput, corrigir a quebra de linha do 16:9, provar cancelamento de render em execução e o export final pelo navegador na jornada W70.",
+      "notes": "PR #89: chips de review/block com evidência e proveniência visíveis, overrides de legenda (posição/estilo/texto/visibilidade) e de reframe com set/reset por Command, recompilação só da variante afetada, sem botão de resolver, bloqueio não reconhecível (428). Defeito encontrado e corrigido: o override de legenda era gravado mas nenhum render o lia. Guard subtitleOverridesMatchApproval no export final. Capability apollo.projects.subtitle-segments.read 1.0.0. Design: docs/quality/w68-issue-override-ui.md."
     },
     {
       "id": "W69",
