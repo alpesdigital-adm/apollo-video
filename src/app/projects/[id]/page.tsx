@@ -1289,7 +1289,11 @@ export default function ProjectWorkspacePage() {
   const [compareToggleSide, setCompareToggleSide] = useState<'before' | 'after'>('after')
   const [compareOverlayOpacity, setCompareOverlayOpacity] = useState(0.5)
   const [compareBusy, setCompareBusy] = useState(false)
-  const [proxyReview, setProxyReview] = useState<ProxyReviewData | null>(null)
+  // A proxy review belongs to ONE output, so it is kept with the output it was read for and is the page's review only while that output is the
+  // selected one. Switching outputs used to leave the previous output's review on screen, labelled as the new one's, until the new read answered:
+  // an issue clicked meanwhile was the other output's, and it vanished (with the form it opened) when the right review arrived.
+  const [loadedProxyReview, setLoadedProxyReview] = useState<{ variantId: string | null; review: ProxyReviewData } | null>(null)
+  const proxyReview = loadedProxyReview && loadedProxyReview.variantId === outputVariantId ? loadedProxyReview.review : null
   // Structured read failures for the review surface. A 409 on the annotations
   // read is not an empty list and not a dismissable notice: it stays on screen,
   // names the part that is unavailable, and blocks every action that depends on
@@ -1458,7 +1462,7 @@ export default function ProjectWorkspacePage() {
     selectedReviewVersionId.current = null
     setWorkspace(null)
     setReview(null)
-    setProxyReview(null)
+    setLoadedProxyReview(null)
     reviewReadFenceRef.current.invalidate()
     proxyReviewReadFenceRef.current.invalidate()
   }, [projectId, reads])
@@ -1895,8 +1899,9 @@ export default function ProjectWorkspacePage() {
     try {
       const query = new URLSearchParams()
       if (projectVersionId) query.set('projectVersionId', projectVersionId)
-      // A proxy review belongs to one output: the selected output's stable variant id names it.
-      if (selectedOutputIdRef.current) query.set('variantId', selectedOutputIdRef.current)
+      // A proxy review belongs to one output: the selected output's stable variant id names it, and the answer is kept with it.
+      const requestedVariantId = selectedOutputIdRef.current
+      if (requestedVariantId) query.set('variantId', requestedVariantId)
       const suffix = query.size ? `?${query.toString()}` : ''
       const result = await reads.read<{ review: ProxyReviewData }>({
         name: 'proxy-reviews',
@@ -1908,15 +1913,15 @@ export default function ProjectWorkspacePage() {
       if (!result.ok && result.failure.dropped) return
       if (!result.ok && result.failure.kind === 'auth') { router.replace(loginUrl()); return }
       if (!result.ok) {
-        setProxyReview(null)
+        setLoadedProxyReview(null)
         setProxyReviewFailure(result.failure)
         return
       }
       setProxyReviewFailure(null)
-      setProxyReview(result.data.review)
+      setLoadedProxyReview({ variantId: requestedVariantId, review: result.data.review })
     } catch (error) {
       if (!proxyReviewReadFenceRef.current.isCurrent(readTicket)) return
-      setProxyReview(null)
+      setLoadedProxyReview(null)
       setProxyReviewFailure({ kind: 'error', status: 0, message: error instanceof Error ? error.message : 'Não foi possível carregar o laudo do proxy.' })
     } finally {
       if (proxyReviewReadFenceRef.current.isCurrent(readTicket)) setProxyReviewLoading(false)
@@ -1937,7 +1942,7 @@ export default function ProjectWorkspacePage() {
     }
     if (!reportVersionId) {
       proxyReviewReadFenceRef.current.invalidate()
-      setProxyReview(null)
+      setLoadedProxyReview(null)
       setProxyReviewLoading(false)
       setProxyReviewFailure(null)
     }
@@ -3271,6 +3276,8 @@ export default function ProjectWorkspacePage() {
     ) return
     setProxyReviewBusy(true)
     setNotice(null)
+    // The acknowledged review is the selected output's (`proxyReview` is only ever that one); the answer is kept with that output.
+    const acknowledgedVariantId = outputVariantId
     try {
       const result = await requestJson<{ review: ProxyReviewData; replayed: boolean }>(
         `/v1/projects/${encodeURIComponent(projectId)}/proxy-reviews`,
@@ -3289,7 +3296,7 @@ export default function ProjectWorkspacePage() {
           }),
         },
       )
-      setProxyReview(result.review)
+      setLoadedProxyReview({ variantId: acknowledgedVariantId, review: result.review })
       setProxyReviewFailure(null)
       setNotice('Ressalvas registradas. Esta versão está liberada para o render final.')
     } catch (error) {
