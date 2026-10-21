@@ -548,8 +548,11 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       await sameChips(tallReview)
       // W70 readiness (R1): the carried render is labelled in the review panel as an automatic carry from the earlier Version, and since nothing
       // was approved on the vertical output, the carry says it approved nothing and a person is still asked to decide.
-      assert.deepEqual(Object.keys(tallReview.carriedFrom ?? {}).sort(), ['decisionId', 'renderContentHash', 'reviewHash', 'reviewId', 'versionId'], 'the public review names where the render was carried from')
+      assert.deepEqual(Object.keys(tallReview.carriedFrom ?? {}).sort(), ['acknowledgedBy', 'decisionId', 'renderContentHash', 'reviewHash', 'reviewId', 'versionId'], 'the public review names where the render was carried from')
       assert.equal(tallReview.carriedFrom.decisionId, null, 'no approval existed to re-bind')
+      // (Opus validation, note 3) and so nobody's acknowledgement came with it: none in carriedFrom, none on the review
+      assert.equal(tallReview.carriedFrom.acknowledgedBy, null, 'no acknowledgement of the earlier Version was carried')
+      assert.equal(tallReview.acknowledgedBy, undefined, 'and the carried review names no acknowledgement of its own')
       await waitFor('the carry is labelled in the review panel', async () => (await page.getByTestId('proxy-review-carried').count()) > 0, { timeoutMs: 60_000 })
       const carriedHeadline = await page.getByTestId('proxy-review-carried-headline').innerText()
       assert.equal(carriedHeadline, `Render herdado automaticamente da versão ${tallReview.carriedFrom.versionId} — conteúdo idêntico`)
