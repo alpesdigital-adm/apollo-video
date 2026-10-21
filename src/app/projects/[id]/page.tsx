@@ -1292,7 +1292,7 @@ export default function ProjectWorkspacePage() {
   // A proxy review belongs to ONE output, so it is kept with the output it was read for and is the page's review only while that output is the
   // selected one. Switching outputs used to leave the previous output's review on screen, labelled as the new one's, until the new read answered:
   // an issue clicked meanwhile was the other output's, and it vanished (with the form it opened) when the right review arrived.
-  const [loadedProxyReview, setLoadedProxyReview] = useState<{ variantId: string | null; review: ProxyReviewData } | null>(null)
+  const [loadedProxyReview, setProxyReview] = useState<{ variantId: string | null; review: ProxyReviewData } | null>(null)
   const proxyReview = loadedProxyReview && loadedProxyReview.variantId === outputVariantId ? loadedProxyReview.review : null
   // Structured read failures for the review surface. A 409 on the annotations
   // read is not an empty list and not a dismissable notice: it stays on screen,
@@ -1462,7 +1462,7 @@ export default function ProjectWorkspacePage() {
     selectedReviewVersionId.current = null
     setWorkspace(null)
     setReview(null)
-    setLoadedProxyReview(null)
+    setProxyReview(null)
     reviewReadFenceRef.current.invalidate()
     proxyReviewReadFenceRef.current.invalidate()
   }, [projectId, reads])
@@ -1913,15 +1913,15 @@ export default function ProjectWorkspacePage() {
       if (!result.ok && result.failure.dropped) return
       if (!result.ok && result.failure.kind === 'auth') { router.replace(loginUrl()); return }
       if (!result.ok) {
-        setLoadedProxyReview(null)
+        setProxyReview(null)
         setProxyReviewFailure(result.failure)
         return
       }
       setProxyReviewFailure(null)
-      setLoadedProxyReview({ variantId: requestedVariantId, review: result.data.review })
+      setProxyReview({ variantId: requestedVariantId, review: result.data.review })
     } catch (error) {
       if (!proxyReviewReadFenceRef.current.isCurrent(readTicket)) return
-      setLoadedProxyReview(null)
+      setProxyReview(null)
       setProxyReviewFailure({ kind: 'error', status: 0, message: error instanceof Error ? error.message : 'Não foi possível carregar o laudo do proxy.' })
     } finally {
       if (proxyReviewReadFenceRef.current.isCurrent(readTicket)) setProxyReviewLoading(false)
@@ -1942,7 +1942,7 @@ export default function ProjectWorkspacePage() {
     }
     if (!reportVersionId) {
       proxyReviewReadFenceRef.current.invalidate()
-      setLoadedProxyReview(null)
+      setProxyReview(null)
       setProxyReviewLoading(false)
       setProxyReviewFailure(null)
     }
@@ -3296,7 +3296,7 @@ export default function ProjectWorkspacePage() {
           }),
         },
       )
-      setLoadedProxyReview({ variantId: acknowledgedVariantId, review: result.review })
+      setProxyReview({ variantId: acknowledgedVariantId, review: result.review })
       setProxyReviewFailure(null)
       setNotice('Ressalvas registradas. Esta versão está liberada para o render final.')
     } catch (error) {
