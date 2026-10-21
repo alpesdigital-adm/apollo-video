@@ -6920,12 +6920,13 @@ const proxyReviewSchema = {
     updatedAt: dateTimeSchema,
   },
 }
-// W70 readiness. v4 of the review schemas adds `carriedFrom` (present only on a review whose render was carried from an earlier Version) and keeps
-// everything else exactly as v3 published it; v3 keeps its bytes.
+// W70 readiness. v4 of the review schemas adds `carriedFrom` (present only on a review whose render was carried from an earlier Version) and lets
+// `acknowledgedBy` name the automatic carry; everything else is exactly as v3 published it, and v3 keeps its bytes.
+const proxyReviewHumanAcknowledgementSchema = proxyReviewSchema.properties.acknowledgedBy
 const proxyReviewCarriedFromSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['versionId', 'reviewId', 'reviewHash', 'decisionId', 'renderContentHash'],
+  required: ['versionId', 'reviewId', 'reviewHash', 'decisionId', 'renderContentHash', 'acknowledgedBy'],
   properties: {
     versionId: idSchema,
     reviewId: idSchema,
@@ -6933,11 +6934,29 @@ const proxyReviewCarriedFromSchema = {
     // The `carry-over-approval` decision that re-bound the approval the source review had; null when it had none to re-bind.
     decisionId: { anyOf: [idSchema, { type: 'null' }] },
     renderContentHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    // The person who acknowledged the SOURCE review, on `versionId` (the approval the carry re-bound); null when it re-bound none.
+    acknowledgedBy: { anyOf: [proxyReviewHumanAcknowledgementSchema, { type: 'null' }] },
   },
 }
 const proxyReviewSchemaV4 = {
   ...proxyReviewSchema,
-  properties: { ...proxyReviewSchema.properties, carriedFrom: proxyReviewCarriedFromSchema },
+  properties: {
+    ...proxyReviewSchema.properties,
+    // A person who acknowledged THIS Version (`api-client`), or the automatic carry that re-bound an earlier Version's approval
+    // (`automatic-carry`: its `carry-over-approval` decision and when it was made) - never the earlier person as if they had acknowledged here.
+    acknowledgedBy: {
+      oneOf: [
+        proxyReviewHumanAcknowledgementSchema,
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['type', 'id', 'at'],
+          properties: { type: { const: 'automatic-carry' }, id: idSchema, at: dateTimeSchema },
+        },
+      ],
+    },
+    carriedFrom: proxyReviewCarriedFromSchema,
+  },
 }
 const proxyQualityIssueSchemaV1 = {
   ...proxyQualityIssueSchema,

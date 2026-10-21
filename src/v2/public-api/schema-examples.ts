@@ -1222,20 +1222,22 @@ const proxyReviewExampleV3 = {
     },
   },
 }
-// W70 readiness. A review whose render, and the approval it had, were carried from an earlier Version: the approval is the one a person gave THERE.
+// W70 readiness. A review whose render, and the approval it had, were carried from an earlier Version: the approval is the one a person gave THERE
+// (`carriedFrom.acknowledgedBy`); on this Version it was acknowledged by the automatic carry, never by that person.
 const proxyReviewExampleV4Carried = {
   ...proxyReviewExampleV3,
   status: 'ready-for-final',
   warningsAcknowledged: true,
   finalAllowed: true,
   revision: 2,
-  acknowledgedBy: { type: 'api-client', id: clientId, at: createdAt },
+  acknowledgedBy: { type: 'automatic-carry', id: 'proxy-review-decision-example-carry-1', at: '2026-10-20T12:30:00.000Z' },
   carriedFrom: {
     versionId: 'project-version-example-0',
     reviewId: 'proxy-review-example-0',
     reviewHash: 'c'.repeat(64),
     decisionId: 'proxy-review-decision-example-carry-1',
     renderContentHash: 'd'.repeat(64),
+    acknowledgedBy: { type: 'api-client', id: clientId, at: createdAt },
   },
 }
 const proxyReviewExampleV1 = {

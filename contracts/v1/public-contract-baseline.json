@@ -153670,27 +153670,54 @@
                   "minimum": 1
                 },
                 "acknowledgedBy": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "type",
-                    "id",
-                    "at"
-                  ],
-                  "properties": {
-                    "type": {
-                      "const": "api-client"
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "id",
+                        "at"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "api-client"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
                     },
-                    "id": {
-                      "type": "string",
-                      "minLength": 3,
-                      "maxLength": 128
-                    },
-                    "at": {
-                      "type": "string",
-                      "format": "date-time"
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "id",
+                        "at"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "automatic-carry"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
                     }
-                  }
+                  ]
                 },
                 "createdAt": {
                   "type": "string",
@@ -153708,7 +153735,8 @@
                     "reviewId",
                     "reviewHash",
                     "decisionId",
-                    "renderContentHash"
+                    "renderContentHash",
+                    "acknowledgedBy"
                   ],
                   "properties": {
                     "versionId": {
@@ -153740,6 +153768,36 @@
                     "renderContentHash": {
                       "type": "string",
                       "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "acknowledgedBy": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "id",
+                            "at"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "api-client"
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   }
                 }
@@ -156093,27 +156151,54 @@
                   "minimum": 1
                 },
                 "acknowledgedBy": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "type",
-                    "id",
-                    "at"
-                  ],
-                  "properties": {
-                    "type": {
-                      "const": "api-client"
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "id",
+                        "at"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "api-client"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
                     },
-                    "id": {
-                      "type": "string",
-                      "minLength": 3,
-                      "maxLength": 128
-                    },
-                    "at": {
-                      "type": "string",
-                      "format": "date-time"
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "id",
+                        "at"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "automatic-carry"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
                     }
-                  }
+                  ]
                 },
                 "createdAt": {
                   "type": "string",
@@ -156131,7 +156216,8 @@
                     "reviewId",
                     "reviewHash",
                     "decisionId",
-                    "renderContentHash"
+                    "renderContentHash",
+                    "acknowledgedBy"
                   ],
                   "properties": {
                     "versionId": {
@@ -156163,6 +156249,36 @@
                     "renderContentHash": {
                       "type": "string",
                       "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "acknowledgedBy": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "id",
+                            "at"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "api-client"
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   }
                 }

@@ -13,7 +13,20 @@ export interface ProxyReviewCarriedFrom {
   reviewHash: string
   decisionId: string | null
   renderContentHash: string
+  /**
+   * The acknowledgement a person made on the SOURCE review (on `versionId`), which the carry re-bound; null when the carry re-bound none. It
+   * lives only here: the review's own `acknowledgedBy` names the automatic carry, never this person as if they had acknowledged this Version.
+   */
+  acknowledgedBy: Readonly<{ type: 'api-client'; id: string; at: string }> | null
 }
+
+/**
+ * Who acknowledged THIS review: a person (an API client) who did it on this Version, or - on a carried review - the automatic carry, named by
+ * its `carry-over-approval` decision and the time it re-bound the approval (the person behind it is in `carriedFrom.acknowledgedBy`).
+ */
+export type ProxyReviewAcknowledgement =
+  | Readonly<{ type: 'api-client'; id: string; at: string }>
+  | Readonly<{ type: 'automatic-carry'; id: string; at: string }>
 
 export interface PersistedProxyReview extends ProxyReview {
   id: string
@@ -21,11 +34,7 @@ export interface PersistedProxyReview extends ProxyReview {
   projectId: string
   operationId: string
   revision: number
-  acknowledgedBy?: Readonly<{
-    type: 'api-client'
-    id: string
-    at: string
-  }>
+  acknowledgedBy?: ProxyReviewAcknowledgement
   carriedFrom?: Readonly<ProxyReviewCarriedFrom>
   createdAt: string
   updatedAt: string

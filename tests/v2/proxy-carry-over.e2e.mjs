@@ -158,7 +158,9 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     assert.equal(carriedReview.operationId, tallV1.operationId)
     assert.equal(carriedReview.inputHash, tallV1.inputHash)
     assert.equal(carriedReview.status, 'ready-for-final'); assert.equal(carriedReview.finalAllowed, true); assert.equal(carriedReview.warningsAcknowledged, true)
-    assert.deepEqual(carriedReview.acknowledgedBy, approved0.acknowledgedBy, 'the person who acknowledged is still the one named')
+    // (Opus validation, note 3) the person who acknowledged V0 did not acknowledge V1: the carried review names the automatic carry, the person only in carriedFrom
+    assert.equal(carriedReview.acknowledgedBy?.type, 'automatic-carry', 'the carried review is acknowledged by the automatic carry')
+    assert.notEqual(carriedReview.acknowledgedBy.id, approved0.acknowledgedBy.id, 'never by the person of V0, as if they had acknowledged V1')
     assert.notEqual(carriedReview.reviewHash, approved0.reviewHash, 'the review is a new one, with its own hash')
     assert.equal(carriedReview.proxyArtifactId, approved0.proxyArtifactId)
     assert.deepEqual(carriedReview.technicalIssues, approved0.technicalIssues); assert.deepEqual(carriedReview.criticIssues, approved0.criticIssues)
@@ -174,16 +176,19 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     assert.equal(decisions[0].resultReviewHash, carriedReview.reviewHash)
     assert.equal(decisions[0].actorId, world.owner.clientId, 'and the actor who triggered it')
     assert.equal(await db.v2ProxyReviewDecision.count({ where: { workspaceId, action: 'acknowledge-warnings' } }), 1, 'no second human acknowledgement was invented')
+    assert.deepEqual(carriedReview.acknowledgedBy, { type: 'automatic-carry', id: decisions[0].id, at: decisions[0].createdAt.toISOString() }, 'named by its decision and the time it re-bound the approval')
     // W70 readiness (R1): the carry is VISIBLE as what it is - an automatic carry of an identical render, with the review, the decision and the content
     // address - in the review a client reads; a render made for the Version says nothing of the kind. The approval is the one a person gave on V0.
-    assert.deepEqual(carriedReview.carriedFrom, { versionId: V0.id, reviewId: approved0.id, reviewHash: approved0.reviewHash, decisionId: decisions[0].id, renderContentHash: tallV0.renderContentHash },
-      'the public review names the Version, the review (as it was when carried), the decision that re-bound the approval and the content address')
+    assert.deepEqual(carriedReview.carriedFrom, { versionId: V0.id, reviewId: approved0.id, reviewHash: approved0.reviewHash, decisionId: decisions[0].id, renderContentHash: tallV0.renderContentHash,
+      acknowledgedBy: approved0.acknowledgedBy },
+      'the public review names the Version, the review (as it was when carried), the decision that re-bound the approval, the content address and the person who acknowledged V0')
     assert.equal((await reviewAt(WIDE, V0.id)).carriedFrom, undefined, 'a render made for its own Version is not marked as carried')
     assert.equal((await reviewAt(TALL, V0.id)).carriedFrom, undefined)
     const publicShape = presentProxyReview(carriedReview)
     const validateV4 = addFormats(new Ajv2020({ strict: false, allErrors: true })).compile(getPublicSchema('apollo://schemas/project-proxy-review-response/v4').schema)
     assert.equal(validateV4({ data: { review: publicShape }, meta: { apiVersion: 'v1' } }), true, JSON.stringify(validateV4.errors))
     assert.deepEqual(publicShape.carriedFrom, carriedReview.carriedFrom)
+    assert.deepEqual(publicShape.acknowledgedBy, carriedReview.acknowledgedBy, 'and the public review names the carry, not the person')
     // the operation records the impact of the Command that made the head in the slot that means that, and the content address beside it
     assert.equal(tallV1.reuseImpactHash, c1.impact.impactHash, 'reuseImpactHash is the impact of the Command, not the content address')
     assert.notEqual(tallV1.reuseImpactHash, tallV1.renderContentHash)
@@ -233,7 +238,8 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     const wideReview2 = await reviewAt(WIDE, wideV2.projectVersionId)
     assert.deepEqual([wideReview4.status, wideReview4.warningsAcknowledged, wideReview4.finalAllowed], [wideReview2.status, wideReview2.warningsAcknowledged, wideReview2.finalAllowed], 'a review nobody approved is carried as it was: nothing is approved by the carry')
     assert.equal(await db.v2ProxyReviewDecision.count({ where: { workspaceId, action: 'carry-over-approval' } }), 1, 'no approval existed, so none was re-bound')
-    assert.deepEqual(wideReview4.carriedFrom, { versionId: wideV2.projectVersionId, reviewId: wideReview2.id, reviewHash: wideReview2.reviewHash, decisionId: null, renderContentHash: wideV2.renderContentHash },
+    assert.deepEqual(wideReview4.carriedFrom, { versionId: wideV2.projectVersionId, reviewId: wideReview2.id, reviewHash: wideReview2.reviewHash, decisionId: null, renderContentHash: wideV2.renderContentHash,
+      acknowledgedBy: null },
       'a carry that re-bound no approval says so: decisionId is null, and the review is the pending one it was')
 
     /* ---------------------------------------------------------- 5. a head that moved is refused */

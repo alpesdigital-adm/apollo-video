@@ -12,6 +12,8 @@ export interface CarriedFromView {
   reviewHash: string
   decisionId: string | null
   renderContentHash: string
+  /** The person who acknowledged the SOURCE review, on `versionId`; null when the carry re-bound no approval. */
+  acknowledgedBy?: { type: string; id: string; at: string } | null
 }
 
 export interface CarriedReviewInput {
@@ -38,7 +40,7 @@ export function describeCarriedReview(review: Readonly<CarriedReviewInput>): Car
     return Object.freeze({
       kind: 'approval-carried' as const,
       headline: `Aprovação herdada automaticamente da versão ${carried.versionId} — conteúdo idêntico`,
-      detail: `Nenhuma pessoa reconheceu as ressalvas desta versão: a aprovação é a do laudo ${short(carried.reviewHash)} da versão ${carried.versionId}, religada pela decisão ${carried.decisionId} porque o conteúdo do render não mudou (endereço ${short(carried.renderContentHash)}).`,
+      detail: `Nenhuma pessoa reconheceu as ressalvas desta versão: a aprovação é a do laudo ${short(carried.reviewHash)} da versão ${carried.versionId}${carried.acknowledgedBy ? ` (reconhecida lá por ${carried.acknowledgedBy.id} em ${carried.acknowledgedBy.at})` : ''}, religada pela decisão ${carried.decisionId} porque o conteúdo do render não mudou (endereço ${short(carried.renderContentHash)}).`,
       acknowledgedOnThisVersion: false,
     })
   }

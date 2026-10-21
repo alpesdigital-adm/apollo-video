@@ -827,9 +827,9 @@ interface ProxyReviewData {
   timeToFirstProxyMs: number
   reviewHash: string
   revision: number
-  acknowledgedBy?: { type: 'api-client'; id: string; at: string }
+  acknowledgedBy?: { type: 'api-client' | 'automatic-carry'; id: string; at: string }
   /** W70 readiness. Present when the render, and the approval it had, were carried automatically from an earlier Version. */
-  carriedFrom?: { versionId: string; reviewId: string; reviewHash: string; decisionId: string | null; renderContentHash: string }
+  carriedFrom?: { versionId: string; reviewId: string; reviewHash: string; decisionId: string | null; renderContentHash: string; acknowledgedBy?: { type: 'api-client'; id: string; at: string } | null }
   createdAt: string
   updatedAt: string
 }

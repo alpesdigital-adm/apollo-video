@@ -43,7 +43,7 @@ export interface ReviewInput {
   formatQuality?: { outputPresetHash: string; status: string; exportAllowed: boolean; explanation: string; reportHash: string }
   acknowledgedBy?: { type: string; id: string; at: string }
   /** W70 readiness. Present when this review's render, and the approval it had, were carried automatically from an earlier Version. */
-  carriedFrom?: { versionId: string; reviewId: string; reviewHash: string; decisionId: string | null; renderContentHash: string }
+  carriedFrom?: { versionId: string; reviewId: string; reviewHash: string; decisionId: string | null; renderContentHash: string; acknowledgedBy?: { type: string; id: string; at: string } | null }
 }
 
 export interface IssueChip {
@@ -148,6 +148,8 @@ export function issueProvenance(chip: IssueChip, review: ReviewInput, proxy: { a
     rows.push({ label: 'Laudo de origem', value: review.carriedFrom.reviewHash, kind: 'hash' })
     rows.push({ label: 'Endereço do conteúdo', value: review.carriedFrom.renderContentHash, kind: 'hash' })
     if (review.carriedFrom.decisionId) rows.push({ label: 'Decisão da herança', value: review.carriedFrom.decisionId, kind: 'id' })
+    // the person who acknowledged the SOURCE review, on that Version (never shown as an acknowledgement of this one)
+    if (review.carriedFrom.acknowledgedBy) rows.push({ label: 'Reconhecido na versão de origem por', value: review.carriedFrom.acknowledgedBy.id, kind: 'id' })
   }
   if (review.formatQuality) {
     rows.push({ label: 'Laudo de formato', value: review.formatQuality.reportHash, kind: 'hash' })

@@ -3,7 +3,9 @@ import type { PersistedProxyReview } from '../application/ports/proxy-review-rep
 /**
  * The public shape of a proxy review (`project-proxy-review-response/v4`). `carriedFrom` is present only when the review's render was carried from
  * an earlier Version: it says so, and names the review, the decision that re-bound the approval and the content address that proved the inputs equal,
- * so an inherited approval is never mistaken for a human acknowledgement made on this Version.
+ * so an inherited approval is never mistaken for a human acknowledgement made on this Version: the review's `acknowledgedBy` is then the
+ * automatic carry (`automatic-carry`, its decision and time), and the person who acknowledged the source review is only in
+ * `carriedFrom.acknowledgedBy`.
  */
 export function presentProxyReview(review: Readonly<PersistedProxyReview>) {
   return {
@@ -36,6 +38,7 @@ export function presentProxyReview(review: Readonly<PersistedProxyReview>) {
         reviewHash: review.carriedFrom.reviewHash,
         decisionId: review.carriedFrom.decisionId,
         renderContentHash: review.carriedFrom.renderContentHash,
+        acknowledgedBy: review.carriedFrom.acknowledgedBy,
       },
     } : {}),
     createdAt: review.createdAt,
