@@ -4,7 +4,7 @@ import { join, resolve, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assertOwnedRoot, readRegistry, registryLock, writeRegistry, digest, jsonDigest,
   readAuthorityIdentitySync, identityKey, sourceFingerprint, budget,
-  namespaceEmptyProof, assessLockLeftover, parseLockLeftoverName } from './perception-addon-registry.mjs'
+  namespaceEmptyProof, assessLockLeftover, parseLockLeftoverName, reclaimAdmissionLock, reclaimAdmissionMutex } from './perception-addon-registry.mjs'
 import { readLinuxProcessIdentity } from './run-perception-ci.mjs'
 import { prepareCgroupCleanup, removeArchivedCgroups, cgroupControlledCaseAccepted } from './perception-consumer-cgroup.mjs'
 
@@ -89,17 +89,39 @@ export function readNamespaceProofs(root, env = process.env) {
 }
 // Exact admission-lock artifacts (lock, reclaim mutex, link staging files, tombstones) are removed only when their
 // creator is provably gone (dead here, or inside a namespace the host supervisor proved empty); otherwise the root is
-// retained as evidence, as for any unknown file. Returns false for names that are not admission-lock artifacts.
-export function sweepLockLeftover(item, relative, metadata, { namespaceProofs = [], report, io = {} }) {
+// retained as evidence, as for any unknown file. Classification is read-only; removal happens only after the whole
+// inventory passed (`removeLockLeftovers`). Returns null for names that are not admission-lock artifacts.
+export function classifyLockLeftover(item, relative, metadata, { namespaceProofs = [], io = {} }) {
   const leftover = relative.includes('/') ? null : parseLockLeftoverName(relative)
-  if (!leftover) return false
+  if (!leftover) return null
   const verdict = assessLockLeftover(item, leftover, io, { namespaceProofs })
   assert.equal(verdict.verdict, 'stale', `Admission-lock leftover ${relative} has no proof that its creator is gone (${verdict.reason}); retain evidence`)
   assert.ok(metadata.size <= 4096)
-  const sha256 = digest(readFileSync(item))
-  unlinkSync(item)
-  ;(report.admissionLockLeftovers ??= []).push({ name: relative, kind: leftover.kind, bytes: metadata.size, sha256, proof: verdict.proof })
-  return true
+  return { item, relative, kind: leftover.kind, parsed: leftover, bytes: metadata.size, sha256: digest(readFileSync(item)), proof: verdict.proof }
+}
+// The lock and the reclaim mutex go through the reclaim protocol (mutex, intent receipt, tombstone, digest re-check,
+// link restore): a contender may have reclaimed and republished since classification, and a live lock is never
+// removed. Staging files and tombstones belong to a creator that is provably gone and are unlinked after the same
+// proof is re-checked and the bytes still match.
+export function removeLockLeftovers(root, pending, { namespaceProofs = [], report, io = {} }) {
+  for (const entry of pending) {
+    let outcome = { action: 'removed' }
+    if (entry.kind === 'lock' || entry.kind === 'mutex') {
+      const result = (entry.kind === 'lock' ? reclaimAdmissionLock : reclaimAdmissionMutex)(root, { io, namespaceProofs })
+      // Already gone (an earlier reclaim in this pass removed an orphaned mutex together with the lock) is not a failure.
+      if (result.assessment?.verdict === 'absent') outcome = { action: 'already-absent' }
+      else {
+        assert.equal(result.reclaimed, true, `Admission-lock leftover ${entry.relative} could not be reclaimed under proof (${result.assessment?.reason}); retain evidence`)
+        outcome = { action: 'reclaimed', reclaimId: result.record.reclaimId }
+      }
+    } else {
+      const again = assessLockLeftover(entry.item, entry.parsed, io, { namespaceProofs })
+      assert.equal(again.verdict, 'stale', `Admission-lock leftover ${entry.relative} lost its proof (${again.reason}); retain evidence`)
+      assert.equal(digest(readFileSync(entry.item)), entry.sha256, `Admission-lock leftover ${entry.relative} changed; retain evidence`)
+      unlinkSync(entry.item)
+    }
+    ;(report.admissionLockLeftovers ??= []).push({ name: entry.relative, kind: entry.kind, bytes: entry.bytes, sha256: entry.sha256, proof: entry.proof, ...outcome })
+  }
 }
 export async function cleanupPidfd(env = process.env) {
   assert.equal(process.platform, 'linux'); assert.ok(process.getuid() > 0)
@@ -133,7 +155,7 @@ export async function cleanupPidfd(env = process.env) {
     for (const item of [receipt.compiler, receipt.timeout, receipt.node, receipt.source, receipt.addon, ...receipt.headers]) {
       assert.equal(digest(readFileSync(item.path)), item.sha256, 'Prerequisite input bytes changed')
     }
-    const allFiles = []
+    const allFiles = [], pendingLeftovers = []
     let inventoryBytes = 0
     const walk = (path) => {
       assert.ok(Date.now() < deadlineAt, 'Cleanup inventory deadline')
@@ -147,7 +169,8 @@ export async function cleanupPidfd(env = process.env) {
         else {
           assert.ok(metadata.isFile() && metadata.size <= 16777216)
           const relative = item.slice(root.length + 1)
-          if (sweepLockLeftover(item, relative, metadata, { namespaceProofs, report })) continue
+          const leftover = classifyLockLeftover(item, relative, metadata, { namespaceProofs })
+          if (leftover) { pendingLeftovers.push(leftover); continue }
           assert.ok(/^(registry\.json|build-owner\.json|provenance\.json|compiler\.(stdout|stderr|version)|perception-pidfd\.node)$/.test(relative) ||
             /^owners\/[a-f0-9]{64}\.json$/.test(relative) ||
             /^receipts\/pidfd-consumer-cgroup-gates-[a-f0-9-]+\.cases\.(?:json|sha256)$/.test(relative) ||
@@ -161,6 +184,7 @@ export async function cleanupPidfd(env = process.env) {
       }
     }
     walk(root); assert.ok(allFiles.length <= 8192)
+    removeLockLeftovers(root, pendingLeftovers, { namespaceProofs, report })
     const namespaceReports = allFiles.filter((path) => path.includes('/receipts/namespace-') && path.endsWith('.json'))
       .map((path) => JSON.parse(readFileSync(path, 'utf8')))
     const selfNamespace = report.cleanupOwner.namespace

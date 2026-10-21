@@ -236,7 +236,7 @@ const runTag = (runId) => createHash('sha256').update(runId ?? '').digest('hex')
 function leftoverName(base, kind, creator) {
   return `${base}.${kind}.${/^pid:\[(\d+)\]$/.exec(creator.pidNamespace)[1]}-${creator.pid}-${creator.starttime}-${runTag(creator.observerRunId)}.${randomUUID()}`
 }
-const LEFTOVER_NAME = /^(admission\.lock(?:\.reclaim)?)\.(new|stale)\.(\d+)-([1-9]\d*)-(\d{1,32})-([0-9a-f]{8})\.[0-9a-f-]{36}$/
+const LEFTOVER_NAME = /^(admission\.lock(?:\.reclaim)?)\.(new|stale|released)\.(\d+)-([1-9]\d*)-(\d{1,32})-([0-9a-f]{8})\.[0-9a-f-]{36}$/
 export function parseLockLeftoverName(name) {
   if (name === 'admission.lock') return { kind: 'lock' }
   if (name === 'admission.lock.reclaim') return { kind: 'mutex' }
@@ -364,21 +364,67 @@ function publishOwnedFile(path, ownerText, creator, io) {
   } finally { try { io.unlink(staging) } catch { /* A leftover staging file stays attributable by name for cleanup. */ } }
 }
 
-// Releasing = the bytes at `path` are exactly the ones this process published, then unlink.
-function releaseOwnedFile(path, ownerText, io) {
-  const bytes = Buffer.from(io.readFile(path))
-  assert.ok(bytes.equals(Buffer.from(ownerText)), 'Admission lock is not owned by this process; refusing to release it')
-  io.unlink(path)
+// Releasing renames the lock to a unique tombstone (atomic held -> absent), verifies that the
+// bytes are exactly the ones this process published, then unlinks the tombstone. Anything else
+// is put back with link(2), which cannot replace, and refused.
+function releaseOwnedFile(path, ownerText, creator, io) {
+  const tombstone = leftoverName(path, 'released', creator)
+  io.rename(path, tombstone)
+  let bytes = null
+  try { bytes = Buffer.from(io.readFile(tombstone)) } catch { /* Treated as not ours below. */ }
+  if (bytes === null || !bytes.equals(Buffer.from(ownerText))) {
+    try { io.link(tombstone, path); io.unlink(tombstone) } catch { /* The tombstone stays as evidence. */ }
+    assert.fail('Admission lock is not owned by this process; refusing to release it')
+  }
+  io.unlink(tombstone)
+}
+
+// Removal of one provably stale entry (the lock, or an orphaned reclaim mutex): intent receipt first
+// (no receipt, no removal), rename to a unique tombstone, re-verify the tombstone's bytes against the
+// assessed digest (a mismatch is put back with link, never rename), unlink, final receipt.
+function removeStaleEntry(root, target, assessment, holder, io) {
+  const tombstone = leftoverName(target, 'stale', holder), id = randomUUID()
+  const receiptPath = join(root, 'receipts', `admission-lock-reclaim-${id}.json`)
+  const record = { schemaVersion: LOCK_RECLAIM_SCHEMA, reclaimId: id, phase: 'intent', target: basename(target),
+    lock: target.slice(0, 512), tombstone: basename(tombstone), observedAt: new Date(io.now()).toISOString(), reclaimer: holder,
+    staleOwner: assessment.owner, staleOwnerDigest: assessment.ownerDigest, proof: assessment.proof,
+    lockStat: assessment.lock, tombstoneRemoved: null }
+  try { io.writeFile(receiptPath, JSON.stringify(record, null, 2), { flag: 'wx', mode: 0o600 }) }
+  catch (error) { return { reclaimed: false, assessment: { ...assessment, verdict: 'unproven', reason: `reclaim-receipt-${error?.code ?? 'unavailable'}` } } }
+  try { io.rename(target, tombstone) }
+  catch (error) { return { reclaimed: false, assessment: { ...assessment, verdict: 'unproven', reason: `reclaim-rename-${error?.code ?? 'failed'}` } } }
+  let renamed = null
+  try { renamed = digest(Buffer.from(io.readFile(tombstone))) } catch { /* Treated as a mismatch below. */ }
+  if (renamed !== assessment.ownerDigest) {
+    // Not the entry that was judged: put it back WITHOUT replacing anything (link fails if a new one exists).
+    try { io.link(tombstone, target); io.unlink(tombstone) } catch { /* The tombstone stays as evidence. */ }
+    throw new Error('Admission lock changed during stale-lock reclaim; failing closed')
+  }
+  let removed = true
+  try { io.unlink(tombstone) } catch { removed = false }
+  record.phase = 'removed'; record.tombstoneRemoved = removed
+  try { io.writeFile(receiptPath, JSON.stringify(record, null, 2), { flag: 'w', mode: 0o600 }) } catch { /* The intent receipt remains. */ }
+  return { reclaimed: true, assessment, record }
+}
+
+// An orphaned reclaim mutex is removable under the same proof as a lock: its holder is provably gone.
+export function reclaimAdmissionMutex(root, { io: ioOverride, namespaceProofs = [], self, attempted = new Set(), env = process.env } = {}) {
+  const io = { ...lockIo, ...ioOverride }, mutex = join(root, 'admission.lock.reclaim')
+  const assessment = assessAdmissionLock(mutex, io, { namespaceProofs })
+  if (assessment.verdict !== 'stale') return { reclaimed: false, assessment }
+  if (attempted.has(assessment.ownerDigest)) return { reclaimed: false, assessment: { ...assessment, verdict: 'unproven', reason: 'reclaim-already-attempted' } }
+  attempted.add(assessment.ownerDigest)
+  const holder = { ...(self ?? captureLockOwner(io, { observerRunId: observerRunIdOf(env) })), nonce: randomUUID() }
+  return removeStaleEntry(root, mutex, assessment, holder, io)
 }
 
 // Removes the lock ONLY when `assessAdmissionLock` proves its owner gone. Reclaimers are
-// serialized by `<lock>.reclaim` (same link-published protocol, never itself reclaimed: an
-// orphaned reclaim mutex keeps failing closed and is reported). Under that mutex the lock
-// cannot be replaced between assessment and removal: acquirers cannot publish over an
-// existing lock, a dead owner cannot release it, nobody else removes it. The tombstone is
-// re-verified against the assessed bytes anyway, and a mismatch is restored with link(2),
-// which cannot replace. The intent receipt is written once per reclaim attempt (keyed by
-// the assessed owner digest in `attempted`) BEFORE the removal; with no receipt nothing is removed.
+// serialized by `<lock>.reclaim` (same link-published protocol; an orphaned one is removable only
+// under the same dead-holder proof). Under that mutex the lock cannot be replaced between assessment
+// and removal: acquirers cannot publish over an existing lock, a dead owner cannot release it,
+// nobody else removes it. The tombstone is re-verified against the assessed bytes anyway. The intent
+// receipt is written once per reclaim attempt (keyed by the assessed owner digest in `attempted`)
+// BEFORE the removal; with no receipt nothing is removed.
 export function reclaimAdmissionLock(root, { io: ioOverride, namespaceProofs = [], self, attempted = new Set(), env = process.env } = {}) {
   const io = { ...lockIo, ...ioOverride }, lock = join(root, 'admission.lock')
   const first = assessAdmissionLock(lock, io, { namespaceProofs })
@@ -386,35 +432,19 @@ export function reclaimAdmissionLock(root, { io: ioOverride, namespaceProofs = [
   if (attempted.has(first.ownerDigest)) return { reclaimed: false, assessment: { ...first, verdict: 'unproven', reason: 'reclaim-already-attempted' } }
   const holderBase = self ?? captureLockOwner(io, { observerRunId: observerRunIdOf(env) })
   const mutex = `${lock}.reclaim`, holder = { ...holderBase, nonce: randomUUID() }, holderText = JSON.stringify(holder)
-  if (!publishOwnedFile(mutex, holderText, holder, io)) return { reclaimed: false, assessment: { ...first, verdict: 'unproven', reason: 'reclaim-mutex-held' } }
+  let held = !publishOwnedFile(mutex, holderText, holder, io)
+  if (held) {
+    const orphan = reclaimAdmissionMutex(root, { io, namespaceProofs, self: holderBase, attempted })
+    held = !(orphan.reclaimed && publishOwnedFile(mutex, holderText, holder, io))
+  }
+  if (held) return { reclaimed: false, assessment: { ...first, verdict: 'unproven', reason: 'reclaim-mutex-held' } }
   try {
     const assessment = assessAdmissionLock(lock, io, { namespaceProofs })
     if (assessment.verdict !== 'stale') return { reclaimed: false, assessment }
     if (attempted.has(assessment.ownerDigest)) return { reclaimed: false, assessment: { ...assessment, verdict: 'unproven', reason: 'reclaim-already-attempted' } }
     attempted.add(assessment.ownerDigest)
-    const tombstone = leftoverName(lock, 'stale', holder), id = randomUUID()
-    const receiptPath = join(root, 'receipts', `admission-lock-reclaim-${id}.json`)
-    const record = { schemaVersion: LOCK_RECLAIM_SCHEMA, reclaimId: id, phase: 'intent', lock: lock.slice(0, 512),
-      tombstone: basename(tombstone), observedAt: new Date(io.now()).toISOString(), reclaimer: holder,
-      staleOwner: assessment.owner, staleOwnerDigest: assessment.ownerDigest, proof: assessment.proof,
-      lockStat: assessment.lock, tombstoneRemoved: null }
-    try { io.writeFile(receiptPath, JSON.stringify(record, null, 2), { flag: 'wx', mode: 0o600 }) }
-    catch (error) { return { reclaimed: false, assessment: { ...assessment, verdict: 'unproven', reason: `reclaim-receipt-${error?.code ?? 'unavailable'}` } } }
-    try { io.rename(lock, tombstone) }
-    catch (error) { return { reclaimed: false, assessment: { ...assessment, verdict: 'unproven', reason: `reclaim-rename-${error?.code ?? 'failed'}` } } }
-    let renamed = null
-    try { renamed = digest(Buffer.from(io.readFile(tombstone))) } catch { /* Treated as a mismatch below. */ }
-    if (renamed !== assessment.ownerDigest) {
-      // Not the lock that was judged: put it back WITHOUT replacing anything (link fails if a new lock exists).
-      try { io.link(tombstone, lock); io.unlink(tombstone) } catch { /* The tombstone stays as evidence. */ }
-      throw new Error('Admission lock changed during stale-lock reclaim; failing closed')
-    }
-    let removed = true
-    try { io.unlink(tombstone) } catch { removed = false }
-    record.phase = 'removed'; record.tombstoneRemoved = removed
-    try { io.writeFile(receiptPath, JSON.stringify(record, null, 2), { flag: 'w', mode: 0o600 }) } catch { /* The intent receipt remains. */ }
-    return { reclaimed: true, assessment, record }
-  } finally { try { releaseOwnedFile(mutex, holderText, io) } catch { /* A stuck reclaim mutex fails closed and is reported. */ } }
+    return removeStaleEntry(root, lock, assessment, holder, io)
+  } finally { try { releaseOwnedFile(mutex, holderText, holder, io) } catch { /* A stuck reclaim mutex fails closed and is reported. */ } }
 }
 
 const observerRunIdOf = (env) => {
@@ -469,7 +499,7 @@ export async function withAdmissionLock(root, action, { deadlineAt = Date.now() 
     admissionCheck(deadlineAt, signal)
     return result
   } catch (error) { failed = true; throw error }
-  finally { try { releaseOwnedFile(lock, ownerText, io) } catch (error) { if (!failed) throw error } }
+  finally { try { releaseOwnedFile(lock, ownerText, owner, io) } catch (error) { if (!failed) throw error } }
 }
 
 export function assertDashboardPlaywrightFacts(facts, root = CI_ROOT) {

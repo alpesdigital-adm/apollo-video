@@ -8,8 +8,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { assessAdmissionLock, assessLockLeftover, captureLockOwner, namespaceEmptyProof, parseLockLeftoverName, reclaimAdmissionLock,
-  withAdmissionLock } from '../../scripts/validation/perception-addon-registry.mjs'
-import { readNamespaceProofs, sweepLockLeftover } from '../../scripts/validation/cleanup-perception-pidfd.mjs'
+  reclaimAdmissionMutex, withAdmissionLock } from '../../scripts/validation/perception-addon-registry.mjs'
+import { classifyLockLeftover, readNamespaceProofs, removeLockLeftovers } from '../../scripts/validation/cleanup-perception-pidfd.mjs'
 import { parseLinuxProcessStat } from '../../scripts/validation/run-perception-ci.mjs'
 
 // The admission lock is a FILE carrying a provable owner, published with link(2). Only a lock whose owner is
@@ -245,10 +245,10 @@ test('the failure diagnostic carries the owner facts and the unchanged read-only
   })
 })
 
-test('an orphaned reclaim mutex fails closed and is reported, never reclaimed', async () => {
+test('a reclaim mutex whose holder is not provably gone fails closed and is reported', async () => {
   await withFixture(async (f) => {
     f.plant(); const mutex = `${f.lock}.reclaim`
-    f.plant(f.doc(), mutex)
+    f.plant(f.doc({ pid: OWNER_PID + 1 }), mutex); f.procs.set(OWNER_PID + 1, statLine(OWNER_PID + 1, OWNER_STARTTIME))
     await assert.rejects(withAdmissionLock(f.root, () => assert.fail('Action must not run'), { deadlineAt: Date.now() + 60, io: f.io }), (error) => {
       assert.equal(error.message, DEADLINE_MESSAGE)
       assert.equal(error.admissionLockDiagnostic.reclaim.assessment.reason, 'reclaim-mutex-held')
@@ -256,6 +256,21 @@ test('an orphaned reclaim mutex fails closed and is reported, never reclaimed', 
       return true
     })
     assert.equal(existsSync(f.lock), true); assert.equal(existsSync(mutex), true); assert.deepEqual(f.receipts(), [])
+  })
+})
+
+test('a reclaim mutex whose holder is provably gone is removed under the same proof (own receipt), then the lock is reclaimed', async () => {
+  await withFixture(async (f) => {
+    f.plant(); const mutex = `${f.lock}.reclaim`, mutexBytes = f.plant(f.doc({ pid: OWNER_PID + 1 }), mutex)
+    assert.equal(await withAdmissionLock(f.root, () => 'acquired', { deadlineAt: Date.now() + 2000, io: f.io }), 'acquired')
+    assert.deepEqual(readdirSync(f.root), ['receipts'])
+    const receipts = f.receipts().map((name) => JSON.parse(readFileSync(join(f.root, 'receipts', name), 'utf8')))
+    assert.deepEqual(receipts.map((value) => value.target).sort(), ['admission.lock', 'admission.lock.reclaim'])
+    const orphan = receipts.find((value) => value.target === 'admission.lock.reclaim')
+    assert.equal(orphan.staleOwnerDigest, sha(mutexBytes)); assert.equal(orphan.proof.basis, 'proc-stat-absent'); assert.equal(orphan.phase, 'removed')
+    // The same protocol refuses a live holder's mutex.
+    f.plant(f.doc({ pid: OWNER_PID + 1 }), mutex); f.procs.set(OWNER_PID + 1, statLine(OWNER_PID + 1, OWNER_STARTTIME))
+    assert.equal(reclaimAdmissionMutex(f.root, { io: f.io }).assessment.reason, 'owner-live'); assert.equal(existsSync(mutex), true)
   })
 })
 
@@ -272,7 +287,7 @@ test('without a writable receipt directory nothing is removed (no un-audited rem
 
 test('one intent receipt per reclaim attempt, not one per poll, when the removal itself keeps failing', async () => {
   await withFixture(async (f) => {
-    f.plant(); const failing = { ...f.io, rename: () => { throw missing('EPERM') } }
+    f.plant(); const failing = { ...f.io, rename: (from, to) => { if (/\.stale\./.test(to)) throw missing('EPERM'); return renameSync(from, to) } }
     await assert.rejects(withAdmissionLock(f.root, () => assert.fail('Action must not run'), { deadlineAt: Date.now() + 200, io: failing }), (error) => {
       assert.equal(error.message, DEADLINE_MESSAGE); return true
     })
@@ -408,9 +423,10 @@ test('lock artifact names are matched exactly and carry their creator', () => {
   assert.deepEqual(parseLockLeftoverName(`admission.lock.new.4026531836-4242-500-0a1b2c3d.${uuid}`),
     { kind: 'staging', base: 'admission.lock', creator: { pidNamespace: 'pid:[4026531836]', pid: 4242, starttime: '500', runTag: '0a1b2c3d' } })
   assert.equal(parseLockLeftoverName(`admission.lock.stale.4026531836-4242-500-0a1b2c3d.${uuid}`).kind, 'tombstone')
+  assert.equal(parseLockLeftoverName(`admission.lock.released.4026531836-4242-500-0a1b2c3d.${uuid}`).kind, 'tombstone')
   assert.equal(parseLockLeftoverName(`admission.lock.reclaim.new.4026531836-4242-500-0a1b2c3d.${uuid}`).base, 'admission.lock.reclaim')
   for (const name of ['admission.lock.new', 'admission.lock.new.x', `admission.lock.new.4026531836-0-500-0a1b2c3d.${uuid}`,
-    `admission.lock.released.4026531836-4242-500-0a1b2c3d.${uuid}`, `xadmission.lock.new.4026531836-4242-500-0a1b2c3d.${uuid}`,
+    `admission.lock.freed.4026531836-4242-500-0a1b2c3d.${uuid}`, `xadmission.lock.new.4026531836-4242-500-0a1b2c3d.${uuid}`,
     `admission.lock.new.4026531836-4242-500-0a1b2c3d.${uuid}.extra`, 'registry.json', 'admission.lock.reclaimed']) {
     assert.equal(parseLockLeftoverName(name), null, name)
   }
@@ -446,23 +462,82 @@ test('leftover files are judged by the identity in their NAME, even when their c
   } finally { f.cleanup() }
 })
 
-test('cleanup sweeps a leftover only with the proof, records it, and otherwise retains the evidence', () => {
+test('cleanup classifies first and removes only after the inventory: staging files and tombstones need the proof, the files stay until then', () => {
   const f = fixture()
   try {
     const dead = `admission.lock.new.4026531836-${OWNER_PID}-${OWNER_STARTTIME}-abcdef12.${randomUUID()}`
     const live = `admission.lock.stale.4026531836-${SELF_PID}-${SELF_STARTTIME}-abcdef12.${randomUUID()}`
     writeFileSync(join(f.root, dead), '{"half'); writeFileSync(join(f.root, live), 'x')
-    const report = {}
-    assert.equal(sweepLockLeftover(join(f.root, dead), dead, lstatSync(join(f.root, dead)), { namespaceProofs: [], report, io: f.io }), true)
-    assert.equal(existsSync(join(f.root, dead)), false)
-    assert.deepEqual(report.admissionLockLeftovers.map((value) => [value.name, value.kind, value.bytes, value.sha256, value.proof.basis]),
-      [[dead, 'staging', 6, sha('{"half'), 'proc-stat-absent']])
-    assert.throws(() => sweepLockLeftover(join(f.root, live), live, lstatSync(join(f.root, live)), { namespaceProofs: [], report, io: f.io }),
+    const entry = classifyLockLeftover(join(f.root, dead), dead, lstatSync(join(f.root, dead)), { io: f.io })
+    assert.equal(existsSync(join(f.root, dead)), true, 'Classification never deletes')
+    assert.throws(() => classifyLockLeftover(join(f.root, live), live, lstatSync(join(f.root, live)), { io: f.io }),
       /no proof that its creator is gone \(owner-live\); retain evidence/)
-    assert.equal(existsSync(join(f.root, live)), true, 'A live creator\'s file is retained as evidence')
-    assert.equal(sweepLockLeftover(join(f.root, 'registry.json'), 'registry.json', { size: 1 }, { namespaceProofs: [], report, io: f.io }), false)
-    assert.equal(report.admissionLockLeftovers.length, 1)
+    assert.equal(existsSync(join(f.root, live)), true, 'A live creator file is retained as evidence')
+    assert.equal(classifyLockLeftover(join(f.root, 'registry.json'), 'registry.json', { size: 1 }, { io: f.io }), null)
+    const report = {}
+    removeLockLeftovers(f.root, [entry], { report, io: f.io })
+    assert.equal(existsSync(join(f.root, dead)), false)
+    assert.deepEqual(report.admissionLockLeftovers.map((value) => [value.name, value.kind, value.bytes, value.sha256, value.proof.basis, value.action]),
+      [[dead, 'staging', 6, sha('{"half'), 'proc-stat-absent', 'removed']])
+    // A file that changed after classification, or whose creator turned out alive, is kept.
+    const other = `admission.lock.new.4026531836-${OWNER_PID}-${OWNER_STARTTIME}-abcdef12.${randomUUID()}`
+    writeFileSync(join(f.root, other), 'a'); const pending = classifyLockLeftover(join(f.root, other), other, lstatSync(join(f.root, other)), { io: f.io })
+    writeFileSync(join(f.root, other), 'b')
+    assert.throws(() => removeLockLeftovers(f.root, [pending], { report, io: f.io }), /changed; retain evidence/)
+    writeFileSync(join(f.root, other), 'a'); f.procs.set(OWNER_PID, statLine(OWNER_PID, OWNER_STARTTIME))
+    assert.throws(() => removeLockLeftovers(f.root, [pending], { report, io: f.io }), /lost its proof \(owner-live\)/)
+    assert.equal(existsSync(join(f.root, other)), true)
   } finally { f.cleanup() }
+})
+
+test('cleanup removes a leftover lock only through the reclaim protocol: a lock republished by a live owner since classification survives', () => {
+  const f = fixture()
+  try {
+    f.plant(); const report = {}
+    const entry = classifyLockLeftover(f.lock, 'admission.lock', lstatSync(f.lock), { io: f.io })
+    // A contender reclaims the dead owner lock and republishes its own LIVE one before cleanup acts.
+    rmSync(f.lock); f.plant(f.doc({ pid: SELF_PID, starttime: SELF_STARTTIME }))
+    assert.throws(() => removeLockLeftovers(f.root, [entry], { report, io: f.io }), /could not be reclaimed under proof \(owner-live\); retain evidence/)
+    assert.equal(JSON.parse(readFileSync(f.lock, 'utf8')).pid, SELF_PID, 'The live lock is untouched')
+    assert.deepEqual(f.receipts(), []); assert.deepEqual(strayNames(f), [])
+  } finally { f.cleanup() }
+})
+
+test('cleanup reclaim race, injected: the dead owner lock is swapped for a live one between the proof and the removal - restored, nothing removed', () => {
+  const f = fixture()
+  try {
+    f.plant(); const report = {}, live = f.doc({ pid: OWNER_PID + 1 }); f.procs.set(OWNER_PID + 1, statLine(OWNER_PID + 1, OWNER_STARTTIME))
+    const entry = classifyLockLeftover(f.lock, 'admission.lock', lstatSync(f.lock), { io: f.io })
+    let swapped = false
+    const io = { ...f.io, rename: (from, to) => {
+      if (!swapped && from === f.lock && /\.stale\./.test(to)) { swapped = true; rmSync(f.lock); writeFileSync(f.lock, JSON.stringify(live)) }
+      return renameSync(from, to)
+    } }
+    assert.throws(() => removeLockLeftovers(f.root, [entry], { report, io }), /changed during stale-lock reclaim/)
+    assert.equal(swapped, true); assert.equal(JSON.parse(readFileSync(f.lock, 'utf8')).pid, OWNER_PID + 1)
+    assert.deepEqual(strayNames(f), []); assert.equal(report.admissionLockLeftovers, undefined)
+  } finally { f.cleanup() }
+})
+
+test('cleanup reclaims a still-stale leftover lock and an orphaned mutex, with receipts, and records them', () => {
+  const f = fixture()
+  try {
+    f.plant(); f.plant(f.doc({ pid: OWNER_PID + 1 }), `${f.lock}.reclaim`)
+    const pending = [['admission.lock', f.lock], ['admission.lock.reclaim', `${f.lock}.reclaim`]]
+      .map(([name, path]) => classifyLockLeftover(path, name, lstatSync(path), { io: f.io }))
+    const report = {}
+    removeLockLeftovers(f.root, pending, { report, io: f.io })
+    assert.deepEqual(readdirSync(f.root), ['receipts']); assert.equal(f.receipts().length, 2, 'Lock and orphaned mutex each have a receipt')
+    assert.deepEqual(report.admissionLockLeftovers.map((value) => [value.name, value.action]), [['admission.lock', 'reclaimed'], ['admission.lock.reclaim', 'already-absent']])
+  } finally { f.cleanup() }
+})
+
+test('release verifies the tombstone bytes: a lock replaced by another owner is put back, never deleted', async () => {
+  await withFixture(async (f) => {
+    const other = f.doc({ pid: OWNER_PID + 1 })
+    await assert.rejects(withAdmissionLock(f.root, () => { rmSync(f.lock); writeFileSync(f.lock, JSON.stringify(other)) }, { io: f.io }), /not owned by this process/)
+    assert.equal(JSON.parse(readFileSync(f.lock, 'utf8')).nonce, other.nonce); assert.deepEqual(strayNames(f), [])
+  })
 })
 
 // E: mutation checks. Each mutant is a textual edit of the real module.
@@ -519,7 +594,7 @@ function interleavingOutcome(module) {
 function attemptsOutcome(module) {
   const f = fixture()
   try {
-    f.plant(); const failing = { ...f.io, rename: () => { throw missing('EPERM') } }, attempted = new Set()
+    f.plant(); const failing = { ...f.io, rename: (from, to) => { if (/\.stale\./.test(to)) throw missing('EPERM'); return renameSync(from, to) } }, attempted = new Set()
     for (let index = 0; index < 3; index += 1) module.reclaimAdmissionLock(f.root, { io: failing, attempted })
     return f.receipts().length
   } finally { f.cleanup() }
@@ -556,7 +631,7 @@ test('mutation checks: every proof of the assessment and the reclaim protocol ma
   assert.notDeepEqual(noMutex, { aReclaimed: true, bReclaimed: false, bReason: 'reclaim-mutex-held', receipts: 1 }, 'Without the mutex B gets in')
   assert.equal(noMutex.bReclaimed, true)
   assert.equal(attemptsOutcome({ reclaimAdmissionLock }), 1)
-  assert.equal(attemptsOutcome(await loadMutant('attempted.add(assessment.ownerDigest)', 'void 0')), 3, 'Without the bookkeeping every poll writes a receipt')
+  assert.equal(attemptsOutcome(await loadMutant('attempted.add(assessment.ownerDigest)\n    return removeStaleEntry(root, lock', 'void 0\n    return removeStaleEntry(root, lock')), 3, 'Without the bookkeeping every poll writes a receipt')
 })
 
 // F: real /proc, real link(2)/rename(2), real processes (Linux only).
