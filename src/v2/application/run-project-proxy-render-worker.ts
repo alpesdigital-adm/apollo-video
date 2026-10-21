@@ -36,6 +36,7 @@ import {
 import { evaluateRenderedProxy, type ProxyQualityIssue } from './render-workflow.ts'
 import { contextVariantSelection, projectProxyRenderContentHash, projectProxyRenderInputHash, sourceOutputVariantId } from './project-render-sources.ts'
 import { deriveProxyRenderGeometry, proxyDirectorCriticIssuesDigest } from './proxy-render-evidence.ts'
+import { appliedColorGradeMatches } from '../domain/render-color-grade.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
@@ -230,6 +231,11 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         operationId: operation.id, compilations: [...colorPipelines.values()],
         ...(colorPlan ? { executions: colorPlan.compiled.targets } : {}),
       })
+      // W70 readiness (R2). The grade applied here (the ColorPlan read above, the LUT selection just materialized) is the one the source was
+      // read with, which the input hash and the content address name: otherwise the render would be identified by a grade it does not have.
+      if (source.colorGrade && !appliedColorGradeMatches(source.colorGrade, {
+        colorPlan, lut: { selectionId: materializedLut.selectionId, selectionHash: materializedLut.selectionHash },
+      })) throw new DomainError('INVALID_RENDER_INPUT', 'The colour grade this render applies is not the one its source was read with')
       const baseInputHash = projectProxyRenderInputHash({ source, colorPipelineBindings: context.colorPipelineBindings })
       const immutableInputHash = context.renderableSnapshot
         ? calculateVersionHash({ type: 'renderable-snapshot-proxy/v1', snapshot: context.renderableSnapshot, renderInputHash: baseInputHash })

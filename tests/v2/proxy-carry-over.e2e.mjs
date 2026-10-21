@@ -24,6 +24,11 @@ const { calculateProxyReviewHash } = await import('../../src/v2/application/rend
 const factory = await import('../../src/v2/infrastructure/repository-factory.ts')
 const { presentProxyReview } = await import('../../src/v2/public-api/proxy-review-presenter.ts')
 const { proxyDirectorCriticIssuesDigest } = await import('../../src/v2/application/proxy-render-evidence.ts')
+const { setProjectLutSelectionService } = await import('../../src/v2/application/project-lut-selections.ts')
+const { setProjectColorPlanService } = await import('../../src/v2/application/project-color-plans.ts')
+const { PrismaProjectLutSelectionRepository } = await import('../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
+const { PrismaProjectColorPlanRepository } = await import('../../src/v2/infrastructure/prisma/project-color-plan-repository.ts')
+const { PrismaWorkspaceLutRepository } = await import('../../src/v2/infrastructure/prisma/workspace-lut-repository.ts')
 const { getPublicSchema } = await import('../../src/v2/public-api/schema-registry.ts')
 const { default: Ajv2020 } = await import('ajv/dist/2020.js')
 const { default: addFormats } = await import('ajv-formats')
@@ -270,6 +275,35 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     assert.ok(wideV8, 'with the same evidence, the render is carried')
     assert.equal(wideV8.reusedFromOperationId, wideV6.operationId)
     assert.deepEqual([wideV8.faceEvidenceDigest, wideV8.criticIssuesDigest], [wideV6.faceEvidenceDigest, wideV6.criticIssuesDigest], 'and the carried row names the evidence it was carried under')
+
+    /* ---------------------------------------------------------- 8. (R2, Opus validation) a LUT Command between the render and the head: never carried */
+    // The same grade re-set (mode none again): the content address agrees, so it is the defence in depth - a Version between the source and the head
+    // that an exception Command did not make - that refuses. Without it this carry would be made.
+    const lutBase = await head()
+    await setProjectLutSelectionService({ repository: new PrismaProjectLutSelectionRepository(db), createId: (kind) => `w70c-${suffix}-lut-${kind}-${randomUUID()}`, createEventId: () => randomUUID() })({
+      ...scope, baseVersionId: lutBase.id, baseHash: lutBase.baseHash, selection: { mode: 'none' }, reason: 'W70 readiness: the same grade, re-set by another Command.', actor,
+      idempotencyKey: `w70c-${suffix}-lut-again` })
+    const c9 = await command(TALL, 'cue-2', 'Nona', 'text-9')
+    assert.equal(await opAt(c9.version.id, WIDE), null, 'a render made before a LUT Command is not carried past it')
+    const lutRefused = await carryService({ ...scope, variantId: WIDE, actor })
+    assert.deepEqual([lutRefused.status, lutRefused.reason], ['not-eligible', 'intermediate-command-not-carriable'], 'the address agreed and the LUT Command between them refused it')
+
+    /* ---------------------------------------------------------- 9. (R2, Opus validation) a ColorPlan between the render and the head: the address moves */
+    const colorBase = await head()
+    const sourceColor = { colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709', range: 'limited', bitDepth: 8 }
+    const compilation = await factory.createColorPipelineCompilationRepository().read({ ...scope, compilationId: `color-compilation-${world.source.artifactId}` })
+    assert.ok(compilation, 'the world registered the colour compilation of its recording')
+    const graded = await setProjectColorPlanService({ repository: new PrismaProjectColorPlanRepository(db), luts: new PrismaWorkspaceLutRepository(db), clock: () => new Date(),
+      createEventId: randomUUID, createId: (kind) => `w70c-${suffix}-color-${kind}-${randomUUID()}` })({
+      ...scope, baseVersionId: colorBase.id, baseHash: colorBase.baseHash, actor, idempotencyKey: `w70c-${suffix}-color`, reason: 'W70 readiness: one grade for the whole project.',
+      plan: { schemaVersion: 'color-plan/v1', metadata: sourceColor, outputMetadata: sourceColor, sourceMetadata: { [world.source.artifactId]: sourceColor }, global: compilation.compilation.pipeline.stages },
+    })
+    assert.equal((await head()).id, graded.version.id, 'the ColorPlan Command made the head')
+    const c10 = await command(TALL, 'cue-2', 'Décima', 'text-10')
+    assert.equal(await opAt(c10.version.id, WIDE), null, 'a render made before a ColorPlan is not carried past it')
+    const colorRefused = await carryService({ ...scope, variantId: WIDE, actor })
+    assert.deepEqual([colorRefused.status, colorRefused.reason], ['not-eligible', 'no-source-render'], 'the grade is in the content address: no render was made under it')
+    console.log(`W70-EVIDENCE ${JSON.stringify({ label: 'grade-not-carried', lut: lutRefused.reason, color: colorRefused.reason, colorPlanVersion: graded.version.id })}`)
   } finally {
     await db.$disconnect().catch(() => undefined)
     const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')

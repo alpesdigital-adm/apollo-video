@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { artifactOutputStoragePrefix } from '../domain/artifact-storage-identity.ts'
 import { evaluateAssetUse } from '../domain/asset-rights.ts'
+import { appliedColorGradeMatches } from '../domain/render-color-grade.ts'
 import { createReconstructableMediaArtifactManifest } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
 import { readOutputFormatPreset } from '../domain/output-format-registry.ts'
@@ -272,6 +273,10 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         operationId: operation.id, compilations: [...colorPipelines.values()],
         ...(colorPlan ? { executions: colorPlan.compiled.targets } : {}),
       })
+      // W70 readiness (R2). The grade applied is the one the sealed source was read with (the approving proxy was rendered under it).
+      if (source.colorGrade && !appliedColorGradeMatches(source.colorGrade, {
+        colorPlan, lut: { selectionId: materializedLut.selectionId, selectionHash: materializedLut.selectionHash },
+      })) throw new DomainError('INVALID_RENDER_INPUT', 'The colour grade this final applies is not the one its source was read with')
       failureStage = 'input-validation'
       const immutableInputHash = projectFinalRenderInputHash({
         projectId: context.projectId,

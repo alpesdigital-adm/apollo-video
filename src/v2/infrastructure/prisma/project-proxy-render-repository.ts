@@ -32,6 +32,9 @@ import { readVariantReframePlanHead } from './variant-reframe-plan-repository.ts
 import { readSubtitleSegmentOverrideHeads } from './subtitle-segment-override-repository.ts'
 import { subtitleOverrideSetHash } from '../../domain/subtitle-segment-override.ts'
 import { PrismaPublicOperationRepository } from './public-operation-repository.ts'
+import { PrismaProjectColorPlanRepository } from './project-color-plan-repository.ts'
+import { PrismaProjectLutSelectionRepository } from './project-lut-selection-repository.ts'
+import { renderColorGradeOf } from '../../domain/render-color-grade.ts'
 
 function parseArray(value: string, field: string): readonly unknown[] {
   try {
@@ -111,7 +114,23 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
   async readCurrentSource(input: { workspaceId: string; projectId: string; purpose?: ProjectRenderConsumptionPurpose; variantId?: string }) {
     const project = await this.queryProject(input)
     const source = hydrateProxySource(project)
-    return source ? this.attachSubtitleOverrides(project!, await this.attachReframePlan(project!, await this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source)))) : null
+    return source ? this.attachColorGrade(project!, await this.attachSubtitleOverrides(project!, await this.attachReframePlan(project!, await this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source))))) : null
+  }
+
+  /**
+   * W70 readiness (R2). The colour grade a render of the Version applies, read exactly as the render worker reads it (the effective ColorPlan,
+   * and the effective LUT selection the LUT materializer resolves), so the input hash and the content address name it.
+   */
+  private async attachColorGrade(
+    project: NonNullable<Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>>,
+    source: Readonly<ProjectProxyRenderSource>,
+  ): Promise<Readonly<ProjectProxyRenderSource>> {
+    const scope = { workspaceId: project.workspaceId, projectId: project.id, projectVersionId: source.projectVersionId }
+    const [colorPlan, lut] = await Promise.all([
+      new PrismaProjectColorPlanRepository(this.client).readEffectiveForVersion(scope),
+      new PrismaProjectLutSelectionRepository(this.client).readEffectiveForVersion(scope),
+    ])
+    return Object.freeze({ ...source, colorGrade: renderColorGradeOf({ colorPlan, lutSelection: lut?.selection ?? null }) })
   }
 
   /** The exact Version a worker was sealed to, consumed for `purpose` (default: the proxy render). */
@@ -122,7 +141,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       throw new DomainError('PERSISTENCE_CONFLICT', 'The sealed Version is no longer the current Version of the project')
     }
     const source = hydrateProxySource(project, input)
-    return source ? this.attachSubtitleOverrides(project!, await this.attachReframePlan(project!, await this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source)))) : null
+    return source ? this.attachColorGrade(project!, await this.attachSubtitleOverrides(project!, await this.attachReframePlan(project!, await this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source))))) : null
   }
 
   /**

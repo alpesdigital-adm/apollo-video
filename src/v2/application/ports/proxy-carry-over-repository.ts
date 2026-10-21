@@ -59,6 +59,8 @@ export type ProxyCarryOverResult =
 
 export const PROXY_CARRY_OVER_REFUSALS = Object.freeze([
   'head-moved', 'no-source-render', 'source-not-ancestor', 'source-incomplete', 'command-impact-missing', 'face-evidence-moved', 'critic-issues-moved',
+  // a Version between the source render and the head was made by a Command other than the two exception Commands
+  'intermediate-command-not-carriable',
 ] as const)
 export type ProxyCarryOverRefusal = (typeof PROXY_CARRY_OVER_REFUSALS)[number]
 

@@ -2209,6 +2209,24 @@ test('W70 R2 proxy worker: the content address written at enqueue is recomputed,
   assert.equal((await runEvidenceWorker(sealed, [faceWindow(() => [FAR_FACE])])).outcome.status, 'succeeded')
 })
 
+test('W70 R2 proxy worker: the colour grade it applies must be the one the source was read with, or nothing is rendered', async () => {
+  // what the fakes of this file apply: no ColorPlan, and the LUT selection the materializer resolves
+  const applied = Object.freeze({ schemaVersion: 'render-color-grade/v1', colorPlan: null,
+    lutSelection: Object.freeze({ id: 'selection-project-proxy', selectionHash: '7'.repeat(64), mode: 'none', lutVersionId: null, lutRecordHash: null, cubeContentHash: null, intensity: 1 }) })
+  const same = await runEvidenceWorker(portraitMasterSource({ colorGrade: applied }), [faceWindow(() => [FAR_FACE])])
+  assert.equal(same.outcome.status, 'succeeded')
+  for (const [label, colorGrade] of [
+    ['another LUT selection', { ...applied, lutSelection: { ...applied.lutSelection, id: 'selection-other' } }],
+    ['a re-sealed LUT selection', { ...applied, lutSelection: { ...applied.lutSelection, selectionHash: '8'.repeat(64) } }],
+    ['a ColorPlan the worker does not apply', { ...applied, colorPlan: { id: 'color-plan-1', recordHash: '1'.repeat(64), planHash: '2'.repeat(64), compiledManifestHash: '3'.repeat(64) } }],
+  ]) {
+    const moved = await runEvidenceWorker(portraitMasterSource({ colorGrade }), [faceWindow(() => [FAR_FACE])])
+    assert.equal(moved.outcome.status, 'failed', label)
+    assert.equal(moved.renders, 0, `${label}: nothing was rendered`)
+    assert.equal(moved.operation.error?.code, 'invalid_render_input', label)
+  }
+})
+
 // ---- W70 readiness (R3): a caption that does not fit its band blocks the proxy, decided before the render ----
 test('W70 R3 proxy worker: a three-line caption in the two-line band is a hard issue before the render; it is drawn, and the review is blocked', async () => {
   // 62 characters lay out in three lines of the 9:16 kinetic band (two lines allowed); the far face leaves the bottom band certified free.

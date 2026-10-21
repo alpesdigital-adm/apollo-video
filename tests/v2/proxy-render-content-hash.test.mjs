@@ -29,6 +29,8 @@ const source = (versionId = 'version-1', patch = {}) => ({
 })
 const bindings = [{ compilationId: 'compilation-1', sourceArtifactId: 'artifact-source', sourceManifestId: 'manifest-source', compilationHash: h('9'), pipelineHash: h('a') }]
 const address = (versionId, patch, colour = bindings) => projectProxyRenderContentHash({ source: source(versionId, patch), colorPipelineBindings: colour })
+const lutNone = Object.freeze({ id: 'lut-selection-1', selectionHash: h('6'), mode: 'none', lutVersionId: null, lutRecordHash: null, cubeContentHash: null, intensity: 1 })
+const grade = (patch = {}) => ({ schemaVersion: 'render-color-grade/v1', colorPlan: null, lutSelection: lutNone, ...patch })
 
 test('two Versions that differ only by the identity of the Version have the same content address (and not the same input hash)', () => {
   const first = address('version-1')
@@ -59,6 +61,10 @@ test('every input the pixels depend on moves the content address', () => {
     'the subject evidence': { formatSubjects: [{ id: 's' }] },
     'a placement asset': { placementAssets: [{ elementId: 'logo', artifactId: 'a', artifactKey: 'k', sha256: h('5'), byteSize: 1 }] },
     'the project': { projectId: 'project-2' },
+    // W70 readiness (R2): a ColorPlan or a LUT selection copies the parent's EditPlan, so only the grade can tell the two renders apart
+    'a ColorPlan': { colorGrade: grade({ colorPlan: { id: 'color-plan-1', recordHash: h('1'), planHash: h('2'), compiledManifestHash: h('3') } }) },
+    'another LUT': { colorGrade: grade({ lutSelection: { ...lutNone, mode: 'lut-version', lutVersionId: 'lut-1', lutRecordHash: h('4'), cubeContentHash: h('5') } }) },
+    'the LUT intensity': { colorGrade: grade({ lutSelection: { ...lutNone, intensity: 0.5 } }) },
   }
   for (const [label, patch] of Object.entries(moved)) assert.notEqual(address('version-2', patch), base, `${label} moves the address`)
   assert.notEqual(address('version-2', {}, [...bindings, { ...bindings[0], compilationId: 'compilation-2' }]), base, 'the colour bindings move it')
@@ -78,6 +84,28 @@ test('what only names the Version never moves it', () => {
     'the file name': { originalFileName: 'other.mp4' },
   }
   for (const [label, patch] of Object.entries(namedOnly)) assert.equal(address('version-1', patch), base, `${label} does not move the address`)
+})
+
+test('W70 the colour grade is in the address by what it does, and in the input hash by the rows that hold it', () => {
+  const graded = address('version-2', { colorGrade: grade() })
+  assert.notEqual(graded, address('version-2'), 'a source read with its grade is not one read without')
+  // the same grade held by other rows (re-set to the same values under another Version) is the same content ...
+  assert.equal(address('version-2', { colorGrade: grade({ lutSelection: { ...lutNone, id: 'lut-selection-2', selectionHash: h('7') } }) }), graded)
+  assert.equal(address('version-2', { colorGrade: grade({ colorPlan: { id: 'plan-a', recordHash: h('1'), planHash: h('2'), compiledManifestHash: h('3') } }) }),
+    address('version-2', { colorGrade: grade({ colorPlan: { id: 'plan-b', recordHash: h('8'), planHash: h('2'), compiledManifestHash: h('3') } }) }))
+  // ... but not the same input: the input hash names the rows
+  const input = (patch) => projectProxyRenderInputHash({ source: source('version-2', patch), colorPipelineBindings: bindings })
+  assert.notEqual(input({ colorGrade: grade() }), input({}))
+  assert.notEqual(input({ colorGrade: grade({ lutSelection: { ...lutNone, id: 'lut-selection-2', selectionHash: h('7') } }) }), input({ colorGrade: grade() }))
+})
+
+test('W70 the review policies are pinned in the address', async () => {
+  const { PROXY_REVIEW_POLICY_IDENTITY, PROXY_REVIEW_POLICY_SHA256 } = await import('../../src/v2/application/project-render-sources.ts')
+  const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
+  assert.equal(PROXY_REVIEW_POLICY_SHA256, calculateCanonicalHash(PROXY_REVIEW_POLICY_IDENTITY))
+  assert.deepEqual(Object.keys(PROXY_REVIEW_POLICY_IDENTITY).sort(), ['anchorPolicies', 'captionPixel', 'captionTextLayout', 'colorCritic', 'faceEvidencePolicySha256',
+    'formatQualityCodes', 'formatQualityReport', 'mp4PixelCriticPolicySha256', 'proxyReview'])
+  assert.equal(PROXY_REVIEW_POLICY_IDENTITY.captionPixel.bandTolerancePx, 6)
 })
 
 test('a source that was not read through the sealed consumption verdict has no address', () => {

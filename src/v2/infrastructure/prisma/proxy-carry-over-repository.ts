@@ -18,6 +18,7 @@ import {
 } from '../../domain/public-operation.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { parseCommandImpact } from '../../domain/command-impact.ts'
+import { INHERITING_COMMAND_TYPES } from '../../domain/director-run-inheritance.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData } from './external-actor-audit.ts'
 import { hydratePublicOperationRecord, OPERATION_INCLUDE, persistOperationStatusEvents } from './public-operation-repository.ts'
@@ -98,15 +99,23 @@ export class PrismaProxyCarryOverRepository implements ProxyCarryOverRepository 
     })
     if (!source) return { status: 'not-eligible', reason: 'no-source-render' }
     // ... and in an ANCESTOR of the head (a Version on the line the head descends from), never a sibling branch.
+    // W70 readiness (R2, defence in depth). Every Version from the source to the head must have been made by an exception Command (a subtitle
+    // segment exception, a manual reframe): those change one output and nothing it is drawn from elsewhere. Any other Command (a ColorPlan, a
+    // LUT selection, an edit) between them is refused even if the content address agrees.
     let cursor: string | null = request.toProjectVersionId
     let ancestor = false
+    let foreignCommand = false
     for (let step = 0; step < MAX_ANCESTOR_STEPS && cursor !== null; step += 1) {
-      const row: { parentVersionId: string | null } | null = await transaction.v2ProjectVersion.findFirst({ where: { id: cursor, workspaceId, projectId }, select: { parentVersionId: true } })
+      const row: { parentVersionId: string | null; command: { type: string } | null } | null = await transaction.v2ProjectVersion.findFirst({
+        where: { id: cursor, workspaceId, projectId }, select: { parentVersionId: true, command: { select: { type: true } } },
+      })
       if (!row) break
+      if (!row.command || !INHERITING_COMMAND_TYPES.includes(row.command.type)) foreignCommand = true
       if (row.parentVersionId === source.projectVersionId) { ancestor = true; break }
       cursor = row.parentVersionId
     }
     if (!ancestor) return { status: 'not-eligible', reason: 'source-not-ancestor' }
+    if (foreignCommand) return { status: 'not-eligible', reason: 'intermediate-command-not-carriable' }
     // W70 readiness (R2). The address says the inputs of the output are equal; it cannot say the same of what the render READ: the face
     // windows its placement read (and the ones it still needed) and the Director's issues its review was built over. Either moved: not carried.
     if (source.faceEvidenceDigest !== request.faceEvidenceDigest) return { status: 'not-eligible', reason: 'face-evidence-moved' }

@@ -2,6 +2,7 @@ import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { FormatSubjectEvidenceV1 } from '../../domain/format-quality-critic.ts'
 import type { DirectorRunInheritance } from '../../domain/director-run-inheritance.ts'
+import type { RenderColorGradeV1 } from '../../domain/render-color-grade.ts'
 import type { OutputConsumptionSealV3 } from '../../domain/output-consumption.ts'
 import type { PerceptionTimeline } from '../../domain/perception-timeline.ts'
 import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
@@ -103,6 +104,12 @@ export interface ProjectProxyRenderSource {
    * Version is the Director's own (or has no Director run at all).
    */
   directorInheritance?: Readonly<DirectorRunInheritance>
+  /**
+   * W70 readiness (R2). The colour grade a render of this Version applies (effective ColorPlan and LUT selection, by ancestry), read with the
+   * source. Part of the input hash and of the content address; the worker refuses to render when the grade it applies is another one. Absent
+   * only on a source not read by the project render repository (a renderable snapshot), which then keeps the identity it always had.
+   */
+  colorGrade?: Readonly<RenderColorGradeV1>
   rangeReuse?: Readonly<ProjectProxyRangeReuse>
   unchangedReuse?: Readonly<ProjectProxyUnchangedReuse>
   unchangedReuseRequired?: true

@@ -990,6 +990,30 @@ test('S3 final export worker refuses an operation sealed to another State, varia
   }
 })
 
+test('W70 R2 final export worker: the colour grade it applies must be the one the source was read with, or nothing is rendered', async () => {
+  // what the fakes of this file apply: no ColorPlan, and the LUT selection the materializer resolves
+  const applied = Object.freeze({ schemaVersion: 'render-color-grade/v1', colorPlan: null,
+    lutSelection: Object.freeze({ id: 'selection-final-export', selectionHash: '8'.repeat(64), mode: 'none', lutVersionId: null, lutRecordHash: null, cubeContentHash: null, intensity: 1 }) })
+  for (const [label, colorGrade, rendered] of [
+    ['the grade it applies', applied, true],
+    ['another LUT selection', { ...applied, lutSelection: { ...applied.lutSelection, id: 'selection-other' } }, false],
+    ['a re-sealed LUT selection', { ...applied, lutSelection: { ...applied.lutSelection, selectionHash: '9'.repeat(64) } }, false],
+    ['a ColorPlan the worker does not apply', { ...applied, colorPlan: { id: 'color-plan-1', recordHash: '1'.repeat(64), planHash: '2'.repeat(64), compiledManifestHash: '3'.repeat(64) } }, false],
+  ]) {
+    const operations = createOperations()
+    const { calls, dependencies } = workerDependencies(operations)
+    serveSource(dependencies, () => ({ colorGrade }))
+    const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-grade')
+    if (rendered) {
+      assert.equal(calls.rendered, 1, label)
+      continue
+    }
+    assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' }, label)
+    assert.equal(operations.operation.error.code, 'invalid_render_input', label)
+    assert.deepEqual([calls.rendered, calls.persisted, calls.attached], [0, 0, 0], `${label}: nothing rendered, nothing published`)
+  }
+})
+
 test('S3 final export worker refuses tampered source bytes (another sha256 than the one the operation sealed) before it renders anything', async () => {
   const operations = createOperations()
   const { calls, dependencies } = workerDependencies(operations)
