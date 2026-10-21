@@ -147,3 +147,29 @@ herda o DirectorRun (seção 1): o laudo de proxy dela é montado sem as issues 
 herança, e mostrá-lo exige levar esse resultado até o laudo e ao schema público - não é pequeno. Quem vê o laudo sem issues do Director nessa situação só descobre a recusa
 ao pedir o final. O que está provado e o que é leitura de código: a jornada de herança prova a recusa do final na exceção empilhada sobre a LUT; que o laudo de proxy sai sem
 as issues do Director vem da leitura (`readEffectiveDirectorRun` devolve null numa parada e `parseProxySourceCriticIssues(undefined)` é `[]`), sem execução que o mostre.
+
+## 9. Execuções após a validação (9f755c90, d2140fde, merge 9c88640f com `origin/main` 4df3fc6f)
+
+Portões (`typecheck`, `lint`, `lint:code`, `lint:whitespace`, `db:v2:validate`, `api:v1:validate`, `api:parity:validate`) verdes em cada commit novo; `npm test` em 9f755c90:
+3851 testes, 3838 passam, 0 falham, 13 pulados; no merge 9c88640f: 3870, 3857, 0, 13.
+
+| Execução | Resultado |
+| --- | --- |
+| `w70r-v2-after-4750252c` (9f755c90) | sidecar, carry, herança passam; W68 reprovou no conjunto de chaves de `carriedFrom` que este ramo fixava (agora com `acknowledgedBy`): corrigido em d2140fde |
+| `full-b2` `w70r-v2-b2-4bb17812` (d2140fde) | 56 passos; W68, sidecar, carry, herança, cancelamento passam; 3 reprovados: `editor-reliability`, `final-export`, `integration-api` |
+| repetição isolada `w70r-v2-rerun-3af4308d` | `integration-api` passa (a corrida de idempotência que a PR #92 trata); `editor-reliability` e `final-export` reprovam igual |
+| árvore de `main` antiga (bf7817fb) `w70r-v2-main-0d6bdb92` | `editor-reliability` passa; `final-export` estoura o tempo (1500 s) |
+| bisseção `editor-reliability` | 8e63d11a passa (1/1); 6c05033b reprova (1/2: a segunda execução, instrumentada, passou) |
+| merge 9c88640f `w70r-merge-9dfc8218` | W68, sidecar, carry, herança, cancelamento passam; `integration-api` reprova no limite por minuto (200 em vez de 429); `final-export` reprova igual; `editor-reliability` 0/3 (cartão do projeto não aparece em 20 s) |
+| `origin/main` 4df3fc6f, worktree temporária, `w70r-mainhead-ed-b8477bd8` | `editor-reliability` reprova igual ao merge (cartão não aparece em 20 s), 1/1 |
+
+Leitura, com o limite de cada uma:
+
+- `final-export` reprova na limpeza do navegador do catálogo (`Owned Chromium lifecycle is not terminal`), com a prova em si concluída; a árvore de `main` antiga estourou o
+  tempo no mesmo passo. Mesmo tipo da limpeza do `wave20-browser` (seção 7): ambiente do host, não este ramo.
+- `editor-reliability` antes do merge: a primeira abertura assentou no painel do laudo antes do `<video>` (`proxy-review-gate, project-preview`). A sondagem para no primeiro
+  marcador presente, e o painel do laudo sempre é desenhado; a execução instrumentada (mesmo commit) passou com os dois presentes. Com N=1-2 por commit não separo uma
+  regressão de 6c05033b de uma corrida de tempo do teste: nenhuma leitura mudou de status entre as execuções (todas 200), e 6c05033b não muda nada do que a abertura lê para um
+  laudo que não foi carregado. Fica em aberto.
+- Depois do merge a falha é outra (o cartão do projeto não aparece) e `main` 4df3fc6f reprova igual neste host; o host estava carregado (build de 725 s contra ~100 s antes;
+  carry 243 s contra 47 s). Não separei carga de host de mudança de `main`.
