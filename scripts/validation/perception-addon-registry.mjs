@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
-import { closeSync, fsyncSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs'
+import { closeSync, fsyncSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, unlinkSync, writeFileSync, writeSync } from 'node:fs'
 import { basename, join, posix, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseLinuxProcessStat, parseLinuxProcessCredentials } from './run-perception-ci.mjs'
@@ -114,19 +114,20 @@ const lockIo = Object.freeze({ lstat: lstatSync, readdir: readdirSync, readFile:
   selfStat: () => readFileSync('/proc/self/stat', 'utf8'),
   bootId: () => readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(),
   pidNamespace: () => readlinkSync('/proc/self/ns/pid'),
+  // Kernels without time namespaces have no such link: recorded and compared as null.
+  timeNamespace: () => { try { return readlinkSync('/proc/self/ns/time') } catch (error) { if (error?.code === 'ENOENT') return null; throw error } },
   pid: () => process.pid, uid: () => process.getuid(), now: () => Date.now(),
-  mkdir: (path) => mkdirSync(path, { mode: 0o700 }), rename: renameSync,
-  rm: (path) => rmSync(path, { recursive: true, force: true }), writeFile: writeFileSync,
+  link: linkSync, unlink: unlinkSync, rename: renameSync, writeFile: writeFileSync,
   writeOwner: (path, text) => {
     const fd = openSync(path, 'wx', 0o600)
     try { writeSync(fd, text); fsyncSync(fd) } finally { closeSync(fd) }
   } })
 
 // Read-only evidence for a failed admission-lock acquisition (it never repairs
-// anything; removal of a provably dead owner's lock is `reclaimStaleAdmissionLock`).
-// A lock published by `registryLock` is a directory carrying `owner.json`; a legacy
-// bare `mkdir` lock carries no owner (`owner.carried` false) and its holder's
-// liveness cannot be established from the lock alone.
+// anything; removal of a provably gone owner's lock is `reclaimAdmissionLock`).
+// A lock published by `registryLock` is a FILE holding the owner document; a legacy
+// bare `mkdir` directory lock carries no owner (`owner.carried` false) and its
+// holder's liveness cannot be established from the lock alone.
 // If a lock file (or an `owner.json` inside a lock directory) carries
 // `{pid, starttime?}`, its owner is looked up in /proc without any signal. This is
 // evidence only: the reclaim decision is the stricter `assessAdmissionLock`.
@@ -181,23 +182,32 @@ export function describeAdmissionLock(lockPath, { now = Date.now(), io = lockIo 
   return facts
 }
 
-const LOCK_OWNER_SCHEMA = 'registry-admission-lock-owner/v1'
-const LOCK_RECLAIM_SCHEMA = 'registry-admission-lock-reclaim/v1'
-const LOCK_OWNER_KEYS = Object.freeze(['bootId', 'createdAt', 'nonce', 'pid', 'pidNamespace', 'schemaVersion', 'starttime', 'uid'])
+const LOCK_OWNER_SCHEMA = 'registry-admission-lock-owner/v2'
+const LOCK_RECLAIM_SCHEMA = 'registry-admission-lock-reclaim/v2'
+const LOCK_OWNER_KEYS = Object.freeze(['bootId', 'createdAt', 'nonce', 'observerRunId', 'pid', 'pidNamespace', 'schemaVersion',
+  'starttime', 'timeNamespace', 'uid'])
 const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const PID_NAMESPACE_SHAPE = /^pid:\[\d+\]$/
+const TIME_NAMESPACE_SHAPE = /^time:\[\d+\]$/
+const RUN_ID_SHAPE = /^[A-Za-z0-9._-]{1,128}$/
 const NO_ENTRY = Object.freeze(['ENOENT', 'ENOTDIR'])
+const LOCK_FILE_LIMIT = 4096
 
 // The identity a lock holder commits to inside the lock itself. `starttime`
 // (/proc/<pid>/stat field 22) plus the boot id make a PID reusable only by a
-// process that can be told apart; the PID namespace says which /proc can answer.
-export function captureLockOwner(io = lockIo) {
+// younger process; the PID namespace says which /proc can answer; the time
+// namespace says the starttime clock is comparable; `observerRunId` binds a lock
+// taken inside a private namespace to the host supervisor run that observes it.
+export function captureLockOwner(io = lockIo, { observerRunId = null } = {}) {
   const pid = io.pid()
   const self = parseLinuxProcessStat(io.selfStat())
   assert.equal(self.pid, pid, 'Admission lock owner: /proc does not describe this process')
-  const pidNamespace = io.pidNamespace(), bootId = io.bootId()
-  assert.match(pidNamespace, /^pid:\[\d+\]$/); assert.match(bootId, UUID_SHAPE)
-  return { schemaVersion: LOCK_OWNER_SCHEMA, pid, starttime: self.starttime, bootId, pidNamespace, uid: io.uid(),
-    nonce: randomUUID(), createdAt: new Date(io.now()).toISOString() }
+  const pidNamespace = io.pidNamespace(), bootId = io.bootId(), timeNamespace = io.timeNamespace()
+  assert.match(pidNamespace, PID_NAMESPACE_SHAPE); assert.match(bootId, UUID_SHAPE)
+  assert.ok(timeNamespace === null || TIME_NAMESPACE_SHAPE.test(timeNamespace))
+  assert.ok(observerRunId === null || RUN_ID_SHAPE.test(observerRunId))
+  return { schemaVersion: LOCK_OWNER_SCHEMA, pid, starttime: self.starttime, bootId, pidNamespace, timeNamespace,
+    observerRunId, uid: io.uid(), nonce: randomUUID(), createdAt: new Date(io.now()).toISOString() }
 }
 
 function parseLockOwner(text) {
@@ -207,7 +217,9 @@ function parseLockOwner(text) {
   assert.equal(owner.schemaVersion, LOCK_OWNER_SCHEMA)
   assert.ok(Number.isSafeInteger(owner.pid) && owner.pid > 0 && Number.isSafeInteger(owner.uid) && owner.uid >= 0)
   assert.match(owner.starttime, /^\d{1,32}$/); assert.match(owner.bootId, UUID_SHAPE); assert.match(owner.nonce, UUID_SHAPE)
-  assert.match(owner.pidNamespace, /^pid:\[\d+\]$/)
+  assert.match(owner.pidNamespace, PID_NAMESPACE_SHAPE)
+  assert.ok(owner.timeNamespace === null || TIME_NAMESPACE_SHAPE.test(owner.timeNamespace))
+  assert.ok(owner.observerRunId === null || RUN_ID_SHAPE.test(owner.observerRunId))
   assert.ok(typeof owner.createdAt === 'string' && Number.isFinite(Date.parse(owner.createdAt)))
   return owner
 }
@@ -216,97 +228,172 @@ function pathExists(path, io) {
   try { io.lstat(path); return true } catch (error) { if (NO_ENTRY.includes(error?.code)) return false; throw error }
 }
 
-// Read-only decision for a lock that already exists. `stale` is returned ONLY when
-// every proof below holds; any other outcome (including a legacy bare `mkdir`
-// lock, a live owner, a zombie, another boot or PID namespace, a read error)
-// is `live`/`unproven` and the caller keeps failing closed.
-export function assessAdmissionLock(lockPath, ioOverride = {}) {
+const runTag = (runId) => createHash('sha256').update(runId ?? '').digest('hex').slice(0, 8)
+
+// Staging files and tombstones carry their creator's identity in the NAME, so a
+// leftover of a creator killed before the content was complete is still
+// attributable: `<base>.<new|stale>.<pidNsInode>-<pid>-<starttime>-<runTag>.<uuid>`.
+function leftoverName(base, kind, creator) {
+  return `${base}.${kind}.${/^pid:\[(\d+)\]$/.exec(creator.pidNamespace)[1]}-${creator.pid}-${creator.starttime}-${runTag(creator.observerRunId)}.${randomUUID()}`
+}
+const LEFTOVER_NAME = /^(admission\.lock(?:\.reclaim)?)\.(new|stale)\.(\d+)-([1-9]\d*)-(\d{1,32})-([0-9a-f]{8})\.[0-9a-f-]{36}$/
+export function parseLockLeftoverName(name) {
+  if (name === 'admission.lock') return { kind: 'lock' }
+  if (name === 'admission.lock.reclaim') return { kind: 'mutex' }
+  const match = LEFTOVER_NAME.exec(String(name))
+  if (!match) return null
+  return { kind: match[2] === 'new' ? 'staging' : 'tombstone', base: match[1], creator: {
+    pidNamespace: `pid:[${match[3]}]`, pid: Number(match[4]), starttime: match[5], runTag: match[6] } }
+}
+
+// What a host supervisor that already proved a private PID namespace EMPTY hands
+// over: every process that ever lived in `namespace`, including any lock owner, is
+// gone. The proof is the same structural evidence cleanup demands of namespace owners.
+export function namespaceEmptyProof(report, evidence, { sourceCommit } = {}) {
+  try {
+    assert.match(report.runId, RUN_ID_SHAPE)
+    if (sourceCommit !== undefined) assert.equal(report.sourceCommit, sourceCommit)
+    const namespace = report.namespaceBinding?.directlyObserved?.namespace
+    assert.match(namespace, PID_NAMESPACE_SHAPE)
+    const anchor = report.namespaceBinding?.wardenAttested?.localNodeIdentity
+    assert.match(anchor?.starttime, /^\d{1,32}$/)
+    assert.equal(report.childCloseObserved, true)
+    const last = report.rootReceipts?.at(-1)
+    assert.equal(last?.stage, 'guardian-final'); assert.equal(last.initFinal?.nodeCloseObserved, true)
+    assert.equal(last.initFinal.cleanup?.namespaceEmpty, true)
+    assert.equal(report.externalIdentities?.length, 5); assert.ok(report.externalIdentities.every((value) => value.terminal === true))
+    assert.equal(report.postflight?.backendCount, 0)
+    return Object.freeze({ kind: 'namespace-empty', runId: report.runId, namespace, anchorStarttime: anchor.starttime,
+      evidence: { path: String(evidence?.path ?? '').slice(0, 512), sha256: evidence?.sha256 ?? null } })
+  } catch { return null }
+}
+
+// Judges whether a lock creator is provably gone. `identity` always has
+// pidNamespace/pid/starttime; a lock document adds bootId, timeNamespace, uid and
+// observerRunId, a file NAME adds runTag only. Anything not proven is not stale.
+function judgeCreator(identity, io, namespaceProofs) {
+  const unproven = (reason) => ({ verdict: 'unproven', reason })
+  let bootId, pidNamespace, timeNamespace
+  try {
+    assert.equal(parseLinuxProcessStat(io.selfStat()).pid, io.pid())
+    bootId = io.bootId(); pidNamespace = io.pidNamespace(); timeNamespace = io.timeNamespace()
+    assert.match(bootId, UUID_SHAPE); assert.match(pidNamespace, PID_NAMESPACE_SHAPE)
+    assert.ok(timeNamespace === null || TIME_NAMESPACE_SHAPE.test(timeNamespace))
+  } catch { return unproven('self-proc-unverifiable') }
+  if (identity.bootId !== undefined && identity.bootId !== bootId) return unproven('boot-id-differs')
+  if (identity.pidNamespace !== pidNamespace) {
+    // A private PID namespace this process cannot see into: only a host supervisor's proof that the
+    // whole namespace is empty (bound to this run and to a process born after its anchor) proves death.
+    const bound = (value) => identity.observerRunId !== undefined ? identity.observerRunId !== null && identity.observerRunId === value.runId
+      : identity.runTag !== undefined && identity.runTag === runTag(value.runId)
+    const proof = namespaceProofs.find((value) => value.namespace === identity.pidNamespace &&
+      BigInt(identity.starttime) >= BigInt(value.anchorStarttime) && bound(value))
+    return proof ? { verdict: 'stale', reason: 'namespace-empty', proof: { basis: 'namespace-empty', runId: proof.runId,
+      namespace: proof.namespace, anchorStarttime: proof.anchorStarttime, evidence: proof.evidence, recordedStarttime: identity.starttime,
+      bootId, pidNamespace } } : unproven('pid-namespace-differs')
+  }
+  // Time namespaces shift /proc starttime, so the clock is only comparable inside the same one.
+  if (identity.timeNamespace !== undefined && identity.timeNamespace !== timeNamespace) return unproven('time-namespace-differs')
+  const stale = (basis, observedStarttime = null) => ({ verdict: 'stale', reason: basis,
+    proof: { basis, recordedStarttime: identity.starttime, observedStarttime, bootId, pidNamespace, timeNamespace } })
+  let observed
+  try { observed = parseLinuxProcessStat(io.procStat(identity.pid)) }
+  catch (error) {
+    if (['ENOENT', 'ESRCH'].includes(error?.code)) return stale('proc-stat-absent')
+    return unproven(error?.code === 'ERR_ASSERTION' ? 'proc-stat-unparseable' : `proc-stat-${error?.code ?? 'error'}`)
+  }
+  if (observed.pid !== identity.pid) return unproven('proc-stat-pid-mismatch')
+  // A reused PID belongs to a strictly younger process; equal is the same process, older is not a proof.
+  if (BigInt(observed.starttime) > BigInt(identity.starttime)) return stale('pid-recycled', observed.starttime)
+  if (BigInt(observed.starttime) < BigInt(identity.starttime)) return unproven('starttime-went-backwards')
+  return { verdict: 'live', reason: 'owner-live', observedState: observed.state }
+}
+
+// Read-only decision for the lock at `lockPath`. `stale` is returned ONLY when every
+// proof holds; a legacy directory lock, a live owner, a zombie, another boot, a
+// namespace without a proof, or any read error is `live`/`unproven` and callers fail closed.
+export function assessAdmissionLock(lockPath, ioOverride = {}, { namespaceProofs = [] } = {}) {
   const io = { ...lockIo, ...ioOverride }
   const unproven = (reason, extra = {}) => ({ verdict: 'unproven', reason, ...extra })
   let metadata
   try { metadata = io.lstat(lockPath) }
   catch (error) { return NO_ENTRY.includes(error?.code) ? { verdict: 'absent', reason: 'lock-absent' } : unproven(`lock-lstat-${error?.code ?? 'error'}`) }
-  if (!metadata.isDirectory()) return unproven('lock-not-a-directory')
-  let uid, names
+  if (metadata.isDirectory()) return unproven('legacy-directory-lock')
+  if (!metadata.isFile()) return unproven('lock-not-a-file')
+  let uid
   try { uid = io.uid() } catch { return unproven('uid-unavailable') }
   if (metadata.uid !== uid) return unproven('lock-uid-mismatch')
-  try { names = io.readdir(lockPath).map(String) } catch (error) { return unproven(`lock-readdir-${error?.code ?? 'error'}`) }
-  if (!names.includes('owner.json')) return unproven('owner-missing')
-  if (names.length !== 1) return unproven('unexpected-entries')
   let owner, ownerDigest
   try {
-    const ownerPath = join(lockPath, 'owner.json'), ownerMeta = io.lstat(ownerPath)
-    assert.ok(ownerMeta.isFile() && ownerMeta.size <= 4096 && ownerMeta.uid === uid)
-    const bytes = Buffer.from(io.readFile(ownerPath))
-    assert.ok(bytes.length <= 4096)
+    assert.ok(metadata.size <= LOCK_FILE_LIMIT)
+    const bytes = Buffer.from(io.readFile(lockPath))
+    assert.ok(bytes.length <= LOCK_FILE_LIMIT)
     owner = parseLockOwner(bytes.toString('utf8')); ownerDigest = digest(bytes)
   } catch { return unproven('owner-document-invalid') }
   if (owner.uid !== uid) return unproven('owner-uid-mismatch', { owner })
-  let bootId, pidNamespace
-  try {
-    assert.equal(parseLinuxProcessStat(io.selfStat()).pid, io.pid())
-    bootId = io.bootId(); pidNamespace = io.pidNamespace()
-    assert.match(bootId, UUID_SHAPE); assert.match(pidNamespace, /^pid:\[\d+\]$/)
-  } catch { return unproven('self-proc-unverifiable', { owner }) }
-  if (owner.bootId !== bootId) return unproven('boot-id-differs', { owner })
-  if (owner.pidNamespace !== pidNamespace) return unproven('pid-namespace-differs', { owner })
-  const stale = (basis, observedStarttime = null) => ({ verdict: 'stale', reason: basis, owner, ownerDigest,
-    lock: { dev: metadata.dev, ino: metadata.ino, ageMs: Number.isFinite(metadata.mtimeMs) ? Math.max(0, io.now() - metadata.mtimeMs) : null },
-    proof: { basis, recordedStarttime: owner.starttime, observedStarttime, bootId, pidNamespace } })
-  let observed
-  try { observed = parseLinuxProcessStat(io.procStat(owner.pid)) }
-  catch (error) {
-    if (['ENOENT', 'ESRCH'].includes(error?.code)) return stale('proc-stat-absent')
-    return unproven(error?.code === 'ERR_ASSERTION' ? 'proc-stat-unparseable' : `proc-stat-${error?.code ?? 'error'}`, { owner })
-  }
-  if (observed.pid !== owner.pid) return unproven('proc-stat-pid-mismatch', { owner })
-  if (BigInt(observed.starttime) !== BigInt(owner.starttime)) return stale('pid-recycled', observed.starttime)
-  return { verdict: 'live', reason: 'owner-live', owner, observedState: observed.state }
+  const judged = judgeCreator(owner, io, namespaceProofs)
+  const result = { ...judged, owner, ownerDigest }
+  if (judged.verdict === 'stale') result.lock = { dev: metadata.dev, ino: metadata.ino,
+    ageMs: Number.isFinite(metadata.mtimeMs) ? Math.max(0, io.now() - metadata.mtimeMs) : null }
+  return result
 }
 
-// Publishes `path` as a directory that already contains owner.json (fsynced in a
-// private staging directory on the same filesystem, then renamed into place), so
-// there is no instant at which the lock exists without its owner. rename(2) would
-// replace an EMPTY destination directory, so an existing path - notably a legacy
-// bare-mkdir lock - is never renamed over; a non-empty one makes rename fail.
-function publishOwnedDirectory(path, owner, io) {
-  const staging = `${path}.new.${randomUUID()}`
-  let published = false
-  io.mkdir(staging)
+// A root entry named like an admission-lock artifact (staging file, tombstone,
+// reclaim mutex, the lock itself): is its creator provably gone? Used by cleanup.
+export function assessLockLeftover(path, parsed, ioOverride = {}, { namespaceProofs = [] } = {}) {
+  const io = { ...lockIo, ...ioOverride }
+  if (parsed.kind === 'lock' || parsed.kind === 'mutex') return assessAdmissionLock(path, io, { namespaceProofs })
+  let metadata
+  try { metadata = io.lstat(path) } catch (error) { return { verdict: 'unproven', reason: `leftover-lstat-${error?.code ?? 'error'}` } }
+  if (!metadata.isFile()) return { verdict: 'unproven', reason: 'leftover-not-a-file' }
+  try { assert.equal(metadata.uid, io.uid()) } catch { return { verdict: 'unproven', reason: 'leftover-uid-mismatch' } }
+  return { ...judgeCreator(parsed.creator, io, namespaceProofs), name: basename(path) }
+}
+
+// Publishes `path` as a FILE whose owner document is already complete: written and
+// fsynced to a private staging file, then link(2)ed to `path`. link never replaces
+// anything (EEXIST on any existing entry, including a legacy directory lock) and
+// the lock never exists half-written. Staging happens only while `path` is absent.
+function publishOwnedFile(path, ownerText, creator, io) {
+  if (pathExists(path, io)) return false
+  const staging = leftoverName(path, 'new', creator)
   try {
-    io.writeOwner(join(staging, 'owner.json'), JSON.stringify(owner))
-    if (pathExists(path, io)) return false
-    try { io.rename(staging, path); published = true; return true }
+    io.writeOwner(staging, ownerText)
+    try { io.link(staging, path); return true }
     catch (error) { if (pathExists(path, io)) return false; throw error }
-  } finally { if (!published) { try { io.rm(staging) } catch { /* A leftover staging directory stays visible to the cleanup inventory. */ } } }
+  } finally { try { io.unlink(staging) } catch { /* A leftover staging file stays attributable by name for cleanup. */ } }
 }
 
-// Releasing is a rename to a unique name (atomic held -> absent), then deletion.
-function releaseOwnedDirectory(path, owner, io) {
-  const document = JSON.parse(Buffer.from(io.readFile(join(path, 'owner.json'))).toString('utf8'))
-  assert.equal(document?.nonce, owner.nonce, 'Admission lock is not owned by this process; refusing to release it')
-  const tombstone = `${path}.released.${randomUUID()}`
-  io.rename(path, tombstone)
-  try { io.rm(tombstone) } catch { /* The lock is already free; the leftover stays visible to the cleanup inventory. */ }
+// Releasing = the bytes at `path` are exactly the ones this process published, then unlink.
+function releaseOwnedFile(path, ownerText, io) {
+  const bytes = Buffer.from(io.readFile(path))
+  assert.ok(bytes.equals(Buffer.from(ownerText)), 'Admission lock is not owned by this process; refusing to release it')
+  io.unlink(path)
 }
 
-// Removes the lock ONLY when `assessAdmissionLock` proves its owner dead. Reclaimers
-// are serialized by `<lock>.reclaim` (same owner-carrying protocol, never itself
-// reclaimed: an orphaned reclaim mutex keeps failing closed). Under that mutex the
-// lock cannot be replaced between assessment and rename: acquirers cannot publish
-// over an existing lock, the dead owner cannot release it, and nobody else removes
-// it. The tombstone is re-verified against the assessed owner bytes anyway. The
-// receipt is written BEFORE the removal; if it cannot be written nothing is removed.
-function reclaimStaleAdmissionLock(lock, self, io) {
-  const first = assessAdmissionLock(lock, io)
+// Removes the lock ONLY when `assessAdmissionLock` proves its owner gone. Reclaimers are
+// serialized by `<lock>.reclaim` (same link-published protocol, never itself reclaimed: an
+// orphaned reclaim mutex keeps failing closed and is reported). Under that mutex the lock
+// cannot be replaced between assessment and removal: acquirers cannot publish over an
+// existing lock, a dead owner cannot release it, nobody else removes it. The tombstone is
+// re-verified against the assessed bytes anyway, and a mismatch is restored with link(2),
+// which cannot replace. The intent receipt is written once per reclaim attempt (keyed by
+// the assessed owner digest in `attempted`) BEFORE the removal; with no receipt nothing is removed.
+export function reclaimAdmissionLock(root, { io: ioOverride, namespaceProofs = [], self, attempted = new Set(), env = process.env } = {}) {
+  const io = { ...lockIo, ...ioOverride }, lock = join(root, 'admission.lock')
+  const first = assessAdmissionLock(lock, io, { namespaceProofs })
   if (first.verdict !== 'stale') return { reclaimed: false, assessment: first }
-  const mutex = `${lock}.reclaim`, holder = { ...self, nonce: randomUUID() }
-  if (!publishOwnedDirectory(mutex, holder, io)) return { reclaimed: false, assessment: { ...first, verdict: 'unproven', reason: 'reclaim-mutex-held' } }
+  if (attempted.has(first.ownerDigest)) return { reclaimed: false, assessment: { ...first, verdict: 'unproven', reason: 'reclaim-already-attempted' } }
+  const holderBase = self ?? captureLockOwner(io, { observerRunId: observerRunIdOf(env) })
+  const mutex = `${lock}.reclaim`, holder = { ...holderBase, nonce: randomUUID() }, holderText = JSON.stringify(holder)
+  if (!publishOwnedFile(mutex, holderText, holder, io)) return { reclaimed: false, assessment: { ...first, verdict: 'unproven', reason: 'reclaim-mutex-held' } }
   try {
-    const assessment = assessAdmissionLock(lock, io)
+    const assessment = assessAdmissionLock(lock, io, { namespaceProofs })
     if (assessment.verdict !== 'stale') return { reclaimed: false, assessment }
-    const id = randomUUID(), tombstone = `${lock}.stale.${id}`
-    const receiptPath = join(dirname(lock), 'receipts', `admission-lock-reclaim-${id}.json`)
+    if (attempted.has(assessment.ownerDigest)) return { reclaimed: false, assessment: { ...assessment, verdict: 'unproven', reason: 'reclaim-already-attempted' } }
+    attempted.add(assessment.ownerDigest)
+    const tombstone = leftoverName(lock, 'stale', holder), id = randomUUID()
+    const receiptPath = join(root, 'receipts', `admission-lock-reclaim-${id}.json`)
     const record = { schemaVersion: LOCK_RECLAIM_SCHEMA, reclaimId: id, phase: 'intent', lock: lock.slice(0, 512),
       tombstone: basename(tombstone), observedAt: new Date(io.now()).toISOString(), reclaimer: holder,
       staleOwner: assessment.owner, staleOwnerDigest: assessment.ownerDigest, proof: assessment.proof,
@@ -316,17 +403,23 @@ function reclaimStaleAdmissionLock(lock, self, io) {
     try { io.rename(lock, tombstone) }
     catch (error) { return { reclaimed: false, assessment: { ...assessment, verdict: 'unproven', reason: `reclaim-rename-${error?.code ?? 'failed'}` } } }
     let renamed = null
-    try { renamed = digest(Buffer.from(io.readFile(join(tombstone, 'owner.json')))) } catch { /* Treated as a mismatch below. */ }
+    try { renamed = digest(Buffer.from(io.readFile(tombstone))) } catch { /* Treated as a mismatch below. */ }
     if (renamed !== assessment.ownerDigest) {
-      try { if (!pathExists(lock, io)) io.rename(tombstone, lock) } catch { /* The tombstone stays as evidence. */ }
+      // Not the lock that was judged: put it back WITHOUT replacing anything (link fails if a new lock exists).
+      try { io.link(tombstone, lock); io.unlink(tombstone) } catch { /* The tombstone stays as evidence. */ }
       throw new Error('Admission lock changed during stale-lock reclaim; failing closed')
     }
     let removed = true
-    try { io.rm(tombstone) } catch { removed = false }
+    try { io.unlink(tombstone) } catch { removed = false }
     record.phase = 'removed'; record.tombstoneRemoved = removed
     try { io.writeFile(receiptPath, JSON.stringify(record, null, 2), { flag: 'w', mode: 0o600 }) } catch { /* The intent receipt remains. */ }
     return { reclaimed: true, assessment, record }
-  } finally { try { releaseOwnedDirectory(mutex, holder, io) } catch { /* A stuck reclaim mutex fails closed and is reported. */ } }
+  } finally { try { releaseOwnedFile(mutex, holderText, io) } catch { /* A stuck reclaim mutex fails closed and is reported. */ } }
+}
+
+const observerRunIdOf = (env) => {
+  const value = env?.APOLLO_OBSERVER_RUN_ID ?? env?.APOLLO_PERCEPTION_RUN_ID ?? null
+  return typeof value === 'string' && RUN_ID_SHAPE.test(value) ? value : null
 }
 
 function admissionLockDiagnostic(lock, assessment, reclaims, io) {
@@ -344,21 +437,21 @@ export async function registryLock(root, action, options = {}) {
   return withAdmissionLock(root, action, options)
 }
 
-// `registryLock` without the Linux-only root ownership assertion (unit-testable
-// with injected `io`). The lock is owner-carrying; see `reclaimStaleAdmissionLock`.
-export async function withAdmissionLock(root, action, { deadlineAt = Date.now() + 750, signal, io: ioOverride } = {}) {
+// `registryLock` without the Linux-only root ownership assertion (unit-testable with
+// injected `io`). `namespaceProofs` are host-supervisor proofs (see `namespaceEmptyProof`).
+export async function withAdmissionLock(root, action, { deadlineAt = Date.now() + 750, signal, io: ioOverride, env = process.env, namespaceProofs = [] } = {}) {
   admissionCheck(deadlineAt, signal)
   const io = { ...lockIo, ...ioOverride }
   const lock = join(root, 'admission.lock')
-  let acquired = false, owner = null, assessment = null
-  const reclaims = []
+  let acquired = false, owner = null, ownerText = null, assessment = null
+  const reclaims = [], attempted = new Set()
   try {
-    owner = captureLockOwner(io)
+    owner = captureLockOwner(io, { observerRunId: observerRunIdOf(env) }); ownerText = JSON.stringify(owner)
     while (Date.now() < deadlineAt) {
       // The loop condition is the deadline test; a second clock read here could cross the deadline and replace the lock-deadline failure.
       if (signal?.aborted) admissionCheck(deadlineAt, signal)
-      if (publishOwnedDirectory(lock, owner, io)) { acquired = true; break }
-      const attempt = reclaimStaleAdmissionLock(lock, owner, io)
+      if (publishOwnedFile(lock, ownerText, owner, io)) { acquired = true; break }
+      const attempt = reclaimAdmissionLock(root, { io, namespaceProofs, self: owner, attempted })
       assessment = attempt.assessment
       if (attempt.reclaimed) { reclaims.push(attempt.record); continue }
       await new Promise((done) => setTimeout(done, Math.min(10, Math.max(0, deadlineAt - Date.now()))))
@@ -376,7 +469,7 @@ export async function withAdmissionLock(root, action, { deadlineAt = Date.now() 
     admissionCheck(deadlineAt, signal)
     return result
   } catch (error) { failed = true; throw error }
-  finally { try { releaseOwnedDirectory(lock, owner, io) } catch (error) { if (!failed) throw error } }
+  finally { try { releaseOwnedFile(lock, ownerText, io) } catch (error) { if (!failed) throw error } }
 }
 
 export function assertDashboardPlaywrightFacts(facts, root = CI_ROOT) {

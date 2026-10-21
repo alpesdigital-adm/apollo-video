@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
-import { cpSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assertOwnedRoot, readRegistry, registryLock, writeRegistry, digest, jsonDigest,
-  readAuthorityIdentitySync, identityKey, sourceFingerprint, budget } from './perception-addon-registry.mjs'
+  readAuthorityIdentitySync, identityKey, sourceFingerprint, budget,
+  namespaceEmptyProof, assessLockLeftover, parseLockLeftoverName } from './perception-addon-registry.mjs'
 import { readLinuxProcessIdentity } from './run-perception-ci.mjs'
 import { prepareCgroupCleanup, removeArchivedCgroups, cgroupControlledCaseAccepted } from './perception-consumer-cgroup.mjs'
 
@@ -68,6 +69,38 @@ export function namespaceOwnerClosed(owner, reports) {
   assert.equal(report.postflight?.backendCount, 0)
   return true
 }
+// Host-side proofs that a private PID namespace is EMPTY, from the supervisor's own authenticated
+// receipts (the same evidence `namespaceOwnerClosed` demands of every namespace owner).
+export function readNamespaceProofs(root, env = process.env) {
+  const proofs = []
+  let names
+  try { names = readdirSync(join(root, 'receipts')) } catch { return proofs }
+  for (const name of names) {
+    if (proofs.length >= 64 || !/^namespace-perception-namespace-[a-f0-9-]+\.json$/.test(name)) continue
+    try {
+      const path = join(root, 'receipts', name), metadata = lstatSync(path)
+      if (!metadata.isFile() || metadata.uid !== process.getuid() || metadata.size > 16777216) continue
+      const bytes = readFileSync(path)
+      const proof = namespaceEmptyProof(JSON.parse(bytes.toString('utf8')), { path: `receipts/${name}`, sha256: digest(bytes) }, { sourceCommit: env.GITHUB_SHA })
+      if (proof) proofs.push(proof)
+    } catch { /* An unreadable receipt is not a proof. */ }
+  }
+  return proofs
+}
+// Exact admission-lock artifacts (lock, reclaim mutex, link staging files, tombstones) are removed only when their
+// creator is provably gone (dead here, or inside a namespace the host supervisor proved empty); otherwise the root is
+// retained as evidence, as for any unknown file. Returns false for names that are not admission-lock artifacts.
+export function sweepLockLeftover(item, relative, metadata, { namespaceProofs = [], report, io = {} }) {
+  const leftover = relative.includes('/') ? null : parseLockLeftoverName(relative)
+  if (!leftover) return false
+  const verdict = assessLockLeftover(item, leftover, io, { namespaceProofs })
+  assert.equal(verdict.verdict, 'stale', `Admission-lock leftover ${relative} has no proof that its creator is gone (${verdict.reason}); retain evidence`)
+  assert.ok(metadata.size <= 4096)
+  const sha256 = digest(readFileSync(item))
+  unlinkSync(item)
+  ;(report.admissionLockLeftovers ??= []).push({ name: relative, kind: leftover.kind, bytes: metadata.size, sha256, proof: verdict.proof })
+  return true
+}
 export async function cleanupPidfd(env = process.env) {
   assert.equal(process.platform, 'linux'); assert.ok(process.getuid() > 0)
   const root = env.APOLLO_PERCEPTION_PIDFD_ROOT
@@ -80,11 +113,13 @@ export async function cleanupPidfd(env = process.env) {
   const fail = (error) => report.errors.push({ name: error.name, code: error.code ?? null, message: String(error.message).slice(0, 512),
     ...(error.admissionLockDiagnostic ? { admissionLockDiagnostic: error.admissionLockDiagnostic } : {}) })
   let preparedCgroups = []
+  let namespaceProofs = []
   try {
+    namespaceProofs = readNamespaceProofs(root, env)
     await registryLock(root, async () => {
       const current = readRegistry(root, env)
       current.admission = 'closed'; writeRegistry(root, current)
-    }, { env })
+    }, { env, namespaceProofs })
     assert.deepEqual(sourceFingerprint(), registry.sourceFiles, 'Source changed since build')
     // Containment has its own authenticated scope even when a consumer's FAIL
     // prevents successful prerequisite deletion. Unknown scopes remain retained.
@@ -112,6 +147,7 @@ export async function cleanupPidfd(env = process.env) {
         else {
           assert.ok(metadata.isFile() && metadata.size <= 16777216)
           const relative = item.slice(root.length + 1)
+          if (sweepLockLeftover(item, relative, metadata, { namespaceProofs, report })) continue
           assert.ok(/^(registry\.json|build-owner\.json|provenance\.json|compiler\.(stdout|stderr|version)|perception-pidfd\.node)$/.test(relative) ||
             /^owners\/[a-f0-9]{64}\.json$/.test(relative) ||
             /^receipts\/pidfd-consumer-cgroup-gates-[a-f0-9-]+\.cases\.(?:json|sha256)$/.test(relative) ||
