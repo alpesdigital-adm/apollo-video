@@ -1960,24 +1960,37 @@ test('W70 a final worker refuses, before it renders anything, a chain that is no
 })
 
 test('W70 the final repository refuses, with a precise reason, a Version whose chain holds a Command that is not an exception Command', async () => {
-  const calls = []
-  const world = fakeOutputWorld({ workspaceId, projectId, versionId: projectVersionId, baseHash: '1'.repeat(64) })
-  const client = {
-    $queryRawUnsafe: (...args) => world.queryRawUnsafe(...args),
-    v2Project: { async findFirst() { return { locale: 'pt-BR', versions: [{ id: projectVersionId }], proxyReviews: [] } } },
-    v2ProjectVersion: { async findFirst({ where }) {
-      calls.push(where.id)
-      return { id: where.id, parentVersionId: 'version-final-export-parent', commandId: 'command-final-export-patch',
-        command: { id: 'command-final-export-patch', type: 'apply-review-patch', baseVersionId: 'version-final-export-parent' },
-        editPlanSnapshot: { contentJson: '{"id":"a","projectVersionId":"b"}' } }
-    } },
-    v2DirectorRun: { async findFirst() { return null } },
+  const parentVersionId = 'version-final-export-parent'
+  const clientFor = (calls, directed) => {
+    const world = fakeOutputWorld({ workspaceId, projectId, versionId: projectVersionId, baseHash: '1'.repeat(64) })
+    return {
+      $queryRawUnsafe: (...args) => world.queryRawUnsafe(...args),
+      v2Project: { async findFirst() { return { locale: 'pt-BR', versions: [{ id: projectVersionId }], proxyReviews: [] } } },
+      v2ProjectVersion: {
+        async findFirst({ where }) {
+          calls.push(where.id)
+          return { id: where.id, parentVersionId, commandId: 'command-final-export-patch',
+            command: { id: 'command-final-export-patch', type: 'apply-review-patch', baseVersionId: parentVersionId },
+            editPlanSnapshot: { contentJson: '{"id":"a","projectVersionId":"b"}' } }
+        },
+        // the project's line, read once when the walk stopped, to tell a refusal from a Version nothing directed
+        async findMany() { return [{ id: projectVersionId, parentVersionId }, { id: parentVersionId, parentVersionId: null }] },
+      },
+      v2DirectorRun: {
+        async findFirst() { return null },
+        async findMany() { return directed ? [{ resultVersionId: parentVersionId }] : [] },
+      },
+    }
   }
-  const repository = new PrismaProjectFinalExportRepository(client)
-  await assert.rejects(
-    () => repository.readApproval({ workspaceId, projectId, projectVersionId, projectVersionHash: '1'.repeat(64), outputSpecId: 'preset-9x16', outputVariantId: 'variant-final-export', requireCurrent: false }),
+  const approvalOf = (client) => new PrismaProjectFinalExportRepository(client).readApproval({ workspaceId, projectId, projectVersionId, projectVersionHash: '1'.repeat(64),
+    outputSpecId: 'preset-9x16', outputVariantId: 'variant-final-export', requireCurrent: false })
+  // a review patch on top of the Director's own Version: the Director quality exists and does not carry
+  const calls = []
+  await assert.rejects(() => approvalOf(clientFor(calls, true)),
     (error) => error.code === 'EDITORIAL_ACCEPTANCE_FAILED' && error.details.reason === 'director-run-not-inherited' &&
       error.details.inheritanceReason === 'command-not-inheriting' && error.details.commandType === 'apply-review-patch' && error.details.versionId === projectVersionId,
   )
   assert.deepEqual(calls, [projectVersionId], 'the walk stopped at the first Version: it never read past the Command it does not know')
+  // the same patch on a line nothing ever directed: no approval, as before inheritance existed (and nothing to say about inheritance)
+  assert.equal(await approvalOf(clientFor([], false)), null)
 })
