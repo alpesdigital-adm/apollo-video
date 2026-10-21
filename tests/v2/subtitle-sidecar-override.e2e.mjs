@@ -283,12 +283,17 @@ test('W69 tail: the sidecar of each output follows the cues its MP4 burned, thro
     assert.notEqual(baseline.wide.proxy.sha256, baseline.tall.proxy.sha256)
 
     /* ------------------------------------------------------------ a stale render is refused with its reason */
+    const beforeWideException = await head()
     const afterFirst = await override(WIDE, 'cue-1', [{ kind: 'text', text: 'Ação' }], 'text-1')
     const stale = await exportSidecar(WIDE, 'srt')
     assert.equal(stale.status, 409, serialize(stale.body))
     assert.equal(stale.error.code, 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH')
     assert.equal(stale.error.details?.reason, 'render-stale', serialize(stale.error))
-    assert.equal(stale.error.details?.renderedVersionId, world.headVersionId)
+    // the newest render of the 16:9 output is the one carried to the Version of the control (the Commands aimed at the 9:16 output carried it), not V0
+    assert.equal(stale.error.details?.renderedVersionId, beforeWideException.id)
+    const carriedWide = await db.v2ProjectProxyRenderOperation.findFirst({ where: { workspaceId: world.owner.workspaceId, projectId: world.projectId, projectVersionId: beforeWideException.id, outputVariantId: WIDE.variantId } })
+    assert.ok(carriedWide?.reusedFromOperationId, 'that render was carried, not made again')
+    assert.equal(carriedWide.outputArtifactId, baseline.wide.proxy.artifactId, 'and it is still the very MP4 of V0')
     assert.equal(stale.error.details?.requestedVersionId, afterFirst.version.id)
     note('stale-refused', { error: stale.error.code, reason: stale.error.details?.reason })
 
@@ -311,6 +316,11 @@ test('W69 tail: the sidecar of each output follows the cues its MP4 burned, thro
       assert.equal(again.data.sidecar.id, V0.tall[format].sidecar.id)
       assert.equal(again.data.sidecar.outputSha256, baseline.tall.proxy.sha256)
     }
+    // at the new Version the 9:16 output keeps the render it had (carried from its control, whose captions are all hidden): it draws no caption,
+    // so there is no sidecar to derive, and the refusal says so
+    const tallAtHead = await exportSidecar(TALL, 'srt', { projectVersionId: recompiled.versionId })
+    assert.equal(tallAtHead.status, 409, serialize(tallAtHead.body))
+    assert.equal(tallAtHead.error.details?.reason, 'no-rendered-cue')
     // two outputs, two MP4s, two RenderInputs, two variants
     assert.notEqual(edited.srt.sidecar.outputSha256, V0.tall.srt.sidecar.outputSha256)
     assert.notEqual(edited.srt.sidecar.renderInputHash, V0.tall.srt.sidecar.renderInputHash)

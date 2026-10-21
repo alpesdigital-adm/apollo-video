@@ -153,9 +153,10 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
     // What must not move: the previous Version (its row and its EditPlan snapshot) and the OTHER output's renders, reviews and approvals.
     const immutableFacts = async (versionId, siblingVariantId) => {
       const version = await db.v2ProjectVersion.findUniqueOrThrow({ where: { id: versionId }, include: { editPlanSnapshot: true } })
-      const siblingOperations = await db.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: world.owner.workspaceId, projectId: world.projectId, outputVariantId: siblingVariantId }, orderBy: { operationId: 'asc' } })
+      // What existed AT that Version: a render carried to a later Version (the untouched output keeps its render) is a new fact about the later Version, not a change of this one.
+      const siblingOperations = await db.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: world.owner.workspaceId, projectId: world.projectId, outputVariantId: siblingVariantId, version: { sequence: { lte: version.sequence } } }, orderBy: { operationId: 'asc' } })
       const siblingArtifacts = await db.v2MediaArtifact.findMany({ where: { id: { in: siblingOperations.map((operation) => operation.outputArtifactId) }, workspaceId: world.owner.workspaceId }, orderBy: { id: 'asc' } })
-      const siblingReviews = await db.v2ProxyReview.findMany({ where: { workspaceId: world.owner.workspaceId, projectId: world.projectId, proxyArtifactId: { in: siblingArtifacts.map((artifact) => artifact.id) } }, orderBy: { id: 'asc' } })
+      const siblingReviews = await db.v2ProxyReview.findMany({ where: { workspaceId: world.owner.workspaceId, projectId: world.projectId, proxyArtifactId: { in: siblingArtifacts.map((artifact) => artifact.id) }, projectVersion: { sequence: { lte: version.sequence } } }, orderBy: { id: 'asc' } })
       return serialize({ version, siblingOperations: siblingOperations.map((operation) => operation.operationId), siblingArtifacts: siblingArtifacts.map((artifact) => [artifact.id, artifact.sha256]), siblingReviews: siblingReviews.map((review) => [review.id, review.reviewHash, review.revision, review.warningsAcknowledged]), decisions: await decisionCount() })
     }
     const cueMid = (cue) => Math.floor((cue.startFrame + cue.endFrame) / 2)
@@ -307,7 +308,10 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       assert.equal((await db.v2EditCommand.findUniqueOrThrow({ where: { id: afterFix.commandId } })).type, 'apply-subtitle-segment-override')
       const fixProxy = await proxyOf(afterFix.id, entry.variantId)
       assert.ok(fixProxy, 'the output was rendered again')
-      assert.equal(await proxyOf(afterFix.id, tall.variantId), null, 'the vertical output was not rendered')
+      const tallCarriedOp = await db.v2ProjectProxyRenderOperation.findFirst({ where: { workspaceId: world.owner.workspaceId, projectId: world.projectId, projectVersionId: afterFix.id, outputVariantId: tall.variantId } })
+      assert.ok(tallCarriedOp?.reusedFromOperationId, 'the vertical output was not rendered again: its render was CARRIED to the new Version, recorded as taken from the operation that had it')
+      assert.equal(tallCarriedOp.outputArtifactId, tall.proxy.artifactId, 'the artifact of its first render')
+      assert.equal((await proxyOf(afterFix.id, tall.variantId)).sha256, tall.proxy.sha256, 'and it is the very same MP4')
       assert.equal(await immutableFacts(beforeFix.id, tall.variantId), beforeFixFacts, 'the previous Version and the vertical output are untouched')
       assert.equal(await immutableFacts(before.id, tall.variantId), beforeFacts, 'the Version before the other writer is untouched too')
       const fixedReview = await reviewOf(entry.variantId, afterFix.id)
@@ -358,8 +362,10 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       assert.equal(command.type, type, `${label}: the Command type`)
       assert.deepEqual(JSON.parse(command.scopeJson).outputVariantIds, [entry.variantId], `${label}: the Command names the output it is for`)
       const operations = await db.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: world.owner.workspaceId, projectId: world.projectId, projectVersionId: current.id } })
-      assert.ok(operations.every((operation) => operation.outputVariantId === entry.variantId) && (!rendered || operations.length >= 1), `${label}: every render of the new Version is for ${entry.key} only`)
-      assert.equal(await proxyOf(current.id, sibling.variantId), null, `${label}: the other output was not rendered again`)
+      const fresh = operations.filter((operation) => operation.reusedFromOperationId === null)
+      assert.ok(fresh.every((operation) => operation.outputVariantId === entry.variantId) && (!rendered || fresh.length >= 1), `${label}: every render made for the new Version is for ${entry.key} only`)
+      const siblingOperation = operations.find((operation) => operation.outputVariantId === sibling.variantId)
+      assert.ok(siblingOperation === undefined || siblingOperation.reusedFromOperationId !== null, `${label}: the other output was never rendered again (at most its render was carried)`)
       assert.equal(await immutableFacts(beforeVersion.id, sibling.variantId), beforeFacts, `${label}: the previous Version and the other output's renders, reviews and approvals are untouched`)
       if (type === 'apply-subtitle-segment-override') assert.deepEqual(await plansOf(current.id), beforePlans, `${label}: both outputs keep the very same reframe plan record on the new Version`)
       assert.equal(await decisionCount(), 0, `${label}: nothing was accepted`)
@@ -494,14 +500,15 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
     /* ====== 9:16 : render the current Version, pin with an expired session, reframe set/reset, hide + cancel the recompile ====== */
     {
       const entry = VARIANTS[0]
-      await openOutput(entry, { mayBeUnrendered: true })
-      assert.ok(await page.getByTestId('issue-render-current').isVisible(), 'the vertical output has no render of the current Version yet')
+      await openOutput(entry)
       const current = await head()
-      assert.equal(await proxyOf(current.id, entry.variantId), null)
+      // The vertical output was never touched by anything done to the wide one: its render was carried to the current Version, so there is nothing to render
+      // and the editor does not offer it.
+      assert.equal(await page.getByTestId('issue-render-current').count(), 0, 'the vertical output needs no render of the current Version')
+      const carriedTall = await db.v2ProjectProxyRenderOperation.findFirst({ where: { workspaceId: world.owner.workspaceId, projectId: world.projectId, projectVersionId: current.id, outputVariantId: entry.variantId } })
+      assert.ok(carriedTall?.reusedFromOperationId && carriedTall.outputArtifactId === tall.proxy.artifactId, 'and its render of the current Version is the carried one: the artifact of its first render')
       const wideFacts = await immutableFacts(current.id, siblingOf(entry.variantId).variantId)
-      await page.getByTestId('issue-render-current').click()
-      await waitFor('the vertical output is rendered for the current Version', async () => (await proxyOf(current.id, entry.variantId)) !== null)
-      assert.equal(await immutableFacts(current.id, siblingOf(entry.variantId).variantId), wideFacts, 'rendering the vertical output touched nothing of the wide one')
+      assert.equal(await immutableFacts(current.id, siblingOf(entry.variantId).variantId), wideFacts, 'looking at the vertical output touched nothing of the wide one')
       const tallNow = await proxyOf(current.id, entry.variantId)
       await waitFor('the vertical review reaches the editor', async () => (await page.locator('[data-testid="issue-chip"]').count()) > 0, { timeoutMs: 120_000 })
       const tallReview = await reviewOf(entry.variantId, current.id)
@@ -622,7 +629,11 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       await fillForm({ visible: false })
       pump.pause()
       await page.getByTestId('caption-apply').click()
-      const hiddenTall = await waitFor('the hide Command is committed', async () => { const version = await head(); return version.sequence === snap.beforeVersion.sequence + 1 ? version : null })
+      const hiddenTall = await waitFor('the hide Command is committed', async () => { const version = await head(); return version.sequence === snap.beforeVersion.sequence + 1 ? version : null }, { timeoutMs: 60_000 }).catch(async (error) => {
+        await page.screenshot({ path: join(evidenceDir, 'w68-diagnostic-tall-hide.png'), fullPage: true }).catch(() => undefined)
+        const seen = await page.evaluate(() => ({ failure: document.querySelector('[data-testid="issue-command-failure"]')?.textContent ?? null, kind: document.querySelector('[data-testid="issue-command-failure"]')?.getAttribute('data-failure-kind') ?? null, text: document.body.innerText.slice(0, 1200) })).catch(() => null)
+        throw new Error(`${error.message} :: the editor said ${serialize(seen)} :: head sequence ${(await head()).sequence} (was ${snap.beforeVersion.sequence})`)
+      })
       await page.locator(`[data-testid="issue-applied"][data-command-id="${hiddenTall.commandId}"]`).waitFor()
       lastApplied = hiddenTall.commandId
       await afterCommand({ entry, ...snap, label: 'tall hide', type: 'apply-subtitle-segment-override', rendered: false })
@@ -636,7 +647,8 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       pump.resume()
       await delay(6_000)
       assert.equal(await proxyOf(hiddenTall.id, entry.variantId), null, 'a canceled recompile promoted no artifact')
-      const canceledOps = await db.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: world.owner.workspaceId, projectId: world.projectId, projectVersionId: hiddenTall.id } })
+      // (the wide output's render, which the Command did not touch, was carried to this Version: not a render of its own)
+      const canceledOps = await db.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: world.owner.workspaceId, projectId: world.projectId, projectVersionId: hiddenTall.id, reusedFromOperationId: null } })
       assert.equal(canceledOps.length, 1)
       assert.equal((await db.v2PublicOperation.findUniqueOrThrow({ where: { id: canceledOps[0].operationId } })).status, 'canceled')
       note('tall-cancel', { operation: canceledOps[0].operationId, artifact: null })
