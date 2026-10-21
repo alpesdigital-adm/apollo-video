@@ -1,6 +1,7 @@
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { FormatSubjectEvidenceV1 } from '../../domain/format-quality-critic.ts'
+import type { DirectorRunInheritance } from '../../domain/director-run-inheritance.ts'
 import type { OutputConsumptionSealV3 } from '../../domain/output-consumption.ts'
 import type { PerceptionTimeline } from '../../domain/perception-timeline.ts'
 import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
@@ -96,6 +97,12 @@ export interface ProjectProxyRenderSource {
   originalFileName: string
   uploadReceivedAt: string
   criticIssues: readonly Readonly<ProxyQualityIssue>[]
+  /**
+   * W70 readiness. Present when `criticIssues` are the issues of a DirectorRun of an ANCESTOR Version, reached through exception Commands
+   * only (a subtitle segment exception, a manual reframe): the Versions and Commands the Director's quality went through. Absent when the
+   * Version is the Director's own (or has no Director run at all).
+   */
+  directorInheritance?: Readonly<DirectorRunInheritance>
   rangeReuse?: Readonly<ProjectProxyRangeReuse>
   unchangedReuse?: Readonly<ProjectProxyUnchangedReuse>
   unchangedReuseRequired?: true

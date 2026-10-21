@@ -6196,9 +6196,9 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.final-exports.enqueue',
-    version: '1.1.0',
+    version: '1.2.0',
     title: 'Approve and export current project final',
-    description: 'Records explicit approval and creates a durable final render operation bound to the exact ProjectVersion, DirectorRun, QualityReport, rights state and versioned output preset. An optional variantId (stable State variant id) names the output; it may be omitted only when the project has exactly one output, and format must equal the aspect ratio of that output. A project cannot address two outputs of one aspect ratio apart (output-variant-ambiguous).',
+    description: 'Records explicit approval and creates a durable final render operation bound to the exact ProjectVersion, DirectorRun, QualityReport, rights state and versioned output preset. An optional variantId (stable State variant id) names the output; it may be omitted only when the project has exactly one output, and format must equal the aspect ratio of that output. A project cannot address two outputs of one aspect ratio apart (output-variant-ambiguous). A ProjectVersion made by a subtitle-segment exception or a manual reframe of one output has no DirectorRun of its own: it inherits the quality of the DirectorRun of the ancestor it descends from, walking parentVersionId back while every intermediate Version was made by one of those two Commands and kept the EditPlan of the ancestor; the DirectorRun row is never copied, and the Versions and Commands the quality went through are part of the input hash and the receipt of the final. A chain that contains any other Command, or an EditPlan that moved, is refused with EDITORIAL_ACCEPTANCE_FAILED (details.reason director-run-not-inherited, with details.inheritanceReason, versionId and commandType), and a chain that moved after the operation was queued is refused with details.reason director-inheritance-moved.',
     exposure: 'public',
     operationKind: 'job',
     authMode: 'required',

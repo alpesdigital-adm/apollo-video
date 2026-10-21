@@ -84,7 +84,7 @@ test('proxy renders accept an optional body that only names the output, and stay
 
 test('final exports take an optional variantId; the preset format stays required and never selects the output', () => {
   const enqueue = capability('apollo.projects.final-exports.enqueue')
-  assert.equal(enqueue.version, '1.1.0')
+  assert.equal(enqueue.version, '1.2.0')
   assert.equal(enqueue.inputSchemaRef, 'apollo://schemas/project-final-export-request/v2')
   assert.equal(enqueue.requestBodyRequired, true)
   const schema = getPublicSchema(enqueue.inputSchemaRef).schema

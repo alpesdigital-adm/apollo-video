@@ -8,7 +8,9 @@ import { evaluateAssetUse } from '../../domain/asset-rights.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import type { OutputConsumptionPurpose } from '../../domain/output-consumption.ts'
+import type { DirectorRunInheritance } from '../../domain/director-run-inheritance.ts'
 import { requirePersistedOutputConsumptionV3 } from './output-state-consumption.ts'
+import { readEffectiveDirectorRun } from './director-run-inheritance.ts'
 
 type ProxySourceQuery = {
   workspaceId: string; projectId: string; projectVersionId?: string; editPlanSnapshotId?: string;
@@ -44,11 +46,29 @@ export async function queryProxySourceProject(client: PrismaClient | Prisma.Tran
     throw new DomainError('PRECONDITION_REQUIRED', 'The consumed output carries no aspect ratio of its own',
       { reason: 'output-not-consumable', purpose, outputStateId: consumption.state.document.id })
   }
+  // W70 readiness. A Version made by an exception Command (subtitle segment, manual reframe) has no DirectorRun of its own; the quality the
+  // Director certified for the ancestor it descends from, through allowed exception Commands only, is the one that describes it. Looked up
+  // only when the Version has no run itself, and never copied: the row is the ancestor's.
+  const version = project.versions[0]
+  const inheritedDirectorRun = version && version.directorRunAsResult === null
+    ? await readEffectiveDirectorRun(client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: version.id })
+    : null
   return {
     ...project,
     format: consumption.aspectRatio,
     outputConsumption: Object.freeze({ seal: consumption.seal, sealHash: consumption.sealHash }),
+    inheritedDirectorRun,
   }
+}
+
+/**
+ * The DirectorRun whose quality the consumed Version carries: its own, or the ancestor's reached through allowed exception Commands. The
+ * inheritance receipt is present exactly when the run is not the Version's own.
+ */
+export function effectiveDirectorRunOf(project: NonNullable<Awaited<ReturnType<typeof queryProxySourceProject>>>) {
+  const version = project.versions[0]
+  if (version?.directorRunAsResult) return { run: version.directorRunAsResult, inheritance: null as DirectorRunInheritance | null }
+  return project.inheritedDirectorRun ?? null
 }
 
 function findProxySourceProject(client: PrismaClient | Prisma.TransactionClient, input: ProxySourceQuery) {
@@ -223,6 +243,7 @@ export function hydrateProxySource(
     typeof (artifactBody as Record<string, unknown>).artifactKey !== 'string'
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy source is inconsistent')
   const renderSources = hydrateProxyRenderSources(project, editPlan, evaluatedAt)
+  const directed = effectiveDirectorRunOf(project)
   if (!renderSources.some((item) => item.artifactId === media.artifactId)) {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',
@@ -244,7 +265,8 @@ export function hydrateProxySource(
     renderSources: Object.freeze(renderSources),
     originalFileName: media.originalFileName,
     uploadReceivedAt: (media.upload?.createdAt ?? media.createdAt).toISOString(),
-    criticIssues: parseProxySourceCriticIssues(version.directorRunAsResult?.qualitySnapshot.contentJson),
+    criticIssues: parseProxySourceCriticIssues(directed?.run.qualitySnapshot.contentJson),
+    ...(directed?.inheritance ? { directorInheritance: directed.inheritance } : {}),
   })
 }
 

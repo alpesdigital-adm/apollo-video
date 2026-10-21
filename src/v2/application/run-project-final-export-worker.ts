@@ -9,6 +9,7 @@ import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import { createRenderInputSpec } from '../domain/render-input.ts'
 import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import { createDirectedAudioTimelineHash } from '../domain/director-run.ts'
+import { directorRunInheritanceEquals, directorRunInheritanceIdentity } from '../domain/director-run-inheritance.ts'
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
 import type { ArtifactSourceMaterializer, VerifiedMediaStorage } from './ports/media-ingest.ts'
@@ -224,6 +225,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         projectVersionHash: context.projectVersionHash,
         editPlanSnapshotId: context.editPlanSnapshotId,
         directorRunId: context.directorRunId,
+        // The chain of exception Versions the Director's quality was inherited through when this operation was queued (null: the Director's
+        // own Version). The repository re-derives it and refuses one that moved, with its precise reason.
+        directorInheritance: context.directorInheritance ?? null,
         qualitySnapshotId: context.qualitySnapshotId,
         qualitySnapshotHash: context.qualitySnapshotHash,
         proxyReviewId: context.proxyReviewId,
@@ -236,6 +240,12 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         requireCurrent: true,
       })
       if (!source) throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Immutable approved final export source disappeared')
+      // W70 readiness. The chain of exception Versions the Director's quality reached this Version through is the one the operation was queued
+      // with, or there is no operation: checked here on the source the repository returned, whatever the repository compared itself.
+      if (!directorRunInheritanceEquals(context.directorInheritance ?? null, source.directorInheritance ?? null)) {
+        throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'The Director run inheritance of the sealed Version is not the chain the final export was queued with',
+          { reason: 'director-inheritance-moved', versionId: context.projectVersionId })
+      }
       // The output this export was approved for is the one the operation persisted; a source sealed to another output is no source.
       if (context.outputVariantId !== undefined && context.outputVariantId !== sourceOutputVariantId(source)) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Immutable final export source is not the output its operation was approved for')
@@ -285,6 +295,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         outputConsumptionSealHash: source.outputConsumption.sealHash,
         ...(source.reframeRecordHash ? { reframeRecordHash: source.reframeRecordHash } : {}),
         ...(source.subtitleOverridesHash ? { subtitleOverridesHash: source.subtitleOverridesHash } : {}),
+        ...(source.directorInheritance ? { directorInheritance: directorRunInheritanceIdentity(source.directorInheritance) } : {}),
       })
       if (
         immutableInputHash !== context.inputHash ||
@@ -661,6 +672,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             projectVersionHash: context.projectVersionHash,
             editPlanSnapshotId: context.editPlanSnapshotId,
             directorRunId: context.directorRunId,
+            // W70 readiness. Present when the Director's quality was inherited through exception Commands: the Version the run produced and
+            // every Version and Command it went through. Absent for the Director's own Version, which keeps every earlier receipt's shape.
+            ...(source.directorInheritance ? { directorInheritance: directorRunInheritanceIdentity(source.directorInheritance) } : {}),
             qualitySnapshotId: context.qualitySnapshotId,
             qualitySnapshotHash: context.qualitySnapshotHash,
             proxyReviewId: context.proxyReviewId,

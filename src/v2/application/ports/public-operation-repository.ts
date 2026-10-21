@@ -13,6 +13,7 @@ import type {
   SyntheticProductionRenderKind,
 } from '../../domain/synthetic-production-render.ts'
 import type { RenderInputSpecV1 } from '../../domain/render-input.ts'
+import type { DirectorRunInheritance } from '../../domain/director-run-inheritance.ts'
 
 export interface ArtifactRenderOperationContext {
   kind: 'artifact-render'
@@ -109,6 +110,11 @@ export interface ProjectFinalExportOperationContext {
   projectVersionHash: string
   editPlanSnapshotId: string
   directorRunId: string
+  /**
+   * W70 readiness. The Versions and Commands the Director's quality went through from `projectVersionId` back to the Version `directorRunId`
+   * produced (exception Commands only). Absent when `projectVersionId` is the Director's own Version.
+   */
+  directorInheritance?: Readonly<DirectorRunInheritance>
   qualitySnapshotId: string
   qualitySnapshotHash: string
   proxyReviewId: string

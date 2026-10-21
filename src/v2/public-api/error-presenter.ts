@@ -1,6 +1,7 @@
 import type { DomainError } from '../domain/errors.ts'
 import { PUBLIC_ERROR_CATALOG } from './public-error-catalog.ts'
 import { PUBLISHED_CONSUMPTION_REASONS } from '../domain/output-consumption.ts'
+import { DIRECTOR_INHERITANCE_BLOCK_REASONS } from '../domain/director-run-inheritance.ts'
 
 function boundedStrings(value: unknown, maximum: number, maximumLength = 256): string[] | null {
   if (
@@ -176,6 +177,26 @@ function presentSidecarMismatch(details: Readonly<Record<string, unknown>>) {
   return presented
 }
 
+/**
+ * W70 readiness. The reasons a final export refuses a Version whose Director quality it cannot inherit (`EDITORIAL_ACCEPTANCE_FAILED`):
+ * the Version and Command that stopped the walk, so a client can say which exception or edit needs a new Director run.
+ */
+const PUBLISHED_DIRECTOR_INHERITANCE_REASONS: ReadonlySet<string> = new Set(['director-run-not-inherited', 'director-inheritance-moved'])
+const PUBLISHED_INHERITANCE_BLOCKS: ReadonlySet<string> = new Set(DIRECTOR_INHERITANCE_BLOCK_REASONS)
+const INHERITANCE_COMMAND_TYPE = /^[a-z][a-z0-9-]{1,79}$/
+
+function presentDirectorInheritanceRefusal(details: Readonly<Record<string, unknown>>) {
+  if (typeof details.reason !== 'string' || !PUBLISHED_DIRECTOR_INHERITANCE_REASONS.has(details.reason)) return undefined
+  const presented: Record<string, string> = { reason: details.reason }
+  if (typeof details.inheritanceReason === 'string' && PUBLISHED_INHERITANCE_BLOCKS.has(details.inheritanceReason)) presented.inheritanceReason = details.inheritanceReason
+  for (const key of ['versionId', 'commandId'] as const) {
+    const value = details[key]
+    if (typeof value === 'string' && SIDECAR_ID.test(value)) presented[key] = value
+  }
+  if (typeof details.commandType === 'string' && INHERITANCE_COMMAND_TYPE.test(details.commandType)) presented.commandType = details.commandType
+  return presented
+}
+
 function presentPreconditionReason(details: Readonly<Record<string, unknown>>) {
   return typeof details.reason === 'string' && PUBLISHED_PRECONDITION_REASONS.has(details.reason)
     ? { reason: details.reason }
@@ -195,7 +216,9 @@ export function presentPublicDomainError(error: DomainError, requestId: string) 
             ? presentStalePair(error.details)
             : error.code === 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH'
               ? presentSidecarMismatch(error.details)
-              : undefined
+              : error.code === 'EDITORIAL_ACCEPTANCE_FAILED'
+                ? presentDirectorInheritanceRefusal(error.details)
+                : undefined
   const conflict =
     error.code === 'VERSION_CONFLICT'
       ? presentVersionConflict(error.details.conflict)

@@ -4309,6 +4309,9 @@ model V2ProjectFinalExportOperation {
   projectVersionHash        String   @db.Char(64)
   editPlanSnapshotId        String   @db.VarChar(128)
   directorRunId             String   @db.VarChar(128)
+  // W70 readiness. The sealed `director-run-inheritance/v1` document when directorRunId is the run of an ANCESTOR of projectVersionId reached
+  // through exception Commands only; null when the exported Version is the Director's own.
+  directorInheritanceJson   String?  @db.Text
   qualitySnapshotId         String   @db.VarChar(128)
   qualitySnapshotHash       String   @db.Char(64)
   proxyReviewId             String   @db.VarChar(128)

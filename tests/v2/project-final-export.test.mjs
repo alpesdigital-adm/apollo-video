@@ -18,6 +18,7 @@ import { artifactOutputStoragePrefix } from '../../src/v2/domain/artifact-storag
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createRenderPlacementPlan, validateRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
 import { createRenderReframePlan } from '../../src/v2/domain/render-reframe-plan.ts'
+import { createDirectorRunInheritance, directorRunInheritanceIdentity } from '../../src/v2/domain/director-run-inheritance.ts'
 import { createQualityReport, resolveStrategicRubric } from '../../src/v2/domain/strategic-rubric.ts'
 import { SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
 import { parseFinalExportQuality, PrismaProjectFinalExportRepository } from '../../src/v2/infrastructure/prisma/project-final-export-repository.ts'
@@ -82,13 +83,14 @@ test('final export rejects unknown, legacy and hash-altered face-safety claims',
     $queryRawUnsafe: (...args) => approvalWorld.queryRawUnsafe(...args),
     v2Project: { async findFirst() { return {
       locale: 'pt-BR', versions: [{ id: 'result-version' }],
-      directorRuns: [{ id: 'director-run', baseVersionId: 'input-version',
-        qualitySnapshotId: 'quality-snapshot', objective: 'discovery',
-        rubricRef: `${rubric.id}/v${rubric.version}`,
-        qualitySnapshot: { schemaVersion: 3, contentJson: JSON.stringify(verified),
-          contentHash: calculateVersionHash(verified) } }],
       proxyReviews: [{ id: 'proxy-review', reviewHash: 'a'.repeat(64), proxyArtifactId: 'proxy-artifact' }],
     } } },
+    // The Director run is the Version's own (W70 readiness reads it through the run table, by the Version it produced).
+    v2DirectorRun: { async findFirst() { return { id: 'director-run', baseVersionId: 'input-version',
+      qualitySnapshotId: 'quality-snapshot', objective: 'discovery',
+      rubricRef: `${rubric.id}/v${rubric.version}`,
+      qualitySnapshot: { schemaVersion: 3, contentJson: JSON.stringify(verified),
+        contentHash: calculateVersionHash(verified) } } } },
   })
   repository.perceptionEvidence = { async read(input) { observed.push(input); return { modality: 'ocr' } } }
   const request = { workspaceId, projectId: 'project-controlled', projectVersionId: 'result-version',
@@ -339,7 +341,7 @@ test('final export enqueue fails before allocation when catalog promotion rights
     && error.details.requiredUse === 'editorial-reuse')
 })
 
-function createOperations(inputHash = finalInputHash()) {
+function createOperations(inputHash = finalInputHash(), contextExtra = {}) {
   let operation = createQueuedPublicOperation({
     id: 'operation-final-export-test',
     workspaceId,
@@ -374,12 +376,14 @@ function createOperations(inputHash = finalInputHash()) {
     },
     approval: { actorType: 'api-client', actorId: 'client-final-export-test', approvedAt: '2026-07-19T01:00:00.000Z' },
     originalFileName: 'gravacao-bruta-final-1080x1920.mp4',
+    ...contextExtra,
   })
   let lease
   const matches = (input) => lease && lease.owner === input.leaseOwner && lease.attempt === input.attempt && Date.parse(lease.expiresAt) > Date.parse(input.now)
   const record = () => ({ operation, context })
   return {
     get operation() { return operation },
+    inputHash,
     repository: {
       async claimNext(input) {
         assert.equal(input.type, 'project-final-export')
@@ -488,7 +492,7 @@ function workerDependencies(
           calls.persisted += 1
           assert.equal(input.manifest.recipe.id, 'editorial-final')
           assert.deepEqual(input.lineageIds, [
-            `lineage-${createHash('sha256').update(`${workspaceId}:${finalInputHash()}:manifest-final-output:final:${sourceArtifactId}:0`).digest('hex')}`,
+            `lineage-${createHash('sha256').update(`${workspaceId}:${operations.inputHash}:manifest-final-output:final:${sourceArtifactId}:0`).digest('hex')}`,
           ])
           assert.equal(input.manifest.schemaVersion, 'media-artifact-manifest/v4')
           assert.equal(input.manifest.recipe.parametersRef, input.recipeParameters.ref)
@@ -1185,8 +1189,11 @@ test('S3-MO the approval of a final export is the proxy review of THAT output: t
     $queryRawUnsafe: (...args) => world.queryRawUnsafe(...args),
     v2Project: { async findFirst(query) {
       lookups.push(query.select.proxyReviews.where)
-      return { locale: 'pt-BR', versions: [{ id: projectVersionId }], directorRuns: [], proxyReviews: [] }
+      return { locale: 'pt-BR', versions: [{ id: projectVersionId }], proxyReviews: [] }
     } },
+    // No Director run is reachable from this Version (it is the root of its line): the approval is looked up no further.
+    v2DirectorRun: { async findFirst() { return null } },
+    v2ProjectVersion: { async findFirst() { return null } },
   })
   const request = { workspaceId, projectId, projectVersionId, projectVersionHash: '1'.repeat(64), outputSpecId: 'output-spec-mo', requireCurrent: true }
   assert.equal(await repositoryOn(moWorld()).readApproval({ ...request, outputVariantId: 'variant-tall' }), null)
@@ -1468,11 +1475,11 @@ function approvalRepository(report, rubric) {
     $queryRawUnsafe: (...args) => world.queryRawUnsafe(...args),
     v2Project: { async findFirst() { return {
       locale: 'pt-BR', versions: [{ id: 'result-version' }],
-      directorRuns: [{ id: 'director-run', baseVersionId: 'input-version', qualitySnapshotId: 'quality-snapshot', objective: 'discovery',
-        rubricRef: `${rubric.id}/v${rubric.version}`,
-        qualitySnapshot: { schemaVersion: 3, contentJson: JSON.stringify(report), contentHash: calculateVersionHash(report) } }],
       proxyReviews: [{ id: 'proxy-review', reviewHash: 'a'.repeat(64), proxyArtifactId: 'proxy-artifact' }],
     } } },
+    v2DirectorRun: { async findFirst() { return { id: 'director-run', baseVersionId: 'input-version', qualitySnapshotId: 'quality-snapshot', objective: 'discovery',
+      rubricRef: `${rubric.id}/v${rubric.version}`,
+      qualitySnapshot: { schemaVersion: 3, contentJson: JSON.stringify(report), contentHash: calculateVersionHash(report) } } } },
   })
   repository.perceptionEvidence = { async read(input) { observed.push(input); return null } }
   return { repository, observed, world, request: { workspaceId, projectId: 'project-controlled', projectVersionId: 'result-version',
@@ -1508,7 +1515,7 @@ test('W65b the gate still refuses everything the Director report does not honest
   const forged = approvalRepository({ ...failed.report, status: 'review-required' }, failed.rubric)
   await assert.rejects(forged.repository.readApproval(forged.request), (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT')
   const wrongRun = approvalRepository(report, rubric)
-  const stale = new PrismaProjectFinalExportRepository({ $queryRawUnsafe: (...args) => wrongRun.world.queryRawUnsafe(...args), v2Project: { async findFirst() { return { locale: 'pt-BR', versions: [], directorRuns: [], proxyReviews: [] } } } })
+  const stale = new PrismaProjectFinalExportRepository({ $queryRawUnsafe: (...args) => wrongRun.world.queryRawUnsafe(...args), v2Project: { async findFirst() { return { locale: 'pt-BR', versions: [], proxyReviews: [] } } } })
   assert.equal(await stale.readApproval(wrongRun.request), null, 'no matching version, run or ready-for-final proxy review')
 })
 
@@ -1850,4 +1857,102 @@ test('W68 the subtitle exceptions are part of the final input: none keeps every 
   assert.equal(outcome.status, 'failed')
   assert.equal(refused.calls.rendered, 0, 'nothing was rendered')
   assert.equal(queued.operation.error.code, 'invalid_render_input')
+})
+
+const inheritedThrough = (...links) => createDirectorRunInheritance({ directorResultVersionId: 'version-final-export-director', links })
+const SUBTITLE_LINK = Object.freeze({ versionId: projectVersionId, commandId: 'command-final-export-subtitle' })
+
+test('W70 the Director run an exception Version inherited is part of the final input and of its receipt: none keeps every earlier identity, another chain addresses another final', async () => {
+  const one = inheritedThrough(SUBTITLE_LINK)
+  const another = inheritedThrough({ versionId: projectVersionId, commandId: 'command-final-export-reframe' })
+  const longer = inheritedThrough(SUBTITLE_LINK, { versionId: 'version-final-export-earlier', commandId: 'command-final-export-earlier' })
+  const enqueue = async (change, key) => {
+    let created
+    await enqueueProjectFinalExportService({
+      projects: { async readApprovedCurrentSource() { return { ...approvedSource(), ...change } } },
+      rights: { async findCurrent() { return { snapshot: rightsSnapshot(), revision: 'revision-1' } } },
+      operations: { async findReplay() { return null }, async createOrReplay(input) { created = input; return { ...input, replayed: false } } },
+      colorPipelines,
+      clock: () => new Date('2026-07-19T01:05:00.000Z'),
+      createId: (kind) => `${kind}-final-export-inherited`,
+    })({ workspaceId, projectId, projectVersionId, projectVersionHash: '1'.repeat(64), format: '9:16', approval: { approved: true }, actor: exportActor(), idempotencyKey: key })
+    return created.context
+  }
+  const none = await enqueue({}, 'final-inherited-none')
+  const withOne = await enqueue({ directorInheritance: one }, 'final-inherited-one')
+  const withAnother = await enqueue({ directorInheritance: another }, 'final-inherited-another')
+  const withLonger = await enqueue({ directorInheritance: longer }, 'final-inherited-longer')
+  assert.equal(none.inputHash, finalInputHash(), 'the Director own Version is identified exactly as it always was')
+  assert.equal(Object.hasOwn(none, 'directorInheritance'), false)
+  const expected = (inheritance) => finalInputHash(true, approvedSource(), FINAL_CAPTION_CERTIFICATION_POLICY_SHA256, { directorInheritance: directorRunInheritanceIdentity(inheritance) })
+  assert.equal(withOne.inputHash, expected(one), 'the hash is the independently computed one: Director Version, every Version and every Command')
+  assert.equal(withAnother.inputHash, expected(another))
+  assert.equal(withLonger.inputHash, expected(longer))
+  assert.equal(new Set([none.inputHash, withOne.inputHash, withAnother.inputHash, withLonger.inputHash]).size, 4, 'a different Command or one more Version in the chain is another final')
+  assert.deepEqual(withOne.directorInheritance, one, 'the sealed chain is part of the operation context, for the worker to re-check')
+  assert.equal(withOne.directorRunId, 'director-run-final-export-test', 'the run is the row of the ancestor, never copied')
+})
+
+test('W70 a final worker renders an inherited Director quality, hands the repository the chain it was queued with, and writes it into the receipt', async () => {
+  const inheritance = inheritedThrough(SUBTITLE_LINK)
+  const queued = createOperations(finalInputHash(true, approvedSource(), FINAL_CAPTION_CERTIFICATION_POLICY_SHA256, { directorInheritance: directorRunInheritanceIdentity(inheritance) }), { directorInheritance: inheritance })
+  const world = workerDependencies(queued)
+  const asked = []
+  const receipts = []
+  serveSource(world.dependencies, () => ({ directorInheritance: inheritance }))
+  const serve = world.dependencies.projects.readImmutableApprovedSource
+  world.dependencies.projects.readImmutableApprovedSource = async (input) => { asked.push(input); return serve(input) }
+  const persist = world.dependencies.artifacts.persistOrReplay
+  world.dependencies.artifacts.persistOrReplay = async (input) => { receipts.push(JSON.parse(input.recipeParameters.canonicalJson)); return persist(input) }
+  const outcome = await runNextProjectFinalExportOperationService(world.dependencies)('worker-final-export-inherited')
+  assert.equal(outcome.status, 'succeeded', JSON.stringify(queued.operation.error ?? null))
+  assert.deepEqual(asked.map((input) => input.directorInheritance), [inheritance], 'the repository re-derives and compares the chain the operation was queued with')
+  assert.deepEqual(receipts[0].directorInheritance, directorRunInheritanceIdentity(inheritance), 'the receipt names the Director Version and every Version and Command the quality went through')
+  assert.deepEqual(receipts[0].directorInheritance.inheritedThroughCommandIds, ['command-final-export-subtitle'])
+})
+
+test('W70 a final worker refuses, before it renders anything, a chain that is not the one the operation was queued with', async () => {
+  const inheritance = inheritedThrough(SUBTITLE_LINK)
+  const forged = inheritedThrough({ versionId: projectVersionId, commandId: 'command-final-export-forged' })
+  const identityHash = (chain) => finalInputHash(true, approvedSource(), FINAL_CAPTION_CERTIFICATION_POLICY_SHA256, chain ? { directorInheritance: directorRunInheritanceIdentity(chain) } : {})
+  const cases = [
+    { label: 'queued through the chain, the source now reaches the run through another Command', queuedHash: identityHash(inheritance), context: { directorInheritance: inheritance }, now: forged, code: 'editorial_acceptance_failed' },
+    { label: 'queued through the chain, the Version is now the Director own', queuedHash: identityHash(inheritance), context: { directorInheritance: inheritance }, now: undefined, code: 'editorial_acceptance_failed' },
+    { label: 'queued as the Director own, the source now inherits', queuedHash: identityHash(null), context: {}, now: inheritance, code: 'editorial_acceptance_failed' },
+    { label: 'the chain in the context was forged while the source and the hash name the real one', queuedHash: identityHash(inheritance), context: { directorInheritance: forged }, now: inheritance, code: 'editorial_acceptance_failed' },
+    { label: 'the context and the source agree on a chain but the input hash was sealed over another one', queuedHash: identityHash(forged), context: { directorInheritance: inheritance }, now: inheritance, code: 'invalid_render_input' },
+  ]
+  for (const item of cases) {
+    const queued = createOperations(item.queuedHash, item.context)
+    const world = workerDependencies(queued)
+    serveSource(world.dependencies, () => (item.now ? { directorInheritance: item.now } : {}))
+    const outcome = await runNextProjectFinalExportOperationService(world.dependencies)('worker-final-export-chain-moved')
+    assert.equal(outcome.status, 'failed', item.label)
+    assert.equal(world.calls.rendered, 0, `${item.label}: nothing was rendered`)
+    assert.equal(world.calls.persisted + world.calls.attached + world.calls.cataloged, 0, `${item.label}: nothing was published`)
+    assert.equal(queued.operation.error.code, item.code, item.label)
+  }
+})
+
+test('W70 the final repository refuses, with a precise reason, a Version whose chain holds a Command that is not an exception Command', async () => {
+  const calls = []
+  const world = fakeOutputWorld({ workspaceId, projectId, versionId: projectVersionId, baseHash: '1'.repeat(64) })
+  const client = {
+    $queryRawUnsafe: (...args) => world.queryRawUnsafe(...args),
+    v2Project: { async findFirst() { return { locale: 'pt-BR', versions: [{ id: projectVersionId }], proxyReviews: [] } } },
+    v2ProjectVersion: { async findFirst({ where }) {
+      calls.push(where.id)
+      return { id: where.id, parentVersionId: 'version-final-export-parent', commandId: 'command-final-export-patch',
+        command: { id: 'command-final-export-patch', type: 'apply-review-patch', baseVersionId: 'version-final-export-parent' },
+        editPlanSnapshot: { contentJson: '{"id":"a","projectVersionId":"b"}' } }
+    } },
+    v2DirectorRun: { async findFirst() { return null } },
+  }
+  const repository = new PrismaProjectFinalExportRepository(client)
+  await assert.rejects(
+    () => repository.readApproval({ workspaceId, projectId, projectVersionId, projectVersionHash: '1'.repeat(64), outputSpecId: 'preset-9x16', outputVariantId: 'variant-final-export', requireCurrent: false }),
+    (error) => error.code === 'EDITORIAL_ACCEPTANCE_FAILED' && error.details.reason === 'director-run-not-inherited' &&
+      error.details.inheritanceReason === 'command-not-inheriting' && error.details.commandType === 'apply-review-patch' && error.details.versionId === projectVersionId,
+  )
+  assert.deepEqual(calls, [projectVersionId], 'the walk stopped at the first Version: it never read past the Command it does not know')
 })

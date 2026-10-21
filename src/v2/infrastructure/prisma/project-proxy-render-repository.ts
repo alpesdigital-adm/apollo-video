@@ -20,7 +20,7 @@ import { editCommandRenderPolicy } from '../../domain/edit-command-registry.ts'
 import { PrismaRenderablePlanSnapshotRepository } from './renderable-plan-snapshot-repository.ts'
 import { readSafeReusableProxy, selectReusableProxyOperation } from './proxy-reuse-safety.ts'
 import { sourceOutputVariantId } from '../../application/project-render-sources.ts'
-import { queryProxySourceProject, hydrateProxySource, hydrateProxyRenderSources, uniqueSourceLink,
+import { queryProxySourceProject, hydrateProxySource, hydrateProxyRenderSources, uniqueSourceLink, effectiveDirectorRunOf,
   parseProxySourceRecord, parseProxySourceCriticIssues, assertProxySourceLineage, lockProxySourceArtifacts } from './proxy-source-authority.ts'
 import { parseDirectorPerceptionSnapshotUnchecked } from './director-run-repository.ts'
 import { readPerceptionProducerEnvelope } from './perception-producer-envelope-repository.ts'
@@ -180,9 +180,12 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     source: Readonly<ProjectProxyRenderSource>,
     client: PrismaClient | Prisma.TransactionClient = this.client,
   ): Promise<Readonly<ProjectProxyRenderSource>> {
-    const run = project.versions[0]?.directorRunAsResult
-    if (!run) return source
-    if (run.resultVersionId !== source.projectVersionId || run.projectId !== project.id ||
+    // The Director's own run, or the one an ancestor reached through exception Commands only (W70 readiness): the evidence stays the
+    // Director's (its `baseVersionId` below), and the time-map check refuses it whenever the clips are not the ones it was read for.
+    const directed = effectiveDirectorRunOf(project)
+    if (!directed) return source
+    const run = directed.run
+    if (run.resultVersionId !== (directed.inheritance?.directorResultVersionId ?? source.projectVersionId) || run.projectId !== project.id ||
         run.workspaceId !== project.workspaceId) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy Director result lineage is invalid')
     }
@@ -252,6 +255,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot Version is not the Version its output consumption seals')
     }
     const renderSources = hydrateProxyRenderSources(project, snapshot.plan, evaluatedAt)
+    const directed = effectiveDirectorRunOf(project)
     const primary = renderSources.find((asset) => asset.mediaType === 'video') ?? renderSources[0]
     const primaryLink = primary ? uniqueSourceLink(project.mediaAssets, primary.artifactId) : undefined
     if (!primary || !primaryLink) throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot has no source media')
@@ -272,7 +276,8 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       renderSources: Object.freeze(renderSources),
       originalFileName: primaryLink.originalFileName,
       uploadReceivedAt: (primaryLink.upload?.createdAt ?? primaryLink.createdAt).toISOString(),
-      criticIssues: parseProxySourceCriticIssues(version.directorRunAsResult?.qualitySnapshot.contentJson),
+      criticIssues: parseProxySourceCriticIssues(directed?.run.qualitySnapshot.contentJson),
+      ...(directed?.inheritance ? { directorInheritance: directed.inheritance } : {}),
     })
   }
 

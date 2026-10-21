@@ -821,6 +821,15 @@ jobs:
           APOLLO_PROXY_CARRY_OVER_E2E: "1"
           APOLLO_RENDER_CANCEL_RUNNING_E2E: "1"
 
+      # W70 readiness: a Version made by an exception Command inherits the quality of the DirectorRun of its ancestor (final admitted, the
+      # Director warnings kept on a fresh proxy render, the chain sealed in the input hash and the context, a moved chain refused), and a Command
+      # the rule does not know stops the walk. Production workers, real PostgreSQL and FFmpeg.
+      - name: Run W70 Director run inheritance proof
+        run: npm run test:e2e:director-run-inheritance
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-director-inheritance-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_DIRECTOR_INHERITANCE_E2E: "1"
+
       - name: Run final export integration against the migrated capture database
         run: |
           set -euo pipefail
