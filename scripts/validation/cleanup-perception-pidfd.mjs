@@ -115,6 +115,7 @@ export async function cleanupPidfd(env = process.env) {
           assert.ok(/^(registry\.json|build-owner\.json|provenance\.json|compiler\.(stdout|stderr|version)|perception-pidfd\.node)$/.test(relative) ||
             /^owners\/[a-f0-9]{64}\.json$/.test(relative) ||
             /^receipts\/pidfd-consumer-cgroup-gates-[a-f0-9-]+\.cases\.(?:json|sha256)$/.test(relative) ||
+            /^receipts\/admission-lock-reclaim-[a-f0-9-]+\.json$/.test(relative) ||
             /^receipts\/(?:pidfd-consumer-[a-z-]+-[a-f0-9-]+\.(?:json|sha256)|namespace-perception-namespace-[a-f0-9-]+\.json)$/.test(relative),
           'Unknown file in build root; retain evidence')
           allFiles.push(item)
