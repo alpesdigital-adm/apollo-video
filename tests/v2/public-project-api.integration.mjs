@@ -16,7 +16,7 @@ import { proveDashboardStates } from './helpers/dashboard-w35-states.mjs'
 import { proveDashboardEventFeedBrowser } from './helpers/dashboard-w36-events-proof.mjs'
 import { proveW37RenameFromCard } from './helpers/dashboard-w37-rename.mjs'
 import { proveW38ArchiveRestore } from './helpers/dashboard-w38-archive-restore.mjs'
-import { createW39ArtifactRoot, proveW39DuplicateCopyOnWrite } from './helpers/dashboard-w39-duplicate.mjs'
+import { createW39ArtifactRoot, proveW39DuplicateCopyOnWrite, removeW39ArtifactRoot } from './helpers/dashboard-w39-duplicate.mjs'
 import { proveW40ConsolidatedJourney } from './helpers/dashboard-w40-consolidated.mjs'
 import { proveMediaTransferHttp } from './helpers/media-transfer-http-proof.mjs'
 
@@ -5842,6 +5842,8 @@ test('authenticated public API manages projects, clients and artifact inspection
     const postflightErrors = []
     try { await stopOwnedServer(server) } catch (error) { postflightErrors.push(error) }
     try { await client.$disconnect() } catch (error) { postflightErrors.push(error) }
+    // The journey server is stopped; the artifact root it served is removed on every path (success, failure, timeout).
+    try { await removeW39ArtifactRoot(w39ArtifactRoot) } catch (error) { postflightErrors.push(error) }
     if (postflightErrors.length) throw new AggregateError(
       primaryFailure ? [primaryFailure, ...postflightErrors] : postflightErrors,
       'Public API integration postflight failed',
