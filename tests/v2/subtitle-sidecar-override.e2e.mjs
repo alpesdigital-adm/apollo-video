@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { artifactPath, issueApiClient } from './helpers/capture-journey.mjs'
+import { createOwnedTempRoot, removeOwnedTempRoot } from './helpers/owned-temp-root.mjs'
 import { apiClient, startServer } from './helpers/issue-override-runtime.mjs'
 import { bandRows } from './helpers/issue-override-proof.mjs'
 import { CUES, OVERFLOW_CAPTION, runProxyWorkerOnce, seedIssueOverrideWorld } from './helpers/issue-override-world.mjs'
@@ -122,7 +122,7 @@ test('W69 tail: the sidecar of each output follows the cues its MP4 burned, thro
   const poolOf = (limit) => { const url = new URL(harnessUrl); url.searchParams.set('connection_limit', String(limit)); return url.toString() }
   process.env.V2_DATABASE_URL = poolOf(3)
   const db = new PrismaClient({ datasources: { db: { url: poolOf(2) } } })
-  const root = await mkdtemp(join(tmpdir(), 'apollo-w69t-'))
+  const root = await createOwnedTempRoot('apollo-w69t-')
   const artifactRoot = join(root, 'artifacts')
   await mkdir(artifactRoot, { recursive: true })
   const evidenceDir = process.env.APOLLO_SUBTITLE_SIDECAR_EVIDENCE_DIR ? join(process.env.APOLLO_SUBTITLE_SIDECAR_EVIDENCE_DIR, `run-${new Date().toISOString().replace(/[:.]/g, '-')}`) : join(root, 'evidence')
@@ -411,5 +411,7 @@ test('W69 tail: the sidecar of each output follows the cues its MP4 burned, thro
     await db.$disconnect().catch(() => undefined)
     const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
     await disconnectV2PostgresClient().catch(() => undefined)
+    // The evidence directory lives under the root only when no evidence directory was configured: keep it then.
+    if (relative(root, evidenceDir).startsWith('..')) await removeOwnedTempRoot(root)
   }
 })

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { join, relative } from 'node:path'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { artifactPath } from './helpers/capture-journey.mjs'
+import { createOwnedTempRoot, removeOwnedTempRoot } from './helpers/owned-temp-root.mjs'
 import { apiClient, chromeExecutable, startServer } from './helpers/issue-override-runtime.mjs'
 import { PIXEL_TOLERANCE, bandRows, changedClusters, decodeFrame, occupiedBands, sha256Hex } from './helpers/issue-override-proof.mjs'
 import { CUES, SCENE, runProxyWorkerOnce, seedIssueOverrideWorld } from './helpers/issue-override-world.mjs'
@@ -48,7 +48,7 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
   // The in-process repositories (the render worker pass the journey drives) hold one process-wide client: it gets the same small pool.
   process.env.V2_DATABASE_URL = poolOf(3)
   const db = new PrismaClient({ datasources: { db: { url: poolOf(2) } } })
-  const root = await mkdtemp(join(tmpdir(), 'apollo-w68-'))
+  const root = await createOwnedTempRoot('apollo-w68-')
   const artifactRoot = join(root, 'artifacts')
   await mkdir(artifactRoot, { recursive: true })
   const evidenceDir = process.env.APOLLO_ISSUE_OVERRIDE_EVIDENCE_DIR ? join(process.env.APOLLO_ISSUE_OVERRIDE_EVIDENCE_DIR, `run-${new Date().toISOString().replace(/[:.]/g, '-')}`) : join(root, 'evidence')
@@ -734,5 +734,7 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
     await db.$disconnect().catch(() => undefined)
     const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
     await disconnectV2PostgresClient().catch(() => undefined)
+    // The evidence directory lives under the root only when no evidence directory was configured: keep it then.
+    if (relative(root, evidenceDir).startsWith('..')) await removeOwnedTempRoot(root)
   }
 })

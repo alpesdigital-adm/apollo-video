@@ -13,7 +13,12 @@ import {
   assertWebhookAdministrationReplay,
   webhookAdministrationCommandData,
 } from './webhook-administration-command-persistence.ts'
-import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
+import {
+  DEFAULT_IDEMPOTENCY_WINNER_WAIT,
+  awaitCommittedIdempotencyWinner,
+  readCompletedIdempotencyResponse,
+  type IdempotencyWinnerWait,
+} from './idempotency-record-persistence.ts'
 
 interface StoredWebhookSubscriptionCreationResponse {
   subscriptionId: string
@@ -71,9 +76,50 @@ function hydrate(row: V2WebhookSubscription): Readonly<WebhookSubscription> {
 export class PrismaWebhookSubscriptionCreationRepository
   implements WebhookSubscriptionCreationRepository {
   private readonly client: PrismaClient
+  private readonly winnerWait: Readonly<IdempotencyWinnerWait>
 
-  constructor(client: PrismaClient = getV2PostgresClient()) {
+  constructor(
+    client: PrismaClient = getV2PostgresClient(),
+    winnerWait: Readonly<IdempotencyWinnerWait> = DEFAULT_IDEMPOTENCY_WINNER_WAIT,
+  ) {
     this.client = client
+    this.winnerWait = winnerWait
+  }
+
+  private async readCommittedWinner(
+    bundle: Readonly<WebhookSubscriptionCreationBundle>,
+  ): Promise<Readonly<WebhookSubscriptionCreationResult> | null> {
+    const { command, subscription, idempotency } = bundle
+    const existing = await this.client.v2IdempotencyRecord.findUnique({
+      where: {
+        workspaceId_clientId_key: {
+          workspaceId: idempotency.workspaceId,
+          clientId: idempotency.clientId,
+          key: idempotency.key,
+        },
+      },
+    })
+    if (!existing || existing.expiresAt <= new Date(idempotency.requestedAt)) return null
+    if (existing.requestFingerprint !== idempotency.requestFingerprint) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Idempotency key was already used with a different request',
+      )
+    }
+    const stored = parseStoredResponse(existing, idempotency.requestFingerprint)
+    const auditCommand = await this.client.v2WebhookAdministrationCommand.findFirst({
+      where: {
+        workspaceId: subscription.workspaceId,
+        targetType: 'webhook-subscription',
+        targetId: stored.subscriptionId,
+        action: 'webhook-subscription.create',
+      },
+    })
+    assertWebhookAdministrationReplay(auditCommand, command)
+    const row = await this.client.v2WebhookSubscription.findFirst({
+      where: { id: stored.subscriptionId, workspaceId: subscription.workspaceId },
+    })
+    return row ? { subscription: hydrate(row), replayed: true } : null
   }
 
   async createOrReplay(
@@ -225,43 +271,19 @@ export class PrismaWebhookSubscriptionCreationRepository
         if (serializationAttempt < 3) {
           return this.createOrReplay(bundle, serializationAttempt + 1)
         }
+        // The loser is cancelled by SSI while the winner may still be in
+        // flight: wait (bounded) for its committed record and answer as a
+        // sequential duplicate would (replay or IDEMPOTENCY_PAYLOAD_MISMATCH).
+        const committedWinner = await awaitCommittedIdempotencyWinner(
+          () => this.readCommittedWinner(bundle),
+          this.winnerWait,
+        )
+        if (committedWinner) return committedWinner
         throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook subscription creation must be retried')
       }
       if (isPrismaError(error, 'P2002')) {
-        const existing = await this.client.v2IdempotencyRecord.findUnique({
-          where: {
-            workspaceId_clientId_key: {
-              workspaceId: idempotency.workspaceId,
-              clientId: idempotency.clientId,
-              key: idempotency.key,
-            },
-          },
-        })
-        if (existing) {
-          if (existing.requestFingerprint !== idempotency.requestFingerprint) {
-            throw new DomainError(
-              'IDEMPOTENCY_PAYLOAD_MISMATCH',
-              'Idempotency key was already used with a different request',
-            )
-          }
-          const stored = parseStoredResponse(
-            existing,
-            idempotency.requestFingerprint,
-          )
-          const auditCommand = await this.client.v2WebhookAdministrationCommand.findFirst({
-            where: {
-              workspaceId: subscription.workspaceId,
-              targetType: 'webhook-subscription',
-              targetId: stored.subscriptionId,
-              action: 'webhook-subscription.create',
-            },
-          })
-          assertWebhookAdministrationReplay(auditCommand, command)
-          const row = await this.client.v2WebhookSubscription.findFirst({
-            where: { id: stored.subscriptionId, workspaceId: subscription.workspaceId },
-          })
-          if (row) return { subscription: hydrate(row), replayed: true }
-        }
+        const committedWinner = await this.readCommittedWinner(bundle)
+        if (committedWinner) return committedWinner
         const duplicate = await this.client.v2WebhookSubscription.findFirst({
           where: { endpointId: subscription.endpointId, filterHash: subscription.filter.hash },
           select: { id: true },
