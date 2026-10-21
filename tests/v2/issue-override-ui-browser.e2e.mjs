@@ -513,6 +513,15 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       await waitFor('the vertical review reaches the editor', async () => (await page.locator('[data-testid="issue-chip"]').count()) > 0, { timeoutMs: 120_000 })
       const tallReview = await reviewOf(entry.variantId, current.id)
       await sameChips(tallReview)
+      // W70 readiness (R1): the carried render is labelled in the review panel as an automatic carry from the earlier Version, and since nothing
+      // was approved on the vertical output, the carry says it approved nothing and a person is still asked to decide.
+      assert.deepEqual(Object.keys(tallReview.carriedFrom ?? {}).sort(), ['decisionId', 'renderContentHash', 'reviewHash', 'reviewId', 'versionId'], 'the public review names where the render was carried from')
+      assert.equal(tallReview.carriedFrom.decisionId, null, 'no approval existed to re-bind')
+      await waitFor('the carry is labelled in the review panel', async () => (await page.getByTestId('proxy-review-carried').count()) > 0, { timeoutMs: 60_000 })
+      const carriedHeadline = await page.getByTestId('proxy-review-carried-headline').innerText()
+      assert.equal(carriedHeadline, `Render herdado automaticamente da versão ${tallReview.carriedFrom.versionId} — conteúdo idêntico`)
+      assert.equal(await page.getByTestId('proxy-review-carried').getAttribute('data-carried-kind'), 'render-carried')
+      assert.equal(await page.getByTestId('proxy-review-acknowledge').count(), 1, 'the inheritance approved nothing: a person is still asked to acknowledge the warnings')
       // the vertical pixels are what they were at its first render: nothing done to the wide output reached them
       const probeFrames = [5, 25, 70, 120]
       for (const frame of probeFrames) assert.equal((await frameAt(tallNow, frame)).sha256, (await frameAt(tall.proxy, frame)).sha256, `vertical frame ${frame} equals the one of its first render`)

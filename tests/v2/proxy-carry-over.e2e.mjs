@@ -20,6 +20,10 @@ const { PrismaSubtitleSidecarRepository } = await import('../../src/v2/infrastru
 const { PrismaSubtitleSegmentOverrideRepository } = await import('../../src/v2/infrastructure/prisma/subtitle-segment-override-repository.ts')
 const { calculateProxyReviewHash } = await import('../../src/v2/application/render-workflow.ts')
 const factory = await import('../../src/v2/infrastructure/repository-factory.ts')
+const { presentProxyReview } = await import('../../src/v2/public-api/proxy-review-presenter.ts')
+const { getPublicSchema } = await import('../../src/v2/public-api/schema-registry.ts')
+const { default: Ajv2020 } = await import('ajv/dist/2020.js')
+const { default: addFormats } = await import('ajv-formats')
 
 /**
  * W70 prep ("invalidar so o necessario"). A Command aimed at ONE output creates a new ProjectVersion; the OTHER output keeps its render, its
@@ -149,6 +153,21 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     assert.equal(decisions[0].resultReviewHash, carriedReview.reviewHash)
     assert.equal(decisions[0].actorId, world.owner.clientId, 'and the actor who triggered it')
     assert.equal(await db.v2ProxyReviewDecision.count({ where: { workspaceId, action: 'acknowledge-warnings' } }), 1, 'no second human acknowledgement was invented')
+    // W70 readiness (R1): the carry is VISIBLE as what it is - an automatic carry of an identical render, with the review, the decision and the content
+    // address - in the review a client reads; a render made for the Version says nothing of the kind. The approval is the one a person gave on V0.
+    assert.deepEqual(carriedReview.carriedFrom, { versionId: V0.id, reviewId: approved0.id, reviewHash: approved0.reviewHash, decisionId: decisions[0].id, renderContentHash: tallV0.renderContentHash },
+      'the public review names the Version, the review (as it was when carried), the decision that re-bound the approval and the content address')
+    assert.equal((await reviewAt(WIDE, V0.id)).carriedFrom, undefined, 'a render made for its own Version is not marked as carried')
+    assert.equal((await reviewAt(TALL, V0.id)).carriedFrom, undefined)
+    const publicShape = presentProxyReview(carriedReview)
+    const validateV4 = addFormats(new Ajv2020({ strict: false, allErrors: true })).compile(getPublicSchema('apollo://schemas/project-proxy-review-response/v4').schema)
+    assert.equal(validateV4({ data: { review: publicShape }, meta: { apiVersion: 'v1' } }), true, JSON.stringify(validateV4.errors))
+    assert.deepEqual(publicShape.carriedFrom, carriedReview.carriedFrom)
+    // the operation records the impact of the Command that made the head in the slot that means that, and the content address beside it
+    assert.equal(tallV1.reuseImpactHash, c1.impact.impactHash, 'reuseImpactHash is the impact of the Command, not the content address')
+    assert.notEqual(tallV1.reuseImpactHash, tallV1.renderContentHash)
+    assert.deepEqual([tallV1.carriedFromReviewId, tallV1.carriedFromReviewHash], [approved0.id, approved0.reviewHash])
+    assert.equal(await db.v2ProjectProxyRenderOperation.count({ where: { ...scope, carriedFromReviewId: { not: null } } }), 1, 'only the carried operation is marked')
     assert.equal(await db.v2RenderElementMap.count({ where: { ...scope, projectVersionId: V1.id, proxyArtifactId: tallV0.outputArtifactId } }), 1, 'the cue map of the same MP4 is bound to the new Version')
     // the sidecar reader sees the carried output as the output of the new Version, aligned with the very MP4 of the earlier one
     const alignment = await new PrismaSubtitleSidecarRepository(db).readRenderedAlignment({ ...scope, variantId: TALL, projectVersionId: V1.id })
@@ -193,6 +212,8 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     const wideReview2 = await reviewAt(WIDE, wideV2.projectVersionId)
     assert.deepEqual([wideReview4.status, wideReview4.warningsAcknowledged, wideReview4.finalAllowed], [wideReview2.status, wideReview2.warningsAcknowledged, wideReview2.finalAllowed], 'a review nobody approved is carried as it was: nothing is approved by the carry')
     assert.equal(await db.v2ProxyReviewDecision.count({ where: { workspaceId, action: 'carry-over-approval' } }), 1, 'no approval existed, so none was re-bound')
+    assert.deepEqual(wideReview4.carriedFrom, { versionId: wideV2.projectVersionId, reviewId: wideReview2.id, reviewHash: wideReview2.reviewHash, decisionId: null, renderContentHash: wideV2.renderContentHash },
+      'a carry that re-bound no approval says so: decisionId is null, and the review is the pending one it was')
 
     /* ---------------------------------------------------------- 5. a head that moved is refused */
     const stale = await carryService({ ...scope, variantId: TALL, actor })

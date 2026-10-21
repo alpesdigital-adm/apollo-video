@@ -34,6 +34,7 @@ import {
   type StrategicObjectiveId,
 } from '@/v2/domain/strategic-objective'
 import { parseProductionBrief } from '@/v2/domain/production-brief'
+import { describeCarriedReview } from '@/v2/ui/proxy-review-carry-view'
 
 const PRODUCTION_BRIEF_ASSUMPTION_LABELS: Readonly<Record<string, string>> = {
   'briefing-absent': 'Briefing livre não informado',
@@ -827,6 +828,8 @@ interface ProxyReviewData {
   reviewHash: string
   revision: number
   acknowledgedBy?: { type: 'api-client'; id: string; at: string }
+  /** W70 readiness. Present when the render, and the approval it had, were carried automatically from an earlier Version. */
+  carriedFrom?: { versionId: string; reviewId: string; reviewHash: string; decisionId: string | null; renderContentHash: string }
   createdAt: string
   updatedAt: string
 }
@@ -3627,6 +3630,12 @@ export default function ProjectWorkspacePage() {
                 <p className="mt-1 text-xs font-medium text-[#d8d2c8]">
                   {proxyReviewFailure ? 'Laudo indisponível' : !proxyReview ? 'Sem laudo para esta versão' : proxyReview.status === 'blocked' ? 'Correção obrigatória' : proxyReview.status === 'warning-ack-required' ? 'Ressalvas para decidir' : 'Liberado para alta'}
                 </p>
+                {proxyReview && describeCarriedReview(proxyReview) ? (
+                  <div className="mt-2 max-w-[260px] rounded border border-[#6f9fd4]/25 bg-[#6f9fd4]/[0.06] px-2 py-1.5" data-testid="proxy-review-carried" data-carried-kind={describeCarriedReview(proxyReview)!.kind}>
+                    <p className="text-[9px] font-semibold leading-4 text-[#9cc1e6]" data-testid="proxy-review-carried-headline">{describeCarriedReview(proxyReview)!.headline}</p>
+                    <p className="mt-1 text-[8px] leading-3 text-[#8e8980]" data-testid="proxy-review-carried-detail">{describeCarriedReview(proxyReview)!.detail}</p>
+                  </div>
+                ) : null}
                 {proxyReviewFailure ? <button className="mt-2 rounded border border-[#d46f63]/40 px-2 py-1 text-[9px] text-[#e7a59b] disabled:opacity-50" data-testid="proxy-review-retry" disabled={proxyReviewLoading} onClick={() => { void loadProxyReview(false, workspaceVersionId, true) }} type="button">Tentar novamente</button> : null}
               </div>
               <span

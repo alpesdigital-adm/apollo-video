@@ -6920,6 +6920,25 @@ const proxyReviewSchema = {
     updatedAt: dateTimeSchema,
   },
 }
+// W70 readiness. v4 of the review schemas adds `carriedFrom` (present only on a review whose render was carried from an earlier Version) and keeps
+// everything else exactly as v3 published it; v3 keeps its bytes.
+const proxyReviewCarriedFromSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['versionId', 'reviewId', 'reviewHash', 'decisionId', 'renderContentHash'],
+  properties: {
+    versionId: idSchema,
+    reviewId: idSchema,
+    reviewHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    // The `carry-over-approval` decision that re-bound the approval the source review had; null when it had none to re-bind.
+    decisionId: { anyOf: [idSchema, { type: 'null' }] },
+    renderContentHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+  },
+}
+const proxyReviewSchemaV4 = {
+  ...proxyReviewSchema,
+  properties: { ...proxyReviewSchema.properties, carriedFrom: proxyReviewCarriedFromSchema },
+}
 const proxyQualityIssueSchemaV1 = {
   ...proxyQualityIssueSchema,
   properties: Object.fromEntries(Object.entries(proxyQualityIssueSchema.properties).filter(([key]) =>
@@ -25980,6 +25999,12 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
       properties: { review: proxyReviewSchema },
     }),
   ),
+  defineSchema('project-proxy-review-response', 4, 'Output-specific proxy review that says when its render, and the approval it had, were carried from an earlier Version',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['review'],
+      properties: { review: proxyReviewSchemaV4 },
+    }),
+  ),
   defineSchema('project-proxy-review-warning-acknowledgement-request', 1, 'Acknowledge non-hard proxy warnings against an exact review revision', {
     type: 'object',
     additionalProperties: false,
@@ -26048,6 +26073,24 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
       type: 'object', additionalProperties: false, required: ['review', 'decision', 'replayed'],
       properties: {
         review: proxyReviewSchema,
+        decision: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'proxyReviewId', 'action', 'actor', 'baseReviewHash', 'resultReviewHash', 'createdAt'],
+          properties: {
+            id: idSchema, proxyReviewId: idSchema, action: { const: 'acknowledge-warnings' },
+            actor: { type: 'object', additionalProperties: false, required: ['type', 'id'], properties: { type: { const: 'api-client' }, id: idSchema } },
+            baseReviewHash: sha256Schema, resultReviewHash: sha256Schema, createdAt: dateTimeSchema,
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('project-proxy-review-warning-acknowledgement-result', 4, 'Auditable proxy warning acknowledgement result over a review that says when its render was carried from an earlier Version',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['review', 'decision', 'replayed'],
+      properties: {
+        review: proxyReviewSchemaV4,
         decision: {
           type: 'object', additionalProperties: false,
           required: ['id', 'proxyReviewId', 'action', 'actor', 'baseReviewHash', 'resultReviewHash', 'createdAt'],

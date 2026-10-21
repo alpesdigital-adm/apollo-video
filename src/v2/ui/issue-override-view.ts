@@ -42,6 +42,8 @@ export interface ReviewInput {
   criticIssues: readonly ReviewIssueInput[]
   formatQuality?: { outputPresetHash: string; status: string; exportAllowed: boolean; explanation: string; reportHash: string }
   acknowledgedBy?: { type: string; id: string; at: string }
+  /** W70 readiness. Present when this review's render, and the approval it had, were carried automatically from an earlier Version. */
+  carriedFrom?: { versionId: string; reviewId: string; reviewHash: string; decisionId: string | null; renderContentHash: string }
 }
 
 export interface IssueChip {
@@ -138,6 +140,13 @@ export function issueProvenance(chip: IssueChip, review: ReviewInput, proxy: { a
     { label: 'Proxy', value: proxy.artifactId, kind: 'id' },
   ]
   if (proxy.sha256) rows.push({ label: 'Proxy sha256', value: proxy.sha256, kind: 'hash' })
+  if (review.carriedFrom) {
+    // An inherited render is shown as what it is: the evidence below is the earlier Version's, carried because the content is identical.
+    rows.push({ label: 'Herdado da versão', value: review.carriedFrom.versionId, kind: 'id' })
+    rows.push({ label: 'Laudo de origem', value: review.carriedFrom.reviewHash, kind: 'hash' })
+    rows.push({ label: 'Endereço do conteúdo', value: review.carriedFrom.renderContentHash, kind: 'hash' })
+    if (review.carriedFrom.decisionId) rows.push({ label: 'Decisão da herança', value: review.carriedFrom.decisionId, kind: 'id' })
+  }
   if (review.formatQuality) {
     rows.push({ label: 'Laudo de formato', value: review.formatQuality.reportHash, kind: 'hash' })
     rows.push({ label: 'Preset da saída', value: review.formatQuality.outputPresetHash, kind: 'hash' })

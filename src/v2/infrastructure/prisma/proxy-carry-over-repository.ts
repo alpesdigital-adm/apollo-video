@@ -17,12 +17,29 @@ import {
   succeedPublicOperation,
 } from '../../domain/public-operation.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
+import { parseCommandImpact } from '../../domain/command-impact.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData } from './external-actor-audit.ts'
 import { hydratePublicOperationRecord, OPERATION_INCLUDE, persistOperationStatusEvents } from './public-operation-repository.ts'
 import { hydrateProxyReview } from './proxy-review-repository.ts'
 
 const MAX_ANCESTOR_STEPS = 500
+
+/**
+ * The impact hash of the Command that made the head Version, read from the sealed payload it was committed with (every Command a carry follows
+ * - a subtitle segment exception, a manual reframe - carries its impact there). `null` when it cannot be read: a carry is then not made, rather
+ * than recorded under an impact nobody can show.
+ */
+async function commandImpactHashOf(transaction: Prisma.TransactionClient, scope: Readonly<{ workspaceId: string; projectId: string; commandId: string }>): Promise<string | null> {
+  const command = await transaction.v2EditCommand.findFirst({ where: { id: scope.commandId, workspaceId: scope.workspaceId, projectId: scope.projectId }, select: { payloadJson: true } })
+  if (!command) return null
+  try {
+    const payload = JSON.parse(command.payloadJson) as { impact?: unknown }
+    return parseCommandImpact(payload.impact).impactHash
+  } catch {
+    return null
+  }
+}
 
 /**
  * W70 prep. Carries the render, the review and the approval of ONE output from an earlier Version of the project to its head Version, in one
@@ -97,6 +114,11 @@ export class PrismaProxyCarryOverRepository implements ProxyCarryOverRepository 
     ])
     if (!source.review || !artifact || !manifest || !map) return { status: 'not-eligible', reason: 'source-incomplete' }
     const sourceReview = hydrateProxyReview(source.review)
+    // The Command that made the head, and the impact it was committed with: the carry is decided under THAT impact (the Command did not touch this
+    // output) and records it where an impact belongs. Without both there is nothing to record, so nothing is carried.
+    const carriedByCommandId = request.commandId ?? version?.commandId ?? null
+    const commandImpactHash = carriedByCommandId ? await commandImpactHashOf(transaction, { workspaceId, projectId, commandId: carriedByCommandId }) : null
+    if (!carriedByCommandId || !commandImpactHash) return { status: 'not-eligible', reason: 'command-impact-missing' }
 
     // ---- the operation: completed, pointing at the very same artifact
     const audit = materializeActorAuditContext(request.actor)
@@ -107,7 +129,6 @@ export class PrismaProxyCarryOverRepository implements ProxyCarryOverRepository 
     operation = startPublicOperationAttempt(operation, request.now)
     operation = advancePublicOperationPhase(operation, 'persisting', request.now)
     operation = succeedPublicOperation(operation, request.now)
-    const carriedByCommandId = request.commandId ?? version?.commandId ?? null
     await transaction.v2PublicOperation.create({
       data: {
         id: operation.id, workspaceId, projectId, clientId: operation.clientId,
@@ -131,9 +152,12 @@ export class PrismaProxyCarryOverRepository implements ProxyCarryOverRepository 
         inputHash: request.inputHash, outputArtifactId: source.outputArtifactId, outputManifestId: source.outputManifestId,
         originalFileName: request.originalFileName, outputVariantId: request.variantId, renderContentHash: request.renderContentHash,
         reusedFromOperationId: source.operationId, reuseBaseVersionId: source.projectVersionId,
-        ...(carriedByCommandId ? { reuseCommandId: carriedByCommandId } : {}),
-        // the slot that names the impact of a Command names, for a carry, the content address that proved the inputs equal
-        reuseImpactHash: request.renderContentHash,
+        reuseCommandId: carriedByCommandId,
+        // the impact of that Command; the content address that proved the inputs equal is `renderContentHash`, on this same row
+        reuseImpactHash: commandImpactHash,
+        // visible as what it is: carried from this review, which had this hash when it was carried (the public review's `carriedFrom`)
+        carriedFromReviewId: source.review.id,
+        carriedFromReviewHash: source.review.reviewHash,
       },
     })
     const created = await transaction.v2PublicOperation.findUnique({ where: { id: operation.id }, include: OPERATION_INCLUDE })

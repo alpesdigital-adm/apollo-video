@@ -112,7 +112,9 @@ test('the review and proxy-review reads take an optional stable variantId; the w
     assert.match(parameter.description, /stable/i)
   }
   // 2.2.0 (W67, additive): the review's formatQuality may carry the seal of the independent MP4 critic (response schema v3)
-  assert.equal(capability('apollo.projects.proxy-reviews.read').version, '2.2.0')
+  // 2.3.0 (W70 readiness, additive): a review whose render was carried from an earlier Version says so (`carriedFrom`, response schema v4)
+  assert.equal(capability('apollo.projects.proxy-reviews.read').version, '2.3.0')
+  assert.equal(capability('apollo.projects.proxy-reviews.read').outputSchemaRef, 'apollo://schemas/project-proxy-review-response/v4')
   for (const id of ['apollo.projects.workspace.read', 'apollo.projects.workspace.current.read']) {
     assert.equal(capability(id).outputSchemaRef, 'apollo://schemas/project-workspace/v15', id)
   }

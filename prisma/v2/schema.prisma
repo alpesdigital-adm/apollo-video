@@ -4186,6 +4186,11 @@ model V2ProjectProxyRenderOperation {
   reuseBaseVersionId        String?  @db.VarChar(128)
   /// Version-independent content address of the pre-render identity of this proxy (null on rows written before it existed: never carried).
   renderContentHash         String?  @db.Char(64)
+  /// W70 readiness. Set only on an operation CARRIED from an earlier Version (never on a render or an inline reuse): the review of the source
+  /// operation and the hash that review had when it was carried. The public review exposes them as `carriedFrom`, so an inherited approval
+  /// is never mistaken for a human acknowledgement made on this Version.
+  carriedFromReviewId       String?  @db.VarChar(128)
+  carriedFromReviewHash     String?  @db.Char(64)
   createdAt                 DateTime @default(now()) @db.Timestamptz(3)
 
   workspace        V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -4202,6 +4207,7 @@ model V2ProjectProxyRenderOperation {
   reuses           V2ProjectProxyRenderOperation[] @relation("ProjectProxyOperationReuse")
   reuseCommand     V2EditCommand?                  @relation("ProjectProxyReuseCommand", fields: [reuseCommandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   reuseBaseVersion V2ProjectVersion?               @relation("ProjectProxyReuseBaseVersion", fields: [reuseBaseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  carriedFromReview V2ProxyReview?                 @relation("ProxyReviewCarry", fields: [carriedFromReviewId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
 
   @@unique([operationId, workspaceId])
   @@unique([operationId, projectId, workspaceId])
@@ -4212,6 +4218,7 @@ model V2ProjectProxyRenderOperation {
   @@index([workspaceId, reusedFromOperationId])
   @@index([workspaceId, projectId, outputVariantId], map: "pp_render_ops_variant_idx")
   @@index([workspaceId, projectId, outputVariantId, renderContentHash], map: "pp_render_ops_content_idx")
+  @@index([workspaceId, carriedFromReviewId], map: "pp_render_ops_carried_from_idx")
   @@map("project_proxy_render_operations")
 }
 
@@ -4253,6 +4260,7 @@ model V2ProxyReview {
   decisions         V2ProxyReviewDecision[]
   finalExports      V2ProjectFinalExportOperation[]
   qualityIterations V2QualityIteration[]
+  carriedBy         V2ProjectProxyRenderOperation[] @relation("ProxyReviewCarry")
 
   @@unique([id, workspaceId])
   @@unique([id, projectId, workspaceId])

@@ -48,7 +48,7 @@ export type ProxyCarryOverResult =
     outputArtifactId: string
   }>
   | Readonly<{ status: 'present'; operationId: string }>
-  | Readonly<{ status: 'not-eligible'; reason: 'head-moved' | 'no-source-render' | 'source-not-ancestor' | 'source-incomplete' }>
+  | Readonly<{ status: 'not-eligible'; reason: 'head-moved' | 'no-source-render' | 'source-not-ancestor' | 'source-incomplete' | 'command-impact-missing' }>
 
 export interface ProxyCarryOverRepository {
   carry(request: Readonly<ProxyCarryOverRequest>): Promise<ProxyCarryOverResult>

@@ -7,6 +7,7 @@ import {
 
 import type {
   PersistedProxyReview,
+  ProxyReviewCarriedFrom,
   ProxyReviewDecision,
   ProxyReviewRepository,
 } from '../../application/ports/proxy-review-repository.ts'
@@ -210,6 +211,46 @@ export function hydrateProxyReview(row: StoredProxyReview): Readonly<PersistedPr
   })
 }
 
+/**
+ * W70 readiness. Where a review's render was carried from, when it was carried (the operation names the review it came from and the hash that
+ * review had); `null` for a render made for this Version. The decision that re-bound the approval is looked up by the review, never assumed.
+ */
+export async function readProxyReviewCarriedFrom(
+  client: Pick<Prisma.TransactionClient, 'v2ProjectProxyRenderOperation' | 'v2ProxyReviewDecision'>,
+  row: Pick<StoredProxyReview, 'id' | 'workspaceId' | 'operationId'>,
+): Promise<Readonly<ProxyReviewCarriedFrom> | null> {
+  const operation = await client.v2ProjectProxyRenderOperation.findFirst({
+    where: { operationId: row.operationId, workspaceId: row.workspaceId },
+    select: { carriedFromReviewId: true, carriedFromReviewHash: true, reuseBaseVersionId: true, renderContentHash: true },
+  })
+  if (!operation || operation.carriedFromReviewId === null) return null
+  if (operation.carriedFromReviewHash === null || operation.reuseBaseVersionId === null || operation.renderContentHash === null) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review carry-over is incomplete')
+  }
+  const decision = await client.v2ProxyReviewDecision.findFirst({
+    where: { workspaceId: row.workspaceId, proxyReviewId: row.id, action: 'carry-over-approval' },
+    select: { id: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  })
+  return Object.freeze({
+    versionId: operation.reuseBaseVersionId,
+    reviewId: operation.carriedFromReviewId,
+    reviewHash: operation.carriedFromReviewHash,
+    decisionId: decision?.id ?? null,
+    renderContentHash: operation.renderContentHash,
+  })
+}
+
+/** A hydrated review with the carry it came from, when it came from one. */
+async function withCarriedFrom(
+  client: Pick<Prisma.TransactionClient, 'v2ProjectProxyRenderOperation' | 'v2ProxyReviewDecision'>,
+  row: StoredProxyReview,
+): Promise<Readonly<PersistedProxyReview>> {
+  const review = hydrateProxyReview(row)
+  const carriedFrom = await readProxyReviewCarriedFrom(client, row)
+  return carriedFrom ? Object.freeze({ ...review, carriedFrom }) : review
+}
+
 function hydrateDecision(row: StoredProxyReviewDecision): Readonly<ProxyReviewDecision> {
   hydrateExternalActorAudit(row, row.actorId)
   if (row.action !== 'acknowledge-warnings' || row.actorType !== 'api-client') {
@@ -231,7 +272,7 @@ function isPrismaCode(error: unknown, code: string): boolean {
 }
 
 export async function readCurrentProxyReview(
-  client: Pick<Prisma.TransactionClient, 'v2ProxyReview' | 'v2Project' | '$queryRawUnsafe'>,
+  client: Pick<Prisma.TransactionClient, 'v2ProxyReview' | 'v2Project' | '$queryRawUnsafe' | 'v2ProjectProxyRenderOperation' | 'v2ProxyReviewDecision'>,
   input: Parameters<ProxyReviewRepository['findCurrent']>[0],
 ): Promise<Readonly<PersistedProxyReview> | null> {
   // The Version, then its sealed State: which output's review is asked for is decided by the State, never by recency.
@@ -262,7 +303,7 @@ export async function readCurrentProxyReview(
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
   })
-  return row ? hydrateProxyReview(row) : null
+  return row ? withCarriedFrom(client, row) : null
 }
 
 export class PrismaProxyReviewRepository implements ProxyReviewRepository {
@@ -505,7 +546,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
             where: { id: existing.proxyReviewId },
           })
           return Object.freeze({
-            review: hydrateProxyReview(review),
+            review: await withCarriedFrom(transaction, review),
             decision: hydrateDecision(existing),
             replayed: true,
           })
@@ -646,7 +687,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
           where: { id: input.proxyReviewId },
         })
         return Object.freeze({
-          review: hydrateProxyReview(review),
+          review: await withCarriedFrom(transaction, review),
           decision: hydrateDecision(decision),
           replayed: false,
         })
