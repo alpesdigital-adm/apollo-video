@@ -26,6 +26,8 @@ const actor = Object.freeze({
   auditContext,
 })
 
+const INSTANT_WINNER_WAIT = { delaysMs: [0, 0], async sleep() {} }
+
 function emptySources() {
   return Object.freeze({
     projectVersionId: 'version-synthetic-gate',
@@ -203,7 +205,7 @@ test('T-F3-GATE Prisma adapter keeps exhausted P2034 without winner as persisten
     attempts += 1
     throw Object.assign(new Error('serialization conflict'), { code: 'P2034' })
   }
-  const repository = new PrismaSyntheticPhaseGateRepository(controlled.client, controlled.evidenceReader)
+  const repository = new PrismaSyntheticPhaseGateRepository(controlled.client, controlled.evidenceReader, INSTANT_WINNER_WAIT)
   const run = runSyntheticPhaseGateService({
     repository,
     clock: () => new Date('2026-09-04T10:00:00.000Z'),
@@ -222,6 +224,66 @@ test('T-F3-GATE Prisma adapter keeps exhausted P2034 without winner as persisten
   )
   assert.equal(attempts, 3)
   assert.equal(controlled.state.creates, 0)
+})
+
+test('T-F3-GATE Prisma adapter waits for a winner that commits after the loser exhausted its attempts', async () => {
+  const controlled = controlledPrisma()
+  let attempts = 0
+  controlled.client.$transaction = async () => {
+    attempts += 1
+    throw Object.assign(new Error('serialization conflict'), { code: 'P2034' })
+  }
+  const winnerController = controlledPrisma()
+  const winnerRow = async () => {
+    await runSyntheticPhaseGateService({
+      repository: new PrismaSyntheticPhaseGateRepository(
+        winnerController.client,
+        winnerController.evidenceReader,
+      ),
+      clock: () => new Date('2026-09-04T10:00:00.000Z'),
+      createId: () => 'synthetic-phase-gate-p2034-late-winner',
+    })({
+      workspaceId: actor.workspaceId,
+      projectId: 'project-synthetic-gate',
+      projectVersionId: 'version-synthetic-gate',
+      projectVersionHash: versionHash,
+      actor,
+      idempotencyKey: 'synthetic-phase-gate-p2034-late-winner-request',
+    })
+    controlled.state.evidenceRows = [...winnerController.state.evidenceRows]
+    return winnerController.state.row
+  }
+  const sleeps = []
+  const winnerWait = {
+    delaysMs: [1, 2, 3],
+    async sleep(milliseconds) {
+      sleeps.push(milliseconds)
+      // The winner's transaction commits only while the loser is waiting.
+      if (sleeps.length === 2) await controlled.transaction.v2SyntheticPhaseGate.create({ data: await winnerRow() })
+    },
+  }
+  const repository = new PrismaSyntheticPhaseGateRepository(
+    controlled.client,
+    controlled.evidenceReader,
+    winnerWait,
+  )
+  const run = runSyntheticPhaseGateService({
+    repository,
+    clock: () => new Date('2026-09-04T10:00:00.000Z'),
+    createId: () => 'synthetic-phase-gate-p2034-late-loser',
+  })
+  const result = await run({
+    workspaceId: actor.workspaceId,
+    projectId: 'project-synthetic-gate',
+    projectVersionId: 'version-synthetic-gate',
+    projectVersionHash: versionHash,
+    actor,
+    idempotencyKey: 'synthetic-phase-gate-p2034-late-winner-request',
+  })
+  assert.equal(attempts, 3)
+  assert.deepEqual(sleeps, [1, 2])
+  assert.equal(result.replayed, true)
+  assert.equal(result.gate.id, 'synthetic-phase-gate-p2034-late-winner')
 })
 
 test('T-F3-GATE Prisma adapter reports payload mismatch for a divergent exhausted P2034 winner', async () => {

@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
+  DEFAULT_IDEMPOTENCY_WINNER_WAIT,
+  awaitCommittedIdempotencyWinner,
   readCompletedIdempotencyResponse,
 } from '../../src/v2/infrastructure/prisma/idempotency-record-persistence.ts'
 
@@ -91,4 +93,54 @@ test('T-FR-245 PostgreSQL enforces the same response, time and size matrix', () 
   assert.match(migration, /jsonb_typeof\("responseJson"::jsonb\) = 'object'/)
   assert.match(migration, /idempotency_records_time_order_check/)
   assert.match(migration, /idempotency_records_response_size_check/)
+})
+
+test('idempotency winner wait reads once when the winner is already committed', async () => {
+  const sleeps = []
+  const winner = await awaitCommittedIdempotencyWinner(
+    async () => 'winner',
+    { delaysMs: [1, 2], async sleep(ms) { sleeps.push(ms) } },
+  )
+  assert.equal(winner, 'winner')
+  assert.deepEqual(sleeps, [])
+})
+
+test('idempotency winner wait re-reads until the in-flight winner commits and then stops', async () => {
+  const sleeps = []
+  let reads = 0
+  const winner = await awaitCommittedIdempotencyWinner(
+    async () => (++reads > 3 ? 'late-winner' : null),
+    { delaysMs: [1, 2, 3, 4, 5], async sleep(ms) { sleeps.push(ms) } },
+  )
+  assert.equal(winner, 'late-winner')
+  assert.deepEqual(sleeps, [1, 2, 3])
+  assert.equal(reads, 4)
+})
+
+test('idempotency winner wait is bounded and reports no winner', async () => {
+  const sleeps = []
+  let reads = 0
+  const winner = await awaitCommittedIdempotencyWinner(
+    async () => { reads += 1; return null },
+    { delaysMs: [1, 2], async sleep(ms) { sleeps.push(ms) } },
+  )
+  assert.equal(winner, null)
+  assert.deepEqual(sleeps, [1, 2])
+  assert.equal(reads, 3)
+  assert.ok(
+    DEFAULT_IDEMPOTENCY_WINNER_WAIT.delaysMs.reduce((total, ms) => total + ms, 0) <= 2_000,
+    'default wait must stay a bounded fraction of the request budget',
+  )
+})
+
+test('idempotency winner wait never retries a final mismatch raised while reading', async () => {
+  let reads = 0
+  await assert.rejects(
+    () => awaitCommittedIdempotencyWinner(
+      async () => { reads += 1; throw Object.assign(new Error('mismatch'), { code: 'IDEMPOTENCY_PAYLOAD_MISMATCH' }) },
+      { delaysMs: [1, 2], async sleep() {} },
+    ),
+    (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
+  assert.equal(reads, 1)
 })

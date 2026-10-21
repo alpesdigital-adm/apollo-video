@@ -23,7 +23,12 @@ import {
   assertWebhookAdministrationReplay,
   webhookAdministrationCommandData,
 } from './webhook-administration-command-persistence.ts'
-import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
+import {
+  DEFAULT_IDEMPOTENCY_WINNER_WAIT,
+  awaitCommittedIdempotencyWinner,
+  readCompletedIdempotencyResponse,
+  type IdempotencyWinnerWait,
+} from './idempotency-record-persistence.ts'
 
 interface StoredEndpointCreationResponse {
   endpointId: string
@@ -91,9 +96,14 @@ function result(
 
 export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointCreationRepository {
   private readonly client: PrismaClient
+  private readonly winnerWait: Readonly<IdempotencyWinnerWait>
 
-  constructor(client: PrismaClient = getV2PostgresClient()) {
+  constructor(
+    client: PrismaClient = getV2PostgresClient(),
+    winnerWait: Readonly<IdempotencyWinnerWait> = DEFAULT_IDEMPOTENCY_WINNER_WAIT,
+  ) {
     this.client = client
+    this.winnerWait = winnerWait
   }
 
   private async reconcileCommittedWinner(
@@ -310,7 +320,10 @@ export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointC
         if (serializationAttempt < 3) {
           return this.createOrReplay(bundle, serializationAttempt + 1)
         }
-        const committedWinner = await this.reconcileCommittedWinner(bundle)
+        const committedWinner = await awaitCommittedIdempotencyWinner(
+          () => this.reconcileCommittedWinner(bundle),
+          this.winnerWait,
+        )
         if (committedWinner) return committedWinner
         throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook endpoint creation must be retried')
       }

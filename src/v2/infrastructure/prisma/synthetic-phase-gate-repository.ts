@@ -25,6 +25,11 @@ import {
   externalActorAuditData,
   hydrateExternalActorAudit,
 } from './external-actor-audit.ts'
+import {
+  DEFAULT_IDEMPOTENCY_WINNER_WAIT,
+  awaitCommittedIdempotencyWinner,
+  type IdempotencyWinnerWait,
+} from './idempotency-record-persistence.ts'
 import { PrismaSyntheticPhaseGateEvidenceReader } from './synthetic-phase-gate-evidence-reader.ts'
 
 interface TransactionalSyntheticPhaseGateEvidenceReader {
@@ -199,14 +204,17 @@ export class PrismaSyntheticPhaseGateRepository
 implements SyntheticPhaseGateRepository {
   private readonly client: PrismaClient
   private readonly evidenceReader: TransactionalSyntheticPhaseGateEvidenceReader
+  private readonly winnerWait: Readonly<IdempotencyWinnerWait>
 
   constructor(
     client: PrismaClient = getV2PostgresClient(),
     evidenceReader: TransactionalSyntheticPhaseGateEvidenceReader =
       new PrismaSyntheticPhaseGateEvidenceReader(client),
+    winnerWait: Readonly<IdempotencyWinnerWait> = DEFAULT_IDEMPOTENCY_WINNER_WAIT,
   ) {
     this.client = client
     this.evidenceReader = evidenceReader
+    this.winnerWait = winnerWait
   }
 
   async findIdempotent(input: {
@@ -375,12 +383,18 @@ implements SyntheticPhaseGateRepository {
         return this.persist(gate, authenticationAudit, attempt + 1)
       }
       if (isPrismaCode(error, 'P2034')) {
-        const replay = await this.findIdempotent({
-          workspaceId: gate.workspaceId,
-          projectId: gate.projectId,
-          idempotencyKey: gate.idempotencyKey,
-          actorContextHash: authenticationAudit.contextHash,
-        })
+        // The cancelled loser may outrun the winner's commit: wait (bounded)
+        // for its record instead of reading once.
+        const replay = await awaitCommittedIdempotencyWinner(
+          () =>
+            this.findIdempotent({
+              workspaceId: gate.workspaceId,
+              projectId: gate.projectId,
+              idempotencyKey: gate.idempotencyKey,
+              actorContextHash: authenticationAudit.contextHash,
+            }),
+          this.winnerWait,
+        )
         if (replay) {
           if (replay.requestFingerprint !== gate.requestFingerprint) {
             throw new DomainError(
