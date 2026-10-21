@@ -10033,6 +10033,27 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/subtitle-sidecar-exported/v2': [
+      {
+        data: {
+          sidecar: subtitleSidecarExample,
+          projectVersion: { id: projectVersionId, sequence: 5, current: true },
+          alignment: {
+            renderElementMapHash: 'f'.repeat(64),
+            renderInputHash: 'b'.repeat(64),
+            outputArtifactId: artifactId,
+            outputSha256: 'e'.repeat(64),
+            cueCount: 2,
+            firstCueStartMs: 0,
+            lastCueEndMs: 2500,
+            omittedCueIds: ['cue-3'],
+            subtitleOverridesHash: 'a'.repeat(64),
+          },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/subtitle-sidecar-list/v1': [
       { data: { sidecars: [subtitleSidecarExample] }, meta: { apiVersion: 'v1' } },
     ],

@@ -2454,6 +2454,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               outputManifestId: context.outputManifestId,
               originalFileName: context.originalFileName,
               outputVariantId: admittedOutputVariantId!,
+              ...(projectRenderContext?.renderContentHash ? { renderContentHash: projectRenderContext.renderContentHash } : {}),
               ...(projectRenderContext?.renderableSnapshot ? {
                 renderablePlanHash: projectRenderContext.renderableSnapshot.planHash,
                 renderablePlanId: projectRenderContext.renderableSnapshot.planId,

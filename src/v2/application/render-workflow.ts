@@ -187,6 +187,18 @@ function groupedSubtitleIssues(input: {
   return Object.freeze(issues)
 }
 
+/** The range cache key of a proxy review: it names the Version, so a review carried to another Version recomputes it. */
+export function proxyRangeCacheKey(input: Readonly<{ projectVersionId: string; sourceSha256: string; editPlanHash: string; format: string; spec: unknown }>): string {
+  return calculateCanonicalHash({
+    kind: 'proxy-range-cache/v1',
+    projectVersionId: input.projectVersionId,
+    sourceSha256: input.sourceSha256,
+    editPlanHash: input.editPlanHash,
+    format: input.format,
+    spec: input.spec,
+  })
+}
+
 export function calculateProxyReviewHash(
   review: Omit<ProxyReview, 'reviewHash'>,
 ): string {
@@ -319,8 +331,7 @@ export function evaluateRenderedProxy(input: {
     proxyManifestId: input.proxyManifestId,
     inputHash: input.inputHash,
     outputSpecId: input.formatCritic?.outputSpecId ?? OUTPUT_FORMAT_REGISTRY.presets[input.format as ProxyOutputFormat].spec.id,
-    rangeCacheKey: calculateCanonicalHash({
-      kind: 'proxy-range-cache/v1',
+    rangeCacheKey: proxyRangeCacheKey({
       projectVersionId: input.projectVersionId,
       sourceSha256: input.sourceSha256,
       editPlanHash: input.editPlanHash,

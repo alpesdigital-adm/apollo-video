@@ -9,7 +9,7 @@ import type { ProjectProxyRenderRepository } from './ports/project-proxy-render-
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
 import type { RenderablePlanSnapshotRepository } from './ports/renderable-plan-snapshot-repository.ts'
-import { projectProxyRenderInputHash, sourceOutputVariantId } from './project-render-sources.ts'
+import { projectProxyRenderContentHash, projectProxyRenderInputHash, sourceOutputVariantId } from './project-render-sources.ts'
 import { resolveRenderColorPipelineBindings } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
 import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
@@ -163,6 +163,13 @@ export function enqueueProjectProxyRenderService(dependencies: {
     const requestFingerprint = calculateVersionHash({ type: 'project-proxy-render', projectId, inputHash, actorContextHash: audit.contextHash })
     const replay = await dependencies.operations.findReplay({ workspaceId, clientId, actorContextHash: audit.contextHash, idempotencyKey, requestFingerprint })
     if (replay) return replay
+    // A render of exactly this Version and input already completed - one made for it, or one CARRIED to it from an earlier Version because its
+    // output was untouched - is the answer: asking for it again does not start a second render of the same pixels.
+    const admittedId = await dependencies.projects.findAdmittedOperationId?.({ workspaceId, projectId, projectVersionId: source.projectVersionId, inputHash })
+    if (admittedId) {
+      const admitted = await dependencies.operations.findById(workspaceId, admittedId)
+      if (admitted?.operation.status === 'succeeded') return { ...admitted, replayed: true }
+    }
     const operationId = dependencies.createId('operation')
     const outputArtifactId = source.unchangedReuse?.artifactId ?? dependencies.createId('artifact')
     const outputManifestId = source.unchangedReuse?.manifestId ?? dependencies.createId('manifest')
@@ -194,6 +201,8 @@ export function enqueueProjectProxyRenderService(dependencies: {
         editPlanSnapshotId: source.editPlanSnapshotId, sourceArtifactId: source.sourceArtifactId,
         sourceManifestId: source.sourceManifestId, inputHash, outputArtifactId, outputManifestId,
         outputVariantId: sourceOutputVariantId(source),
+        // The Version-independent content address of this render's identity: what lets a later Version carry this render untouched.
+        renderContentHash: projectProxyRenderContentHash({ source, colorPipelineBindings }),
         colorPipelineBindings,
         originalFileName: `${source.originalFileName.replace(/\.[^.]+$/, '').slice(0, 200)}-editorial.mp4`,
       },

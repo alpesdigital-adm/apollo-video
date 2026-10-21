@@ -104,5 +104,5 @@ test('cue boundaries survive the encoders: parsed SRT and VTT show the same fram
     assert.deepEqual(parsed.map((cue) => framesShown(120, cue.startMs, cue.endMs, fps)),
       [[2, 3, 4], Array.from({ length: 114 }, (_unused, offset) => 5 + offset)], format)
   }
-  assert.equal(SUBTITLE_SIDECAR_RECIPE_VERSION, '1.2.0')
+  assert.equal(SUBTITLE_SIDECAR_RECIPE_VERSION, '1.3.0')
 })

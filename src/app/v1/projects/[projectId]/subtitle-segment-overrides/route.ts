@@ -6,6 +6,7 @@ import {
   listSubtitleSegmentOverridesService,
   readSubtitleSegmentOverrideService,
 } from '@/v2/application/subtitle-segment-overrides'
+import { carryOverAfterCommand } from '@/v2/infrastructure/carry-over-after-command'
 import { createSubtitleSegmentOverrideRepository } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
@@ -69,6 +70,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       projectId,
       actor,
       idempotencyKey: request.headers.get('idempotency-key') ?? '',
+    })
+    // The other outputs of the project keep the render and the approval they had when nothing they are drawn from changed (best effort: the
+    // Command has committed and answers regardless).
+    await carryOverAfterCommand({
+      workspaceId: actor.workspaceId, projectId, versionId: result.version.id, commandId: result.command.id,
+      affectedVariantIds: result.impact.affectedVariantIds, actor, traceId: requestId,
     })
     return NextResponse.json(
       presentSuccess(presentSubtitleSegmentOverrideResult(result)),

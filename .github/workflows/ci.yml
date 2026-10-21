@@ -789,6 +789,38 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # W69 tail: the subtitle sidecar of each output follows the cues its MP4 burned. One project, two outputs, a real recording, the
+      # production proxy-render worker, `next start`, real FFmpeg and real storage; the SRT/VTT are read by an independent parser and by FFmpeg's
+      # own demuxer, and their cue boundaries are compared with the decoded frames of the delivered MP4.
+      - name: Run W69 subtitle sidecar override journey
+        id: subtitle-sidecar-override
+        run: npm run test:e2e:subtitle-sidecar-override
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-subtitle-sidecar-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_SUBTITLE_SIDECAR_OVERRIDE_E2E: "1"
+          APOLLO_SUBTITLE_SIDECAR_EVIDENCE_DIR: ${{ runner.temp }}/subtitle-sidecar-override
+
+      - name: Publish W69 subtitle sidecar evidence
+        if: always() && steps.subtitle-sidecar-override.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-subtitle-sidecar-override-${{ github.sha }}
+          path: ${{ runner.temp }}/subtitle-sidecar-override
+          if-no-files-found: warn
+          retention-days: 14
+
+      # W70 prep: the untouched output keeps its render and approval by content address, recorded (a decision of its own kind), and any change to
+      # its inputs carries nothing; and a render cancelled while the worker is rendering promotes nothing and leaves no scratch.
+      - name: Run W70 render carry-over and running-cancel proofs
+        run: |
+          set -euo pipefail
+          npm run test:e2e:proxy-carry-over
+          npm run test:e2e:proxy-render-cancel-running
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-render-carry-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_PROXY_CARRY_OVER_E2E: "1"
+          APOLLO_RENDER_CANCEL_RUNNING_E2E: "1"
+
       - name: Run final export integration against the migrated capture database
         run: |
           set -euo pipefail

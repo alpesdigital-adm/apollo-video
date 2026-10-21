@@ -154,6 +154,28 @@ function presentMissingTool(details: Readonly<Record<string, unknown>>) {
  */
 const PUBLISHED_PRECONDITION_REASONS: ReadonlySet<string> = new Set(PUBLISHED_CONSUMPTION_REASONS)
 
+/**
+ * The reasons a subtitle sidecar refusal publishes (`SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH`), with the identifiers that let a client act on them:
+ * the Version asked for, the Version whose render exists, the verdict that blocked it. Nothing else a domain throw put in `details` crosses.
+ */
+const PUBLISHED_SIDECAR_REASONS: ReadonlySet<string> = new Set([
+  'render-blocked', 'review-missing', 'render-binding-mismatch', 'render-stale', 'override-set-mismatch', 'no-rendered-cue', 'rendered-cue-not-effective',
+])
+const SIDECAR_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
+const SIDECAR_REVIEW_STATUSES: ReadonlySet<string> = new Set(['blocked', 'warning-ack-required', 'ready-for-final'])
+
+function presentSidecarMismatch(details: Readonly<Record<string, unknown>>) {
+  if (typeof details.reason !== 'string' || !PUBLISHED_SIDECAR_REASONS.has(details.reason)) return undefined
+  const presented: Record<string, string> = { reason: details.reason }
+  for (const key of ['requestedVersionId', 'resolvedVersionId', 'renderedVersionId', 'requestedVariantId', 'resolvedVariantId', 'variantId'] as const) {
+    const value = details[key]
+    if (typeof value === 'string' && SIDECAR_ID.test(value)) presented[key] = value
+  }
+  if (typeof details.reviewStatus === 'string' && SIDECAR_REVIEW_STATUSES.has(details.reviewStatus)) presented.reviewStatus = details.reviewStatus
+  if (typeof details.reviewHash === 'string' && /^[a-f0-9]{64}$/.test(details.reviewHash)) presented.reviewHash = details.reviewHash
+  return presented
+}
+
 function presentPreconditionReason(details: Readonly<Record<string, unknown>>) {
   return typeof details.reason === 'string' && PUBLISHED_PRECONDITION_REASONS.has(details.reason)
     ? { reason: details.reason }
@@ -171,7 +193,9 @@ export function presentPublicDomainError(error: DomainError, requestId: string) 
           ? presentPreconditionReason(error.details)
           : STALE_PAIR_CODES.has(error.code)
             ? presentStalePair(error.details)
-            : undefined
+            : error.code === 'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH'
+              ? presentSidecarMismatch(error.details)
+              : undefined
   const conflict =
     error.code === 'VERSION_CONFLICT'
       ? presentVersionConflict(error.details.conflict)

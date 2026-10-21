@@ -19920,6 +19920,44 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
       },
     }),
   ),
+  defineSchema('subtitle-sidecar-exported', 2, 'Subtitle sidecar derived from the cues the render drew, naming the cues it did not draw and the subtitle exceptions it was drawn with',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['sidecar', 'projectVersion', 'alignment', 'replayed'],
+      properties: {
+        sidecar: subtitleSidecarSchema,
+        projectVersion: {
+          type: 'object', additionalProperties: false, required: ['id', 'sequence', 'current'],
+          properties: {
+            id: idSchema,
+            sequence: { type: 'integer', minimum: 1 },
+            current: { type: 'boolean' },
+          },
+        },
+        alignment: {
+          type: 'object', additionalProperties: false,
+          required: [
+            'renderElementMapHash', 'renderInputHash', 'outputArtifactId', 'outputSha256',
+            'cueCount', 'firstCueStartMs', 'lastCueEndMs', 'omittedCueIds', 'subtitleOverridesHash',
+          ],
+          properties: {
+            renderElementMapHash: sha256Schema,
+            renderInputHash: sha256Schema,
+            outputArtifactId: idSchema,
+            outputSha256: sha256Schema,
+            cueCount: { type: 'integer', minimum: 1 },
+            firstCueStartMs: { type: 'integer', minimum: 0 },
+            lastCueEndMs: { type: 'integer', minimum: 1 },
+            // Effective cues the render did not draw (suppressed or omitted by the placement plan): absent from the file, named here.
+            omittedCueIds: { type: 'array', maxItems: 5000, items: idSchema },
+            // The set of subtitle exceptions the render was drawn with; null when it was drawn with none.
+            subtitleOverridesHash: { oneOf: [sha256Schema, { type: 'null' }] },
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('subtitle-sidecar-list', 1, 'Subtitle sidecars already derived for a project',
     successSchema({
       type: 'object', additionalProperties: false, required: ['sidecars'],

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import { canonicalCaptionText } from './caption-text-layout.ts'
 import { stableSerialize } from './canonical-hash.ts'
 import { assertDomain, DomainError } from './errors.ts'
 import type { RenderElementMap } from './review-system.ts'
@@ -16,7 +17,11 @@ import type { RenderElementMap } from './review-system.ts'
  */
 export const SUBTITLE_SIDECAR_SCHEMA_VERSION = 'subtitle-sidecar/v1'
 export const SUBTITLE_SIDECAR_RECIPE_ID = 'subtitle-sidecar'
-export const SUBTITLE_SIDECAR_RECIPE_VERSION = '1.2.0'
+// 1.3.0 (W69 tail): the cues of a sidecar are the cues the render DREW - the effective cues (compiled text with the subtitle exceptions of the
+// render applied, hidden cues gone) of which the map shows pixels - and their text is the canonical caption text the renderer burns
+// (`canonicalCaptionText`). A cue the render did not draw (suppressed or omitted by the plan) is absent from the file and listed in the
+// manifest; a cue an exception hid is neither drawn nor listed as a cue. 1.2.0 sidecars keep their lineage.
+export const SUBTITLE_SIDECAR_RECIPE_VERSION = '1.3.0'
 export const SUBTITLE_SIDECAR_TEXT_POLICY = 'vtt-literal-single-decode/v1'
 export const SUBTITLE_SIDECAR_ELEMENT_PREFIX = 'subtitle:'
 export const SUBTITLE_SIDECAR_FORMATS = Object.freeze(['srt', 'vtt'] as const)
@@ -98,7 +103,8 @@ export function subtitleSidecarFrameToMs(frame: number, fps: number): number {
 }
 
 export function normalizeSubtitleCueText(value: string, cueId: string): string {
-  const normalized = value.normalize('NFC').replace(/\r\n|\r/g, '\n').trim()
+  // The text the renderer burns, and no other: NFC, `\n` breaks, the markup characters libass does not draw removed, lines trimmed and collapsed.
+  const normalized = canonicalCaptionText(value)
   assertDomain(
     normalized.length > 0 && normalized.length <= 512,
     'INVALID_ARGUMENT',
@@ -120,7 +126,7 @@ export function normalizeSubtitleCueText(value: string, cueId: string): string {
     'INVALID_ARGUMENT',
     `Subtitle cue ${cueId} line breaks are invalid`,
   )
-  return lines.map((line) => line.trim()).join('\n')
+  return normalized
 }
 
 /**
@@ -166,19 +172,34 @@ export function assertRenderedSubtitleCues(
   return Object.freeze(cues.map((cue) => Object.freeze({ ...cue })))
 }
 
+/** A cue the render could draw: the compiled cue with the subtitle exceptions of this output applied (hidden cues are not in the list). */
+export interface EffectiveSubtitleCue {
+  id: string
+  startFrame: number
+  /** Exclusive. */
+  endFrame: number
+  text: string
+}
+
+export interface RenderedSubtitleCueSet {
+  cues: readonly Readonly<RenderedSubtitleCue>[]
+  /** Effective cues the render did NOT draw (suppressed or omitted by the placement plan): absent from the file, listed here. */
+  omittedCueIds: readonly string[]
+}
+
 /**
  * Extracts the exact rendered cues from the persisted RenderElementMap.
  *
- * Every `subtitle:<cueId>` element contributes one frame. The frames of one cue
- * must form a single contiguous run — a hole would mean the map and the burned
- * subtitle disagree — and every rendered cue must have exactly one text in the
- * immutable snapshot. Any divergence in either direction is a conflict, never a
- * silently narrower sidecar.
+ * Every `subtitle:<cueId>` element contributes one frame. The frames of one cue must form a single contiguous run - a hole would mean
+ * the map and the burned subtitle disagree - and every rendered cue must be an EFFECTIVE cue of the render (exactly one text, frames that
+ * contain the rendered run). A rendered cue nobody wrote is a conflict, never a silently narrower sidecar. An effective cue without a
+ * pixel in the map was not drawn: it is absent from the sidecar (the file carries only what was burned) and reported in `omittedCueIds`
+ * so the omission is explicit and auditable, never silent.
  */
-export function collectRenderedSubtitleCues(input: {
+export function deriveRenderedSubtitleCues(input: {
   map: Readonly<RenderElementMap>
-  texts: Readonly<Record<string, string>>
-}): readonly Readonly<RenderedSubtitleCue>[] {
+  effectiveCues: readonly Readonly<EffectiveSubtitleCue>[]
+}): Readonly<RenderedSubtitleCueSet> {
   const frames = new Map<string, number[]>()
   for (const element of input.map.elements) {
     if (element.type !== 'subtitle') continue
@@ -196,19 +217,26 @@ export function collectRenderedSubtitleCues(input: {
     throw new DomainError(
       'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
       'The rendered artifact carries no subtitle element; a sidecar cannot be derived',
+      { reason: 'no-rendered-cue', omittedCueIds: input.effectiveCues.map((cue) => cue.id).toSorted() },
     )
   }
+  const byId = new Map(input.effectiveCues.map((cue) => [cue.id, cue] as const))
+  assertDomain(
+    byId.size === input.effectiveCues.length,
+    'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
+    'The effective subtitle cues of the render have a duplicated identity',
+  )
   const rendered = [...frames.keys()]
-  const missing = rendered.filter((cueId) => typeof input.texts[cueId] !== 'string')
-  const extra = Object.keys(input.texts).filter((cueId) => !frames.has(cueId))
-  if (missing.length > 0 || extra.length > 0) {
+  const unwritten = rendered.filter((cueId) => !byId.has(cueId))
+  if (unwritten.length > 0) {
     throw new DomainError(
       'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
-      'Rendered subtitle cues and the immutable snapshot cues do not match',
-      { missing, extra },
+      'Rendered subtitle cues and the effective cues of the render do not match',
+      { reason: 'rendered-cue-not-effective', unwritten: unwritten.toSorted() },
     )
   }
   const cues = rendered.map((cueId) => {
+    const effective = byId.get(cueId)!
     const ordered = [...frames.get(cueId)!].sort((left, right) => left - right)
     const startFrame = ordered[0]!
     const endFrame = ordered[ordered.length - 1]! + 1
@@ -217,21 +245,48 @@ export function collectRenderedSubtitleCues(input: {
       'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
       `Rendered subtitle cue ${cueId} does not occupy a contiguous frame range`,
     )
+    assertDomain(
+      startFrame >= effective.startFrame && endFrame <= effective.endFrame,
+      'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
+      `Rendered subtitle cue ${cueId} is drawn outside the frames of its cue`,
+    )
     return {
       cueId,
       startFrame,
       endFrame,
       startMs: subtitleSidecarFrameToMs(startFrame, input.map.fps),
       endMs: subtitleSidecarFrameToMs(endFrame, input.map.fps),
-      text: normalizeSubtitleCueText(input.texts[cueId]!, cueId),
+      text: normalizeSubtitleCueText(effective.text, cueId),
     }
   })
   cues.sort((left, right) =>
     left.startFrame - right.startFrame || left.cueId.localeCompare(right.cueId))
-  return assertRenderedSubtitleCues(
-    cues,
-    subtitleSidecarFrameToMs(input.map.durationFrames, input.map.fps),
-  )
+  return Object.freeze({
+    cues: assertRenderedSubtitleCues(
+      cues,
+      subtitleSidecarFrameToMs(input.map.durationFrames, input.map.fps),
+    ),
+    omittedCueIds: Object.freeze(input.effectiveCues.map((cue) => cue.id).filter((cueId) => !frames.has(cueId)).toSorted()),
+  })
+}
+
+/** Strict form: every effective cue must have been drawn. Kept for callers that have no notion of an omitted cue. */
+export function collectRenderedSubtitleCues(input: {
+  map: Readonly<RenderElementMap>
+  texts: Readonly<Record<string, string>>
+}): readonly Readonly<RenderedSubtitleCue>[] {
+  const effectiveCues = Object.entries(input.texts).map(([id, text]) => ({
+    id, text, startFrame: 0, endFrame: Number.MAX_SAFE_INTEGER,
+  }))
+  const derived = deriveRenderedSubtitleCues({ map: input.map, effectiveCues })
+  if (derived.omittedCueIds.length > 0) {
+    throw new DomainError(
+      'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
+      'Rendered subtitle cues and the immutable snapshot cues do not match',
+      { missing: [], extra: derived.omittedCueIds },
+    )
+  }
+  return derived.cues
 }
 
 function stamp(ms: number, format: SubtitleSidecarFormat): string {
@@ -385,6 +440,8 @@ export interface SubtitleSidecarLineage {
   editPlanSnapshotId: string
   editPlanHash: string
   renderElementMapHash: string
+  /** The set of subtitle exceptions the render was drawn with; absent when it was drawn with none. */
+  subtitleOverridesHash?: string
   format: SubtitleSidecarFormat
   locale: string
 }
@@ -401,6 +458,7 @@ export function subtitleSidecarLineageHash(lineage: Readonly<SubtitleSidecarLine
       /^[a-f0-9]{64}$/.test(lineage.renderElementMapHash) &&
       /^[a-f0-9]{64}$/.test(lineage.renderInputHash) &&
       /^[a-f0-9]{64}$/.test(lineage.editPlanHash) &&
+      (lineage.subtitleOverridesHash === undefined || /^[a-f0-9]{64}$/.test(lineage.subtitleOverridesHash)) &&
       SUBTITLE_SIDECAR_FORMATS.includes(lineage.format) &&
       LOCALE_PATTERN.test(lineage.locale) &&
       ['proxy', 'final'].includes(lineage.outputKind) &&

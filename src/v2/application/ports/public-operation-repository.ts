@@ -67,6 +67,11 @@ export interface ProjectProxyRenderOperationContext {
    * before the column existed: such a row belongs to the State's only output, and to none when the State has several.
    */
   outputVariantId?: string
+  /**
+   * W70 prep. The Version-independent content address of this render's pre-render identity (`projectProxyRenderContentHash`). It is what lets a
+   * later Version carry this render when nothing the output is drawn from changed; a row without it is never a source for a carry.
+   */
+  renderContentHash?: string
   renderableSnapshot?: Readonly<{
     planId: string
     planHash: string

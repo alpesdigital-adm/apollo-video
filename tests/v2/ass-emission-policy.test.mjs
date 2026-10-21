@@ -164,7 +164,7 @@ test('the pre-libass stage closes the clock without the fps filter, which droppe
 })
 
 test('renderer and recipe versions moved past the previous contracts (fps stage, v2-only captions) so older renders are never reused', () => {
-  assert.equal(FFMPEG_EDITORIAL_RENDERER_VERSION, '1.16.0')
-  assert.equal(EDITORIAL_PROXY_RECIPE_VERSION, '1.17.0')
-  assert.equal(EDITORIAL_FINAL_RECIPE_VERSION, '1.14.0', 'a final of the integration carries the proxy geometry (S3/e17b9188) AND records its caption certification (W65b): neither lineage alone')
+  assert.equal(FFMPEG_EDITORIAL_RENDERER_VERSION, '1.17.0')
+  assert.equal(EDITORIAL_PROXY_RECIPE_VERSION, '1.18.0')
+  assert.equal(EDITORIAL_FINAL_RECIPE_VERSION, '1.15.0', 'a final of the integration carries the proxy geometry (S3/e17b9188) AND records its caption certification (W65b) AND lays its captions out from the certified band (W70 prep): none of the earlier lineages alone')
 })

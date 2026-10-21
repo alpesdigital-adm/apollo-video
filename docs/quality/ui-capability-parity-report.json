@@ -2601,6 +2601,8 @@
         "applySubtitleSegmentOverrideService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "carryOverUntouchedOutputService",
+        "carryOverUntouchedOutputs",
         "governanceAnomalyPolicyFromEnvironment",
         "governanceDefaultLimitsFromEnvironment",
         "requireScope"
@@ -2621,6 +2623,8 @@
         "applyVariantReframeOverrideService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "carryOverUntouchedOutputService",
+        "carryOverUntouchedOutputs",
         "governanceAnomalyPolicyFromEnvironment",
         "governanceDefaultLimitsFromEnvironment",
         "presentVariantReframePlan",
@@ -3898,7 +3902,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/subtitle-sidecars",
       "inputSchemaRef": "apollo://schemas/export-subtitle-sidecar-request/v2",
-      "outputSchemaRef": "apollo://schemas/subtitle-sidecar-exported/v1",
+      "outputSchemaRef": "apollo://schemas/subtitle-sidecar-exported/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

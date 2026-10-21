@@ -5,7 +5,7 @@ import { assertDomain, DomainError } from '../domain/errors.ts'
 import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import { renderElementMapHash, validateRenderElementMap } from '../domain/review-system.ts'
 import {
-  collectRenderedSubtitleCues,
+  deriveRenderedSubtitleCues,
   encodeSubtitleSidecar,
   subtitleSidecarFrameToMs,
   subtitleSidecarLineageHash,
@@ -64,6 +64,10 @@ export interface SubtitleSidecarExportResult {
     cueCount: number
     firstCueStartMs: number
     lastCueEndMs: number
+    /** Effective cues the render did not draw (suppressed or omitted by the placement plan): absent from the file, listed here. */
+    omittedCueIds: readonly string[]
+    /** The set of subtitle exceptions the render was drawn with; null when it was drawn with none. */
+    subtitleOverridesHash: string | null
   }>
   replayed: boolean
 }
@@ -236,7 +240,18 @@ export function exportProjectSubtitleSidecarService(dependencies: {
       alignment,
     )
 
-    const cues = collectRenderedSubtitleCues({ map: verified.map, texts: alignment.cueTexts })
+    // The cues the render DREW: the cues of the map, each with the text the render burned (the effective text of its cue). A cue the render
+    // did not draw is not in the file; it is listed, so the omission is explicit.
+    const textIds = Object.keys(alignment.cueTexts).toSorted()
+    assertDomain(
+      JSON.stringify(textIds) === JSON.stringify(Object.keys(alignment.cueFrames).toSorted()),
+      'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
+      'The effective cue texts and frames of the render do not describe the same cues',
+    )
+    const { cues, omittedCueIds } = deriveRenderedSubtitleCues({
+      map: verified.map,
+      effectiveCues: textIds.map((id) => ({ id, text: alignment.cueTexts[id]!, ...alignment.cueFrames[id]! })),
+    })
     const encoded = encodeSubtitleSidecar({
       cues,
       format: input.format,
@@ -257,10 +272,24 @@ export function exportProjectSubtitleSidecarService(dependencies: {
       editPlanSnapshotId: alignment.editPlanSnapshotId,
       editPlanHash: alignment.editPlanHash,
       renderElementMapHash: alignment.renderElementMapHash,
+      // A render drawn with subtitle exceptions names the set; one drawn with none keeps the lineage shape it always had.
+      ...(alignment.subtitleOverridesHash ? { subtitleOverridesHash: alignment.subtitleOverridesHash } : {}),
       format: input.format,
       locale,
     }
     const lineageHash = subtitleSidecarLineageHash(lineage)
+    // The request is its lineage and its bytes. An Idempotency-Key that already names ANOTHER request of this project is refused before a byte
+    // is staged or stored, whether or not the lineage of this request happens to exist already (it would otherwise be answered by lineage and the
+    // key reuse would pass unnoticed).
+    const requestFingerprint = calculateVersionHash({
+      schemaVersion: 'subtitle-sidecar-export/v1',
+      lineageHash,
+      sha256: encoded.sha256,
+    })
+    const prior = await dependencies.sidecars.findIdempotent({ workspaceId: input.workspaceId, projectId: input.projectId, idempotencyKey: input.idempotencyKey })
+    if (prior && prior.requestFingerprint !== requestFingerprint) {
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was reused with another subtitle sidecar')
+    }
     const artifactId = `artifact-subtitle-sidecar-${lineageHash.slice(0, 40)}`
     const manifestId = `manifest-subtitle-sidecar-${lineageHash.slice(0, 40)}`
     const sidecarId = `subtitle-sidecar-${lineageHash.slice(0, 40)}`
@@ -305,6 +334,8 @@ export function exportProjectSubtitleSidecarService(dependencies: {
           cueCount: encoded.cueCount,
           byteSize: encoded.byteSize,
           sha256: encoded.sha256,
+          // The cues the render did not draw are not in the file; they are named here (empty list: every effective cue was drawn).
+          omittedCueIds,
           cueAlignment: cues.map((cue) => ({
             cueId: cue.cueId,
             startFrame: cue.startFrame,
@@ -363,11 +394,7 @@ export function exportProjectSubtitleSidecarService(dependencies: {
     const result = await dependencies.sidecars.persistOrReplay({
       record,
       idempotencyKey: input.idempotencyKey,
-      requestFingerprint: calculateVersionHash({
-        schemaVersion: 'subtitle-sidecar-export/v1',
-        lineageHash,
-        sha256: encoded.sha256,
-      }),
+      requestFingerprint,
     })
     assertDomain(
       result.record.sha256 === encoded.sha256 && result.record.lineageHash === lineageHash,
@@ -389,6 +416,8 @@ export function exportProjectSubtitleSidecarService(dependencies: {
         cueCount: cues.length,
         firstCueStartMs: cues[0]!.startMs,
         lastCueEndMs: cues[cues.length - 1]!.endMs,
+        omittedCueIds,
+        subtitleOverridesHash: alignment.subtitleOverridesHash,
       }),
       replayed: result.replayed,
     })

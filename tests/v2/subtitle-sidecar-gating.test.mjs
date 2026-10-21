@@ -31,7 +31,7 @@ function alignment(review) {
     variantId: '9:16', outputKind: 'proxy', outputArtifactId: 'artifact-output', outputManifestId: 'manifest-output',
     outputArtifactKey: 'proxies/output.mp4', outputSha256: sha('a'), renderInputHash: sha('b'),
     editPlanSnapshotId: 'snapshot-plan', editPlanHash: sha('c'), renderElementMapId: 'map-1',
-    renderElementMapHash: renderElementMapHash(map), map, cueTexts: { 'cue-1': 'Ação' }, review,
+    renderElementMapHash: renderElementMapHash(map), map, cueTexts: { 'cue-1': 'Ação' }, cueFrames: { 'cue-1': { startFrame: 0, endFrame: 36 } }, subtitleOverridesHash: null, review,
   }
 }
 

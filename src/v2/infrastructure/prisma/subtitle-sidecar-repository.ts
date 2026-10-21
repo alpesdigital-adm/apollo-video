@@ -23,6 +23,9 @@ import {
   SUBTITLE_SIDECAR_FORMATS,
   type SubtitleSidecarFormat,
 } from '../../domain/subtitle-sidecar.ts'
+import { emittedSubtitleTracks } from '../../domain/subtitle-emission-tracks.ts'
+import { resolveSubtitleOverridesForRender, subtitleOverrideSetHash } from '../../domain/subtitle-segment-override.ts'
+import { readSubtitleSegmentOverrideHeadsAsOf } from './subtitle-segment-override-repository.ts'
 
 const PROXY_REVIEW_STATUSES = ['blocked', 'warning-ack-required', 'ready-for-final'] as const
 
@@ -37,24 +40,22 @@ function parseObject(value: string, field: string): Record<string, unknown> {
 }
 
 /**
- * Reads the cue texts of the exact EditPlan snapshot that the render operation
- * consumed. The project head is deliberately not consulted: a later command may
- * already have rewritten the cues, and the sidecar has to describe the MP4.
+ * The cues the EditPlan snapshot of the render compiled (the cues a renderer may burn: the emitted tracks, exactly as the geometry
+ * derivation reads them), with their frames. The project head is deliberately not consulted: a later command may already have rewritten
+ * the cues, and the sidecar has to describe the MP4.
  */
-function cueTextsOf(contentJson: string): Readonly<Record<string, string>> {
+function compiledCuesOf(contentJson: string): readonly Readonly<{ id: string; startFrame: number; endFrame: number; text: string }>[] {
   const plan = parseObject(contentJson, 'EditPlan snapshot')
   const tracks = plan.subtitleTracks
   if (!Array.isArray(tracks)) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored EditPlan snapshot has no subtitle tracks')
   }
-  const texts: Record<string, string> = {}
-  for (const track of tracks) {
-    if (!track || typeof track !== 'object' || Array.isArray(track)) {
-      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored subtitle track is invalid')
-    }
-    const cues = (track as Record<string, unknown>).cues
-    if (!Array.isArray(cues)) continue
-    for (const cue of cues) {
+  const cues: { id: string; startFrame: number; endFrame: number; text: string }[] = []
+  const seen = new Set<string>()
+  for (const track of emittedSubtitleTracks(tracks as readonly object[])) {
+    const trackCues = (track as { cues?: unknown }).cues
+    if (!Array.isArray(trackCues)) continue
+    for (const cue of trackCues) {
       if (!cue || typeof cue !== 'object' || Array.isArray(cue)) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Stored subtitle cue is invalid')
       }
@@ -62,13 +63,25 @@ function cueTextsOf(contentJson: string): Readonly<Record<string, string>> {
       if (typeof value.id !== 'string' || typeof value.text !== 'string') {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Stored subtitle cue identity is invalid')
       }
-      if (value.id in texts) {
+      if (seen.has(value.id)) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Stored subtitle cue id is duplicated')
       }
-      texts[value.id] = value.text
+      const startFrame = Number(value.startFrame), endFrame = Number(value.endFrame)
+      if (!Number.isSafeInteger(startFrame) || !Number.isSafeInteger(endFrame) || startFrame < 0 || endFrame <= startFrame) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Stored subtitle cue range is invalid')
+      }
+      seen.add(value.id)
+      cues.push(Object.freeze({ id: value.id, startFrame, endFrame, text: value.text }))
     }
   }
-  return Object.freeze(texts)
+  return Object.freeze(cues)
+}
+
+/** The set hash of subtitle exceptions the review of a render recorded (`formatQuality.subtitleOverridesHash`); `null` when it was drawn with none. */
+function reviewedOverridesHash(formatQualityJson: string | null): string | null {
+  if (formatQualityJson === null || formatQualityJson === undefined) return null
+  const hash = parseObject(formatQualityJson, 'proxy review format quality').subtitleOverridesHash
+  return typeof hash === 'string' ? hash : null
 }
 
 function mapOf(row: {
@@ -225,7 +238,29 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
             editPlanJson: proxy.editPlanSnapshot.contentJson,
           }
         : null
-    if (!render) return null
+    if (!render) {
+      // No render of THIS output exists for the requested Version. When a render of the same output exists for ANOTHER Version of the project,
+      // the sidecar of that render would describe something this Version does not play: say so, precisely, instead of "not found".
+      const [otherFinal, otherProxy] = await Promise.all([
+        this.client.v2ProjectFinalExportOperation.findFirst({
+          where: { workspaceId: input.workspaceId, projectId: input.projectId, outputVariantId, projectVersionId: { not: projectVersionId },
+            operation: { status: 'succeeded', phase: 'completed' } },
+          orderBy: [{ createdAt: 'desc' }], select: { projectVersionId: true },
+        }),
+        this.client.v2ProjectProxyRenderOperation.findFirst({
+          where: { workspaceId: input.workspaceId, projectId: input.projectId, outputVariantId, projectVersionId: { not: projectVersionId },
+            operation: { status: 'succeeded', phase: 'completed' } },
+          orderBy: [{ createdAt: 'desc' }], select: { projectVersionId: true },
+        }),
+      ])
+      const renderedVersionId = otherFinal?.projectVersionId ?? otherProxy?.projectVersionId ?? null
+      if (renderedVersionId !== null) {
+        throw new DomainError('SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
+          'This output has no render of the requested Version; the only render is of another Version, so its sidecar would not describe what this Version plays',
+          { reason: 'render-stale', requestedVersionId: projectVersionId, renderedVersionId, variantId: outputVariantId })
+      }
+      return null
+    }
     // What the audience sees is a final export: the Version must be consumable as one too (a cut copy stays blocked until its
     // target owns perception authority), or the sidecar would describe an export the product refuses to make.
     const finalConsumption = render.kind === 'final'
@@ -247,13 +282,29 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
       }),
       this.client.v2ProxyReview.findFirst({
         where: { ...render.reviewWhere, workspaceId: input.workspaceId, projectId: input.projectId },
-        select: { status: true, finalAllowed: true, reviewHash: true },
+        select: { status: true, finalAllowed: true, reviewHash: true, formatQualityJson: true },
       }),
     ])
     if (!artifact || !mapRow) return null
     if (reviewRow && !PROXY_REVIEW_STATUSES.includes(reviewRow.status as (typeof PROXY_REVIEW_STATUSES)[number])) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review status is invalid')
     }
+
+    // The cues THIS render could draw: the compiled cues of its own EditPlan snapshot with the subtitle exceptions of the output applied -
+    // the very function the geometry derivation applied to the render. The exceptions are those in force as of the rendered Version, and the
+    // set must be the one the review of the render recorded: another set would make the sidecar describe pixels nobody drew.
+    const heads = await readSubtitleSegmentOverrideHeadsAsOf(this.client, {
+      workspaceId: input.workspaceId, projectId: input.projectId, variantId: outputVariantId, versionSequence: version.sequence,
+    })
+    const overridesHash = subtitleOverrideSetHash(heads, outputVariantId)
+    if (reviewRow && reviewedOverridesHash(reviewRow.formatQualityJson) !== overridesHash) {
+      throw new DomainError('SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
+        'The subtitle exceptions in force for this output are not the set the render was drawn with',
+        { reason: 'override-set-mismatch', variantId: outputVariantId, projectVersionId })
+    }
+    const compiled = compiledCuesOf(render.editPlanJson)
+    const effective = overridesHash === null ? compiled
+      : resolveSubtitleOverridesForRender({ cues: compiled, overrides: heads, variantId: outputVariantId }).cues
 
     return Object.freeze({
       projectId: input.projectId,
@@ -272,7 +323,9 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
       renderElementMapId: mapRow.id,
       renderElementMapHash: mapRow.mapHash,
       map: mapOf(mapRow),
-      cueTexts: cueTextsOf(render.editPlanJson),
+      cueTexts: Object.freeze(Object.fromEntries(effective.map((cue) => [cue.id, cue.text]))),
+      cueFrames: Object.freeze(Object.fromEntries(effective.map((cue) => [cue.id, Object.freeze({ startFrame: cue.startFrame, endFrame: cue.endFrame })]))),
+      subtitleOverridesHash: overridesHash,
       outputConsumption: Object.freeze({ render: sealOf(rendered), ...(finalConsumption ? { final: sealOf(finalConsumption) } : {}) }),
       review: reviewRow
         ? Object.freeze({
