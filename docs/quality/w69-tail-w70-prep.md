@@ -80,5 +80,22 @@ Já estava no W68 e foi conferida: `subtitleOverridesMatchApproval` (final recus
 - A estimativa de largura é calibrada no Arial Bold (e na Liberation Sans, métrica compatível). Um host cujo `Arial` resolva para uma face mais larga (DejaVu) está fora desta alegação.
 - Três linhas de legenda em 16:9 ainda cabem na tolerância de 6 px do crítico W65 (a layout reporta `fits: false`; o pixel não); é do crítico W65, não foi alterado.
 - O crítico de pixels do W67 (OpenVINO) e o final real (W70) não foram executados aqui. O final exige um DirectorRun cujo resultado seja a Versão; uma Versão nascida de um Command de exceção não o tem, então a aprovação herdada vale para o portão do laudo, não substitui o Diretor.
-- Uma execução da jornada de browser do W68 (`w69t-w68ui-3`) falhou no passo `tall-hide` ("hide Command is committed: null", depois do reenquadramento), o mesmo ponto em que o W68 relatou uma execução sem saída; ver o relatório final.
-- Uma execução da jornada do sidecar ficou sem saída por 48 min num render que parou em `persisting` (`w69t-sidecar-16`), sem erro registrado; a repetição imediata passou. Não foi reproduzida nem explicada; a jornada agora coleta o estado do banco (`pg_stat_activity`) quando um render não se resolve e o `stop` do pump tem prazo.
+- A jornada de browser do W68 reprovou duas vezes seguidas no passo `tall-hide` (\"hide Command is committed: null\", depois do reenquadramento: `w69t-w68ui-3`, `w69t-w68ui-6`) e passou depois, sem mudança nesse passo (`w69t-w68ui-8`, `w69tg-full-b2`); o W68 já relatara uma execução sem saída nesse ponto. Não foi explicada nem reproduzida sob diagnóstico (o passo agora tira captura e relata o que o editor dizia). Tratar como flake aberto.
+- Uma execução da jornada do sidecar ficou sem saída por 48 min num render que parou em `persisting` (`w69t-sidecar-16`), sem erro registrado; a repetição imediata passou. A jornada agora coleta o estado do banco (`pg_stat_activity`) quando um render não se resolve e o `stop` do pump tem prazo.
+- O primeiro `full-b1` da cabeça final parou no passo 27 por `statement timeout` do PostgreSQL local (a medição de identidade do harness registrou um máximo de 121 s: parada do hospedeiro, não do produto); o lote inteiro foi repetido e passou.
+- Os dois passos do lote local `b3` que o W68 já documentava como alheios (`library-journey` espera S3/MinIO; `synthetic-wave24-journey` precisa do bundle Remotion): o segundo passa com `npm run remotion:build` feito (`w69tg-rerun-b3`); o primeiro segue reprovando por ambiente.
+- Uma jornada que supunha \"a outra saída não foi renderizada\" (W68) e uma que supunha o `renderedVersionId` do sidecar (a nova) foram corrigidas: com a herança, a saída intocada TEM um render da Versão nova (o mesmo artefato) e a mais recente é a herdada; as asserções agora provam a herança em vez de a ausência.
+
+## 4. Execuções (cabeça final 00960a91, árvore limpa; harness `run-local-pg-s2d.mjs`, lock global)
+
+| Execução | Resultado |
+| --- | --- |
+| `npm test` | 3818 testes, 3805 passam, 13 pulados, 0 falham |
+| gates diretos | typecheck, lint, lint:code, lint:whitespace, db:v2:validate, api:v1:validate, api:parity:validate: todos exit 0 |
+| `full-b1` (repetido) `w69tg-full-b1r-bcde911c` | 43 passos, 115/115 |
+| `full-b1` (primeiro) `w69tg-full-b1-65b67f41` | parou no passo 27: `statement timeout` do PostgreSQL local (parada do hospedeiro); repetido acima |
+| `full-b2` `w69tg-full-b2-d81cf93f` | 57 passos, nenhum reprovado (inclui as quatro jornadas deste ramo: W68 browser 166 s, sidecar 62 s, herança 32 s, cancelamento em execução 77 s) |
+| `full-b3` `w69tg-full-b3-31f47c93` | 2 reprovações: `library-journey` (S3/MinIO, ambiente) e `synthetic-wave24-journey` (sem o bundle Remotion); repetição `w69tg-rerun-b3-2ce00909` com o bundle construído: wave24 passa, `library-journey` reprova igual |
+| execuções isoladas | pixels do layout `w69t-layout-3-0f573c2f` (5/5); sidecar `w69t-sidecar-25-45129485`; herança `w69t-carry-2-154f0c83`; cancelamento `w69t-cancel-1-b200c6de`; W68 browser `w69t-w68ui-8-f1949458` |
+
+A fusão de `origin/main` (04c4e01f: `@modelcontextprotocol/sdk` 1.32.1) só mexe em `package.json` e no lock; o `node_modules` compartilhado continua na 1.31.0 (nenhum `npm install` foi feito).
