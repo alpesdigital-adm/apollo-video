@@ -6,6 +6,7 @@ import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createPerceptionTimeline, type PerceptionCoverage, type PerceptionObservation } from '../../domain/perception-timeline.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
+import { pauseBeforeLostRaceRetry } from './idempotency-record-persistence.ts'
 
 function isPrismaCode(error: unknown, code: string) {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
@@ -136,8 +137,10 @@ export class PrismaPerceptionTimelineRepository implements PerceptionTimelineRep
         return Object.freeze({ timeline: hydrate(created), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      if ((isPrismaCode(error, 'P2034') || isPrismaCode(error, 'P2002')) && attempt < 3) return this.persist(value, attempt + 1)
-      if (isPrismaCode(error, 'P2034') || isPrismaCode(error, 'P2002')) throw new DomainError('PERSISTENCE_CONFLICT', 'Perception timeline conflicted with another transaction')
+      if (isPrismaCode(error, 'P2034') || isPrismaCode(error, 'P2002')) {
+        if (await pauseBeforeLostRaceRetry(attempt)) return this.persist(value, attempt + 1)
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Perception timeline conflicted with another transaction')
+      }
       throw error
     }
   }

@@ -40,6 +40,7 @@ import type {
 } from '../../domain/production-batch.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { batchActorAuditData, hydrateBatchActorAudit } from './batch-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type CommandRow = V2BatchEditCommand & {
   items: Array<V2BatchEditCommandItem & {
@@ -916,13 +917,16 @@ implements BatchEditRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.createPreflight(record, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findPreflightReplay({
-          workspaceId: record.run.workspaceId,
-          actorClientId: record.run.createdByClientId,
-          actorContextHash: record.authenticationAudit.contextHash,
-          idempotencyKey: record.idempotencyKey,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findPreflightReplay({
+            workspaceId: record.run.workspaceId,
+            actorClientId: record.run.createdByClientId,
+            actorContextHash: record.authenticationAudit.contextHash,
+            idempotencyKey: record.idempotencyKey,
+          }),
+        )
         if (replay) {
           if (
             replay.requestFingerprint !== record.requestFingerprint
@@ -1268,13 +1272,16 @@ implements BatchEditRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.commit(record, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findCommandReplay({
-          workspaceId: record.command.workspaceId,
-          actorClientId: record.command.createdByClientId,
-          actorContextHash: record.authenticationAudit.contextHash,
-          idempotencyKey: record.idempotencyKey,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findCommandReplay({
+            workspaceId: record.command.workspaceId,
+            actorClientId: record.command.createdByClientId,
+            actorContextHash: record.authenticationAudit.contextHash,
+            idempotencyKey: record.idempotencyKey,
+          }),
+        )
         if (replay) {
           if (
             replay.requestFingerprint !== record.requestFingerprint

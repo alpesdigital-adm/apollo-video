@@ -23,6 +23,7 @@ import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type StoredCommand = Prisma.V2EditCommandGetPayload<{
   include: {
@@ -259,8 +260,11 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(input, serializationAttempt + 1)
-      if (isPrismaCode(error, 'P2002')) {
-        const existing = await this.findIdempotentResult({ workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, idempotencyKey: bundle.command.idempotencyKey, actorContextHash: authenticationAudit.contextHash })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const existing = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotentResult({ workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, idempotencyKey: bundle.command.idempotencyKey, actorContextHash: authenticationAudit.contextHash }),
+        )
         if (existing) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different source transcript replacement')
           return Object.freeze({ ...existing.result, replayed: true })

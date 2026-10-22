@@ -10,6 +10,7 @@ import { batchActorAuditData, hydrateBatchActorAudit } from './batch-actor-audit
 import { childRowId } from './child-row-id.ts'
 import { evaluateAssetUse } from '../../domain/asset-rights.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
+import { retryAfterLostRace } from './idempotency-record-persistence.ts'
 
 function parse<T>(value: string, label: string): T { try { return JSON.parse(value) as T } catch { throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${label} is invalid JSON`) } }
 function hydrate(row: { runJson: string; runHash: string }): Readonly<LocalizationRun> {
@@ -89,7 +90,7 @@ export class PrismaLocalizationRunRepository implements LocalizationRunRepositor
 
   async create(input: Parameters<LocalizationRunRepository['create']>[0]) {
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      return await retryAfterLostRace(() => this.prisma.$transaction(async (tx) => {
         const replay = await tx.v2LocalizationRun.findFirst({ where: { workspaceId: input.run.workspaceId, requestedByClientId: input.run.requestedByClientId, idempotencyKey: input.idempotencyKey } })
         if (replay) {
           if (hydrateBatchActorAudit(replay, replay.requestedByClientId).contextHash !== input.authenticationAudit.contextHash || replay.requestFingerprint !== input.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Localization run idempotency key belongs to another request or actor context')
@@ -110,7 +111,7 @@ export class PrismaLocalizationRunRepository implements LocalizationRunRepositor
         const row = await tx.v2LocalizationRun.create({ data })
         await tx.v2LocalizationRunRevision.create({ data: { id: childRowId([input.run.workspaceId, input.run.id, '1'], 160), workspaceId: input.run.workspaceId, runId: input.run.id, revision: 1, status: input.run.status, runJson: stableSerialize(input.run), runHash: input.run.runHash, createdAt: new Date(input.run.createdAt) } })
         return Object.freeze({ run: hydrate(row), replayed: false })
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }))
     } catch (error) { if (typeof error === 'object' && error && 'code' in error && (error.code === 'P2002' || error.code === 'P2034')) throw new DomainError('PERSISTENCE_CONFLICT', 'Localization run request conflicted'); throw error }
   }
 

@@ -22,6 +22,7 @@ import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { carryVariantReframePlans } from './variant-reframe-plan-repository.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 const include = Prisma.validator<Prisma.V2SubtitleSegmentOverrideInclude>()({ command: true, resultVersion: true })
 type Stored = Prisma.V2SubtitleSegmentOverrideGetPayload<{ include: typeof include }>
@@ -415,16 +416,19 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
         )
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const replay = await this.findIdempotent({
-          workspaceId: command.workspaceId, projectId: command.projectId,
-          idempotencyKey: command.idempotencyKey,
-        })
-        if (replay?.requestFingerprint === requestFingerprint) return replay.result
-        if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was reused with another subtitle segment override')
-      }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 3) {
         return this.commitOrReplay(input, attempt + 1)
+      }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === 'P2002' || error.code === 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({
+            workspaceId: command.workspaceId, projectId: command.projectId,
+            idempotencyKey: command.idempotencyKey,
+          }),
+        )
+        if (replay?.requestFingerprint === requestFingerprint) return replay.result
+        if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was reused with another subtitle segment override')
       }
       throw error
     }

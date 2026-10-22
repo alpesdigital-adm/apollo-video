@@ -25,7 +25,9 @@ import {
   assertWebhookAdministrationReplay,
   webhookAdministrationCommandData,
 } from './webhook-administration-command-persistence.ts'
-import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
+import { readCompletedIdempotencyResponse,
+  pauseBeforeLostRaceRetry,
+} from './idempotency-record-persistence.ts'
 
 interface StoredProvisioningResponse {
   endpointId: string
@@ -34,10 +36,6 @@ interface StoredProvisioningResponse {
 
 function isPrismaError(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
-}
-
-function waitForConcurrentCommit(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
 function storedResponse(
@@ -183,7 +181,7 @@ export class PrismaWebhookSigningSecretProvisioningRepository
       return result(endpointRow, secretRow, true)
     }
 
-    for (let serializationAttempt = 1; serializationAttempt <= 3; serializationAttempt += 1) {
+    for (let serializationAttempt = 1; ; serializationAttempt += 1) {
       try {
         return await this.client.$transaction(async (transaction) => {
         const existing = await transaction.v2IdempotencyRecord.findUnique({ where: key })
@@ -347,7 +345,6 @@ export class PrismaWebhookSigningSecretProvisioningRepository
       } catch (error) {
         if (!isPrismaError(error, 'P2034') && !isPrismaError(error, 'P2002')) throw error
 
-        await waitForConcurrentCommit(serializationAttempt * 10)
         const existing = await this.client.v2IdempotencyRecord.findUnique({ where: key })
         if (existing && existing.expiresAt > requestedAt) {
           if (existing.requestFingerprint !== command.idempotency.requestFingerprint) {
@@ -358,16 +355,12 @@ export class PrismaWebhookSigningSecretProvisioningRepository
           }
           if (existing.status === 'completed') return readReplay(this.client, existing)
         }
-        if (serializationAttempt < 3) continue
+        if (await pauseBeforeLostRaceRetry(serializationAttempt)) continue
         throw new DomainError(
           'WEBHOOK_ENDPOINT_REVISION_MISMATCH',
           'Webhook endpoint changed concurrently',
         )
       }
     }
-    throw new DomainError(
-      'WEBHOOK_ENDPOINT_REVISION_MISMATCH',
-      'Webhook endpoint changed concurrently',
-    )
   }
 }
