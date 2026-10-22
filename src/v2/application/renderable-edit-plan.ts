@@ -1,4 +1,5 @@
-import { compositionUnderPolicy, planMovementPolicyUnder, requestlessEditorialPolicies } from '../domain/editorial-policy-resolution.ts'
+import { compositionUnderPolicy, planMovementPolicyUnder, requestlessEditorialPolicies, resolveEditorialPolicies } from '../domain/editorial-policy-resolution.ts'
+import { createEditorialRequest } from '../domain/editorial-request.ts'
 import { calculateRenderablePlanHash, RENDERABLE_PLAN_COMPILER_VERSION } from '../domain/renderable-plan-authority.ts'
 export { calculateRenderablePlanHash, RENDERABLE_PLAN_COMPILER_VERSION } from '../domain/renderable-plan-authority.ts'
 import {
@@ -157,6 +158,12 @@ export interface AssembleDirectedEditPlanInput {
    */
   readonly decisions?: readonly Readonly<DirectorDecisionInput>[]
   readonly backgroundMusic?: Readonly<DirectedMusicTrack>
+  /**
+   * The frame shape of the source and of every output the plan is made for (`W:H`), when the compiler knows them. With it the layout follows the
+   * geometry like any other plan (the source as it is where the shapes agree); without it the geometry is unknown and the silence rule keeps the whole
+   * frame visible over a backdrop.
+   */
+  readonly geometry?: Readonly<{ sourceAspectRatio?: string; outputAspectRatios: readonly string[] }>
   readonly assumptions: readonly string[]
   readonly createdAt: string
 }
@@ -289,7 +296,10 @@ export function assembleDirectedEditPlan(
       anchor: 'bottom' as const,
       maxCharactersPerBlock: REQUESTLESS_POLICIES.captions.value.capacityCharacters,
     }),
-    composition: compositionUnderPolicy(REQUESTLESS_POLICIES.layout),
+    composition: compositionUnderPolicy(input.geometry
+      ? resolveEditorialPolicies(createEditorialRequest({}), { hasSelectedInsert: false, ...(input.geometry.sourceAspectRatio ? { sourceAspectRatio: input.geometry.sourceAspectRatio } : {}) },
+        input.geometry.outputAspectRatios.map((aspectRatio, index) => ({ variantId: `output-${index + 1}`, aspectRatio }))).policies.layout
+      : REQUESTLESS_POLICIES.layout),
     director: Object.freeze({
       plannerVersion: RENDERABLE_PLAN_COMPILER_VERSION,
       decisions: input.decisions === undefined

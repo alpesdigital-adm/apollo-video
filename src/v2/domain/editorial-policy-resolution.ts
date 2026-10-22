@@ -76,7 +76,7 @@ export interface EditorialPolicies {
   transitions: ResolvedPolicy<{ type: 'straight-cut'; audioFadeMs: number }>
   inserts: ResolvedPolicy<{ mode: 'use-selected-insert' | 'no-insert' }>
   cta: ResolvedPolicy<{ required: boolean; evaluation: CtaEvaluation }>
-  ctaOverlay: ResolvedPolicy<{ mode: 'none' } | { mode: 'window'; startSeconds: number; endSeconds: number; anchoredTo: 'spoken-cta' | 'spoken-cta-to-end' | 'closing-sentence' }>
+  ctaOverlay: ResolvedPolicy<{ mode: 'none' } | { mode: 'window'; startSeconds: number; endSeconds: number; anchoredTo: 'spoken-cta' | 'spoken-cta-to-end' | 'closing-sentence' | 'requested-seconds' | 'whole-video' }>
   layout: ResolvedPolicy<{ mode: 'fit-with-backdrop' | 'source-native' }>
   language: ResolvedPolicy<{ captionLanguage: string | null }>
   captions: ResolvedPolicy<CaptionPolicyValue>
@@ -191,6 +191,12 @@ export interface EditorialOutputSpec {
 
 // The caption style the renderer registry designates for an output that must draw captions when nothing else names one (rule `renderer-baseline`).
 export const RENDERER_BASELINE_CAPTION_PRESET: SubtitlePresetId = 'clean-color'
+/**
+ * The look the renderer draws a montage in when nothing names one (rule `renderer-baseline`): its colours and its style preset are the renderer's own,
+ * not a choice of the requester. A caller that has a palette or a style states it; these are what is drawn otherwise.
+ */
+export const RENDERER_BASELINE_PALETTE = Object.freeze({ primary: '#4ECDC4', secondary: '#2457A7', accent: '#FFB800', text: '#FFFFFF', background: '#07111F' })
+export const RENDERER_BASELINE_STYLE_PRESET = 'creator-clean'
 // Not editorial: a click guard at an audio seam.
 const AUDIO_SEAM_FADE_MS = 24
 
@@ -424,7 +430,7 @@ export function resolveEditorialPolicies(
   const visualText = action?.visualCta?.trim()
   const spoken = mediaContext.spokenCta
   const overlayWanted = ctaSelection !== undefined
-    ? ctaSelection.directive.value === 'overlay-closing' || ctaSelection.directive.value === 'overlay-at-spoken-cta'
+    ? ['overlay-closing', 'overlay-at-spoken-cta', 'overlay-whole-video', 'overlay-from-seconds'].includes(ctaSelection.directive.value)
     : Boolean(visualText)
   const noOverlay = { mode: 'none' as const }
   let ctaOverlay: EditorialPolicies['ctaOverlay']
@@ -434,11 +440,34 @@ export function resolveEditorialPolicies(
         ctaSelection.directive.value === 'verbal-only' && visualText ? 'The call to action is only spoken: the visual call to action text of the desired action is not drawn' : 'No visual call to action is drawn', noOverlay)
       : silent(request, 'ctaOverlay', noOverlay, 'minimal-intervention', 'The request gives no visual call to action text, so none is drawn.')
   } else {
-    const toEnd = ctaSelection?.directive.value === 'overlay-closing'
+    // The structured placement says where the call is drawn without the speech having to show one: from a second the requester names, or throughout.
+    const structuredPlacement = ctaSelection?.directive.value === 'overlay-whole-video' || ctaSelection?.directive.value === 'overlay-from-seconds'
+    const toEnd = ctaSelection?.directive.value === 'overlay-closing' || structuredPlacement
     let value: EditorialPolicies['ctaOverlay']['value'] = noOverlay
     let effect = 'No visual call to action is drawn until the question is answered'
     if (!visualText) {
       openQuestions.push(Object.freeze({ id: 'cta-overlay-text-missing', question: 'The request asks for a visual call to action and the desired action has no visual text. What should it say?', source: 'resolution' as const }))
+    } else if (structuredPlacement) {
+      const fromSeconds = ctaSelection!.directive.value === 'overlay-from-seconds'
+      const startSeconds = fromSeconds ? Number(ctaSelection!.directive.param) : 0
+      if (mediaContext.timelineDurationSeconds === undefined) {
+        openQuestions.push(Object.freeze({
+          id: 'cta-overlay-timeline-unknown',
+          question: 'The request places the visual call to action on the video, and the length of the compiled video is not known yet. Direct the video again once its timeline exists.',
+          source: 'resolution' as const,
+        }))
+      } else if (startSeconds >= mediaContext.timelineDurationSeconds) {
+        openQuestions.push(Object.freeze({
+          id: 'cta-overlay-after-end',
+          question: `The request draws the visual call to action from ${startSeconds} s, and the video lasts ${mediaContext.timelineDurationSeconds} s. From which second should it be drawn?`,
+          source: 'resolution' as const,
+        }))
+      } else {
+        value = { mode: 'window' as const, startSeconds, endSeconds: mediaContext.timelineDurationSeconds, anchoredTo: fromSeconds ? 'requested-seconds' as const : 'whole-video' as const }
+        effect = fromSeconds
+          ? `The visual call to action is drawn from the second the request names (${startSeconds} s) to the end of the video (${mediaContext.timelineDurationSeconds} s)`
+          : `The visual call to action is drawn throughout the video (0 s to ${mediaContext.timelineDurationSeconds} s)`
+      }
     } else if (spoken === undefined && !(toEnd && mediaContext.closingSentenceStartSeconds !== undefined)) {
       openQuestions.push(Object.freeze({
         id: 'cta-overlay-placement-unknown',

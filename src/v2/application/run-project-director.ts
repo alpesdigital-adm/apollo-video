@@ -245,6 +245,14 @@ function buildPerception(input: {
   return Object.freeze({ perception, serverPerception })
 }
 
+/** The mean adjacent-frame change score of the shot observations, as a ratio. No observation, no measurement: 0. */
+function measuredVisualVariety(observations: readonly Readonly<{ kind: string; value: unknown }>[]): number {
+  const scores = observations.filter((item) => item.kind === 'shot').map((item) => (item.value as { changeScore?: unknown } | null)?.changeScore)
+    .filter((score): score is number => typeof score === 'number' && Number.isFinite(score))
+  if (scores.length === 0) return 0
+  return Number(Math.min(1, Math.max(0, scores.reduce((sum, score) => sum + score, 0) / scores.length)).toFixed(4))
+}
+
 /** What the Director itself carries of its input Version, for a context that has no store to read the rest of the evidence from. */
 function directorAssemblyInput(input: {
   workspaceId: string
@@ -1207,7 +1215,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         summaryHash: calculateVersionHash(perception.summary),
         confidence: perception.summary.confidence,
         speakerCoverage: perception.summary.speechCoverage,
-        visualVariety: 0,
+        // Measured, not declared: the mean adjacent-frame change the perception snapshot recorded over the timeline (0 where nothing was measured: the
+        // snapshot's own coverage says whether the kind was examined).
+        visualVariety: measuredVisualVariety(perception.timeline.observations),
         evidenceItemCount: perception.timeline.observations.length,
         durationMs: Math.round(context.editPlan.durationFrames / context.editPlan.fps * 1_000),
       },

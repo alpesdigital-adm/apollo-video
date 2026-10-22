@@ -169,3 +169,27 @@ test('a plan is judged on its call to action: drawn exactly when the resolution 
   // a plan that states no overlay list says nothing about it
   assertPlanHonorsResolution({ fps: 30, movementPolicy: { automaticZoom: false, protectedOpeningFrames: 0 } }, none)
 })
+
+test('a speech with no call to say where the visual call goes is a question the structured placement answers', () => {
+  const withText = createEditorialRequest({ objective: 'sale', desiredAction: sale({ visualCta: 'label' }) })
+  const speech = { ...media, transcriptLanguage: 'pt', timelineDurationSeconds: 12 }
+  assert.deepEqual(resolveEditorialPolicies(withText, speech, []).openQuestions.map((item) => item.id), ['cta-overlay-placement-unknown'])
+  const placed = (value, param) => createEditorialRequest({ objective: 'sale', desiredAction: sale({ visualCta: 'label' }), directives: [{ id: 'c', kind: 'cta', value, ...(param !== undefined ? { param } : {}) }] })
+  const from = resolveEditorialPolicies(placed('overlay-from-seconds', 8), speech, [])
+  assert.deepEqual(from.openQuestions, [])
+  assert.deepEqual(from.policies.ctaOverlay.value, { mode: 'window', startSeconds: 8, endSeconds: 12, anchoredTo: 'requested-seconds' })
+  assert.equal(from.policies.ctaOverlay.origin, 'request-field')
+  assert.equal(from.policies.ctaOverlay.rule, 'explicit-request')
+  const whole = resolveEditorialPolicies(placed('overlay-whole-video'), speech, [])
+  assert.deepEqual(whole.policies.ctaOverlay.value, { mode: 'window', startSeconds: 0, endSeconds: 12, anchoredTo: 'whole-video' })
+  assert.equal(whole.blocked, false)
+  // the second is the requester's: past the end of the video, or a video of unknown length, is a question and not a guess
+  assert.deepEqual(resolveEditorialPolicies(placed('overlay-from-seconds', 20), speech, []).openQuestions.map((item) => item.id), ['cta-overlay-after-end'])
+  assert.deepEqual(resolveEditorialPolicies(placed('overlay-from-seconds', 8), { ...speech, timelineDurationSeconds: undefined }, []).openQuestions.map((item) => item.id), ['cta-overlay-timeline-unknown'])
+  // the parameter is part of the vocabulary: a placement without its second, or a second on a value that takes none, is not a directive
+  assert.throws(() => placed('overlay-from-seconds'), /needs seconds/)
+  assert.throws(() => placed('overlay-whole-video', 4), /takes no parameter/)
+  // the structured placement still needs the text to draw
+  const textless = createEditorialRequest({ objective: 'sale', desiredAction: sale(), directives: [{ id: 'c', kind: 'cta', value: 'overlay-whole-video' }] })
+  assert.deepEqual(resolveEditorialPolicies(textless, speech, []).openQuestions.map((item) => item.id), ['cta-overlay-text-missing'])
+})

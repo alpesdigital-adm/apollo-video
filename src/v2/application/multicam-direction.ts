@@ -960,6 +960,14 @@ export function placeOverlaysOnMulticamTimeline(input: {
   if (policy?.mode === 'none') return Object.freeze([])
   const fps = input.base.fps
   return Object.freeze(input.base.overlayTracks.map((overlay) => {
+    // A placement the requester gave in seconds of the video is a second of THIS video: it is not followed through the recordings.
+    if (policy?.mode === 'window' && (policy.anchoredTo === 'whole-video' || policy.anchoredTo === 'requested-seconds')) {
+      const start = policy.anchoredTo === 'whole-video' ? 0 : Math.round(policy.startSeconds * fps)
+      if (start >= input.compilation.durationFrames) {
+        throw new DomainError('PRECONDITION_REQUIRED', `The call to action is requested from ${policy.startSeconds} s and the directed video lasts ${(input.compilation.durationFrames / fps).toFixed(2)} s`, { overlayId: overlay.id })
+      }
+      return Object.freeze({ ...overlay, startFrame: start, endFrame: input.compilation.durationFrames })
+    }
     const locate = (frame: number) => locateBasePlanFrameOnMulticamTimeline({ ...input, frame })
     const start = locate(overlay.startFrame)
     const toEnd = policy !== undefined ? policy.anchoredTo !== 'spoken-cta' : overlay.endFrame >= input.base.durationFrames

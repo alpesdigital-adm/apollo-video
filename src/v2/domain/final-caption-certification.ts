@@ -114,7 +114,7 @@ export type AdmissibleDirectorQuality = Readonly<Pick<DirectorQualityReport, 'st
 }>
 
 /**
- * (a) of the policy. A report is admitted only when it is a v5 report of critic v4 or later, bound to the request now in the brief and to
+ * (a) of the policy. A report is admitted only when it is a v5 report of critic v5 or later (`MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION`), bound to the request now in the brief and to
  * the policy resolution sealed in its run, with every hard check holding. A verified face safety claim keeps its original basis; the
  * report the Director actually produces - `review-required` with an unknown face claim - is admitted when that claim is its only
  * reservation. Everything else (blocked, an older report, a request that moved, a failed check, a hard issue, an inconsistent claim) is

@@ -1,4 +1,4 @@
-import { RENDERER_BASELINE_CAPTION_PRESET } from '../domain/editorial-policy-resolution.ts'
+import { RENDERER_BASELINE_CAPTION_PRESET, RENDERER_BASELINE_PALETTE, RENDERER_BASELINE_STYLE_PRESET } from '../domain/editorial-policy-resolution.ts'
 import type { SubtitlePresetId } from '../domain/subtitle-style-tokens.ts'
 import { createRenderInputSpec, type RenderInputSpecV1 } from '../domain/render-input.ts'
 import { assertVisualMontagePlanIntegrity, type VisualMontagePlan } from '../domain/visual-montage.ts'
@@ -13,6 +13,9 @@ import type { OutputAspectRatio } from '../domain/output-spec.ts'
 export function compileVisualMontageRenderInputs(input: {
   /** The caption style the project fixed (an override or the request); without one, the renderer baseline is drawn (rule `renderer-baseline`). */
   subtitleStyle?: SubtitlePresetId
+  /** The colours and the style preset the project fixed; without them the renderer baseline is drawn (rule `renderer-baseline`). */
+  palette?: Readonly<{ primary: string; secondary: string; accent: string; text: string; background: string }>
+  stylePreset?: string
   plan: Readonly<VisualMontagePlan>
   renderer: RenderInputSpecV1['renderer']
   aspectRatio?: OutputAspectRatio
@@ -54,7 +57,7 @@ export function compileVisualMontageRenderInputs(input: {
       : { ...(slot.kind === 'image' ? { imageAssetId: slot.assetId } : { videoAssetId: slot.assetId }), layout: 'full', visualRole: 'context', stutter: false },
   }))
   const subtitles = input.plan.beats.map((beat) => ({ text: beat.narration, fromFrame: toFrame(beat.startMs), toFrame: toFrame(beat.endMs), anchor: 'bottom' }))
-  const props = { primaryAudioAssetId: 'voiceover-audio', scenes, subtitles, palette: { primary: '#4ECDC4', secondary: '#2457A7', accent: '#FFB800', text: '#FFFFFF', background: '#07111F' }, stylePreset: 'creator-clean', subtitleStyle: input.subtitleStyle ?? RENDERER_BASELINE_CAPTION_PRESET }
+  const props = { primaryAudioAssetId: 'voiceover-audio', scenes, subtitles, palette: { ...(input.palette ?? RENDERER_BASELINE_PALETTE) }, stylePreset: input.stylePreset ?? RENDERER_BASELINE_STYLE_PRESET, subtitleStyle: input.subtitleStyle ?? RENDERER_BASELINE_CAPTION_PRESET }
   const compile = (kind: 'proxy' | 'final') => createRenderInputSpec({
     schemaVersion: 'render-input/v1', renderer: input.renderer,
     composition: { id: 'apollo-video', version: 'v1', propsSchemaRef: 'apollo://render-props/apollo-video/v1' },

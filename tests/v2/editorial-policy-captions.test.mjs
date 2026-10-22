@@ -132,6 +132,13 @@ test('no policy of any request carries a value of the planner, and none names a 
       assert.ok(EDITORIAL_POLICY_RULES[policy.rule], `${key} names a catalogued rule`)
       assert.doesNotMatch(policy.reason, /carried|to be removed|scheduled/i, `${key} must not describe a carried value`)
     }
+    // The values, not only the words: without a movement or an opening in the request the plan applies no motion and protects no window, and a window
+    // exists only where the request gave its seconds (or the first sentence it named). None of these numbers is the planner's.
+    const named = request.directives.find((directive) => directive.kind === 'opening')
+    assert.deepEqual(policies.movement.value, { mode: 'none' })
+    assert.equal(policies.movement.rule, request.directives.some((directive) => directive.kind === 'movement') ? 'explicit-request' : 'minimal-intervention')
+    assert.deepEqual(policies.opening.value, named?.value === 'protect-seconds' ? { mode: 'protected-window', seconds: Number(named.param) } : { mode: 'not-applicable' })
+    assert.equal(policies.opening.rule, named === undefined ? 'minimal-intervention' : 'explicit-request')
   }
 })
 

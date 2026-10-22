@@ -17,6 +17,7 @@ import type {
 } from './ports/renderable-plan-snapshot-repository.ts'
 import {
   assembleDirectedEditPlan,
+  type AssembleDirectedEditPlanInput,
   renderablePlanSnapshotOf,
   type RenderablePlanMarker,
   type RenderablePlanSeam,
@@ -63,6 +64,8 @@ export interface CompileSynthesisOptions {
   readonly projectVersionId: string
   readonly objective: StrategicObjectiveId
   readonly desiredAction?: Readonly<DesiredActionInput>
+  /** The frame shape of the source and of the outputs, when the caller knows them (see `AssembleDirectedEditPlanInput.geometry`). */
+  readonly geometry?: AssembleDirectedEditPlanInput['geometry']
   readonly createdAt: string
 }
 
@@ -244,6 +247,7 @@ export function compileSynthesisToDirectedPlan(
     storyPlanId: synthesis.storyPlan.id,
     objective: options.objective,
     ...(options.desiredAction ? { desiredAction: options.desiredAction } : {}),
+    ...(options.geometry ? { geometry: options.geometry } : {}),
     fps,
     sources,
     clips: cutClips,
