@@ -42,6 +42,7 @@ import {
   type BatchItem,
   type BatchItemStep,
   type ProductionBatch,
+  type ProductionBatchEditorialRequest,
   type ProductionBatchRecipe,
   type ProductionBatchSourceGroup,
   type ProductionBatchStatus,
@@ -206,6 +207,7 @@ function hydrateBatch(row: BatchRow): Readonly<ProductionBatch> {
     variants,
     budget,
     items,
+    ...(row.briefingJson === null ? {} : { editorialRequest: canonicalJson<ProductionBatchEditorialRequest>(row.briefingJson, 'production batch editorial request') }),
     createdBy: Object.freeze({
       type: 'api-client',
       id: row.createdByClientId,
@@ -218,6 +220,7 @@ function hydrateBatch(row: BatchRow): Readonly<ProductionBatch> {
     definitionHash: row.definitionHash,
   })
   if (
+    (batch.editorialRequest?.request.requestHash ?? null) !== row.requestHash ||
     items.length !== row.itemCount ||
     budget.maxCostMinorUnits !== row.maxCostMinorUnits ||
     budget.reservedCostMinorUnits !== row.reservedCostMinorUnits ||
@@ -418,6 +421,8 @@ function batchData(record: Readonly<ProductionBatchCreateRecord>) {
     reservedCostMinorUnits: batch.budget.reservedCostMinorUnits,
     itemCount: batch.items.length,
     definitionHash: batch.definitionHash,
+    briefingJson: batch.editorialRequest ? stableSerialize(batch.editorialRequest) : null,
+    requestHash: batch.editorialRequest ? batch.editorialRequest.request.requestHash : null,
     requestFingerprint: record.requestFingerprint,
     idempotencyKey: record.idempotencyKey,
     createdByClientId: batch.createdBy.id,

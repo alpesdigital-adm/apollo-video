@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import net from 'node:net'
 import test from 'node:test'
+import { startBriefInterpreterStandIn } from './helpers/brief-interpreter-stand-in.mjs'
 
 import {
   Prisma,
@@ -98,6 +99,8 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
   const createdAt = new Date('2026-07-27T20:30:00.000Z')
   let server
   let serverLogs = ''
+  // The batch briefing is read by the real adapter against a local stand-in for the provider (no network, no credential).
+  let interpreter
 
   try {
     await client.v2Workspace.create({
@@ -247,6 +250,7 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
       })
     }
 
+    interpreter = await startBriefInterpreterStandIn()
     const port = await getFreePort()
     const baseUrl = `http://127.0.0.1:${port}`
     server = spawn(
@@ -258,6 +262,7 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
           ...process.env,
           NODE_ENV: 'production',
           __NEXT_PROCESSED_ENV: 'true',
+          ...interpreter.environment,
           APOLLO_API_ENVIRONMENT: 'production',
           APOLLO_PREFLIGHT_COMMIT_TOKEN_SECRET:
             'batch-edit-e2e-signed-commit-secret-32-bytes',
@@ -281,6 +286,7 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
     }
     const body = {
       projectId,
+      briefing: '<texto do pedido>',
       name: 'Campanha de descoberta',
       objective: 'content-distribution',
       sourceGroups: [
@@ -1667,6 +1673,7 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
     throw error
   } finally {
     await stopServer(server)
+    await interpreter?.close()
     await client.$disconnect()
   }
 })

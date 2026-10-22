@@ -6,7 +6,10 @@ import {
   createProductionBatchItemResult,
   projectProductionBatchItemOperation,
 } from '../domain/batch-item-result.ts'
+import { createEditorialRequest } from '../domain/editorial-request.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
+import { normalizeBriefingText } from '../domain/production-brief.ts'
+import type { InterpretBrief } from './interpret-brief.ts'
 import {
   batchProgress,
   cancelProductionBatch,
@@ -154,6 +157,8 @@ function decodeBatchItemPageCursor(
 export interface CreateProductionBatchRequest {
   workspaceId: string
   projectId: string
+  /** The editorial request of the whole batch: any non-empty text. It is read by the interpreter when the batch is created. */
+  briefing: string
   name: string
   objective: string
   sourceGroups: readonly Readonly<ProductionBatchSourceGroup>[]
@@ -176,6 +181,8 @@ export interface CreateProductionBatchRequest {
 
 export function createProductionBatchService(dependencies: {
   repository: ProductionBatchRepository
+  /** Reads a briefing (fail-closed with PRECONDITION_REQUIRED when the deployment has no interpreter). */
+  interpretBrief: InterpretBrief
   clock: () => Date
   createBatchId: () => string
   createItemId: () => string
@@ -194,10 +201,13 @@ export function createProductionBatchService(dependencies: {
     )
     const actorClientId = authenticationAudit.clientId
     const replayKey = idempotencyKey(request.idempotencyKey)
+    const briefing = normalizeBriefingText(typeof request.briefing === 'string' ? request.briefing : '')
+    assertDomain(briefing.length > 0 && briefing.length <= 10_000, 'INVALID_ARGUMENT', 'A batch needs a briefing: any text of 1 to 10000 characters')
     const requestFingerprint = calculateCanonicalHash({
-      schemaVersion: 'production-batch-create-request/v1',
+      schemaVersion: 'production-batch-create-request/v2',
       workspaceId,
       projectId,
+      briefing,
       name: request.name,
       objective: request.objective,
       sourceGroups: request.sourceGroups,
@@ -220,6 +230,12 @@ export function createProductionBatchService(dependencies: {
         replayed: true,
       })
     }
+    // A replay never reads the briefing again. The reading happens once, before the batch exists, and is stored with it.
+    const read = await dependencies.interpretBrief({ briefing })
+    const editorialRequest = Object.freeze({
+      request: createEditorialRequest({ briefing, interpretation: read.interpretation }),
+      interpretationAudit: read.audit as unknown as Readonly<Record<string, unknown>>,
+    })
     const createdAt = instant(dependencies.clock)
     const batch = createProductionBatch({
       id: identity(dependencies.createBatchId(), 'created batch ID'),
@@ -231,6 +247,7 @@ export function createProductionBatchService(dependencies: {
       recipes: request.recipes,
       variants: request.variants,
       budget: request.budget,
+      editorialRequest,
       itemDefinitions: request.items.map((item) => ({
         ...item,
         id: identity(dependencies.createItemId(), 'created item ID'),

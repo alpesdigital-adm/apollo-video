@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import net from 'node:net'
 import test from 'node:test'
+import { startBriefInterpreterStandIn } from './helpers/brief-interpreter-stand-in.mjs'
 
 import {
   Prisma,
@@ -125,6 +126,8 @@ test('T-FR-081 imports, aligns and reviews grouped recordings through PostgreSQL
   const createdAt = new Date('2026-07-27T22:00:00.000Z')
   let server
   let serverLogs = ''
+  // The batch briefing is read by the real adapter against a local stand-in for the provider (no network, no credential).
+  let interpreter
 
   try {
     await resetDisposableDatabase(client)
@@ -349,6 +352,7 @@ test('T-FR-081 imports, aligns and reviews grouped recordings through PostgreSQL
       ],
     })
 
+    interpreter = await startBriefInterpreterStandIn()
     const port = await freePort()
     const baseUrl = `http://127.0.0.1:${port}`
     server = spawn(
@@ -360,6 +364,7 @@ test('T-FR-081 imports, aligns and reviews grouped recordings through PostgreSQL
           ...process.env,
           NODE_ENV: 'production',
           __NEXT_PROCESSED_ENV: 'true',
+          ...interpreter.environment,
           APOLLO_API_ENVIRONMENT: 'production',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -386,6 +391,7 @@ test('T-FR-081 imports, aligns and reviews grouped recordings through PostgreSQL
       },
       body: JSON.stringify({
         projectId,
+        briefing: '<texto do pedido>',
         name: 'Variações de descoberta',
         objective: 'content-distribution',
         sourceGroups: [
@@ -668,6 +674,7 @@ test('T-FR-081 imports, aligns and reviews grouped recordings through PostgreSQL
     throw error
   } finally {
     await stopServer(server)
+    await interpreter?.close()
     await client.$disconnect()
   }
 })

@@ -858,6 +858,7 @@ export default function BatchesPage() {
   const [composerOpen, setComposerOpen] = useState(false)
   const [projectId, setProjectId] = useState('')
   const [name, setName] = useState('')
+  const [briefing, setBriefing] = useState('')
   const [sourceIds, setSourceIds] = useState<Set<string>>(new Set())
   const [recipeText, setRecipeText] = useState('Composição principal')
   const [formats, setFormats] = useState<Set<string>>(new Set(['9:16']))
@@ -1686,6 +1687,7 @@ export default function BatchesPage() {
 
   function resetComposer() {
     setName('')
+    setBriefing('')
     setRecipeText('Composição principal')
     setFormats(new Set(['9:16']))
     setMatrix(new Set(['0::9:16']))
@@ -1699,6 +1701,10 @@ export default function BatchesPage() {
     event.preventDefault()
     if (!projectId || name.trim().length < 2) {
       setNotice('Escolha o projeto e informe um nome para o lote.')
+      return
+    }
+    if (briefing.trim().length === 0) {
+      setNotice('Escreva o pedido do lote: qualquer texto vale, mas o lote precisa de um.')
       return
     }
     if (sourceIds.size === 0) {
@@ -1750,6 +1756,7 @@ export default function BatchesPage() {
         },
         body: JSON.stringify({
           projectId,
+          briefing: briefing.trim(),
           name: name.trim(),
           objective: selectedProject?.objective || 'discovery',
           sourceGroups: [{
@@ -4546,6 +4553,11 @@ export default function BatchesPage() {
                     <input autoFocus className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={200} onChange={(event) => { setName(event.target.value); idempotencyKey.current = null }} placeholder="Ex.: Hooks validados · agosto" required value={name} />
                   </label>
                 </div>
+
+                <label className="block">
+                  <span className="text-xs font-semibold text-[#c8c2b8]">Pedido do lote (briefing)</span>
+                  <textarea className="mt-2 min-h-28 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 py-3 text-sm text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" maxLength={10000} onChange={(event) => { setBriefing(event.target.value); idempotencyKey.current = null }} required value={briefing} />
+                </label>
 
                 <fieldset>
                   <div className="flex items-end justify-between gap-4">

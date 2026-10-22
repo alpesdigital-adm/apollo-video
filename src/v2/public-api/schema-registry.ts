@@ -106,6 +106,7 @@ import {
   MULTICAM_LONGFORM_GATE_SCHEMA_VERSION,
 } from '../domain/multicam-longform-gate.ts'
 import { COVERAGE_AVAILABILITIES } from '../domain/track-coverage.ts'
+import { EDITORIAL_DIRECTIVE_KINDS, EDITORIAL_DIRECTIVE_VOCABULARY } from '../domain/editorial-request.ts'
 import { DIRECTION_POLICY_OVERRIDE_KEYS } from '../application/multicam-direction.ts'
 import { STRATEGIC_OBJECTIVES } from '../domain/strategic-objective.ts'
 import { MULTICAM_LONGFORM_CHECK_CODES } from './multicam-longform-gate-contract.ts'
@@ -8409,6 +8410,155 @@ const projectPolicyOverridesResultSchema = {
     nextRequiredCapability: { const: 'apollo.projects.commands.apply:run-director' },
     replayed: { type: 'boolean' },
   },
+}
+
+// ---- ADR-160 F6. The editorial request of a video: what the owner asked, how a model read the briefing, and what blocks the Director.
+const editorialDirectiveIdSchema = { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' }
+const editorialDirectiveSchema = {
+  type: 'object', additionalProperties: false, required: ['id', 'kind', 'value'],
+  properties: {
+    id: editorialDirectiveIdSchema,
+    kind: { enum: [...EDITORIAL_DIRECTIVE_KINDS] },
+    value: { enum: [...new Set(EDITORIAL_DIRECTIVE_KINDS.flatMap((kind) => EDITORIAL_DIRECTIVE_VOCABULARY[kind].values))] },
+    param: { anyOf: [{ type: 'string', minLength: 1, maxLength: 200 }, { type: 'number', exclusiveMinimum: 0, maximum: 30 }] },
+  },
+}
+const briefExcerptSchema = {
+  type: 'object', additionalProperties: false, required: ['start', 'end', 'text'],
+  properties: { start: { type: 'integer', minimum: 0 }, end: { type: 'integer', minimum: 1 }, text: { type: 'string', minLength: 1, maxLength: 10000 } },
+}
+const briefInterpretationSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'briefingSha256', 'interpreter', 'directives', 'unsupported', 'questions', 'interpretationHash'],
+  properties: {
+    schemaVersion: { const: 'brief-interpretation/v1' }, briefingSha256: sha256Schema,
+    interpreter: {
+      type: 'object', additionalProperties: false, required: ['provider', 'model', 'promptVersion'],
+      properties: { provider: { type: 'string', minLength: 1, maxLength: 128 }, model: { type: 'string', minLength: 1, maxLength: 128 }, promptVersion: { type: 'string', minLength: 1, maxLength: 128 } },
+    },
+    directives: { type: 'array', maxItems: 64, items: { ...editorialDirectiveSchema, required: [...editorialDirectiveSchema.required, 'excerpt'], properties: { ...editorialDirectiveSchema.properties, excerpt: briefExcerptSchema } } },
+    unsupported: { type: 'array', maxItems: 64, items: {
+      type: 'object', additionalProperties: false, required: ['id', 'excerpt', 'summary', 'reason'],
+      properties: { id: editorialDirectiveIdSchema, excerpt: briefExcerptSchema, summary: { type: 'string', minLength: 1, maxLength: 500 }, reason: { enum: ['outside-vocabulary', 'not-executable'] } },
+    } },
+    questions: { type: 'array', maxItems: 64, items: {
+      type: 'object', additionalProperties: false, required: ['id', 'question', 'status'],
+      properties: { id: editorialDirectiveIdSchema, question: { type: 'string', minLength: 1, maxLength: 500 }, excerpt: briefExcerptSchema, status: { enum: ['open', 'answered'] }, answer: { type: 'string', minLength: 1, maxLength: 500 } },
+    } },
+    coverage: { type: 'array', minItems: 1, maxItems: 3, items: {
+      type: 'object', additionalProperties: false, required: ['topic', 'excerpt'],
+      properties: { topic: { enum: ['audience', 'offer', 'tone'] }, excerpt: briefExcerptSchema },
+    } },
+    interpretationHash: sha256Schema,
+  },
+}
+const briefInterpretationAuditSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'provider', 'model', 'resolvedModel', 'promptVersion', 'promptHash', 'inputHash', 'responseHash', 'usage', 'costMinorUnits', 'signals', 'directivesMovedToUnsupported', 'directivesWithdrawnAsAmbiguous'],
+  properties: {
+    schemaVersion: { const: 'brief-interpretation-audit/v1' },
+    provider: { type: 'string', minLength: 1, maxLength: 128 }, model: { type: 'string', minLength: 1, maxLength: 128 },
+    resolvedModel: { anyOf: [{ type: 'string', minLength: 1, maxLength: 128 }, { type: 'null' }] },
+    promptVersion: { type: 'string', minLength: 1, maxLength: 128 }, promptHash: sha256Schema, inputHash: sha256Schema, responseHash: sha256Schema,
+    usage: { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['inputTokens', 'outputTokens'], properties: { inputTokens: { type: 'integer', minimum: 0 }, outputTokens: { type: 'integer', minimum: 0 } } }] },
+    costMinorUnits: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
+    signals: { type: 'array', maxItems: 16, items: { type: 'string', minLength: 1, maxLength: 128 } },
+    directivesMovedToUnsupported: { type: 'integer', minimum: 0 }, directivesWithdrawnAsAmbiguous: { type: 'integer', minimum: 0 },
+  },
+}
+const currentEditorialRequestSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['version', 'state', 'request', 'interpretation', 'interpretationAudit', 'unsupported', 'openQuestions', 'blocksDirector', 'hashes'],
+  properties: {
+    version: projectPolicyVersionSchema,
+    state: { enum: ['no-briefing', 'awaiting-interpretation', 'interpreted'] },
+    request: {
+      type: 'object', additionalProperties: false, required: ['schemaVersion', 'directives', 'variantOverrides', 'requestHash'],
+      properties: {
+        schemaVersion: { const: 'editorial-request/v1' },
+        briefing: { type: 'object', additionalProperties: false, required: ['text', 'sha256'], properties: { text: { type: 'string', minLength: 1, maxLength: 10000 }, sha256: sha256Schema } },
+        objective: strategicObjectiveSchema, desiredAction: desiredActionSchema,
+        directives: { type: 'array', maxItems: 64, items: editorialDirectiveSchema },
+        variantOverrides: { type: 'object', additionalProperties: { type: 'array', maxItems: 64, items: editorialDirectiveSchema } },
+        requestHash: sha256Schema,
+      },
+    },
+    interpretation: { anyOf: [{ type: 'null' }, briefInterpretationSchema] },
+    interpretationAudit: { anyOf: [{ type: 'null' }, briefInterpretationAuditSchema] },
+    unsupported: { type: 'array', maxItems: 192, items: {
+      type: 'object', additionalProperties: false, required: ['id', 'source', 'reason', 'summary', 'excerpt'],
+      properties: { id: editorialDirectiveIdSchema, source: { enum: ['interpretation', 'directive'] }, reason: { enum: ['outside-vocabulary', 'not-executable'] }, summary: { type: 'string', minLength: 1, maxLength: 500 }, excerpt: { anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }] } },
+    } },
+    openQuestions: { type: 'array', maxItems: 64, items: {
+      type: 'object', additionalProperties: false, required: ['id', 'question', 'excerpt'],
+      properties: { id: editorialDirectiveIdSchema, question: { type: 'string', minLength: 1, maxLength: 500 }, excerpt: { anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }] } },
+    } },
+    blocksDirector: { type: 'boolean' },
+    hashes: {
+      type: 'object', additionalProperties: false, required: ['requestHash', 'briefingSha256', 'interpretationHash', 'briefSnapshotId', 'briefSnapshotHash'],
+      properties: { requestHash: sha256Schema, briefingSha256: { anyOf: [sha256Schema, { type: 'null' }] }, interpretationHash: { anyOf: [sha256Schema, { type: 'null' }] }, briefSnapshotId: idSchema, briefSnapshotHash: sha256Schema },
+    },
+  },
+}
+const editorialRequestRevisionImpactSchema = {
+  ...projectPolicyOverridesImpactSchema,
+  required: [
+    'schemaVersion', 'commandId', 'commandType', 'baseVersionId', 'resultVersionId',
+    'briefSnapshotId', 'briefSnapshotHash', 'previousRequestHash', 'resultRequestHash',
+    'changeKinds', 'dependencyTypes', 'affectedRanges', 'affectedVariantIds',
+    'affectedArtifacts', 'requiredRecomputations', 'renderSemanticsChanged',
+    'renderBlockedUntilDirectorRun', 'impactHash',
+  ],
+  properties: {
+    ...Object.fromEntries(Object.entries(projectPolicyOverridesImpactSchema.properties).filter(([key]) => !['policySnapshotId', 'policySnapshotHash', 'previousResolvedHash', 'resultResolvedHash'].includes(key))),
+    schemaVersion: { const: 'editorial-request-revision-impact/v1' },
+    commandType: { const: 'revise-editorial-request' },
+    briefSnapshotId: idSchema, briefSnapshotHash: sha256Schema, previousRequestHash: sha256Schema, resultRequestHash: sha256Schema,
+    changeKinds: { type: 'array', minItems: 1, maxItems: 1, prefixItems: [{ const: 'editorial-request' }], items: false },
+  },
+}
+const editorialRequestRevisionResultSchema = {
+  ...currentEditorialRequestSchema,
+  required: [...currentEditorialRequestSchema.required, 'command', 'change', 'interpreted', 'impact', 'invalidations', 'nextRequiredCapability', 'replayed'],
+  properties: {
+    ...currentEditorialRequestSchema.properties,
+    command: {
+      type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'author', 'createdAt'],
+      properties: {
+        id: idSchema, type: { const: 'revise-editorial-request' }, baseVersionId: idSchema,
+        author: { type: 'object', additionalProperties: false, required: ['type', 'id'], properties: { type: { const: 'api-client' }, id: idSchema, delegatedUserId: idSchema } },
+        reason: { type: 'string', minLength: 1, maxLength: 1000 }, createdAt: dateTimeSchema,
+      },
+    },
+    change: {
+      type: 'object', additionalProperties: false, required: ['briefing', 'directives', 'variantOverrides', 'desiredAction', 'answeredQuestionIds'],
+      properties: {
+        briefing: { enum: ['kept', 'replaced', 'cleared'] }, directives: { enum: ['kept', 'replaced'] }, variantOverrides: { enum: ['kept', 'replaced'] },
+        desiredAction: { enum: ['kept', 'replaced'] }, answeredQuestionIds: { type: 'array', maxItems: 64, items: editorialDirectiveIdSchema },
+      },
+    },
+    interpreted: { type: 'boolean' },
+    impact: editorialRequestRevisionImpactSchema,
+    invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+    nextRequiredCapability: { const: 'apollo.projects.commands.apply:run-director' },
+    replayed: { type: 'boolean' },
+  },
+}
+const editorialRequestReviseRequestSchema = {
+  type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash'],
+  properties: {
+    baseVersionId: idSchema, baseHash: sha256Schema,
+    briefing: { anyOf: [{ type: 'string', minLength: 1, maxLength: 10000 }, { type: 'null' }] },
+    directives: { type: 'array', maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'kind', 'value'], properties: editorialDirectiveSchema.properties } },
+    variantOverrides: { type: 'object', maxProperties: 64, additionalProperties: { type: 'array', maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'kind', 'value'], properties: editorialDirectiveSchema.properties } } },
+    desiredAction: desiredActionInputSchema,
+    answers: { type: 'array', minItems: 1, maxItems: 64, items: {
+      type: 'object', additionalProperties: false, required: ['questionId', 'answer'],
+      properties: { questionId: editorialDirectiveIdSchema, answer: { type: 'string', minLength: 1, maxLength: 500 } },
+    } },
+    reason: { type: 'string', minLength: 1, maxLength: 1000 },
+  },
+  anyOf: ['briefing', 'directives', 'variantOverrides', 'desiredAction', 'answers'].map((field) => ({ required: [field], properties: { [field]: {} } })),
 }
 
 function currentProjectVersionResultSchema(snapshotRefNames: readonly string[]) {
@@ -17411,6 +17561,72 @@ const gateArtifactSchema = {
   },
 }
 
+const createProductionBatchRequestSchemaV1 = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'projectId',
+    'name',
+    'objective',
+    'sourceGroups',
+    'recipes',
+    'variants',
+    'budget',
+    'items',
+  ],
+  properties: {
+    projectId: idSchema,
+    name: { type: 'string', minLength: 1, maxLength: 200 },
+    objective: {
+      type: 'string',
+      pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$',
+    },
+    sourceGroups: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 100,
+      items: productionBatchSourceGroupSchema,
+    },
+    recipes: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 250,
+      items: productionBatchRecipeSchema,
+    },
+    variants: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 50,
+      items: productionBatchVariantSchema,
+    },
+    budget: productionBatchBudgetSchema,
+    items: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 1000,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'key',
+          'sourceGroupId',
+          'recipeId',
+          'variantId',
+        ],
+        properties: {
+          key: {
+            type: 'string',
+            pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$',
+          },
+          sourceGroupId: idSchema,
+          recipeId: idSchema,
+          variantId: idSchema,
+        },
+      },
+    },
+  },
+}
+
 const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] = [
   defineSchema('create-project-request', 4, 'Create empty output-bound project root', {
     type: 'object', additionalProperties: false, required: ['name', 'objective'],
@@ -23499,69 +23715,13 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
       },
     }),
   ),
-  defineSchema('create-production-batch-request', 1, 'Create one explicit bounded production batch', {
-    type: 'object',
-    additionalProperties: false,
-    required: [
-      'projectId',
-      'name',
-      'objective',
-      'sourceGroups',
-      'recipes',
-      'variants',
-      'budget',
-      'items',
-    ],
+  defineSchema('create-production-batch-request', 1, 'Create one explicit bounded production batch', createProductionBatchRequestSchemaV1),
+  defineSchema('create-production-batch-request', 2, 'Create one explicit bounded production batch under the editorial request of its briefing', {
+    ...createProductionBatchRequestSchemaV1,
+    required: [...createProductionBatchRequestSchemaV1.required, 'briefing'],
     properties: {
-      projectId: idSchema,
-      name: { type: 'string', minLength: 1, maxLength: 200 },
-      objective: {
-        type: 'string',
-        pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$',
-      },
-      sourceGroups: {
-        type: 'array',
-        minItems: 1,
-        maxItems: 100,
-        items: productionBatchSourceGroupSchema,
-      },
-      recipes: {
-        type: 'array',
-        minItems: 1,
-        maxItems: 250,
-        items: productionBatchRecipeSchema,
-      },
-      variants: {
-        type: 'array',
-        minItems: 1,
-        maxItems: 50,
-        items: productionBatchVariantSchema,
-      },
-      budget: productionBatchBudgetSchema,
-      items: {
-        type: 'array',
-        minItems: 1,
-        maxItems: 1000,
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: [
-            'key',
-            'sourceGroupId',
-            'recipeId',
-            'variantId',
-          ],
-          properties: {
-            key: {
-              type: 'string',
-              pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$',
-            },
-            sourceGroupId: idSchema,
-            recipeId: idSchema,
-            variantId: idSchema,
-          },
-        },
-      },
+      ...createProductionBatchRequestSchemaV1.properties,
+      briefing: { type: 'string', minLength: 1, maxLength: 10000, description: 'The editorial request of the whole batch as free text: any non-empty text is valid. It is read by the interpreter configured for the deployment when the batch is created.' },
     },
   }),
   defineSchema('production-batch-mutated', 1, 'Created or mutated production batch with idempotency evidence',
@@ -26890,6 +27050,19 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
   }),
   defineSchema('project-policy-overrides-response', 1, 'Current version-bound project policy values, overrides and resolved origins', successSchema(currentProjectPolicyOverridesSchema)),
   defineSchema('project-policy-overrides-applied', 1, 'Applied project policy EditCommand, immutable Policy Snapshot and deferred render impact', successSchema(projectPolicyOverridesResultSchema)),
+  defineSchema('editorial-request-revision-impact', 1, 'Content-addressed deferred impact of a revised editorial request', editorialRequestRevisionImpactSchema),
+  defineSchema('editorial-request-revise-request', 1, 'Replace the parts of the editorial request of a video that the body names, through an immutable EditCommand that reads the briefing', editorialRequestReviseRequestSchema),
+  defineSchema('editorial-request-response', 1, 'The editorial request of the current Version: what was asked, how the briefing was read, what is unsupported and what is still a question', successSchema(currentEditorialRequestSchema)),
+  defineSchema('editorial-request-revised', 1, 'A revised editorial request: the EditCommand, the new Brief Snapshot state and the deferred render impact', successSchema(editorialRequestRevisionResultSchema)),
+  defineSchema('create-project-request', 5, 'Create empty output-bound project root; the briefing is the editorial request and the locale has no default', {
+    type: 'object', additionalProperties: false, required: ['name', 'objective'],
+    properties: {
+      name: { type: 'string', minLength: 1, maxLength: 120 }, objective: strategicObjectiveSchema,
+      locale: { type: 'string', minLength: 2, maxLength: 35, description: 'Optional. A project has no language unless one is stated; captions follow the request or the language observed in the speech.' },
+      briefing: { type: 'string', minLength: 1, maxLength: 10000, description: 'Optional. The editorial request of the video as free text: any non-empty text is valid. It is read by apollo.projects.editorial-request.revise before a plan is made.' },
+      desiredAction: desiredActionInputSchema,
+    }, allOf: desiredActionObjectiveRequirements,
+  }),
   defineSchema('project-final-export-request', 1, 'Approve and export the current project version', {
     type: 'object', additionalProperties: false,
     required: ['projectVersionId', 'projectVersionHash', 'format', 'approval'],

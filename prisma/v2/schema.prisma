@@ -7785,6 +7785,9 @@ model V2ProductionBatch {
   reservedCostMinorUnits  Int
   itemCount               Int
   definitionHash          String   @db.Char(64)
+  // ADR-160 F6: the editorial request of the batch (its briefing and how it was read), and its hash. Both null for a batch created before it existed.
+  briefingJson            String?  @db.Text
+  requestHash             String?  @db.Char(64)
   requestFingerprint      String   @db.Char(64)
   idempotencyKey          String   @db.VarChar(128)
   createdByClientId       String   @db.VarChar(80)

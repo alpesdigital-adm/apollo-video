@@ -126,6 +126,7 @@ export function parseCreateProductionBatchBody(
     'variants',
     'budget',
     'items',
+    'briefing',
   ], 'body')
   const sourceGroups = array(
     body.sourceGroups,
@@ -237,6 +238,8 @@ export function parseCreateProductionBatchBody(
     })
   return Object.freeze({
     projectId: string(body.projectId, 'projectId', 3, 128),
+    // The editorial request of the whole batch: any non-empty text (the interpreter reads it; the service checks the length and the content).
+    briefing: string(body.briefing, 'briefing', 1, 10_000),
     name: string(body.name, 'name', 1, 200),
     objective: string(body.objective, 'objective', 1, 128),
     sourceGroups: Object.freeze(sourceGroups),
@@ -371,11 +374,17 @@ export function parseProductionBatchActionBody(raw: unknown) {
   })
 }
 
+/** The batch as it is published: the stored editorial request (briefing and its reading) is an input of the batch, not part of its public document. */
+function publishedBatch(batch: Readonly<ProductionBatch>) {
+  const { editorialRequest: _stored, ...published } = batch
+  return published
+}
+
 export function presentProductionBatch(
   batch: Readonly<ProductionBatch>,
 ) {
   return Object.freeze({
-    ...batch,
+    ...publishedBatch(batch),
     status: deriveBatchStatus(batch),
     progress: batchProgress(batch),
   })
@@ -390,7 +399,7 @@ export function presentProductionBatchV2(
     item.visibleState,
   ]))
   return Object.freeze({
-    ...batch,
+    ...publishedBatch(batch),
     items: Object.freeze(batch.items.map((item) => Object.freeze({
       ...item,
       visibleState: itemStates.get(item.id)!,

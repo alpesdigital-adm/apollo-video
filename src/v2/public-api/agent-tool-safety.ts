@@ -483,6 +483,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one project-scoped EditCommand and immutable Policy Snapshot from an exact base version; rendering stays blocked until a new DirectorRun.',
     },
+    'apollo.projects.editorial-request.revise': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one project-scoped EditCommand and immutable Brief Snapshot from an exact base version, with at most one interpreter call for the briefing; rendering stays blocked until a new DirectorRun.',
+    },
     'apollo.projects.proof-integrity-runs.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Evaluates existing ProofNeed, recipe, evidence and current authorization hashes, persists an immutable fail-closed decision and starts no provider, render or media materialization work.',

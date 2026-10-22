@@ -1,4 +1,5 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
+import { createEditorialRequest, type EditorialRequestV1 } from './editorial-request.ts'
 import { assertDomain } from './errors.ts'
 import type { ScriptBlockRole } from './script-alignment.ts'
 
@@ -89,6 +90,15 @@ export interface BatchItem {
   itemHash: string
 }
 
+/**
+ * The request of a batch (ADR-160): the briefing of the whole batch as the requester wrote it and how the interpreter read it. Every item of the
+ * batch is made under it. A batch created before the request existed has none. The audit is the interpreter's own record of the call.
+ */
+export interface ProductionBatchEditorialRequest {
+  request: Readonly<EditorialRequestV1>
+  interpretationAudit: Readonly<Record<string, unknown>> | null
+}
+
 export interface ProductionBatch {
   schemaVersion: typeof PRODUCTION_BATCH_SCHEMA_VERSION
   id: string
@@ -107,6 +117,7 @@ export interface ProductionBatch {
     reservedCostMinorUnits: number
   }>
   items: readonly Readonly<BatchItem>[]
+  editorialRequest?: Readonly<ProductionBatchEditorialRequest>
   createdBy: Readonly<{ type: 'api-client'; id: string }>
   createdAt: string
   updatedAt: string
@@ -401,6 +412,19 @@ function freezeItem(
   return Object.freeze({ ...content, itemHash: hash })
 }
 
+/** The request a batch stores, rebuilt through the request constructor: its briefing, its interpretation and its hash must agree. */
+export function sealedBatchEditorialRequest(value: unknown): Readonly<ProductionBatchEditorialRequest> {
+  const stored = value as { request?: EditorialRequestV1; interpretationAudit?: Readonly<Record<string, unknown>> | null }
+  assertDomain(typeof stored === 'object' && stored !== null && stored.request !== undefined && stored.request.briefing !== undefined,
+    'PERSISTENCE_CONFLICT', 'Stored production batch request has no briefing')
+  const request = createEditorialRequest({
+    briefing: stored.request!.briefing!.text,
+    ...(stored.request!.interpretation ? { interpretation: stored.request!.interpretation } : {}),
+  })
+  assertDomain(request.requestHash === stored.request!.requestHash, 'PERSISTENCE_CONFLICT', 'Stored production batch request hash is inconsistent')
+  return Object.freeze({ request, interpretationAudit: stored.interpretationAudit ? Object.freeze({ ...stored.interpretationAudit }) : null })
+}
+
 function definitionHash(
   batch: Omit<ProductionBatch, 'items' | 'definitionHash'>,
 ): string {
@@ -434,6 +458,7 @@ export function createProductionBatch(input: {
     recipeId: string
     variantId: string
   }>[]
+  editorialRequest?: Readonly<ProductionBatchEditorialRequest>
   createdBy: Readonly<{ type: 'api-client'; id: string }>
   createdAt: string
 }): Readonly<ProductionBatch> {
@@ -624,6 +649,8 @@ export function createProductionBatch(input: {
     recipes,
     variants,
     budget,
+    // Present only for a batch created with a briefing: a batch without one hashes exactly as it did before the request existed.
+    ...(input.editorialRequest ? { editorialRequest: sealedBatchEditorialRequest(input.editorialRequest) } : {}),
     createdBy: Object.freeze({
       type: input.createdBy.type,
       id: normalizedToken(input.createdBy.id, 'createdBy.id'),
@@ -679,6 +706,7 @@ export function hydrateProductionBatch(
     recipes,
     variants,
     budget: Object.freeze({ ...input.budget }),
+    ...(input.editorialRequest ? { editorialRequest: sealedBatchEditorialRequest(input.editorialRequest) } : {}),
     createdBy: Object.freeze({ ...input.createdBy }),
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,

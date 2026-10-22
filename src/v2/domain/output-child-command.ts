@@ -43,6 +43,7 @@ export const CHILD_COMMAND_TRANSITIONS: Readonly<Partial<Record<EditCommandType,
   'replace-source-transcript': Object.freeze({ planEffect: 'recompiles-plan', replaces: Object.freeze([]) }),
   'direct-multicam-session': Object.freeze({ planEffect: 'recompiles-plan', replaces: Object.freeze([]) }),
   'set-project-policy-overrides': Object.freeze({ planEffect: 'preserves-plan', replaces: Object.freeze(['policies'] as const) }),
+  'revise-editorial-request': Object.freeze({ planEffect: 'preserves-plan', replaces: Object.freeze(['brief'] as const) }),
 })
 
 /**

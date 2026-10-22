@@ -21,6 +21,11 @@ import {
 import type { PublicSchemaDefinition } from './schema-registry.ts'
 import { createCompareActionImpact } from '../domain/compare-action-impact.ts'
 import { createProjectPolicyOverridesImpact } from '../domain/project-policy-overrides-impact.ts'
+import { createEditorialRequestRevisionImpact } from '../domain/editorial-request-revision-impact.ts'
+import { createBriefInterpretation } from '../domain/editorial-request.ts'
+import { createDesiredAction } from '../domain/desired-action.ts'
+import { createProductionBrief } from '../domain/production-brief.ts'
+import { describeEditorialRequest } from '../application/revise-editorial-request.ts'
 import {
   createProjectSubtitleConfiguration,
   createProjectSubtitleConfigurationImpact,
@@ -5577,6 +5582,78 @@ const projectPolicyAppliedExample = {
   nextRequiredCapability: 'apollo.projects.commands.apply:run-director',
   replayed: false,
 }
+// The editorial request examples carry placeholders, never a sentence a requester could take for advice: the text of a request is the requester's.
+const editorialRequestBriefingExample = '<texto do pedido>'
+const editorialRequestInterpretationExample = createBriefInterpretation({
+  briefingText: editorialRequestBriefingExample,
+  interpreter: { provider: '<provedor>', model: '<modelo>', promptVersion: 'brief-interpreter/v1' },
+  directives: [{
+    id: 'd1', kind: 'avoid', value: 'subject', param: '<assunto>',
+    excerpt: { start: 0, end: editorialRequestBriefingExample.length, text: editorialRequestBriefingExample },
+  }],
+})
+const editorialRequestAuditExample = {
+  schemaVersion: 'brief-interpretation-audit/v1', provider: '<provedor>', model: '<modelo>', resolvedModel: null,
+  promptVersion: 'brief-interpreter/v1', promptHash: '6'.repeat(64), inputHash: '7'.repeat(64), responseHash: '8'.repeat(64),
+  usage: null, costMinorUnits: null, signals: [], directivesMovedToUnsupported: 0, directivesWithdrawnAsAmbiguous: 0,
+}
+const editorialRequestViewExample = describeEditorialRequest({
+  objective: 'discovery',
+  briefSnapshot: {
+    id: 'project-snapshot-editorial-request-example-2', contentHash: '9'.repeat(64),
+    content: {
+      schemaVersion: 1, objective: 'discovery', desiredAction: createDesiredAction({ objective: 'discovery' }),
+      productionBrief: createProductionBrief({ ownerText: editorialRequestBriefingExample, interpretedCoverage: [] }),
+      editorialRequest: { interpretation: editorialRequestInterpretationExample, interpretationAudit: editorialRequestAuditExample },
+    },
+  },
+})
+const editorialRequestImpactExample = createEditorialRequestRevisionImpact({
+  commandId: 'project-editorial-request-command-example-1',
+  baseVersionId: 'project-version-example-1',
+  resultVersionId: 'project-version-editorial-request-example-2',
+  briefSnapshotId: 'project-snapshot-editorial-request-example-2',
+  briefSnapshotHash: '9'.repeat(64),
+  previousRequestHash: '3'.repeat(64),
+  resultRequestHash: editorialRequestViewExample.hashes.requestHash,
+  durationFrames: 180,
+  outputReferences: [],
+})
+const currentEditorialRequestExample = {
+  version: {
+    id: editorialRequestImpactExample.resultVersionId, sequence: 2, parentVersionId: editorialRequestImpactExample.baseVersionId,
+    baseHash: '5'.repeat(64), createdAt, visibleState: currentProjectVersionVisibleStateExample,
+  },
+  state: editorialRequestViewExample.state,
+  request: {
+    schemaVersion: editorialRequestViewExample.request.schemaVersion,
+    briefing: editorialRequestViewExample.request.briefing,
+    objective: editorialRequestViewExample.request.objective,
+    desiredAction: editorialRequestViewExample.request.desiredAction,
+    directives: editorialRequestViewExample.request.directives,
+    variantOverrides: editorialRequestViewExample.request.variantOverrides,
+    requestHash: editorialRequestViewExample.request.requestHash,
+  },
+  interpretation: editorialRequestViewExample.interpretation,
+  interpretationAudit: editorialRequestViewExample.interpretationAudit,
+  unsupported: editorialRequestViewExample.unsupported,
+  openQuestions: editorialRequestViewExample.openQuestions,
+  blocksDirector: editorialRequestViewExample.blocksDirector,
+  hashes: editorialRequestViewExample.hashes,
+}
+const editorialRequestRevisedExample = {
+  command: {
+    id: editorialRequestImpactExample.commandId, type: 'revise-editorial-request', baseVersionId: editorialRequestImpactExample.baseVersionId,
+    author: { type: 'api-client', id: clientId }, reason: '<motivo da revisão>', createdAt,
+  },
+  ...currentEditorialRequestExample,
+  change: { briefing: 'replaced', directives: 'kept', variantOverrides: 'kept', desiredAction: 'kept', answeredQuestionIds: [] },
+  interpreted: true,
+  impact: editorialRequestImpactExample,
+  invalidations: [],
+  nextRequiredCapability: 'apollo.projects.commands.apply:run-director',
+  replayed: false,
+}
 const projectLutSelectionExampleV3 = {
   ...projectLutSelectionExampleV2,
   version: {
@@ -7489,6 +7566,7 @@ const syntheticPhaseGateExample = {
 const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
     'apollo://schemas/create-project-request/v4': [{ name: 'Projeto sem formato implícito', objective: 'discovery', locale: 'pt-BR' }],
+    'apollo://schemas/create-project-request/v5': [{ name: '<nome do projeto>', objective: 'discovery', briefing: '<texto do pedido>' }],
     'apollo://schemas/project-created/v5': [{ data: {
       projectAtCreation: { id: projectId, workspaceId, name: 'Projeto vazio explícito', status: 'draft',
         objective: 'discovery', locale: 'pt-BR', ownerId: clientId, createdAt,
@@ -12326,6 +12404,9 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     'apollo://schemas/create-production-batch-request/v1': [
       productionBatchCreateRequestExample,
     ],
+    'apollo://schemas/create-production-batch-request/v2': [
+      { ...productionBatchCreateRequestExample, briefing: '<texto do pedido>' },
+    ],
     'apollo://schemas/production-batch-mutated/v1': [
       {
         data: {
@@ -14503,6 +14584,15 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     }],
     'apollo://schemas/project-policy-overrides-response/v1': [{ data: currentProjectPolicyExample, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/project-policy-overrides-applied/v1': [{ data: projectPolicyAppliedExample, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/editorial-request-revision-impact/v1': [editorialRequestImpactExample],
+    'apollo://schemas/editorial-request-revise-request/v1': [{
+      baseVersionId: editorialRequestImpactExample.baseVersionId,
+      baseHash: 'a'.repeat(64),
+      briefing: editorialRequestBriefingExample,
+      reason: '<motivo da revisão>',
+    }],
+    'apollo://schemas/editorial-request-response/v1': [{ data: currentEditorialRequestExample, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/editorial-request-revised/v1': [{ data: editorialRequestRevisedExample, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/project-proxy-review-response/v1': [
       {
         data: { review: proxyReviewExampleV1 },
