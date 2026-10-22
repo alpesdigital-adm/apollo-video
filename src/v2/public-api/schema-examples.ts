@@ -1,3 +1,4 @@
+import { PROJECT_SUBTITLE_STYLES } from '../domain/project-overrides.ts'
 import { PUBLISHED_CAPTURE_PROTOCOLS } from '../domain/capture-protocol-catalog.ts'
 import { evaluateCaptureProtocol } from '../domain/capture-protocol-evaluation.ts'
 import { createCaptureSession } from '../domain/capture-session.ts'
@@ -120,6 +121,17 @@ import {
   presentPlaybackMapRead,
   presentPlaybackPieceListing,
 } from './react-playback-map-contract.ts'
+
+// The v1 refs keep the shape they were published with: a preset whose OutputSpec states a language. The hashes of these examples are placeholders.
+const LEGACY_FORMAT_PRESET_V1_EXAMPLE = (ratio: keyof typeof OUTPUT_FORMAT_REGISTRY.presets) => ({
+  ...OUTPUT_FORMAT_REGISTRY.presets[ratio], schemaVersion: 'output-format-preset/v1', version: 1,
+  spec: { ...OUTPUT_FORMAT_REGISTRY.presets[ratio].spec, locale: 'pt-BR' },
+})
+const LEGACY_FORMAT_REGISTRY_V1_EXAMPLE = {
+  ...OUTPUT_FORMAT_REGISTRY, schemaVersion: 'output-format-registry/v1', registryVersion: 1,
+  presets: Object.fromEntries((Object.keys(OUTPUT_FORMAT_REGISTRY.presets) as (keyof typeof OUTPUT_FORMAT_REGISTRY.presets)[]).map((ratio) => [ratio, LEGACY_FORMAT_PRESET_V1_EXAMPLE(ratio)])),
+}
+
 
 const createdAt = '2026-07-12T20:00:00.000Z'
 
@@ -5492,7 +5504,7 @@ const projectPolicyWorkspaceDefaultsExample = {
   companyName: 'Alpes Digital',
   colors: ['#d9ad44', '#070707'],
   guardrails: ['Regra de exemplo da marca.'],
-  subtitleStyle: 'clean-color',
+  subtitleStyle: PROJECT_SUBTITLE_STYLES[0],
   gradePreset: 'natural',
 }
 const projectPolicyOverridesExample = {
@@ -8017,16 +8029,18 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     }],
     'apollo://schemas/provider-job-mutated/v1': [{ data: { job: providerJobExample, replayed: false }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/provider-job-read/v1': [{ data: { job: providerJobExample }, meta: { apiVersion: 'v1' } }],
-    'apollo://schemas/output-format-preset/v1': [OUTPUT_FORMAT_REGISTRY.presets['9:16']],
-    'apollo://schemas/output-format-registry/v1': [OUTPUT_FORMAT_REGISTRY],
+    'apollo://schemas/output-format-preset/v1': [LEGACY_FORMAT_PRESET_V1_EXAMPLE('9:16')],
+    'apollo://schemas/output-format-registry/v1': [LEGACY_FORMAT_REGISTRY_V1_EXAMPLE],
+    'apollo://schemas/output-format-preset/v2': [OUTPUT_FORMAT_REGISTRY.presets['9:16']],
+    'apollo://schemas/output-format-registry/v2': [OUTPUT_FORMAT_REGISTRY],
     'apollo://schemas/responsive-placement-request/v1': [{
-      outputSpec: OUTPUT_FORMAT_REGISTRY.presets['9:16'].spec,
+      outputSpec: { ...OUTPUT_FORMAT_REGISTRY.presets['9:16'].spec, locale: 'pt-BR' },
       elements: [{ id: 'subtitle-example-1', kind: 'subtitle', anchor: 'auto', priority: 10, readingOrder: 0, minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.3 }],
       protectedRegions: [{ id: 'face-example-1', kind: 'face', x: 0.35, y: 0.15, width: 0.3, height: 0.35 }],
     }],
     'apollo://schemas/responsive-placement-result/v1': [{ data: responsivePlacementResultV1Example, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/responsive-placement-request/v2': [{
-      outputSpec: OUTPUT_FORMAT_REGISTRY.presets['9:16'].spec,
+      outputSpec: { ...OUTPUT_FORMAT_REGISTRY.presets['9:16'].spec, locale: 'pt-BR' },
       elements: [{ id: 'subtitle-example-1', kind: 'subtitle', anchor: 'auto', priority: 10, readingOrder: 0, minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.3 }],
       protectedRegions: [{ id: 'face-example-1', kind: 'face', x: 0.35, y: 0.15, width: 0.3, height: 0.35 }],
       subtitlePresetId: 'kinetic',
@@ -15480,13 +15494,13 @@ const directorQualityReadExamplesV4: readonly ExampleNode[] = (() => {
   report.schemaVersion = 'director-quality-report/v5'
   report.requestHash = 'a'.repeat(64)
   report.policyResolutionHash = 'b'.repeat(64)
-  report.criticVersion = 'apollo-director-critic/v4'
+  report.criticVersion = 'apollo-director-critic/v5'
   const ref = (key: string) => `policy:${key}:${'b'.repeat(16)}`
   report.hardChecks = [
     { id: 'requestHonored', kind: 'request', passed: true, policyRef: null, evidence: [`resolution:${'b'.repeat(64)}`, 'unsupported=0', 'open-questions=0'] },
     { id: 'movementMatchesPolicy', kind: 'request', passed: true, policyRef: ref('movement'), evidence: ['policy-mode=none', 'effect-tracks=0', 'automatic-zoom=false'] },
     { id: 'forbiddenSpeechAbsent', kind: 'request', passed: true, policyRef: ref('speechRemovals'), evidence: ['removal-rules=0', 'matches-in-captions=0'] },
-    { id: 'captionsBounded', kind: 'invariant', passed: true, policyRef: ref('captions'), evidence: ['cues=28', 'longest-cue-characters=30', 'policy-max-characters=32'] },
+    { id: 'captionsFitMeasured', kind: 'invariant', passed: true, policyRef: ref('captions'), evidence: ['cues=28', 'longest-cue-characters=30', 'policy-max-characters=32'] },
     { id: 'timelineContinuous', kind: 'invariant', passed: true, policyRef: null, evidence: ['clips=3', 'duration-frames=2380'] },
     { id: 'sourceRightsCertain', kind: 'invariant', passed: true, policyRef: null, evidence: ['rights-all-sources:certain=1/1'] },
   ]

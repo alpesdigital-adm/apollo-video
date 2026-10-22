@@ -314,6 +314,12 @@ const outputSpecSchema = {
     deliveryProfileId: idSchema,
   },
 } as const
+// output-format-preset/v2 and output-format-registry/v2 (ADR-160): a format preset states no language, so its OutputSpec has no locale. The v1 refs
+// keep the shape they were published with.
+const outputSpecWithoutLocaleSchema = {
+  ...outputSpecSchema,
+  required: outputSpecSchema.required.filter((key) => key !== 'locale'),
+} as const
 const outputFormatExportSchema = {
   type: 'object', additionalProperties: false,
   required: ['codec', 'audioCodec', 'container', 'pixelFormat', 'videoBitrateKbps', 'audioBitrateKbps'],
@@ -339,6 +345,13 @@ const outputFormatPresetSchema = {
     presetHash: sha256Schema,
   },
 } as const
+const outputFormatPresetSchemaV2 = {
+  ...outputFormatPresetSchema,
+  properties: {
+    ...outputFormatPresetSchema.properties,
+    schemaVersion: { const: 'output-format-preset/v2' }, version: { const: 1 }, spec: outputSpecWithoutLocaleSchema,
+  },
+} as const
 const outputFormatRegistrySchema = {
   type: 'object', additionalProperties: false,
   required: ['schemaVersion', 'registryVersion', 'presets', 'registryHash'],
@@ -349,6 +362,17 @@ const outputFormatRegistrySchema = {
       '1:1': outputFormatPresetSchema, '21:9': outputFormatPresetSchema,
     } },
     registryHash: sha256Schema,
+  },
+} as const
+const outputFormatRegistrySchemaV2 = {
+  ...outputFormatRegistrySchema,
+  properties: {
+    ...outputFormatRegistrySchema.properties,
+    schemaVersion: { const: 'output-format-registry/v2' }, registryVersion: { const: 1 },
+    presets: { type: 'object', additionalProperties: false, required: ['9:16', '16:9', '4:5', '1:1', '21:9'], properties: {
+      '9:16': outputFormatPresetSchemaV2, '16:9': outputFormatPresetSchemaV2, '4:5': outputFormatPresetSchemaV2,
+      '1:1': outputFormatPresetSchemaV2, '21:9': outputFormatPresetSchemaV2,
+    } },
   },
 } as const
 const responsivePlacementElementSchema = {
@@ -17423,6 +17447,8 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
   defineSchema('subtitle-css-preview', 1, 'Content-addressed instant subtitle CSS preview', subtitleCssPreviewSchema),
   defineSchema('output-format-preset', 1, 'Versioned output format preset', outputFormatPresetSchema),
   defineSchema('output-format-registry', 1, 'Content-addressed required output format registry', outputFormatRegistrySchema),
+  defineSchema('output-format-preset', 2, 'Versioned output format preset whose OutputSpec states no language', outputFormatPresetSchemaV2),
+  defineSchema('output-format-registry', 2, 'Content-addressed required output format registry whose presets state no language', outputFormatRegistrySchemaV2),
   defineSchema('responsive-placement-request', 1, 'Format-specific responsive placement request', responsivePlacementRequestSchema),
   defineSchema('responsive-placement-result', 1, 'Content-addressed responsive placement result', successSchema(responsivePlacementResultSchema)),
   defineSchema('responsive-placement-request', 2, 'Format-specific responsive placement request with the resolved subtitle preset', responsivePlacementRequestSchemaV2),
