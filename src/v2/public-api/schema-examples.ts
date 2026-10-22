@@ -121,6 +121,10 @@ import {
   presentPlaybackMapRead,
   presentPlaybackPieceListing,
 } from './react-playback-map-contract.ts'
+import { planMovementPolicyUnder, requestlessEditorialPolicies } from '../domain/editorial-policy-resolution.ts'
+
+// What a plan of the examples declares of its movement: the policy of a request that asks for none. Documentation values come from the resolution too.
+const EXAMPLE_PLAN_AUTOMATIC_ZOOM = planMovementPolicyUnder(requestlessEditorialPolicies(), 30).automaticZoom
 
 // The v1 refs keep the shape they were published with: a preset whose OutputSpec states a language. The hashes of these examples are placeholders.
 const LEGACY_FORMAT_PRESET_V1_EXAMPLE = (ratio: keyof typeof OUTPUT_FORMAT_REGISTRY.presets) => ({
@@ -5352,7 +5356,7 @@ const contiguousExtractionExample = {
       'evidence-contiguous-self-contained',
     ],
     movementPolicy: {
-      automaticZoom: false,
+      automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM,
       reason: 'contiguous-source-preservation',
     },
     selectionHash: contiguousCandidateHash,
@@ -10105,7 +10109,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
           version: { id: 'project-version-example-2', sequence: 2, baseHash: 'b'.repeat(64), createdAt },
           editPlan: {
             id: 'edit-plan-example-2', state: 'compiled', fps: 30, durationFrames: 2683,
-            clipCount: 4, cutCount: 3, automaticZoom: false, subtitleFaceProtection: true,
+            clipCount: 4, cutCount: 3, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, subtitleFaceProtection: true,
           },
           commands: [{
             id: 'edit-command-example-1', type: 'remove-spoken-content',
@@ -10122,7 +10126,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         data: {
           project: { id: projectId, workspaceId, name: 'Anuncio de descoberta', status: 'draft', objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt },
           version: { id: 'project-version-example-3', sequence: 3, baseHash: 'c'.repeat(64), createdAt },
-          editPlan: { id: 'edit-plan-example-3', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: false, subtitleFaceProtection: true },
+          editPlan: { id: 'edit-plan-example-3', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, subtitleFaceProtection: true },
           commands: [],
           media: [{
             id: 'project-media-editorial-example-1', role: 'editorial-proxy', originalFileName: 'video-editorial.mp4',
@@ -10139,7 +10143,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         data: {
           project: { id: projectId, workspaceId, name: 'Anuncio de descoberta', status: 'draft', objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt },
           version: { id: 'project-version-example-4', sequence: 4, baseHash: 'd'.repeat(64), createdAt },
-          editPlan: { id: 'edit-plan-example-4', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: false, subtitleFaceProtection: true },
+          editPlan: { id: 'edit-plan-example-4', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, subtitleFaceProtection: true },
           commands: [{
             id: 'edit-command-director-example-1', type: 'run-director', baseVersionId: 'project-version-example-3',
             resultVersionId: 'project-version-example-4', reason: 'Planejar e revisar a composicao completa.', createdAt,
@@ -10149,7 +10153,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             baseVersionId: 'project-version-example-3', resultVersionId: 'project-version-example-4',
             treatmentSnapshotId: 'project-snapshot-treatment-1', storySnapshotId: 'project-snapshot-story-1', qualitySnapshotId: 'project-snapshot-quality-1',
             qualityStatus: 'approved-with-warnings', qualityScore: 0.9, decisionCount: 6, assumptionCount: 2,
-            subtitleCueCount: 28, transitionCount: 2, automaticZoom: false, createdAt,
+            subtitleCueCount: 28, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, createdAt,
           }],
           media: [{
             id: 'project-media-editorial-example-1', role: 'editorial-proxy', originalFileName: 'video-editorial.mp4',
@@ -10166,7 +10170,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         data: {
           project: { id: projectId, workspaceId, name: 'Anuncio de descoberta', status: 'completed', objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt },
           version: { id: 'project-version-example-4', sequence: 4, baseHash: 'd'.repeat(64), createdAt },
-          editPlan: { id: 'edit-plan-example-4', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: false, subtitleFaceProtection: true },
+          editPlan: { id: 'edit-plan-example-4', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, subtitleFaceProtection: true },
           commands: [{
             id: 'edit-command-director-example-1', type: 'run-director', baseVersionId: 'project-version-example-3',
             resultVersionId: 'project-version-example-4', reason: 'Planejar e revisar a composicao completa.', createdAt,
@@ -10176,7 +10180,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             baseVersionId: 'project-version-example-3', resultVersionId: 'project-version-example-4',
             treatmentSnapshotId: 'project-snapshot-treatment-1', storySnapshotId: 'project-snapshot-story-1', qualitySnapshotId: 'project-snapshot-quality-1',
             qualityStatus: 'approved-with-warnings', qualityScore: 0.9, decisionCount: 6, assumptionCount: 2,
-            subtitleCueCount: 28, transitionCount: 2, automaticZoom: false, createdAt,
+            subtitleCueCount: 28, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, createdAt,
           }],
           media: [{
             id: 'project-media-final-example-1', role: 'final-output', originalFileName: 'video-final-1080x1920.mp4',
@@ -12353,7 +12357,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             },
           },
           version: { id: 'project-version-example-4', sequence: 4, baseHash: 'd'.repeat(64), createdAt },
-          editPlan: { id: 'edit-plan-example-4', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: false, subtitleFaceProtection: true },
+          editPlan: { id: 'edit-plan-example-4', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, subtitleFaceProtection: true },
           commands: [{
             id: 'edit-command-director-example-1', type: 'run-director', baseVersionId: 'project-version-example-3',
             resultVersionId: 'project-version-example-4', reason: 'Planejar e revisar a composicao completa.', createdAt,
@@ -12363,7 +12367,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             baseVersionId: 'project-version-example-3', resultVersionId: 'project-version-example-4',
             treatmentSnapshotId: 'project-snapshot-treatment-1', storySnapshotId: 'project-snapshot-story-1', qualitySnapshotId: 'project-snapshot-quality-1',
             qualityStatus: 'approved-with-warnings', qualityScore: 0.9, decisionCount: 6, assumptionCount: 2,
-            subtitleCueCount: 28, transitionCount: 2, automaticZoom: false, createdAt,
+            subtitleCueCount: 28, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, createdAt,
           }],
           media: [{
             id: 'project-media-final-example-1', role: 'final-output', originalFileName: 'video-final-1080x1920.mp4',
@@ -12438,7 +12442,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             treatmentSnapshotId: 'project-snapshot-treatment-2', storySnapshotId: 'project-snapshot-story-2',
             qualitySnapshotId: 'project-snapshot-quality-2', qualityStatus: 'approved-with-warnings',
             qualityScore: 0.9, decisionCount: 6, assumptionCount: 2,
-            subtitleCueCount: 28, transitionCount: 2, automaticZoom: false, createdAt,
+            subtitleCueCount: 28, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, createdAt,
           }],
           commands: [], media: [], transcripts: [], operationIds: [], operations: [],
         },
@@ -12534,7 +12538,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
               band: 'review', value: 0.72, reasonCodes: ['DIRECTOR_LAYOUT'],
               calibrationVersion: 'director-confidence-2026-08-v1', evidenceCount: 2,
             }],
-            subtitleCueCount: 22, transitionCount: 2, automaticZoom: false, createdAt,
+            subtitleCueCount: 22, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, createdAt,
           }],
           commands: [], media: [], transcripts: [], operationIds: [], operations: [],
         },
@@ -12576,7 +12580,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
               band: 'review', value: 0.72, reasonCodes: ['DIRECTOR_LAYOUT'],
               calibrationVersion: 'director-confidence-2026-08-v1', evidenceCount: 2,
             }],
-            subtitleCueCount: 22, transitionCount: 2, automaticZoom: false, createdAt,
+            subtitleCueCount: 22, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, createdAt,
           }],
           commands: [], media: [], transcripts: [], operationIds: [], operations: [],
         },
@@ -12620,7 +12624,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
               band: 'review', value: 0.72, reasonCodes: ['DIRECTOR_LAYOUT'],
               calibrationVersion: 'director-confidence-2026-08-v1', evidenceCount: 2,
             }],
-            subtitleCueCount: 22, transitionCount: 2, automaticZoom: false, createdAt,
+            subtitleCueCount: 22, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, createdAt,
           }],
           reviewAvailability: {
             schemaVersion: 'project-review-availability/v1', requestedVersionId: 'project-version-confidence-1',
@@ -13383,7 +13387,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
               { sourceStartSeconds: 0, sourceEndSeconds: 12.0 },
               { sourceStartSeconds: 15.66, sourceEndSeconds: 102.166 },
             ],
-            outputDurationFrames: 2955, fps: 30, automaticZoom: false,
+            outputDurationFrames: 2955, fps: 30, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM,
             protectedOpeningFrames: 120, subtitleFaceProtection: true,
           },
           replayed: false,
@@ -13412,7 +13416,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             perception: { snapshotId: 'project-snapshot-perception-1', summary: { speechCoverage: 0.78, visualCoverage: 'partial', faceCoverage: 'absent' } },
             treatmentPlan: { snapshotId: 'project-snapshot-treatment-1', plan: { mode: 'talking-head', objective: 'discovery' } },
             storyPlan: { snapshotId: 'project-snapshot-story-1', plan: { objective: 'discovery', blockCount: 3 } },
-            editPlan: { snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4', durationFrames: 2380, fps: 30, subtitleCueCount: 28, transitionCount: 2, automaticZoom: false },
+            editPlan: { snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4', durationFrames: 2380, fps: 30, subtitleCueCount: 28, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM },
             qualityReport: { snapshotId: 'project-snapshot-quality-1', report: { status: 'approved-with-warnings', score: 0.9 } },
             decisions: [
               { id: 'decision-narrative-linear', category: 'narrative', choice: 'preserve-linear-narrative' },
@@ -13589,7 +13593,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
               { sourceStartSeconds: 0, sourceEndSeconds: 12.0 },
               { sourceStartSeconds: 15.66, sourceEndSeconds: 102.166 },
             ],
-            outputDurationFrames: 2955, fps: 30, automaticZoom: false,
+            outputDurationFrames: 2955, fps: 30, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM,
             protectedOpeningFrames: 120, subtitleFaceProtection: true,
             impact: editorialCutImpactExample,
             invalidations: [editorialCutInvalidationExample],
@@ -13633,7 +13637,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             editPlan: {
               snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4',
               durationFrames: 2380, fps: 30, subtitleCueCount: 28,
-              transitionCount: 2, automaticZoom: false,
+              transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM,
             },
             qualityReport: { snapshotId: 'project-snapshot-quality-1', report: { status: 'approved-with-warnings', score: 0.9 } },
             decisions: [
@@ -13711,7 +13715,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             editPlan: {
               snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4',
               durationFrames: 2380, fps: 30, subtitleCueCount: 28,
-              transitionCount: 2, automaticZoom: false,
+              transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM,
             },
             qualityReport: { snapshotId: 'project-snapshot-quality-1', report: { status: 'approved-with-warnings', score: 0.9 } },
             decisions: [
@@ -13786,7 +13790,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
               { sourceStartSeconds: 0, sourceEndSeconds: 12.0 },
               { sourceStartSeconds: 15.66, sourceEndSeconds: 102.166 },
             ],
-            outputDurationFrames: 2955, fps: 30, automaticZoom: false,
+            outputDurationFrames: 2955, fps: 30, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM,
             protectedOpeningFrames: 120, subtitleFaceProtection: true,
             impact: editorialCutImpactExample,
             invalidations: [editorialCutInvalidationExample],
@@ -13836,7 +13840,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             editPlan: {
               snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4',
               durationFrames: 2380, fps: 30, subtitleCueCount: 28,
-              transitionCount: 2, automaticZoom: false,
+              transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM,
             },
             qualityReport: { snapshotId: 'project-snapshot-quality-1', report: { status: 'approved-with-warnings', score: 0.9 } },
             decisions: [
@@ -15540,6 +15544,12 @@ const MULTI_OUTPUT_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>>
     'apollo://schemas/project-workspace/v15': structuredClone(workspaces),
     'apollo://schemas/director-quality-report-read/v3': directorQualityReadExamplesV3,
     'apollo://schemas/director-quality-report-read/v4': directorQualityReadExamplesV4,
+    // ADR-160 F4: a cut of the source applies no movement, so its opening has no window to protect.
+    'apollo://schemas/project-edit-command-applied/v9': clonedExamples('apollo://schemas/project-edit-command-applied/v8').map((example) => {
+      const cloned = structuredClone(example) as Record<string, unknown>
+      exampleNode(cloned, 'data', 'editorial').protectedOpeningFrames = 0
+      return cloned
+    }),
   })
 })()
 

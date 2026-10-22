@@ -301,6 +301,11 @@ const normalizedInsetsSchema = {
     left: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
   },
 } as const
+/**
+ * What the refs published before ADR-160 F4 say of the movement a plan declares: no automatic zoom, as a constant. It is a statement about the
+ * renderer (it executes no effect), kept as published; refs are immutable. It sets nothing: the value of a plan comes from its resolved policy.
+ */
+const PUBLISHED_PLAN_WITHOUT_AUTOMATIC_ZOOM = { const: false } as const
 const outputSpecSchema = {
   type: 'object', additionalProperties: false,
   required: ['schemaVersion', 'id', 'locale', 'aspectRatio', 'width', 'height', 'fps', 'safeArea'],
@@ -12953,7 +12958,7 @@ const contiguousExtractionSchema = {
           additionalProperties: false,
           required: ['automaticZoom', 'reason'],
           properties: {
-            automaticZoom: { const: false },
+            automaticZoom: PUBLISHED_PLAN_WITHOUT_AUTOMATIC_ZOOM,
             reason: {
               const: 'contiguous-source-preservation',
             },
@@ -25262,7 +25267,7 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
             },
             outputDurationFrames: { type: 'integer', minimum: 1 },
             fps: { type: 'number', exclusiveMinimum: 0 },
-            automaticZoom: { const: false },
+            automaticZoom: PUBLISHED_PLAN_WITHOUT_AUTOMATIC_ZOOM,
             protectedOpeningFrames: { type: 'integer', minimum: 1 },
             subtitleFaceProtection: { const: true },
           },
@@ -25318,7 +25323,7 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
                   required: ['snapshotId', 'id', 'durationFrames', 'fps', 'subtitleCueCount', 'transitionCount', 'automaticZoom'],
                   properties: {
                     snapshotId: idSchema, id: idSchema, durationFrames: { type: 'integer', minimum: 1 }, fps: { type: 'number', exclusiveMinimum: 0 },
-                    subtitleCueCount: { type: 'integer', minimum: 1 }, transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: { const: false },
+                    subtitleCueCount: { type: 'integer', minimum: 1 }, transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: PUBLISHED_PLAN_WITHOUT_AUTOMATIC_ZOOM,
                   },
                 },
                 qualityReport: { type: 'object', additionalProperties: false, required: ['snapshotId', 'report'], properties: { snapshotId: idSchema, report: { type: 'object' } } },
@@ -25416,7 +25421,7 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
                 exclusions: { type: 'array', minItems: 1, maxItems: 128 },
                 retainedSourceRanges: { type: 'array', minItems: 1, maxItems: 129 },
                 outputDurationFrames: { type: 'integer', minimum: 1 },
-                fps: { type: 'number', exclusiveMinimum: 0 }, automaticZoom: { const: false },
+                fps: { type: 'number', exclusiveMinimum: 0 }, automaticZoom: PUBLISHED_PLAN_WITHOUT_AUTOMATIC_ZOOM,
                 protectedOpeningFrames: { type: 'integer', minimum: 1 }, subtitleFaceProtection: { const: true },
                 impact: editorialCutImpactSchema,
                 invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
@@ -25484,7 +25489,7 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
                   required: ['snapshotId', 'id', 'durationFrames', 'fps', 'subtitleCueCount', 'transitionCount', 'automaticZoom'],
                   properties: {
                     snapshotId: idSchema, id: idSchema, durationFrames: { type: 'integer', minimum: 1 }, fps: { type: 'number', exclusiveMinimum: 0 },
-                    subtitleCueCount: { type: 'integer', minimum: 1 }, transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: { const: false },
+                    subtitleCueCount: { type: 'integer', minimum: 1 }, transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: PUBLISHED_PLAN_WITHOUT_AUTOMATIC_ZOOM,
                   },
                 },
                 qualityReport: { type: 'object', additionalProperties: false, required: ['snapshotId', 'report'], properties: { snapshotId: idSchema, report: { type: 'object' } } },
@@ -25527,7 +25532,7 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
                 exclusions: { type: 'array', minItems: 1, maxItems: 128 },
                 retainedSourceRanges: { type: 'array', minItems: 1, maxItems: 129 },
                 outputDurationFrames: { type: 'integer', minimum: 1 },
-                fps: { type: 'number', exclusiveMinimum: 0 }, automaticZoom: { const: false },
+                fps: { type: 'number', exclusiveMinimum: 0 }, automaticZoom: PUBLISHED_PLAN_WITHOUT_AUTOMATIC_ZOOM,
                 protectedOpeningFrames: { type: 'integer', minimum: 1 }, subtitleFaceProtection: { const: true },
                 impact: editorialCutImpactSchema,
                 invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
@@ -25565,7 +25570,7 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
                   properties: {
                     snapshotId: idSchema, id: idSchema, durationFrames: { type: 'integer', minimum: 1 },
                     fps: { type: 'number', exclusiveMinimum: 0 }, subtitleCueCount: { type: 'integer', minimum: 1 },
-                    transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: { const: false },
+                    transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: PUBLISHED_PLAN_WITHOUT_AUTOMATIC_ZOOM,
                   },
                 },
                 qualityReport: { type: 'object', additionalProperties: false, required: ['snapshotId', 'report'], properties: { snapshotId: idSchema, report: { type: 'object' } } },
@@ -25627,7 +25632,7 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
                 exclusions: { type: 'array', minItems: 1, maxItems: 128 },
                 retainedSourceRanges: { type: 'array', minItems: 1, maxItems: 129 },
                 outputDurationFrames: { type: 'integer', minimum: 1 },
-                fps: { type: 'number', exclusiveMinimum: 0 }, automaticZoom: { const: false },
+                fps: { type: 'number', exclusiveMinimum: 0 }, automaticZoom: PUBLISHED_PLAN_WITHOUT_AUTOMATIC_ZOOM,
                 protectedOpeningFrames: { type: 'integer', minimum: 1 }, subtitleFaceProtection: { const: true },
                 impact: editorialCutImpactSchema,
                 invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
@@ -25670,7 +25675,7 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
                   properties: {
                     snapshotId: idSchema, id: idSchema, durationFrames: { type: 'integer', minimum: 1 },
                     fps: { type: 'number', exclusiveMinimum: 0 }, subtitleCueCount: { type: 'integer', minimum: 1 },
-                    transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: { const: false },
+                    transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: PUBLISHED_PLAN_WITHOUT_AUTOMATIC_ZOOM,
                   },
                 },
                 qualityReport: { type: 'object', additionalProperties: false, required: ['snapshotId', 'report'], properties: { snapshotId: idSchema, report: { type: 'object' } } },
@@ -25743,7 +25748,7 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
                 },
                 retainedSourceRanges: { type: 'array', minItems: 1, maxItems: 129 },
                 outputDurationFrames: { type: 'integer', minimum: 1 },
-                fps: { type: 'number', exclusiveMinimum: 0 }, automaticZoom: { const: false },
+                fps: { type: 'number', exclusiveMinimum: 0 }, automaticZoom: PUBLISHED_PLAN_WITHOUT_AUTOMATIC_ZOOM,
                 protectedOpeningFrames: { type: 'integer', minimum: 1 }, subtitleFaceProtection: { const: true },
                 impact: editorialCutImpactSchema,
                 invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
@@ -25786,7 +25791,7 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
                   properties: {
                     snapshotId: idSchema, id: idSchema, durationFrames: { type: 'integer', minimum: 1 },
                     fps: { type: 'number', exclusiveMinimum: 0 }, subtitleCueCount: { type: 'integer', minimum: 1 },
-                    transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: { const: false },
+                    transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: PUBLISHED_PLAN_WITHOUT_AUTOMATIC_ZOOM,
                   },
                 },
                 qualityReport: { type: 'object', additionalProperties: false, required: ['snapshotId', 'report'], properties: { snapshotId: idSchema, report: { type: 'object' } } },
@@ -29754,6 +29759,16 @@ const PROJECT_WORKSPACE_V14 = derivedSchema('apollo://schemas/project-workspace/
 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   ...PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS,
+  // ADR-160 F4: the opening window of an EditPlan is the one the editorial policy resolved - none when no movement is applied and the request
+  // names no window - so `protectedOpeningFrames` may be 0. The refs before this one keep the minimum of 1 they were published with.
+  derivedSchema('apollo://schemas/project-edit-command-applied/v8', {
+    id: 'project-edit-command-applied', version: 9,
+    title: 'Applied edit command response whose opening window is the one the editorial policy resolved (possibly none)',
+  }, (body) => {
+    const data = schemaNode(body, 'properties', 'data')
+    const branches = data.oneOf as SchemaNode[]
+    schemaNode(branches[0]!, 'properties', 'editorial', 'properties').protectedOpeningFrames = { type: 'integer', minimum: 0 }
+  }),
   derivedSchema('apollo://schemas/project-subtitle-configuration-set-request/v1', {
     id: 'project-subtitle-configuration-set-request', version: 2,
     title: 'Set one closed subtitle mode for ONE output of the project (named by its stable variant id), or revert it',
