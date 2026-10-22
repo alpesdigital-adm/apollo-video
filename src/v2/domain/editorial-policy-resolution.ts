@@ -768,6 +768,8 @@ export interface PlanMovementDeclaration {
   fps: number
   movementPolicy: Readonly<{ automaticZoom: boolean; protectedOpeningFrames: number }>
   effectTracks?: readonly unknown[]
+  /** The overlays the plan draws; their frames belong to the plan's own timeline, so only their presence is judged here. */
+  overlayTracks?: readonly Readonly<{ kind: string }>[]
 }
 
 /**
@@ -789,6 +791,12 @@ export function assertPlanHonorsResolution(plan: Readonly<PlanMovementDeclaratio
   assertDomain(!resolution.blocked, 'INVALID_RENDER_INPUT', 'The editorial policy resolution of this EditPlan is blocked: nothing may be rendered from it')
   assertDomain(movementMatchesPolicy(facts, resolution.policies.movement) && openingMatchesPolicy(facts, resolution.policies.opening),
     'INVALID_RENDER_INPUT', 'The EditPlan does not honour the editorial policy resolution it was made from')
+  if (Array.isArray(plan.overlayTracks)) {
+    // A call to action is drawn exactly when the resolution says so: where it sits is the timeline's own business (a re-cut of the timeline moves it).
+    const drawn = plan.overlayTracks.filter((overlay) => overlay.kind === 'cta').length
+    assertDomain(resolution.policies.ctaOverlay.value.mode === 'window' ? drawn >= 1 : drawn === 0,
+      'INVALID_RENDER_INPUT', 'The EditPlan does not draw the call to action the editorial policy resolution asks for')
+  }
 }
 
 // ---- Parsing a stored resolution (a Director run is read back from persisted JSON: fail closed on anything that is not what was written).

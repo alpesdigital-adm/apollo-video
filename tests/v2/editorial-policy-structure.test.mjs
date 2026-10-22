@@ -149,3 +149,23 @@ test('the strategic rubric scores only what was requested; weights are renormali
     objective: 'discovery', evidence: evidence.slice(1), notRequested, gates: { narrativeIntegrity: true, legibility: true, rights: true }, evaluatedAt: '2026-01-01T00:00:00.000Z',
   }), (error) => error.code === 'INVALID_ARGUMENT')
 })
+
+test('a plan is judged on its call to action: drawn exactly when the resolution says so, wherever its timeline puts it', async () => {
+  const { assertPlanHonorsResolution } = await import('../../src/v2/domain/editorial-policy-resolution.ts')
+  const drawn = createEditorialRequest({
+    objective: 'sale',
+    desiredAction: sale({ visualCta: 'label', verbalCta: 'phrase' }),
+    directives: [{ id: 'c', kind: 'cta', value: 'overlay-closing' }],
+  })
+  const withCall = resolveEditorialPolicies(drawn, { ...media, closingSentenceStartSeconds: 4, timelineDurationSeconds: 5 }, [])
+  assert.equal(withCall.policies.ctaOverlay.value.mode, 'window')
+  const none = resolveEditorialPolicies(createEditorialRequest({}), media, [])
+  assert.equal(none.policies.ctaOverlay.value.mode, 'none')
+  const plan = (overlayTracks) => ({ fps: 30, movementPolicy: { automaticZoom: false, protectedOpeningFrames: 0 }, effectTracks: [], overlayTracks })
+  assertPlanHonorsResolution(plan([{ kind: 'cta' }]), withCall)
+  assertPlanHonorsResolution(plan([]), none)
+  assert.throws(() => assertPlanHonorsResolution(plan([]), withCall), /call to action/)
+  assert.throws(() => assertPlanHonorsResolution(plan([{ kind: 'cta' }]), none), /call to action/)
+  // a plan that states no overlay list says nothing about it
+  assertPlanHonorsResolution({ fps: 30, movementPolicy: { automaticZoom: false, protectedOpeningFrames: 0 } }, none)
+})
