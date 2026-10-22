@@ -13,6 +13,7 @@ import { promisify } from 'node:util'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { proveCatalogOutputBrowser } from './helpers/catalog-output-browser-proof.mjs'
 import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
+import { sealedEditorialFixture } from './helpers/editorial-request-fixture.mjs'
 
 // The persisted Director quality is review-required with unknown face safety, and it stays that way for the whole test.
 // W65b: unknown face safety no longer refuses an export by itself - the gate admits that report and the worker certifies
@@ -373,15 +374,21 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     })
     assert.equal(noLut.selection.resolved.mode, 'none')
     // The run's own snapshots. A snapshot is inserted, never edited: the quality report is the one the run persisted.
-    const qualityReport = reviewRequiredQualityReport({ suffix, evaluatedAt: createdAt.toISOString(),
-      createQualityReport, resolveStrategicRubric })
+    // ADR-160: the report is a v5 report bound to the request the Version's brief states and to the resolution the run seals.
+    const headRow = await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: noLut.version.id } })
+    const briefRow = await client.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: headRow.briefSnapshotId } })
+    const sealed = await sealedEditorialFixture({ briefContentJson: briefRow.contentJson, suffix, evaluatedAt: createdAt.toISOString(), workspaceId, projectId,
+      projectVersionId, strategic: reviewRequiredQualityReport({ suffix, evaluatedAt: createdAt.toISOString(), createQualityReport, resolveStrategicRubric }).strategic })
+    const qualityReport = sealed.qualityReport
+    const policySnapshotId = `final-export-policy-${suffix}`
     for (const [id, kind, schemaVersion, content] of [
       [snapshotIds.perception, 'perception', 1, emptyDirectorPerceptionSnapshot({
         id: snapshotIds.perception, sourceTranscriptId: `final-export-transcript-${suffix}`,
         createPerceptionTimeline })],
       [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
-      [snapshotIds.quality, 'quality-report', 3, qualityReport],
+      [snapshotIds.quality, 'quality-report', 5, qualityReport],
+      [policySnapshotId, 'policy-resolution', 1, sealed.resolution],
     ]) {
       await client.v2ProjectSnapshot.create({
         data: {
@@ -414,6 +421,8 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
         storySnapshotId: snapshotIds.story,
         editPlanSnapshotId,
         qualitySnapshotId,
+        policySnapshotId,
+        requestHash: sealed.request.requestHash,
         decisionsJson: stableSerialize([]),
         assumptionsJson: stableSerialize([]),
         initiatedByType: 'api-client',
@@ -602,7 +611,7 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     const rolledBack = new Error('forged approval rolled back')
     await assert.rejects(() => client.$transaction(async (transaction) => {
       await transaction.v2ProjectSnapshot.create({ data: {
-        id: forgedSnapshotId, workspaceId, projectId, kind: 'quality-report', schemaVersion: 3,
+        id: forgedSnapshotId, workspaceId, projectId, kind: 'quality-report', schemaVersion: 5,
         contentJson: stableSerialize(forgedReport), contentHash: calculateVersionHash(forgedReport), createdAt,
       } })
       await transaction.v2DirectorRun.update({ where: { id: directorRunId }, data: { qualitySnapshotId: forgedSnapshotId } })
@@ -686,10 +695,10 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     // W65b: the API refuses what the gate refuses. Unknown face safety is no longer that; a hard check that failed still is.
     // A stored snapshot is never edited (a trigger refuses the UPDATE): the dishonest report is a second quality-report snapshot, INSERTED, and the
     // Director run (a mutable pointer) is pointed at it for the one request and put back afterwards. The extra row stays, as every sealed row does.
-    const dishonestReport = { ...qualityReport, hardChecks: { ...qualityReport.hardChecks, timelineContinuous: false } }
+    const dishonestReport = { ...qualityReport, hardChecks: qualityReport.hardChecks.map((check) => check.id === 'timelineContinuous' ? { ...check, passed: false } : check) }
     const dishonestSnapshotId = `final-export-dishonest-quality-${suffix}`
     await client.v2ProjectSnapshot.create({ data: {
-      id: dishonestSnapshotId, workspaceId, projectId, kind: 'quality-report', schemaVersion: 3,
+      id: dishonestSnapshotId, workspaceId, projectId, kind: 'quality-report', schemaVersion: 5,
       contentJson: stableSerialize(dishonestReport), contentHash: calculateVersionHash(dishonestReport), createdAt,
     } })
     await client.v2DirectorRun.update({ where: { id: directorRunId }, data: { qualitySnapshotId: dishonestSnapshotId } })

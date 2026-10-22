@@ -10,6 +10,7 @@ import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
+import { sealedEditorialFixture } from './helpers/editorial-request-fixture.mjs'
 
 /**
  * W65b PostgreSQL + FFmpeg proof of the final-export gate (written for a supervised run; not run in CI).
@@ -40,22 +41,16 @@ const CUE = Object.freeze({ id: 'cue-w65b-1', startFrame: 30, endFrame: 90, text
 const IN_CUE_FRAMES = Object.freeze([35, 60, 85])
 const OUT_OF_CUE_FRAMES = Object.freeze([5, 15, 100, 115])
 
-function qualityReportFor({ suffix, evaluatedAt, createQualityReport, resolveStrategicRubric, hardChecks = {} }) {
+/** The v5 report a Director run of the request-driven era leaves (ADR-160), bound to the brief of the Version it directs. `checks` = a hard check that did not hold. */
+async function qualityReportFor({ suffix, evaluatedAt, createQualityReport, resolveStrategicRubric, checks = {}, briefContentJson, workspaceId, projectId, projectVersionId }) {
   const rubric = resolveStrategicRubric('discovery')
   const strategic = createQualityReport({ objective: 'discovery',
     evidence: rubric.criteria.map((criterion) => ({ criterionId: criterion.id, score: 100, evidence: [`controlled:${criterion.id}`] })),
     gates: { narrativeIntegrity: true, legibility: true, rights: true }, evaluatedAt })
-  return {
-    schemaVersion: 'director-quality-report/v3', id: `quality-report-${suffix}`, desiredActionRef: { id: `action-${suffix}` },
-    status: 'review-required', strategic, score: 1,
-    // The report the Director really produces: face safety UNKNOWN and nothing else to reserve.
-    faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
-    hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true, subtitlesFaceSafe: false, subtitlesBounded: true,
-      forbiddenSpeechAbsent: true, timelineContinuous: true, ...hardChecks },
+  // The report the Director really produces: face safety UNKNOWN and nothing else to reserve.
+  return sealedEditorialFixture({ briefContentJson, strategic, suffix, evaluatedAt, workspaceId, projectId, projectVersionId, checks,
     issues: [{ code: 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED', severity: 'warning', category: 'editorial',
-      message: 'Face detector evidence is unavailable. Caption placement requires review before approval or final export.', correctable: true }],
-    criticVersion: 'project-director-critic/v2', evaluatedAt,
-  }
+      message: 'Face detector evidence is unavailable. Caption placement requires review before approval or final export.', correctable: true }] })
 }
 
 test('T-W65B final export through the real gate: a certified cue is burned and confirmed in pixels, an uncertifiable one is omitted and listed', {
@@ -193,7 +188,12 @@ test('T-W65B final export through the real gate: a certified cue is burned and c
       selection: { mode: 'none' }, actor, idempotencyKey: id('lut-none'), reason: 'Keep this fixture colorimetrically neutral.' })
     assert.equal(noLut.selection.resolved.mode, 'none')
     // The run's own snapshots. A snapshot is inserted, never edited: the quality report is the one the run persisted.
-    const qualityReport = qualityReportFor({ suffix: `${key}-${suffix}`, evaluatedAt: createdAt.toISOString(), createQualityReport, resolveStrategicRubric, hardChecks })
+    const headRow = await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: noLut.version.id } })
+    const briefRow = await client.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: headRow.briefSnapshotId } })
+    const sealed = await qualityReportFor({ suffix: `${key}-${suffix}`, evaluatedAt: createdAt.toISOString(), createQualityReport, resolveStrategicRubric,
+      checks: hardChecks, briefContentJson: briefRow.contentJson, workspaceId, projectId, projectVersionId })
+    const qualityReport = sealed.qualityReport
+    const policySnapshotId = id('policy')
     const snapshotIds = { perception: id('perception'), treatment: id('treatment'), story: id('story'), quality: qualitySnapshotId }
     for (const [snapshotId, kind, schemaVersion, content] of [
       [snapshotIds.perception, 'perception', 1, { schemaVersion: 1, id: snapshotIds.perception,
@@ -202,7 +202,8 @@ test('T-W65B final export through the real gate: a certified cue is burned and c
           sourceTranscriptId: id('transcript') } }],
       [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
-      [snapshotIds.quality, 'quality-report', 3, qualityReport],
+      [snapshotIds.quality, 'quality-report', 5, qualityReport],
+      [policySnapshotId, 'policy-resolution', 1, sealed.resolution],
     ]) {
       await client.v2ProjectSnapshot.create({ data: { id: snapshotId, workspaceId, projectId, kind, schemaVersion,
         contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt } })
@@ -215,7 +216,8 @@ test('T-W65B final export through the real gate: a certified cue is burned and c
       baseVersionId: noLut.version.id, resultVersionId: projectVersionId, status: 'succeeded', objective: 'discovery', objectiveVersion: 1,
       rubricRef: 'awareness-discovery/v1', plannerVersion: 'director-e2e-1.0.0', criticVersion: 'critic-e2e-1.0.0',
       perceptionSnapshotId: snapshotIds.perception, treatmentSnapshotId: snapshotIds.treatment, storySnapshotId: snapshotIds.story,
-      editPlanSnapshotId, qualitySnapshotId, decisionsJson: stableSerialize([]), assumptionsJson: stableSerialize([]),
+      editPlanSnapshotId, qualitySnapshotId, policySnapshotId, requestHash: sealed.request.requestHash,
+      decisionsJson: stableSerialize([]), assumptionsJson: stableSerialize([]),
       initiatedByType: 'api-client', initiatedById: issued.client.id, createdAt, updatedAt: createdAt } })
 
     // The approved proxy: controlled metadata only (the one declared byte is not a rendered MP4); its review is ready-for-final.
@@ -330,7 +332,8 @@ test('T-W65B final export through the real gate: a certified cue is burned and c
       const report = JSON.parse(stored.contentJson)
       assert.equal(report.status, 'review-required')
       assert.deepEqual(report.faceSafety, { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] })
-      assert.equal(report.hardChecks.subtitlesFaceSafe, false)
+      assert.equal(report.schemaVersion, 'director-quality-report/v5')
+      assert.equal(report.hardChecks.every((check) => check.passed), true, 'a v5 report keeps no face flag among its checks: the claim is faceSafety alone')
     }
 
     // ---- the attempt records say what was burned and what was left out ----

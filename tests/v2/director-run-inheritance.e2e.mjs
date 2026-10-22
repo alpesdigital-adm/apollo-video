@@ -9,6 +9,7 @@ import test from 'node:test'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { runProxyWorkerOnce, seedIssueOverrideWorld } from './helpers/issue-override-world.mjs'
 import { commitSealedChild } from './helpers/pg-output-world.mjs'
+import { sealedEditorialFixture } from './helpers/editorial-request-fixture.mjs'
 
 const require = createRequire(import.meta.url)
 const { enqueueProjectProxyRenderService } = await import('../../src/v2/application/enqueue-project-proxy-render.ts')
@@ -47,20 +48,15 @@ const factory = await import('../../src/v2/infrastructure/repository-factory.ts'
 const enabled = process.env.APOLLO_DIRECTOR_INHERITANCE_E2E === '1'
 const WARNING_CODE = 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED'
 
-function directorQualityReport({ suffix, evaluatedAt }) {
+/** The v5 report a Director run of the request-driven era leaves behind, over the brief of the Version it directs, carrying one WARNING. */
+async function directorQualityReport({ suffix, evaluatedAt, briefContentJson, workspaceId, projectId, projectVersionId }) {
   const rubric = resolveStrategicRubric('discovery')
   const strategic = createQualityReport({ objective: 'discovery',
     evidence: rubric.criteria.map((criterion) => ({ criterionId: criterion.id, score: 100, evidence: [`controlled:${criterion.id}`] })),
     gates: { narrativeIntegrity: true, legibility: true, rights: true }, evaluatedAt })
-  return {
-    schemaVersion: 'director-quality-report/v3', id: `quality-report-${suffix}`, desiredActionRef: { id: `action-${suffix}` },
-    status: 'review-required', strategic, score: 1,
-    faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
-    hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true, subtitlesFaceSafe: false, subtitlesBounded: true, forbiddenSpeechAbsent: true, timelineContinuous: true },
+  return sealedEditorialFixture({ briefContentJson, strategic, suffix, evaluatedAt, workspaceId, projectId, projectVersionId,
     issues: [{ code: WARNING_CODE, severity: 'warning', category: 'editorial',
-      message: 'Face detector evidence is unavailable. Caption placement requires review before approval or final export.', correctable: true }],
-    criticVersion: 'project-director-critic/v2', evaluatedAt,
-  }
+      message: 'Face detector evidence is unavailable. Caption placement requires review before approval or final export.', correctable: true }] })
 }
 
 test('W70 readiness: an exception Version inherits the Director quality (final admitted, warnings kept) and nothing else does', { skip: !enabled, timeout: 1_500_000 }, async () => {
@@ -99,13 +95,18 @@ test('W70 readiness: an exception Version inherits the Director quality (final a
     /* ---------------------------------------------------------- V0: the Director's Version, with a quality report that carries a WARNING */
     const directedIds = { version: `director-version-${suffix}`, snapshot: `director-plan-${suffix}`, run: `director-run-${suffix}` }
     const snapshotIds = { perception: `director-perception-${suffix}`, treatment: `director-treatment-${suffix}`, story: `director-story-${suffix}`, quality: `director-quality-${suffix}` }
-    const qualityReport = directorQualityReport({ suffix, evaluatedAt: now.toISOString() })
+    const baseHead = await head()
+    const baseBrief = await db.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: baseHead.briefSnapshotId } })
+    const sealed = await directorQualityReport({ suffix, evaluatedAt: now.toISOString(), briefContentJson: baseBrief.contentJson, workspaceId, projectId, projectVersionId: directedIds.version })
+    const qualityReport = sealed.qualityReport
+    snapshotIds.policy = `director-policy-${suffix}`
     for (const [id, kind, schemaVersion, content] of [
       [snapshotIds.perception, 'perception', 1, { schemaVersion: 1, id: snapshotIds.perception, timeline: createPerceptionTimeline({ durationMs: 5_000, observations: [] }),
         summary: { id: `${snapshotIds.perception}-summary`, speechCoverage: 0, visualCoverage: 'absent', faceCoverage: 'absent', confidence: 0, sourceTranscriptId: `transcript-${suffix}` } }],
       [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
-      [snapshotIds.quality, 'quality-report', 3, qualityReport],
+      [snapshotIds.quality, 'quality-report', 5, qualityReport],
+      [snapshotIds.policy, 'policy-resolution', 1, sealed.resolution],
     ]) {
       await db.v2ProjectSnapshot.create({ data: { id, workspaceId, projectId, kind, schemaVersion, contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt: now } })
     }
@@ -116,6 +117,7 @@ test('W70 readiness: an exception Version inherits the Director quality (final a
       objective: 'discovery', objectiveVersion: 1, rubricRef: 'awareness-discovery/v1', plannerVersion: 'director-inheritance-1.0.0', criticVersion: 'critic-inheritance-1.0.0',
       perceptionSnapshotId: snapshotIds.perception, treatmentSnapshotId: snapshotIds.treatment, storySnapshotId: snapshotIds.story,
       editPlanSnapshotId: directed.editPlanSnapshot.id, qualitySnapshotId: snapshotIds.quality, decisionsJson: stableSerialize([]), assumptionsJson: stableSerialize([]),
+      policySnapshotId: snapshotIds.policy, requestHash: sealed.request.requestHash,
       initiatedByType: 'api-client', initiatedById: world.owner.clientId, createdAt: now, updatedAt: now,
     } })
     const V0 = await head()
