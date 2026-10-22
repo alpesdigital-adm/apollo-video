@@ -190,7 +190,7 @@ export function hydrateProxyReview(row: StoredProxyReview): Readonly<PersistedPr
   if (calculateProxyReviewHash(review) !== row.reviewHash) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review hash is inconsistent')
   }
-  if (row.acknowledgedByType !== null && row.acknowledgedByType !== 'api-client' && row.acknowledgedByType !== 'automatic-carry') {
+  if (row.acknowledgedByType && row.acknowledgedByType !== 'api-client' && row.acknowledgedByType !== 'automatic-carry') {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review acknowledgement has an unknown kind')
   }
   const acknowledgedBy = row.acknowledgedByType && row.acknowledgedById && row.acknowledgedAt
