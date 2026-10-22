@@ -423,7 +423,7 @@ async function waitForEditorSettle(page, { requires = null, refusalSettles = tru
       .innerText()
       .catch(() => '')
     const missing = (requires ?? EDITOR_MARKERS).filter((marker) => !found.includes(marker))
-    return `no-marker(${heading.slice(0, 60).replace(/s+/g, ' ')}; present: ${found.join(',') || 'none'}; missing: ${missing.join(',')})`
+    return `no-marker(${heading.slice(0, 60).replace(/\s+/g, ' ')}; present: ${found.join(',') || 'none'}; missing: ${missing.join(',')})`
   }
   return reached
 }
@@ -1109,8 +1109,12 @@ test(
 
       recorder.start('open-conflict-project')
       await openProjectCard(page, baseUrl, conflict.name)
-      // The assertions below read the refusal block itself, so the refusal is what must be on screen (the gate alone is not it).
-      const conflictSettle = await waitForEditorSettle(page, { requires: ['review-unavailable'] })
+      // The assertions below read the refusal block AND the preview that stays mounted beside it, so both must be on screen: the refusal
+      // alone would settle one read before the <video> (refusalSettles: false keeps the refusal from ending the wait by itself).
+      const conflictSettle = await waitForEditorSettle(page, {
+        requires: ['review-unavailable', 'project-preview'],
+        refusalSettles: false,
+      })
       const conflictPhase = await recorder.stop()
       conflictPhase.settledOn = conflictSettle
       conflictPhase.gets = conflictPhase.entries.filter((entry) => entry.method === 'GET').length
