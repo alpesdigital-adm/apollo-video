@@ -271,6 +271,8 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
         waitSeconds: 60,
         objective: 'discovery',
         format: '9:16',
+        // The project states no language; only the output variant, whose contract requires one, does.
+        outputLocale: 'pt-BR',
       },
       environment: {
         ...process.env,
