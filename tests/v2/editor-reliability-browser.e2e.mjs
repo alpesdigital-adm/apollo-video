@@ -376,22 +376,41 @@ async function refusalBlock(page) {
   }
 }
 
-/** The editor has settled when the preview or a refusal is on screen. */
-async function waitForEditorSettle(page) {
-  // Settle on what the page actually reaches, not on what it ought to reach:
-  // an inventory of a page that refused to mount its preview is still an
-  // inventory, and swallowing it would hide the very state worth measuring.
-  // Capped hard: the second open has to land inside the same 60-second window
-  // as the first, or the request-rate floor is never exercised at all.
-  const markers = ['project-preview', 'review-unavailable', 'proxy-review-gate', 'manual-editor']
+const EDITOR_MARKERS = ['project-preview', 'review-unavailable', 'proxy-review-gate', 'manual-editor']
+
+/**
+ * The editor has settled when the page is in the state the CALLER needs, not when the first marker of any kind appears.
+ *
+ * `proxy-review-gate` is drawn unconditionally by the side panel while the preview is only mounted once the proxy review and its media have
+ * been read, so the panel can be on screen long before the <video>. Stopping at the first marker present therefore sometimes settled on the
+ * panel and the assertion that followed looked for a preview that was one read away. A caller names what it needs:
+ *   - `requires`: markers that must ALL be present before the page counts as settled (the default for the callers that go on to use the
+ *     preview is `['project-preview']`). A refusal (`review-unavailable`) also ends the wait unless the caller requires it to be absent
+ *     (`refusalSettles: false`): the preview of a page that refused to mount it never comes, and swallowing that would hide the state
+ *     worth measuring.
+ *   - no `requires`: any of the markers settles (for the callers that look at whichever state the page reached).
+ * Capped hard (the second open has to land inside the same 60-second window as the first, or the request-rate floor is never exercised at
+ * all) and never raised: a page that does not reach the required state in time is reported with what it did reach.
+ */
+async function waitForEditorSettle(page, { requires = null, refusalSettles = true } = {}) {
   const deadline = Date.now() + 8_000
+  const present = async () => {
+    const found = []
+    for (const marker of EDITOR_MARKERS) {
+      if ((await page.getByTestId(marker).count()) > 0) found.push(marker)
+    }
+    return found
+  }
   let reached = null
+  let found = []
   while (Date.now() < deadline && reached === null) {
-    for (const marker of markers) {
-      if ((await page.getByTestId(marker).count()) > 0) {
-        reached = marker
-        break
-      }
+    found = await present()
+    if (requires === null) {
+      if (found.length > 0) reached = found[0]
+    } else if (requires.every((marker) => found.includes(marker))) {
+      reached = requires[0]
+    } else if (refusalSettles && found.includes('review-unavailable')) {
+      reached = 'review-unavailable'
     }
     if (reached === null) await delay(250)
   }
@@ -403,7 +422,8 @@ async function waitForEditorSettle(page) {
       .first()
       .innerText()
       .catch(() => '')
-    return `no-marker(${heading.slice(0, 60).replace(/\s+/g, ' ')})`
+    const missing = (requires ?? EDITOR_MARKERS).filter((marker) => !found.includes(marker))
+    return `no-marker(${heading.slice(0, 60).replace(/s+/g, ' ')}; present: ${found.join(',') || 'none'}; missing: ${missing.join(',')})`
   }
   return reached
 }
@@ -730,7 +750,7 @@ test(
       for (const label of ['open-1', 'open-2']) {
         recorder.start(label)
         await openProjectCard(page, baseUrl, clean.name)
-        const settled = await waitForEditorSettle(page)
+        const settled = await waitForEditorSettle(page, { requires: ['project-preview'] })
         const mediaBeforeDrain = await page.getByTestId('project-preview').first().evaluate((video) => ({
           tagName: video.tagName.toLowerCase(),
           readyState: video.readyState,
@@ -968,7 +988,7 @@ test(
       // Third open: the same card, now with one annotation behind it.
       recorder.start('open-3-after-annotation')
       await openProjectCard(page, baseUrl, clean.name)
-      const thirdSettle = await waitForEditorSettle(page)
+      const thirdSettle = await waitForEditorSettle(page, { requires: ['project-preview'] })
       const third = await recorder.stop()
       third.settledOn = thirdSettle
       third.readLedger = await readLedger(page)
@@ -1089,7 +1109,8 @@ test(
 
       recorder.start('open-conflict-project')
       await openProjectCard(page, baseUrl, conflict.name)
-      const conflictSettle = await waitForEditorSettle(page)
+      // The assertions below read the refusal block itself, so the refusal is what must be on screen (the gate alone is not it).
+      const conflictSettle = await waitForEditorSettle(page, { requires: ['review-unavailable'] })
       const conflictPhase = await recorder.stop()
       conflictPhase.settledOn = conflictSettle
       conflictPhase.gets = conflictPhase.entries.filter((entry) => entry.method === 'GET').length
