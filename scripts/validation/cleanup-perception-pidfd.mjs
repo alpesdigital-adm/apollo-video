@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
-import { cpSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assertOwnedRoot, readRegistry, registryLock, writeRegistry, digest, jsonDigest,
-  readAuthorityIdentitySync, identityKey, sourceFingerprint, budget } from './perception-addon-registry.mjs'
+  readAuthorityIdentitySync, identityKey, sourceFingerprint, budget,
+  namespaceEmptyProof, assessLockLeftover, parseLockLeftoverName, reclaimAdmissionLock, reclaimAdmissionMutex } from './perception-addon-registry.mjs'
 import { readLinuxProcessIdentity } from './run-perception-ci.mjs'
 import { prepareCgroupCleanup, removeArchivedCgroups, cgroupControlledCaseAccepted } from './perception-consumer-cgroup.mjs'
 
@@ -68,6 +69,60 @@ export function namespaceOwnerClosed(owner, reports) {
   assert.equal(report.postflight?.backendCount, 0)
   return true
 }
+// Host-side proofs that a private PID namespace is EMPTY, from the supervisor's own authenticated
+// receipts (the same evidence `namespaceOwnerClosed` demands of every namespace owner).
+export function readNamespaceProofs(root, env = process.env) {
+  const proofs = []
+  let names
+  try { names = readdirSync(join(root, 'receipts')) } catch { return proofs }
+  for (const name of names) {
+    if (proofs.length >= 64 || !/^namespace-perception-namespace-[a-f0-9-]+\.json$/.test(name)) continue
+    try {
+      const path = join(root, 'receipts', name), metadata = lstatSync(path)
+      if (!metadata.isFile() || metadata.uid !== process.getuid() || metadata.size > 16777216) continue
+      const bytes = readFileSync(path)
+      const proof = namespaceEmptyProof(JSON.parse(bytes.toString('utf8')), { path: `receipts/${name}`, sha256: digest(bytes) }, { sourceCommit: env.GITHUB_SHA })
+      if (proof) proofs.push(proof)
+    } catch { /* An unreadable receipt is not a proof. */ }
+  }
+  return proofs
+}
+// Exact admission-lock artifacts (lock, reclaim mutex, link staging files, tombstones) are removed only when their
+// creator is provably gone (dead here, or inside a namespace the host supervisor proved empty); otherwise the root is
+// retained as evidence, as for any unknown file. Classification is read-only; removal happens only after the whole
+// inventory passed (`removeLockLeftovers`). Returns null for names that are not admission-lock artifacts.
+export function classifyLockLeftover(item, relative, metadata, { namespaceProofs = [], io = {} }) {
+  const leftover = relative.includes('/') ? null : parseLockLeftoverName(relative)
+  if (!leftover) return null
+  const verdict = assessLockLeftover(item, leftover, io, { namespaceProofs })
+  assert.equal(verdict.verdict, 'stale', `Admission-lock leftover ${relative} has no proof that its creator is gone (${verdict.reason}); retain evidence`)
+  assert.ok(metadata.size <= 4096)
+  return { item, relative, kind: leftover.kind, parsed: leftover, bytes: metadata.size, sha256: digest(readFileSync(item)), proof: verdict.proof }
+}
+// The lock and the reclaim mutex go through the reclaim protocol (mutex, intent receipt, tombstone, digest re-check,
+// link restore): a contender may have reclaimed and republished since classification, and a live lock is never
+// removed. Staging files and tombstones belong to a creator that is provably gone and are unlinked after the same
+// proof is re-checked and the bytes still match.
+export function removeLockLeftovers(root, pending, { namespaceProofs = [], report, io = {} }) {
+  for (const entry of pending) {
+    let outcome = { action: 'removed' }
+    if (entry.kind === 'lock' || entry.kind === 'mutex') {
+      const result = (entry.kind === 'lock' ? reclaimAdmissionLock : reclaimAdmissionMutex)(root, { io, namespaceProofs })
+      // Already gone (an earlier reclaim in this pass removed an orphaned mutex together with the lock) is not a failure.
+      if (result.assessment?.verdict === 'absent') outcome = { action: 'already-absent' }
+      else {
+        assert.equal(result.reclaimed, true, `Admission-lock leftover ${entry.relative} could not be reclaimed under proof (${result.assessment?.reason}); retain evidence`)
+        outcome = { action: 'reclaimed', reclaimId: result.record.reclaimId }
+      }
+    } else {
+      const again = assessLockLeftover(entry.item, entry.parsed, io, { namespaceProofs })
+      assert.equal(again.verdict, 'stale', `Admission-lock leftover ${entry.relative} lost its proof (${again.reason}); retain evidence`)
+      assert.equal(digest(readFileSync(entry.item)), entry.sha256, `Admission-lock leftover ${entry.relative} changed; retain evidence`)
+      unlinkSync(entry.item)
+    }
+    ;(report.admissionLockLeftovers ??= []).push({ name: entry.relative, kind: entry.kind, bytes: entry.bytes, sha256: entry.sha256, proof: entry.proof, ...outcome })
+  }
+}
 export async function cleanupPidfd(env = process.env) {
   assert.equal(process.platform, 'linux'); assert.ok(process.getuid() > 0)
   const root = env.APOLLO_PERCEPTION_PIDFD_ROOT
@@ -80,11 +135,13 @@ export async function cleanupPidfd(env = process.env) {
   const fail = (error) => report.errors.push({ name: error.name, code: error.code ?? null, message: String(error.message).slice(0, 512),
     ...(error.admissionLockDiagnostic ? { admissionLockDiagnostic: error.admissionLockDiagnostic } : {}) })
   let preparedCgroups = []
+  let namespaceProofs = []
   try {
+    namespaceProofs = readNamespaceProofs(root, env)
     await registryLock(root, async () => {
       const current = readRegistry(root, env)
       current.admission = 'closed'; writeRegistry(root, current)
-    }, { env })
+    }, { env, namespaceProofs })
     assert.deepEqual(sourceFingerprint(), registry.sourceFiles, 'Source changed since build')
     // Containment has its own authenticated scope even when a consumer's FAIL
     // prevents successful prerequisite deletion. Unknown scopes remain retained.
@@ -98,7 +155,7 @@ export async function cleanupPidfd(env = process.env) {
     for (const item of [receipt.compiler, receipt.timeout, receipt.node, receipt.source, receipt.addon, ...receipt.headers]) {
       assert.equal(digest(readFileSync(item.path)), item.sha256, 'Prerequisite input bytes changed')
     }
-    const allFiles = []
+    const allFiles = [], pendingLeftovers = []
     let inventoryBytes = 0
     const walk = (path) => {
       assert.ok(Date.now() < deadlineAt, 'Cleanup inventory deadline')
@@ -112,9 +169,12 @@ export async function cleanupPidfd(env = process.env) {
         else {
           assert.ok(metadata.isFile() && metadata.size <= 16777216)
           const relative = item.slice(root.length + 1)
+          const leftover = classifyLockLeftover(item, relative, metadata, { namespaceProofs })
+          if (leftover) { pendingLeftovers.push(leftover); continue }
           assert.ok(/^(registry\.json|build-owner\.json|provenance\.json|compiler\.(stdout|stderr|version)|perception-pidfd\.node)$/.test(relative) ||
             /^owners\/[a-f0-9]{64}\.json$/.test(relative) ||
             /^receipts\/pidfd-consumer-cgroup-gates-[a-f0-9-]+\.cases\.(?:json|sha256)$/.test(relative) ||
+            /^receipts\/admission-lock-reclaim-[a-f0-9-]+\.json$/.test(relative) ||
             /^receipts\/(?:pidfd-consumer-[a-z-]+-[a-f0-9-]+\.(?:json|sha256)|namespace-perception-namespace-[a-f0-9-]+\.json)$/.test(relative),
           'Unknown file in build root; retain evidence')
           allFiles.push(item)
@@ -124,6 +184,7 @@ export async function cleanupPidfd(env = process.env) {
       }
     }
     walk(root); assert.ok(allFiles.length <= 8192)
+    removeLockLeftovers(root, pendingLeftovers, { namespaceProofs, report })
     const namespaceReports = allFiles.filter((path) => path.includes('/receipts/namespace-') && path.endsWith('.json'))
       .map((path) => JSON.parse(readFileSync(path, 'utf8')))
     const selfNamespace = report.cleanupOwner.namespace

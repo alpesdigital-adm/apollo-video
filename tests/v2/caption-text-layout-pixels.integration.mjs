@@ -17,6 +17,8 @@ const { createEditorialAudioTimelineHash } = await import('../../src/v2/domain/p
 const { subtitleAnchorDecisionFor } = await import('../../src/v2/domain/subtitle-anchor-plan.ts')
 const { FfmpegCaptionPixelCritic } = await import('../../src/v2/infrastructure/media/ffmpeg-caption-pixel-critic.ts')
 const { FfmpegEditorialProxyRenderer, deriveCaptionGeometry } = await import('../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts')
+const { captionLayoutOverflows } = await import('../../src/v2/domain/caption-burn-layout.ts')
+const { critiqueOutputFormat } = await import('../../src/v2/domain/format-quality-critic.ts')
 import { sealedSourceWindow } from './helpers/face-source-envelope-v3.mjs'
 
 /**
@@ -213,3 +215,32 @@ for (const format of ['16:9', '9:16']) {
     } finally { await rm(w.root, { recursive: true, force: true }) }
   })
 }
+
+test('W70 readiness 16:9: a three-line caption overflows the two-line band by less than the pixel critic tolerance, and the layout blocks it before the render', { timeout: 8 * 60_000 }, async () => {
+  // Three lines at 16:9 (the third holds one word): the block is ~11 px taller than the band, about half above and half below it.
+  const three = [{ id: 'cue-y', startFrame: 20, endFrame: 60,
+    text: 'Esta legenda tem palavras suficientes para ocupar exatamente três linhas na faixa de legendas larga do formato horizontal dezesseis por nove, sem cortar nada' }]
+  const w = await world('16:9', three)
+  try {
+    const anchorPlan = w.plan.subtitleAnchorPlan
+    const geometry = deriveCaptionGeometry(anchorPlan, w.canvas)
+    const overflows = captionLayoutOverflows({ anchorPlan, cues: three, canvas: w.canvas })
+    assert.deepEqual(overflows.map((overflow) => [overflow.cueId, overflow.lines, overflow.maxLines]), [['cue-y', 3, 2]], 'known before anything is rendered')
+    const { delivered, verification } = await judge(w, three)
+    // drawn in full: three runs of glyph rows, nothing cut
+    const raw = rawFrame(delivered.outputPath, 40, w.canvas.width, w.canvas.height)
+    const glyphs = glyphBox(raw, w.canvas.width, w.canvas.height)
+    const rows = glyphRows(raw, w.canvas.width, glyphs)
+    const band = px(subtitleAnchorDecisionFor(anchorPlan, 'cue-y').bounds, w.canvas)
+    const overflowPx = Math.max(band.top - glyphs.top, glyphs.bottom - band.bottom)
+    console.log(`W70-LAYOUT-3LINE font=${geometry.fontPx} rows=${rows.length} glyphs=${JSON.stringify(glyphs)} band=${JSON.stringify(band)} overflowPx=${overflowPx.toFixed(1)} critic=${JSON.stringify(verification.issues.map((issue) => [issue.code, issue.severity]))}`)
+    assert.equal(rows.length, 3, 'the three lines are burned')
+    assert.ok(overflowPx > 0 && overflowPx <= 6, `the glyphs leave the band by ${overflowPx.toFixed(1)} px, within the critic's 6 px tolerance`)
+    assert.ok(!verification.issues.some((issue) => issue.severity === 'hard'), `the pixel critic alone lets it through: ${JSON.stringify(verification.issues)}`)
+    // the layout's verdict blocks the output anyway: the review of this proxy is blocked by CAPTION_TEXT_DOES_NOT_FIT
+    const report = critiqueOutputFormat({ outputSpecId: w.spec.id, format: '16:9', proxyHash: delivered.sha256, map: delivered.renderElementMap,
+      placementPlanHash: w.plan.placementPlanHash, subtitleAnchorPlan: anchorPlan, captionPixelIssues: verification.issues, captionLayoutOverflows: overflows })
+    assert.equal(report.status, 'blocked')
+    assert.deepEqual(report.issues.filter((issue) => issue.severity === 'hard').map((issue) => [issue.code, issue.elementIds]), [['CAPTION_TEXT_DOES_NOT_FIT', ['subtitle:cue-y']]])
+  } finally { await rm(w.root, { recursive: true, force: true }) }
+})

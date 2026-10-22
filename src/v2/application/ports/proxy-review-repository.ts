@@ -1,17 +1,41 @@
 import type { ProxyReview } from '../render-workflow.ts'
 import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
+/**
+ * W70 readiness. Present on a review whose render was CARRIED from an earlier Version because nothing it is drawn from changed: the Version, the
+ * review (and the hash it had when it was carried) and the content address that proved the inputs equal. `decisionId` is the
+ * `carry-over-approval` decision that re-bound the approval the source review had, or null when the source review had none to re-bind (the
+ * carry then approved nothing). It is an automatic carry, never a human acknowledgement made on this Version.
+ */
+export interface ProxyReviewCarriedFrom {
+  versionId: string
+  reviewId: string
+  reviewHash: string
+  decisionId: string | null
+  renderContentHash: string
+  /**
+   * The acknowledgement a person made on the SOURCE review (on `versionId`), which the carry re-bound; null when the carry re-bound none. It
+   * lives only here: the review's own `acknowledgedBy` names the automatic carry, never this person as if they had acknowledged this Version.
+   */
+  acknowledgedBy: Readonly<{ type: 'api-client'; id: string; at: string }> | null
+}
+
+/**
+ * Who acknowledged THIS review: a person (an API client) who did it on this Version, or - on a carried review - the automatic carry, named by
+ * its `carry-over-approval` decision and the time it re-bound the approval (the person behind it is in `carriedFrom.acknowledgedBy`).
+ */
+export type ProxyReviewAcknowledgement =
+  | Readonly<{ type: 'api-client'; id: string; at: string }>
+  | Readonly<{ type: 'automatic-carry'; id: string; at: string }>
+
 export interface PersistedProxyReview extends ProxyReview {
   id: string
   workspaceId: string
   projectId: string
   operationId: string
   revision: number
-  acknowledgedBy?: Readonly<{
-    type: 'api-client'
-    id: string
-    at: string
-  }>
+  acknowledgedBy?: ProxyReviewAcknowledgement
+  carriedFrom?: Readonly<ProxyReviewCarriedFrom>
   createdAt: string
   updatedAt: string
 }

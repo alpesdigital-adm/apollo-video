@@ -2155,6 +2155,100 @@ test('W65 proxy worker: no control render is paid for when the plan draws nothin
   assert.deepEqual(review.criticIssues.filter((entry) => entry.code === 'FACE_PIXEL_CHECK_UNAVAILABLE').map((entry) => entry.severity), ['warning'])
 })
 
+// ---- W70 readiness (R2): what the content address cannot see is stored at completion, and the address itself is re-checked ----
+const { projectProxyRenderContentHash } = await import('../../src/v2/application/project-render-sources.ts')
+const { deriveProxyRenderGeometry, proxyDirectorCriticIssuesDigest } = await import('../../src/v2/application/proxy-render-evidence.ts')
+
+async function runEvidenceWorker(immutableSource, envelopes, contextOverride = {}) {
+  const operations = createOperations(immutableSource, contextOverride)
+  const reader = { async listSourceWindows() { return envelopes.map((envelope) => ({ envelope, authentication: { authenticated: true, reasons: [] } })) } }
+  const base = dependencies(operations, { faceEvidence: reader })
+  let completion = null
+  let renders = 0
+  const attach = base.deps.projects.attachCompletedOutput
+  base.deps.projects = { ...base.deps.projects, async readImmutableSource() { return immutableSource }, async attachCompletedOutput(input) { completion = input; return attach(input) } }
+  const render = base.deps.renderer.render
+  base.deps.renderer = { ...base.deps.renderer, async render(input) { renders += 1; return render(input) } }
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-w70-evidence')
+  return { outcome, completion, renders, reader, operation: operations.operation }
+}
+
+test('W70 R2 proxy worker: the completion stores the digests of the face windows the placement read and of the Director issues, the ones a carry computes', async () => {
+  const one = await runEvidenceWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE])])
+  assert.equal(one.outcome.status, 'succeeded')
+  const evidence = one.completion.renderEvidence
+  assert.match(evidence.faceEvidenceDigest, /^[a-f0-9]{64}$/)
+  assert.equal(evidence.criticIssuesDigest, proxyDirectorCriticIssuesDigest([]))
+  // the carry runs the same derivation, with the same reader, for the same source: the same digest
+  const carried = await deriveProxyRenderGeometry({ source: portraitMasterSource(), workspaceId: SEALED_SCOPE.workspaceId, projectId: SEALED_SCOPE.projectId, faceEvidence: one.reader, clock: () => new Date() })
+  assert.equal(carried.faceEvidenceDigest, evidence.faceEvidenceDigest, 'what the worker stored is what a carry recomputes when nothing moved')
+  // a window published later, or no reader at all, is other evidence
+  const two = await runEvidenceWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE]), faceWindow(() => [FAR_FACE], { id: 'face-source-envelope-later' })])
+  assert.notEqual(two.completion.renderEvidence.faceEvidenceDigest, evidence.faceEvidenceDigest, 'one more window read moves the face digest')
+  const unwired = await deriveProxyRenderGeometry({ source: portraitMasterSource(), workspaceId: SEALED_SCOPE.workspaceId, projectId: SEALED_SCOPE.projectId, clock: () => new Date() })
+  assert.notEqual(unwired.faceEvidenceDigest, evidence.faceEvidenceDigest, 'no reader is not the same evidence as a reader')
+  // the Director's issues the review is built over are in the critic digest, and nothing else is
+  const issue = Object.freeze({ code: 'DIRECTOR_PACING_WARNING', severity: 'warning', category: 'editorial', message: 'Pacing needs review.', correctable: true })
+  const directed = await runEvidenceWorker(portraitMasterSource({ criticIssues: Object.freeze([issue]) }), [faceWindow(() => [FAR_FACE])])
+  assert.equal(directed.completion.renderEvidence.criticIssuesDigest, proxyDirectorCriticIssuesDigest([issue]))
+  assert.notEqual(directed.completion.renderEvidence.criticIssuesDigest, evidence.criticIssuesDigest)
+  assert.equal(directed.completion.renderEvidence.faceEvidenceDigest, evidence.faceEvidenceDigest)
+})
+
+test('W70 R2 proxy worker: the content address written at enqueue is recomputed, and a render whose address moved is refused before anything is rendered', async () => {
+  const sealed = portraitMasterSource()
+  const address = projectProxyRenderContentHash({ source: sealed, colorPipelineBindings })
+  const same = await runEvidenceWorker(sealed, [faceWindow(() => [FAR_FACE])], { renderContentHash: address })
+  assert.equal(same.outcome.status, 'succeeded', 'the address of what is rendered is the address the operation was queued with')
+  const moved = await runEvidenceWorker(sealed, [faceWindow(() => [FAR_FACE])], { renderContentHash: 'e'.repeat(64) })
+  assert.equal(moved.outcome.status, 'failed')
+  assert.equal(moved.renders, 0, 'nothing was rendered')
+  assert.equal(moved.completion, null, 'nothing was attached')
+  assert.equal(moved.operation.error?.code, 'invalid_render_input')
+  // a row written before the address existed has none: it is rendered as before (and is never a carry source)
+  assert.equal((await runEvidenceWorker(sealed, [faceWindow(() => [FAR_FACE])])).outcome.status, 'succeeded')
+})
+
+test('W70 R2 proxy worker: the colour grade it applies must be the one the source was read with, or nothing is rendered', async () => {
+  // what the fakes of this file apply: no ColorPlan, and the LUT selection the materializer resolves
+  const applied = Object.freeze({ schemaVersion: 'render-color-grade/v1', colorPlan: null,
+    lutSelection: Object.freeze({ id: 'selection-project-proxy', selectionHash: '7'.repeat(64), mode: 'none', lutVersionId: null, lutRecordHash: null, cubeContentHash: null, intensity: 1 }) })
+  const same = await runEvidenceWorker(portraitMasterSource({ colorGrade: applied }), [faceWindow(() => [FAR_FACE])])
+  assert.equal(same.outcome.status, 'succeeded')
+  for (const [label, colorGrade] of [
+    ['another LUT selection', { ...applied, lutSelection: { ...applied.lutSelection, id: 'selection-other' } }],
+    ['a re-sealed LUT selection', { ...applied, lutSelection: { ...applied.lutSelection, selectionHash: '8'.repeat(64) } }],
+    ['a ColorPlan the worker does not apply', { ...applied, colorPlan: { id: 'color-plan-1', recordHash: '1'.repeat(64), planHash: '2'.repeat(64), compiledManifestHash: '3'.repeat(64) } }],
+  ]) {
+    const moved = await runEvidenceWorker(portraitMasterSource({ colorGrade }), [faceWindow(() => [FAR_FACE])])
+    assert.equal(moved.outcome.status, 'failed', label)
+    assert.equal(moved.renders, 0, `${label}: nothing was rendered`)
+    assert.equal(moved.operation.error?.code, 'invalid_render_input', label)
+  }
+})
+
+// ---- W70 readiness (R3): a caption that does not fit its band blocks the proxy, decided before the render ----
+test('W70 R3 proxy worker: a three-line caption in the two-line band is a hard issue before the render; it is drawn, and the review is blocked', async () => {
+  // 62 characters lay out in three lines of the 9:16 kinetic band (two lines allowed); the far face leaves the bottom band certified free.
+  const overflowing = portraitMasterSource({ editPlan: Object.freeze({ ...source().editPlan, subtitleTracks: Object.freeze([{ presetId: 'kinetic', cues: Object.freeze([
+    Object.freeze({ id: 'cue-1', startFrame: 0, endFrame: 60, text: 'Ação imediata para o seu canal crescer de verdade com conteúdo', anchor: 'bottom' }),
+  ]) }]) }) })
+  const result = await runCaptionWorker(overflowing, [faceWindow(() => [FAR_FACE])])
+  assert.equal(result.outcome.status, 'succeeded', 'a render was made: the person sees the caption as it is')
+  assert.equal(subtitleAnchorDecisionFor(result.rendered.placementPlan.subtitleAnchorPlan, 'cue-1').disposition, 'placed')
+  assert.deepEqual(result.rendered.subtitleCues.map((cue) => cue.id), ['cue-1'], 'the proxy draws it')
+  assert.equal(result.review.status, 'blocked')
+  assert.equal(result.review.finalAllowed, false)
+  const issue = result.review.criticIssues.find((entry) => entry.code === 'CAPTION_TEXT_DOES_NOT_FIT')
+  assert.ok(issue, JSON.stringify(result.review.criticIssues.map((entry) => entry.code)))
+  assert.equal(issue.severity, 'hard')
+  assert.deepEqual(issue.elementIds, ['subtitle:cue-1'])
+  assert.match(issue.message, /needs 3 lines/)
+  // the same caption, shortened to two lines, is not an issue
+  const fitting = await runCaptionWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE])])
+  assert.ok(!fitting.review.criticIssues.some((entry) => entry.code === 'CAPTION_TEXT_DOES_NOT_FIT'))
+})
+
 // ---- W67: the independent MP4 critic reads the pixels of the delivered proxy ----
 const { createMp4QualityReport: createMp4ProxyReport, MP4_PIXEL_CRITIC_POLICY: MP4_PROXY_POLICY } = await import('../../src/v2/domain/mp4-pixel-quality.ts')
 const { pixelOracleModelPins: proxyOraclePins } = await import('../../src/v2/domain/pixel-face-oracle.ts')

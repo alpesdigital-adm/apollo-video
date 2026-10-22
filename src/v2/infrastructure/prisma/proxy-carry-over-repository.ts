@@ -17,6 +17,8 @@ import {
   succeedPublicOperation,
 } from '../../domain/public-operation.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
+import { parseCommandImpact } from '../../domain/command-impact.ts'
+import { INHERITING_COMMAND_TYPES } from '../../domain/director-run-inheritance.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData } from './external-actor-audit.ts'
 import { hydratePublicOperationRecord, OPERATION_INCLUDE, persistOperationStatusEvents } from './public-operation-repository.ts'
@@ -24,6 +26,22 @@ import { hydrateProxyReview } from './proxy-review-repository.ts'
 import { pauseBeforeLostRaceRetry } from './idempotency-record-persistence.ts'
 
 const MAX_ANCESTOR_STEPS = 500
+
+/**
+ * The impact hash of the Command that made the head Version, read from the sealed payload it was committed with (every Command a carry follows
+ * - a subtitle segment exception, a manual reframe - carries its impact there). `null` when it cannot be read: a carry is then not made, rather
+ * than recorded under an impact nobody can show.
+ */
+async function commandImpactHashOf(transaction: Prisma.TransactionClient, scope: Readonly<{ workspaceId: string; projectId: string; commandId: string }>): Promise<string | null> {
+  const command = await transaction.v2EditCommand.findFirst({ where: { id: scope.commandId, workspaceId: scope.workspaceId, projectId: scope.projectId }, select: { payloadJson: true } })
+  if (!command) return null
+  try {
+    const payload = JSON.parse(command.payloadJson) as { impact?: unknown }
+    return parseCommandImpact(payload.impact).impactHash
+  } catch {
+    return null
+  }
+}
 
 /**
  * W70 prep. Carries the render, the review and the approval of ONE output from an earlier Version of the project to its head Version, in one
@@ -69,10 +87,12 @@ export class PrismaProxyCarryOverRepository implements ProxyCarryOverRepository 
     })
     if (present) return { status: 'present', operationId: present.operationId }
 
-    // The newest completed render of this output, in an earlier Version, whose own content address is the one this output has now.
+    // The newest completed render of this output, in an earlier Version, whose own content address is the one this output has now. A render
+    // stored without the digests of what the address cannot see (written before they existed) proves nothing about them and is never a source.
     const source = await transaction.v2ProjectProxyRenderOperation.findFirst({
       where: {
         workspaceId, projectId, outputVariantId: request.variantId, renderContentHash: request.renderContentHash,
+        faceEvidenceDigest: { not: null }, criticIssuesDigest: { not: null },
         projectVersionId: { not: request.toProjectVersionId }, operation: { status: 'succeeded', phase: 'completed' },
       },
       orderBy: [{ createdAt: 'desc' }, { operationId: 'desc' }],
@@ -80,15 +100,27 @@ export class PrismaProxyCarryOverRepository implements ProxyCarryOverRepository 
     })
     if (!source) return { status: 'not-eligible', reason: 'no-source-render' }
     // ... and in an ANCESTOR of the head (a Version on the line the head descends from), never a sibling branch.
+    // W70 readiness (R2, defence in depth). Every Version from the source to the head must have been made by an exception Command (a subtitle
+    // segment exception, a manual reframe): those change one output and nothing it is drawn from elsewhere. Any other Command (a ColorPlan, a
+    // LUT selection, an edit) between them is refused even if the content address agrees.
     let cursor: string | null = request.toProjectVersionId
     let ancestor = false
+    let foreignCommand = false
     for (let step = 0; step < MAX_ANCESTOR_STEPS && cursor !== null; step += 1) {
-      const row: { parentVersionId: string | null } | null = await transaction.v2ProjectVersion.findFirst({ where: { id: cursor, workspaceId, projectId }, select: { parentVersionId: true } })
+      const row: { parentVersionId: string | null; command: { type: string } | null } | null = await transaction.v2ProjectVersion.findFirst({
+        where: { id: cursor, workspaceId, projectId }, select: { parentVersionId: true, command: { select: { type: true } } },
+      })
       if (!row) break
+      if (!row.command || !INHERITING_COMMAND_TYPES.includes(row.command.type)) foreignCommand = true
       if (row.parentVersionId === source.projectVersionId) { ancestor = true; break }
       cursor = row.parentVersionId
     }
     if (!ancestor) return { status: 'not-eligible', reason: 'source-not-ancestor' }
+    if (foreignCommand) return { status: 'not-eligible', reason: 'intermediate-command-not-carriable' }
+    // W70 readiness (R2). The address says the inputs of the output are equal; it cannot say the same of what the render READ: the face
+    // windows its placement read (and the ones it still needed) and the Director's issues its review was built over. Either moved: not carried.
+    if (source.faceEvidenceDigest !== request.faceEvidenceDigest) return { status: 'not-eligible', reason: 'face-evidence-moved' }
+    if (source.criticIssuesDigest !== request.criticIssuesDigest) return { status: 'not-eligible', reason: 'critic-issues-moved' }
 
     const [artifact, manifest, map, version] = await Promise.all([
       transaction.v2MediaArtifact.findFirst({ where: { id: source.outputArtifactId, workspaceId, status: 'available' }, select: { id: true } }),
@@ -98,6 +130,11 @@ export class PrismaProxyCarryOverRepository implements ProxyCarryOverRepository 
     ])
     if (!source.review || !artifact || !manifest || !map) return { status: 'not-eligible', reason: 'source-incomplete' }
     const sourceReview = hydrateProxyReview(source.review)
+    // The Command that made the head, and the impact it was committed with: the carry is decided under THAT impact (the Command did not touch this
+    // output) and records it where an impact belongs. Without both there is nothing to record, so nothing is carried.
+    const carriedByCommandId = request.commandId ?? version?.commandId ?? null
+    const commandImpactHash = carriedByCommandId ? await commandImpactHashOf(transaction, { workspaceId, projectId, commandId: carriedByCommandId }) : null
+    if (!carriedByCommandId || !commandImpactHash) return { status: 'not-eligible', reason: 'command-impact-missing' }
 
     // ---- the operation: completed, pointing at the very same artifact
     const audit = materializeActorAuditContext(request.actor)
@@ -108,7 +145,6 @@ export class PrismaProxyCarryOverRepository implements ProxyCarryOverRepository 
     operation = startPublicOperationAttempt(operation, request.now)
     operation = advancePublicOperationPhase(operation, 'persisting', request.now)
     operation = succeedPublicOperation(operation, request.now)
-    const carriedByCommandId = request.commandId ?? version?.commandId ?? null
     await transaction.v2PublicOperation.create({
       data: {
         id: operation.id, workspaceId, projectId, clientId: operation.clientId,
@@ -132,9 +168,14 @@ export class PrismaProxyCarryOverRepository implements ProxyCarryOverRepository 
         inputHash: request.inputHash, outputArtifactId: source.outputArtifactId, outputManifestId: source.outputManifestId,
         originalFileName: request.originalFileName, outputVariantId: request.variantId, renderContentHash: request.renderContentHash,
         reusedFromOperationId: source.operationId, reuseBaseVersionId: source.projectVersionId,
-        ...(carriedByCommandId ? { reuseCommandId: carriedByCommandId } : {}),
-        // the slot that names the impact of a Command names, for a carry, the content address that proved the inputs equal
-        reuseImpactHash: request.renderContentHash,
+        reuseCommandId: carriedByCommandId,
+        // the impact of that Command; the content address that proved the inputs equal is `renderContentHash`, on this same row
+        reuseImpactHash: commandImpactHash,
+        // visible as what it is: carried from this review, which had this hash when it was carried (the public review's `carriedFrom`)
+        carriedFromReviewId: source.review.id,
+        carriedFromReviewHash: source.review.reviewHash,
+        // the evidence the carried render read, which is (just checked) the evidence the head has: a later carry from this row compares with it
+        faceEvidenceDigest: source.faceEvidenceDigest, criticIssuesDigest: source.criticIssuesDigest,
       },
     })
     const created = await transaction.v2PublicOperation.findUnique({ where: { id: operation.id }, include: OPERATION_INCLUDE })

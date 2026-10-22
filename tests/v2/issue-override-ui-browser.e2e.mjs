@@ -191,6 +191,39 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
         throw new Error(`the panel never showed a chip, an empty verdict or a render action: ${(await panel.innerText().catch(() => '')).slice(0, 600)} / ${error}`)
       })
     }
+    /** Opens `entry` FROM the other output, with the review read of `entry` held until nothing of the other output is on screen. */
+    const openOutputHoldingReview = async (entry) => {
+      await openOutput(siblingOf(entry.variantId))
+      let release = () => undefined
+      const released = new Promise((resolve) => { release = resolve })
+      let held = 0
+      const handled = []
+      const isReviewOf = (url) => url.pathname.endsWith(`/projects/${world.projectId}/proxy-reviews`) && url.searchParams.get('variantId') === entry.variantId
+      const hold = (route) => {
+        const answered = (async () => {
+          if (route.request().method() === 'GET') { held += 1; await released }
+          await route.continue()
+        })()
+        handled.push(answered)
+        return answered
+      }
+      await page.route(isReviewOf, hold)
+      try {
+        await page.getByTestId(`output-option-${entry.variantId}`).click()
+        await page.locator(`[data-testid="issue-override-panel"][data-variant-id="${entry.variantId}"]`).waitFor()
+        await waitFor('the review of this output is being read', async () => held > 0, { timeoutMs: 30_000 })
+        const shownMeanwhile = await chipCodes()
+        assert.deepEqual(shownMeanwhile, [], 'while this output\'s review is read, no issue of the other output is shown under it')
+        assert.equal(await page.locator('[data-testid="caption-form"]').count(), 0, 'nor a form over the other output\'s exceptions')
+      } finally {
+        // every held read is let through before the route goes away (a route unrouted while held is answered twice)
+        release()
+        await Promise.allSettled(handled)
+        await page.unroute(isReviewOf, hold)
+      }
+      await page.locator('[data-testid="issue-chip"], [data-testid="issue-none"]').first().waitFor()
+      await sameChips(await reviewOf(entry.variantId, (await head()).id))
+    }
     const chipFor = (code, cue) => page.locator(`[data-testid="issue-chip"][data-issue-code="${code}"]${cue ? `[data-cue-id="${cue}"]` : ''}`).first()
     const chipCodes = async () => page.locator('[data-testid="issue-chip"]').evaluateAll((nodes) => nodes.map((node) => [node.getAttribute('data-issue-code'), node.getAttribute('data-severity'), node.getAttribute('data-cue-id')]))
     const selectChip = async (code, cue) => {
@@ -513,6 +546,18 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       await waitFor('the vertical review reaches the editor', async () => (await page.locator('[data-testid="issue-chip"]').count()) > 0, { timeoutMs: 120_000 })
       const tallReview = await reviewOf(entry.variantId, current.id)
       await sameChips(tallReview)
+      // W70 readiness (R1): the carried render is labelled in the review panel as an automatic carry from the earlier Version, and since nothing
+      // was approved on the vertical output, the carry says it approved nothing and a person is still asked to decide.
+      assert.deepEqual(Object.keys(tallReview.carriedFrom ?? {}).sort(), ['acknowledgedBy', 'decisionId', 'renderContentHash', 'reviewHash', 'reviewId', 'versionId'], 'the public review names where the render was carried from')
+      assert.equal(tallReview.carriedFrom.decisionId, null, 'no approval existed to re-bind')
+      // (Opus validation, note 3) and so nobody's acknowledgement came with it: none in carriedFrom, none on the review
+      assert.equal(tallReview.carriedFrom.acknowledgedBy, null, 'no acknowledgement of the earlier Version was carried')
+      assert.equal(tallReview.acknowledgedBy, undefined, 'and the carried review names no acknowledgement of its own')
+      await waitFor('the carry is labelled in the review panel', async () => (await page.getByTestId('proxy-review-carried').count()) > 0, { timeoutMs: 60_000 })
+      const carriedHeadline = await page.getByTestId('proxy-review-carried-headline').innerText()
+      assert.equal(carriedHeadline, `Render herdado automaticamente da versão ${tallReview.carriedFrom.versionId} — conteúdo idêntico`)
+      assert.equal(await page.getByTestId('proxy-review-carried').getAttribute('data-carried-kind'), 'render-carried')
+      assert.equal(await page.getByTestId('proxy-review-acknowledge').count(), 1, 'the inheritance approved nothing: a person is still asked to acknowledge the warnings')
       // the vertical pixels are what they were at its first render: nothing done to the wide output reached them
       const probeFrames = [5, 25, 70, 120]
       for (const frame of probeFrames) assert.equal((await frameAt(tallNow, frame)).sha256, (await frameAt(tall.proxy, frame)).sha256, `vertical frame ${frame} equals the one of its first render`)
@@ -538,9 +583,14 @@ test('W68 issue -> override -> recompile -> critic again, in a real browser, for
       const stored = await page.evaluate(() => Object.entries(window.localStorage).filter(([key]) => key.startsWith('apollo:v2:issue-draft:')).map(([, value]) => JSON.parse(value)))
       assert.ok(stored.some((draft) => draft.segmentId === 'cue-2' && draft.form.anchor === safe), 'the draft is in the browser storage')
       await login(page, server.baseUrl, projectUrl)
-      await openOutput(entry)
+      // CI run 39593869024 (main 24bbf8a2): right after this sign-in the caption form never opened. Switching outputs, the page went on showing the
+      // review of the output it switched FROM under the output it switched TO; the chip clicked was that other output's issue, and it vanished (with
+      // the issue detail) when this output's review arrived. This output's review read is held back here, so that window is as wide as it can be:
+      // nothing of the other output may be shown meanwhile, and what appears once it is answered is this output's review.
+      await openOutputHoldingReview(entry)
       await selectChip('FACE_PIXEL_CHECK_UNAVAILABLE', 'cue-2')
       await page.getByTestId('caption-form').waitFor()
+      assert.equal(await page.getByTestId('caption-form').getAttribute('data-variant-id'), entry.variantId, 'the form edits the exception of this output')
       assert.equal(await page.getByTestId('caption-anchor').inputValue(), safe, 'the draft came back after the sign-in')
       note('tall-session-expired', { redirectedTo: 'login?next=project', draftRestored: safe })
       await page.getByTestId('caption-apply').click()

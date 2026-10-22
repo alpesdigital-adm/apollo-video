@@ -3,7 +3,15 @@ import { REFRAME_COMPOSITION_ID } from '../domain/render-reframe-plan.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } from './ports/editorial-proxy-renderer.ts'
-import { FINAL_CAPTION_CERTIFICATION_POLICY_SHA256 } from '../domain/final-caption-certification.ts'
+import { FINAL_CAPTION_ANCHOR_POLICY, FINAL_CAPTION_CERTIFICATION_POLICY_SHA256 } from '../domain/final-caption-certification.ts'
+import { CAPTION_BAND_TOLERANCE_PX, CAPTION_PIXEL_CODES } from '../domain/caption-pixel-verdict.ts'
+import { CAPTION_TEXT_LAYOUT_ID } from '../domain/caption-text-layout.ts'
+import { COLOR_CRITIC_REPORT_SCHEMA_VERSION, DEFAULT_COLOR_CRITIC_POLICY } from '../domain/color-critic-report.ts'
+import { FACE_EVIDENCE_POLICY_SHA256 } from '../domain/face-evidence-policy.ts'
+import { FORMAT_QUALITY_CODES } from '../domain/format-quality-critic.ts'
+import { MP4_PIXEL_CRITIC_POLICY_SHA256 } from '../domain/mp4-pixel-quality.ts'
+import { renderColorGradeContent } from '../domain/render-color-grade.ts'
+import { DEFAULT_SUBTITLE_ANCHOR_POLICY } from '../domain/subtitle-anchor-plan.ts'
 import type {
   ProjectProxyRenderSource,
   ProjectRenderSourceAsset,
@@ -115,6 +123,9 @@ export function projectProxyRenderInputHash(input: {
     // W68. The per-segment subtitle exceptions that carry a value change the pixels, so another set is another input. Absent when the
     // output has none (or every one was reset), which keeps the identity of every render made before they existed.
     ...(source.subtitleOverridesHash ? { subtitleOverridesHash: source.subtitleOverridesHash } : {}),
+    // W70 readiness (R2). The colour grade the render applies (effective ColorPlan and LUT selection, by ancestry). Absent on a source the
+    // project render repository did not read (a renderable snapshot), which keeps its identity.
+    ...(source.colorGrade ? { colorGrade: source.colorGrade } : {}),
   }
   return calculateVersionHash(source.unchangedReuse
     ? {
@@ -138,8 +149,9 @@ export function projectProxyRenderInputHash(input: {
  * reframe record, the subtitle exceptions, the subtitle preset, the OCR evidence the placement reads, a placement asset, the renderer or the
  * recipe - gives another one. A render is carried from one Version to another only on an exact match.
  *
- * What it cannot see, because the render input hash cannot either: face evidence published AFTER the earlier render (the placement plan reads
- * the sealed face windows at render time). Carrying keeps the pixels and the verdict the output had; it does not re-run perception.
+ * What it cannot see, because it is read only when the render runs: the face windows the placement reads and the Director issues the review
+ * is built over. A render stores their digests at completion and a carry compares them (`proxy-render-evidence.ts`). v2 (W70 readiness) adds
+ * the colour grade (effective ColorPlan and LUT selection) and the review policies.
  */
 export function projectProxyRenderContentHash(input: {
   source: Readonly<ProjectProxyRenderSource>
@@ -151,7 +163,7 @@ export function projectProxyRenderContentHash(input: {
   const { id: _id, projectVersionId: _projectVersionId, createdAt: _createdAt, ...planContent } = source.editPlan as unknown as Record<string, unknown>
   const resolution = source.subtitleResolution
   return calculateVersionHash({
-    kind: 'project-proxy-render-content/v1',
+    kind: 'project-proxy-render-content/v2',
     renderer: FFMPEG_EDITORIAL_RENDERER_VERSION,
     recipe: EDITORIAL_PROXY_RECIPE_VERSION,
     assEmissionPolicy: ASS_EMISSION_POLICY,
@@ -173,5 +185,27 @@ export function projectProxyRenderContentHash(input: {
     placementAssets: source.placementAssets ? source.placementAssets.map((asset) => asset.sha256).toSorted() : null,
     reframeRecordHash: source.reframeRecordHash ?? null,
     subtitleOverridesHash: source.subtitleOverridesHash ?? null,
+    // W70 readiness (R2, Opus validation). What the colour grade does to the pixels (not the rows holding it), and the policies the review of
+    // a render is judged under: another grade, or another critic, is another content.
+    colorGrade: source.colorGrade ? renderColorGradeContent(source.colorGrade) : null,
+    reviewPolicySha256: PROXY_REVIEW_POLICY_SHA256,
   })
 }
+
+/**
+ * W70 readiness (R2). The policies a proxy's review is judged under, pinned by content. A carry keeps the verdict the earlier render had, so a
+ * change of any of them (the format critic's codes, the caption pixel critic's tolerance, the caption layout, the MP4 critic's policy, the face
+ * evidence policy, the colour critic's policy, the anchor policies) must make another content address, never carry an old verdict.
+ */
+export const PROXY_REVIEW_POLICY_IDENTITY = Object.freeze({
+  proxyReview: 'proxy-review/v1',
+  formatQualityReport: 'format-quality-report/v3',
+  formatQualityCodes: calculateCanonicalHash(FORMAT_QUALITY_CODES),
+  captionPixel: Object.freeze({ codes: calculateCanonicalHash(CAPTION_PIXEL_CODES), bandTolerancePx: CAPTION_BAND_TOLERANCE_PX }),
+  captionTextLayout: CAPTION_TEXT_LAYOUT_ID,
+  mp4PixelCriticPolicySha256: MP4_PIXEL_CRITIC_POLICY_SHA256,
+  faceEvidencePolicySha256: FACE_EVIDENCE_POLICY_SHA256,
+  colorCritic: Object.freeze({ report: COLOR_CRITIC_REPORT_SCHEMA_VERSION, policy: calculateCanonicalHash(DEFAULT_COLOR_CRITIC_POLICY) }),
+  anchorPolicies: Object.freeze({ subtitle: DEFAULT_SUBTITLE_ANCHOR_POLICY, finalCaption: FINAL_CAPTION_ANCHOR_POLICY }),
+})
+export const PROXY_REVIEW_POLICY_SHA256: string = calculateCanonicalHash(PROXY_REVIEW_POLICY_IDENTITY)

@@ -3,6 +3,7 @@ import { assertDomain } from './errors.ts'
 import { readOutputFormatPreset } from './output-format-registry.ts'
 import { OUTPUT_ASPECT_RATIOS, type NormalizedBounds, type OutputAspectRatio } from './output-spec.ts'
 import type { CaptionPixelIssueV1 } from './caption-pixel-verdict.ts'
+import type { CaptionLayoutOverflowV1 } from './caption-burn-layout.ts'
 import { mp4EvidenceSealMismatches, type Mp4EvidenceSealV1, type Mp4PixelIssueV1 } from './mp4-pixel-quality.ts'
 import type { RenderElementMap } from './review-system.ts'
 import type { SubtitleAnchorPlan } from './subtitle-anchor-plan.ts'
@@ -23,6 +24,8 @@ export const FORMAT_QUALITY_CODES = [
   // W67: what the independent critic read on the pixels of the delivered MP4 (see mp4-pixel-quality.ts). SUBTITLE_FACE_OVERLAP_IN_PIXELS is shared with W65.
   'CTA_FACE_OVERLAP_IN_PIXELS', 'INK_OUTSIDE_SAFE_AREA_IN_PIXELS', 'INK_CLIPPED_BY_CANVAS_IN_PIXELS', 'SUBJECT_NOT_VISIBLE_IN_PIXELS', 'SUBJECT_CLIPPED_IN_PIXELS',
   'INK_DENSITY_EXCESS_IN_PIXELS', 'MP4_PIXEL_EVIDENCE_UNKNOWN', 'MP4_PIXEL_COVERAGE_PARTIAL', 'MP4_DECODE_FAILED',
+  // W70 readiness (R3): a drawn caption whose text does not fit the band it was certified in (decided by the layout before rendering).
+  'CAPTION_TEXT_DOES_NOT_FIT',
 ] as const
 export type FormatQualityCode = (typeof FORMAT_QUALITY_CODES)[number]
 
@@ -144,6 +147,11 @@ export function critiqueOutputFormat(input: Readonly<{
    */
   captionPixelIssues?: readonly Readonly<CaptionPixelIssueV1>[]
   /**
+   * W70 readiness (R3). The drawn captions whose text does not fit the band the plan certified, as the layout decided before the render: each
+   * is a HARD issue of this output (the pixel critic's tolerance can hide an overflow of a few pixels; the layout cannot).
+   */
+  captionLayoutOverflows?: readonly Readonly<CaptionLayoutOverflowV1>[]
+  /**
    * W66r. The localized issues of the reframe plan record these frames were made from. Each carries its severity from the record (the policy
    * decided it), its range in timeline frames and the evidence it came from; the variant is blocked or reviewable by them, and no other output is.
    */
@@ -228,6 +236,18 @@ export function critiqueOutputFormat(input: Readonly<{
       code: issue.code, severity: issue.severity, message: issue.message,
       evidenceRange: issue.evidenceRange, elementIds: issue.elementIds,
       evidenceIds: [...issue.evidenceIds, `render-map:${input.proxyHash}`],
+    })
+  }
+  for (const overflow of input.captionLayoutOverflows ?? []) {
+    assertDomain(
+      overflow.code === 'CAPTION_TEXT_DOES_NOT_FIT' && Number.isSafeInteger(overflow.startFrame) && Number.isSafeInteger(overflow.endFrame) &&
+        overflow.startFrame >= 0 && overflow.endFrame > overflow.startFrame && overflow.endFrame <= input.map.durationFrames,
+      'INVALID_RENDER_INPUT', 'Caption layout issue is outside the rendered timeline',
+    )
+    add({
+      code: 'CAPTION_TEXT_DOES_NOT_FIT', severity: 'hard', message: overflow.message,
+      evidenceRange: { startFrame: overflow.startFrame, endFrame: overflow.endFrame }, elementIds: [`subtitle:${overflow.cueId}`],
+      evidenceIds: [`caption-layout:${overflow.layoutId}`, ...(input.subtitleAnchorPlan ? [`subtitle-anchor-plan:${input.subtitleAnchorPlan.anchorPlanHash}`] : [])],
     })
   }
   const mp4Evidence = input.mp4Evidence ?? null

@@ -7,6 +7,7 @@ import {
 } from '../domain/output-spec.ts'
 import { readOutputFormatPreset, validateOutputCompatibility } from '../domain/output-format-registry.ts'
 import { createQueuedPublicOperation } from '../domain/public-operation.ts'
+import { directorRunInheritanceIdentity } from '../domain/director-run-inheritance.ts'
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
@@ -160,6 +161,8 @@ export function enqueueProjectFinalExportService(dependencies: {
       outputConsumptionSealHash: source.outputConsumption.sealHash,
       ...(source.reframeRecordHash ? { reframeRecordHash: source.reframeRecordHash } : {}),
       ...(source.subtitleOverridesHash ? { subtitleOverridesHash: source.subtitleOverridesHash } : {}),
+      // W70 readiness. The Versions and Commands the Director's quality went through to reach this Version (absent: it is the Director's own).
+      ...(source.directorInheritance ? { directorInheritance: directorRunInheritanceIdentity(source.directorInheritance) } : {}),
     })
     const requestFingerprint = calculateVersionHash({
       type: 'project-final-export',
@@ -198,6 +201,7 @@ export function enqueueProjectFinalExportService(dependencies: {
         projectVersionHash,
         editPlanSnapshotId: source.editPlanSnapshotId,
         directorRunId: source.directorRunId,
+        ...(source.directorInheritance ? { directorInheritance: source.directorInheritance } : {}),
         qualitySnapshotId: source.qualitySnapshotId,
         qualitySnapshotHash: source.qualitySnapshotHash,
         proxyReviewId: source.proxyReviewId,

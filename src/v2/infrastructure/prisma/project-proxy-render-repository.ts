@@ -20,7 +20,7 @@ import { editCommandRenderPolicy } from '../../domain/edit-command-registry.ts'
 import { PrismaRenderablePlanSnapshotRepository } from './renderable-plan-snapshot-repository.ts'
 import { readSafeReusableProxy, selectReusableProxyOperation } from './proxy-reuse-safety.ts'
 import { sourceOutputVariantId } from '../../application/project-render-sources.ts'
-import { queryProxySourceProject, hydrateProxySource, hydrateProxyRenderSources, uniqueSourceLink,
+import { queryProxySourceProject, hydrateProxySource, hydrateProxyRenderSources, uniqueSourceLink, effectiveDirectorRunOf,
   parseProxySourceRecord, parseProxySourceCriticIssues, assertProxySourceLineage, lockProxySourceArtifacts } from './proxy-source-authority.ts'
 import { parseDirectorPerceptionSnapshotUnchecked } from './director-run-repository.ts'
 import { readPerceptionProducerEnvelope } from './perception-producer-envelope-repository.ts'
@@ -32,6 +32,9 @@ import { readVariantReframePlanHead } from './variant-reframe-plan-repository.ts
 import { readSubtitleSegmentOverrideHeads } from './subtitle-segment-override-repository.ts'
 import { subtitleOverrideSetHash } from '../../domain/subtitle-segment-override.ts'
 import { PrismaPublicOperationRepository } from './public-operation-repository.ts'
+import { PrismaProjectColorPlanRepository } from './project-color-plan-repository.ts'
+import { PrismaProjectLutSelectionRepository } from './project-lut-selection-repository.ts'
+import { renderColorGradeOf } from '../../domain/render-color-grade.ts'
 
 function parseArray(value: string, field: string): readonly unknown[] {
   try {
@@ -111,7 +114,23 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
   async readCurrentSource(input: { workspaceId: string; projectId: string; purpose?: ProjectRenderConsumptionPurpose; variantId?: string }) {
     const project = await this.queryProject(input)
     const source = hydrateProxySource(project)
-    return source ? this.attachSubtitleOverrides(project!, await this.attachReframePlan(project!, await this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source)))) : null
+    return source ? this.attachColorGrade(project!, await this.attachSubtitleOverrides(project!, await this.attachReframePlan(project!, await this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source))))) : null
+  }
+
+  /**
+   * W70 readiness (R2). The colour grade a render of the Version applies, read exactly as the render worker reads it (the effective ColorPlan,
+   * and the effective LUT selection the LUT materializer resolves), so the input hash and the content address name it.
+   */
+  private async attachColorGrade(
+    project: NonNullable<Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>>,
+    source: Readonly<ProjectProxyRenderSource>,
+  ): Promise<Readonly<ProjectProxyRenderSource>> {
+    const scope = { workspaceId: project.workspaceId, projectId: project.id, projectVersionId: source.projectVersionId }
+    const [colorPlan, lut] = await Promise.all([
+      new PrismaProjectColorPlanRepository(this.client).readEffectiveForVersion(scope),
+      new PrismaProjectLutSelectionRepository(this.client).readEffectiveForVersion(scope),
+    ])
+    return Object.freeze({ ...source, colorGrade: renderColorGradeOf({ colorPlan, lutSelection: lut?.selection ?? null }) })
   }
 
   /** The exact Version a worker was sealed to, consumed for `purpose` (default: the proxy render). */
@@ -122,7 +141,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       throw new DomainError('PERSISTENCE_CONFLICT', 'The sealed Version is no longer the current Version of the project')
     }
     const source = hydrateProxySource(project, input)
-    return source ? this.attachSubtitleOverrides(project!, await this.attachReframePlan(project!, await this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source)))) : null
+    return source ? this.attachColorGrade(project!, await this.attachSubtitleOverrides(project!, await this.attachReframePlan(project!, await this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source))))) : null
   }
 
   /**
@@ -180,9 +199,12 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     source: Readonly<ProjectProxyRenderSource>,
     client: PrismaClient | Prisma.TransactionClient = this.client,
   ): Promise<Readonly<ProjectProxyRenderSource>> {
-    const run = project.versions[0]?.directorRunAsResult
-    if (!run) return source
-    if (run.resultVersionId !== source.projectVersionId || run.projectId !== project.id ||
+    // The Director's own run, or the one an ancestor reached through exception Commands only (W70 readiness): the evidence stays the
+    // Director's (its `baseVersionId` below), and the time-map check refuses it whenever the clips are not the ones it was read for.
+    const directed = effectiveDirectorRunOf(project)
+    if (!directed) return source
+    const run = directed.run
+    if (run.resultVersionId !== (directed.inheritance?.directorResultVersionId ?? source.projectVersionId) || run.projectId !== project.id ||
         run.workspaceId !== project.workspaceId) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy Director result lineage is invalid')
     }
@@ -252,6 +274,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot Version is not the Version its output consumption seals')
     }
     const renderSources = hydrateProxyRenderSources(project, snapshot.plan, evaluatedAt)
+    const directed = effectiveDirectorRunOf(project)
     const primary = renderSources.find((asset) => asset.mediaType === 'video') ?? renderSources[0]
     const primaryLink = primary ? uniqueSourceLink(project.mediaAssets, primary.artifactId) : undefined
     if (!primary || !primaryLink) throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot has no source media')
@@ -272,7 +295,8 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       renderSources: Object.freeze(renderSources),
       originalFileName: primaryLink.originalFileName,
       uploadReceivedAt: (primaryLink.upload?.createdAt ?? primaryLink.createdAt).toISOString(),
-      criticIssues: parseProxySourceCriticIssues(version.directorRunAsResult?.qualitySnapshot.contentJson),
+      criticIssues: parseProxySourceCriticIssues(directed?.run.qualitySnapshot.contentJson),
+      ...(directed?.inheritance ? { directorInheritance: directed.inheritance } : {}),
     })
   }
 
@@ -322,7 +346,10 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
           typeof resource !== 'object' || resource === null || Array.isArray(resource) ||
           (resource as Record<string, unknown>).type !== 'media-artifact' ||
           (resource as Record<string, unknown>).id !== input.outputArtifactId ||
-          (resource as Record<string, unknown>).manifestId !== input.outputManifestId) {
+          (resource as Record<string, unknown>).manifestId !== input.outputManifestId ||
+          // W70 readiness (R2): a replay names the evidence the committed completion stored, or it is not the same completion.
+          ('renderEvidence' in input && input.renderEvidence !== undefined &&
+            (detail.faceEvidenceDigest !== input.renderEvidence.faceEvidenceDigest || detail.criticIssuesDigest !== input.renderEvidence.criticIssuesDigest))) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Completed proxy replay identity did not converge')
       }
       assertSealedProxyRecipe(input, detail, artifact, manifest)
@@ -626,6 +653,16 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       ])
       if (!artifact || !manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed project proxy output is inconsistent')
       assertSealedProxyRecipe(input, operation, artifact, manifest)
+      if (input.renderEvidence) {
+        // W70 readiness (R2). The evidence the content address cannot see, as this render read it: what a carry from it is compared with.
+        const { faceEvidenceDigest, criticIssuesDigest } = input.renderEvidence
+        if (![faceEvidenceDigest, criticIssuesDigest].every((digest) => /^[a-f0-9]{64}$/.test(digest))) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Completed project proxy evidence digests are invalid')
+        }
+        await transaction.v2ProjectProxyRenderOperation.update({
+          where: { operationId: input.operationId }, data: { faceEvidenceDigest, criticIssuesDigest },
+        })
+      }
       // The Version is consumed for the output the render was made for: the stable variant the worker names.
       const project = await this.queryProject({ workspaceId: input.workspaceId,
         projectId: input.projectId, projectVersionId: input.projectVersionId, variantId: input.variantId }, transaction)

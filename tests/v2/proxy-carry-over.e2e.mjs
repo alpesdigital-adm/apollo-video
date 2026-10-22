@@ -6,8 +6,10 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { sourceWindowHarness } from './helpers/face-source-pg.mjs'
 import { runProxyWorkerOnce, seedIssueOverrideWorld } from './helpers/issue-override-world.mjs'
 import { createOwnedTempRoot, removeOwnedTempRoot } from './helpers/owned-temp-root.mjs'
+import { standInDetectorRows } from './helpers/reframe-gt-oracle.mjs'
 
 const require = createRequire(import.meta.url)
 const { enqueueProjectProxyRenderService } = await import('../../src/v2/application/enqueue-project-proxy-render.ts')
@@ -20,6 +22,16 @@ const { PrismaSubtitleSidecarRepository } = await import('../../src/v2/infrastru
 const { PrismaSubtitleSegmentOverrideRepository } = await import('../../src/v2/infrastructure/prisma/subtitle-segment-override-repository.ts')
 const { calculateProxyReviewHash } = await import('../../src/v2/application/render-workflow.ts')
 const factory = await import('../../src/v2/infrastructure/repository-factory.ts')
+const { presentProxyReview } = await import('../../src/v2/public-api/proxy-review-presenter.ts')
+const { proxyDirectorCriticIssuesDigest } = await import('../../src/v2/application/proxy-render-evidence.ts')
+const { setProjectLutSelectionService } = await import('../../src/v2/application/project-lut-selections.ts')
+const { setProjectColorPlanService } = await import('../../src/v2/application/project-color-plans.ts')
+const { PrismaProjectLutSelectionRepository } = await import('../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
+const { PrismaProjectColorPlanRepository } = await import('../../src/v2/infrastructure/prisma/project-color-plan-repository.ts')
+const { PrismaWorkspaceLutRepository } = await import('../../src/v2/infrastructure/prisma/workspace-lut-repository.ts')
+const { getPublicSchema } = await import('../../src/v2/public-api/schema-registry.ts')
+const { default: Ajv2020 } = await import('ajv/dist/2020.js')
+const { default: addFormats } = await import('ajv-formats')
 
 /**
  * W70 prep ("invalidar so o necessario"). A Command aimed at ONE output creates a new ProjectVersion; the OTHER output keeps its render, its
@@ -35,6 +47,11 @@ const factory = await import('../../src/v2/infrastructure/repository-factory.ts'
  *  3. a render written without the address (before it existed), or a head that moved, is never a source;
  *  4. after the 16:9 output is rendered for its current inputs, a Command aimed at 9:16 carries the 16:9 render (a chain of carries is fine);
  *  5. the sidecar of a carried output names the very MP4 the earlier Version rendered.
+ * W70 readiness (R2) - what the content address cannot see:
+ *  6. a face window published after the render (the window the plan was still waiting for) is evidence the render never read: the address
+ *     is unchanged and the carry is refused with face-evidence-moved;
+ *  7. the Director issues the head's review would be built over are not the ones the render's was: refused with critic-issues-moved (the
+ *     stored digest is moved by hand - in this world no Director run exists to move them); restored, the carry is made and copies the digests.
  */
 const enabled = process.env.APOLLO_PROXY_CARRY_OVER_E2E === '1'
 const delay = (ms) => new Promise((done) => setTimeout(done, ms))
@@ -95,6 +112,8 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     const carryService = carryOverUntouchedOutputService({
       projects: factory.createProjectProxyRenderRepository(), carryOvers: new PrismaProxyCarryOverRepository(db),
       colorPipelines: factory.createColorPipelineCompilationRepository(), clock: () => new Date(),
+      // the reader the render worker reads with (as `carryOverAfterCommand` wires it)
+      faceEvidence: factory.createFaceSourceWindowRepository(),
     })
     const opAt = (versionId, variantId) => db.v2ProjectProxyRenderOperation.findFirst({ where: { ...scope, projectVersionId: versionId, outputVariantId: variantId, operation: { status: 'succeeded' } } })
 
@@ -103,6 +122,10 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     const wideV0 = await renderOf(WIDE), tallV0 = await renderOf(TALL)
     assert.match(wideV0.renderContentHash ?? '', /^[a-f0-9]{64}$/, 'a render written now carries its content address')
     assert.notEqual(wideV0.renderContentHash, tallV0.renderContentHash)
+    for (const render of [wideV0, tallV0]) {
+      assert.match(render.faceEvidenceDigest ?? '', /^[a-f0-9]{64}$/, 'and the digest of the face windows its placement read')
+      assert.equal(render.criticIssuesDigest, proxyDirectorCriticIssuesDigest([]), 'and of the Director issues it was reviewed over (none: no Director run here)')
+    }
     const tallReview0 = await reviewAt(TALL, V0.id)
     assert.equal(tallReview0.status, 'warning-ack-required', 'the 9:16 render has warnings a person must acknowledge')
     const acknowledged = await acknowledgeProxyWarningsService({ repository: reviews, clock: () => new Date(), createId: () => randomUUID() })({
@@ -126,6 +149,8 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     assert.equal(tallV1.reuseBaseVersionId, V0.id, 'and from that Version')
     assert.equal(tallV1.reuseCommandId, c1.command.id, 'by the Command that made the head')
     assert.equal(tallV1.renderContentHash, tallV0.renderContentHash, 'the content address of the inputs is the same one')
+    assert.deepEqual([tallV1.faceEvidenceDigest, tallV1.criticIssuesDigest], [tallV0.faceEvidenceDigest, tallV0.criticIssuesDigest],
+      'and so is what the render read (checked, then copied to the carried row)')
     assert.notEqual(tallV1.inputHash, tallV0.inputHash, 'while the pre-render input hash names the new Version')
     assert.equal(await opAt(V1.id, WIDE), null, 'the affected 16:9 output is not carried (it must be rendered for its new text)')
     const carriedReview = await reviewAt(TALL, V1.id)
@@ -133,7 +158,9 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     assert.equal(carriedReview.operationId, tallV1.operationId)
     assert.equal(carriedReview.inputHash, tallV1.inputHash)
     assert.equal(carriedReview.status, 'ready-for-final'); assert.equal(carriedReview.finalAllowed, true); assert.equal(carriedReview.warningsAcknowledged, true)
-    assert.deepEqual(carriedReview.acknowledgedBy, approved0.acknowledgedBy, 'the person who acknowledged is still the one named')
+    // (Opus validation, note 3) the person who acknowledged V0 did not acknowledge V1: the carried review names the automatic carry, the person only in carriedFrom
+    assert.equal(carriedReview.acknowledgedBy?.type, 'automatic-carry', 'the carried review is acknowledged by the automatic carry')
+    assert.notEqual(carriedReview.acknowledgedBy.id, approved0.acknowledgedBy.id, 'never by the person of V0, as if they had acknowledged V1')
     assert.notEqual(carriedReview.reviewHash, approved0.reviewHash, 'the review is a new one, with its own hash')
     assert.equal(carriedReview.proxyArtifactId, approved0.proxyArtifactId)
     assert.deepEqual(carriedReview.technicalIssues, approved0.technicalIssues); assert.deepEqual(carriedReview.criticIssues, approved0.criticIssues)
@@ -149,6 +176,24 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     assert.equal(decisions[0].resultReviewHash, carriedReview.reviewHash)
     assert.equal(decisions[0].actorId, world.owner.clientId, 'and the actor who triggered it')
     assert.equal(await db.v2ProxyReviewDecision.count({ where: { workspaceId, action: 'acknowledge-warnings' } }), 1, 'no second human acknowledgement was invented')
+    assert.deepEqual(carriedReview.acknowledgedBy, { type: 'automatic-carry', id: decisions[0].id, at: decisions[0].createdAt.toISOString() }, 'named by its decision and the time it re-bound the approval')
+    // W70 readiness (R1): the carry is VISIBLE as what it is - an automatic carry of an identical render, with the review, the decision and the content
+    // address - in the review a client reads; a render made for the Version says nothing of the kind. The approval is the one a person gave on V0.
+    assert.deepEqual(carriedReview.carriedFrom, { versionId: V0.id, reviewId: approved0.id, reviewHash: approved0.reviewHash, decisionId: decisions[0].id, renderContentHash: tallV0.renderContentHash,
+      acknowledgedBy: approved0.acknowledgedBy },
+      'the public review names the Version, the review (as it was when carried), the decision that re-bound the approval, the content address and the person who acknowledged V0')
+    assert.equal((await reviewAt(WIDE, V0.id)).carriedFrom, undefined, 'a render made for its own Version is not marked as carried')
+    assert.equal((await reviewAt(TALL, V0.id)).carriedFrom, undefined)
+    const publicShape = presentProxyReview(carriedReview)
+    const validateV4 = addFormats(new Ajv2020({ strict: false, allErrors: true })).compile(getPublicSchema('apollo://schemas/project-proxy-review-response/v4').schema)
+    assert.equal(validateV4({ data: { review: publicShape }, meta: { apiVersion: 'v1' } }), true, JSON.stringify(validateV4.errors))
+    assert.deepEqual(publicShape.carriedFrom, carriedReview.carriedFrom)
+    assert.deepEqual(publicShape.acknowledgedBy, carriedReview.acknowledgedBy, 'and the public review names the carry, not the person')
+    // the operation records the impact of the Command that made the head in the slot that means that, and the content address beside it
+    assert.equal(tallV1.reuseImpactHash, c1.impact.impactHash, 'reuseImpactHash is the impact of the Command, not the content address')
+    assert.notEqual(tallV1.reuseImpactHash, tallV1.renderContentHash)
+    assert.deepEqual([tallV1.carriedFromReviewId, tallV1.carriedFromReviewHash], [approved0.id, approved0.reviewHash])
+    assert.equal(await db.v2ProjectProxyRenderOperation.count({ where: { ...scope, carriedFromReviewId: { not: null } } }), 1, 'only the carried operation is marked')
     assert.equal(await db.v2RenderElementMap.count({ where: { ...scope, projectVersionId: V1.id, proxyArtifactId: tallV0.outputArtifactId } }), 1, 'the cue map of the same MP4 is bound to the new Version')
     // the sidecar reader sees the carried output as the output of the new Version, aligned with the very MP4 of the earlier one
     const alignment = await new PrismaSubtitleSidecarRepository(db).readRenderedAlignment({ ...scope, variantId: TALL, projectVersionId: V1.id })
@@ -193,6 +238,9 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     const wideReview2 = await reviewAt(WIDE, wideV2.projectVersionId)
     assert.deepEqual([wideReview4.status, wideReview4.warningsAcknowledged, wideReview4.finalAllowed], [wideReview2.status, wideReview2.warningsAcknowledged, wideReview2.finalAllowed], 'a review nobody approved is carried as it was: nothing is approved by the carry')
     assert.equal(await db.v2ProxyReviewDecision.count({ where: { workspaceId, action: 'carry-over-approval' } }), 1, 'no approval existed, so none was re-bound')
+    assert.deepEqual(wideReview4.carriedFrom, { versionId: wideV2.projectVersionId, reviewId: wideReview2.id, reviewHash: wideReview2.reviewHash, decisionId: null, renderContentHash: wideV2.renderContentHash,
+      acknowledgedBy: null },
+      'a carry that re-bound no approval says so: decisionId is null, and the review is the pending one it was')
 
     /* ---------------------------------------------------------- 5. a head that moved is refused */
     const stale = await carryService({ ...scope, variantId: TALL, actor })
@@ -204,6 +252,64 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
       ids: { operation: `operation-${randomUUID()}`, review: `review-${randomUUID()}`, decision: `decision-${randomUUID()}`, map: randomUUID() },
     })
     assert.deepEqual([moved.status, moved.reason], ['not-eligible', 'head-moved'], 'a carry to a Version that is no longer the head writes nothing')
+
+    /* ---------------------------------------------------------- 6. (R2) a face window published after the render: the address cannot see it, the carry does */
+    // The cover window spans source frames [0, 100); cue-3 plays over [105, 140), so the plan was still waiting for a window there. Publishing
+    // it changes what the caption placement of the 16:9 output reads, while nothing its content address is made of moves.
+    const faces = sourceWindowHarness(db, { suffix: `w70c${suffix}`, workspaceId, clientId: world.owner.clientId, projectId, sourceId: world.source.artifactId, actor })
+    await faces.publish('late', { startSourceFrame: 100, endSourceFrame: 150 }, (frame) => standInDetectorRows(world.scene, frame))
+    const c6 = await command(TALL, 'cue-2', 'Sexta', 'text-6')
+    assert.equal(await opAt(c6.version.id, WIDE), null, 'the 16:9 render read other face windows than the head has now: it is not carried')
+    const faceMoved = await carryService({ ...scope, variantId: WIDE, actor })
+    assert.deepEqual([faceMoved.status, faceMoved.reason], ['not-eligible', 'face-evidence-moved'])
+    const wideV6 = await renderOf(WIDE)
+    assert.equal(wideV6.renderContentHash, wideV2.renderContentHash, 'the content address did not move')
+    assert.notEqual(wideV6.faceEvidenceDigest, wideV2.faceEvidenceDigest, 'the evidence the new render read did')
+    assert.equal(wideV6.criticIssuesDigest, wideV2.criticIssuesDigest)
+    console.log(`W70-EVIDENCE ${JSON.stringify({ label: 'face-evidence-moved', version: c6.version.id, before: wideV2.faceEvidenceDigest, after: wideV6.faceEvidenceDigest })}`)
+
+    /* ---------------------------------------------------------- 7. (R2) the Director issues moved: refused; restored, carried with the digests */
+    await db.v2ProjectProxyRenderOperation.update({ where: { operationId: wideV6.operationId }, data: { criticIssuesDigest: proxyDirectorCriticIssuesDigest([{
+      code: 'DIRECTOR_PACING_WARNING', severity: 'warning', category: 'editorial', message: 'Pacing needs review.', correctable: true }]) } })
+    const c7 = await command(TALL, 'cue-2', 'Sétima', 'text-7')
+    assert.equal(await opAt(c7.version.id, WIDE), null, 'a render reviewed over other Director issues than the head has is not carried')
+    const criticMoved = await carryService({ ...scope, variantId: WIDE, actor })
+    assert.deepEqual([criticMoved.status, criticMoved.reason], ['not-eligible', 'critic-issues-moved'])
+    await db.v2ProjectProxyRenderOperation.update({ where: { operationId: wideV6.operationId }, data: { criticIssuesDigest: wideV6.criticIssuesDigest } })
+    const c8 = await command(TALL, 'cue-2', 'Oitava', 'text-8')
+    const wideV8 = await opAt(c8.version.id, WIDE)
+    assert.ok(wideV8, 'with the same evidence, the render is carried')
+    assert.equal(wideV8.reusedFromOperationId, wideV6.operationId)
+    assert.deepEqual([wideV8.faceEvidenceDigest, wideV8.criticIssuesDigest], [wideV6.faceEvidenceDigest, wideV6.criticIssuesDigest], 'and the carried row names the evidence it was carried under')
+
+    /* ---------------------------------------------------------- 8. (R2, Opus validation) a LUT Command between the render and the head: never carried */
+    // The same grade re-set (mode none again): the content address agrees, so it is the defence in depth - a Version between the source and the head
+    // that an exception Command did not make - that refuses. Without it this carry would be made.
+    const lutBase = await head()
+    await setProjectLutSelectionService({ repository: new PrismaProjectLutSelectionRepository(db), createId: (kind) => `w70c-${suffix}-lut-${kind}-${randomUUID()}`, createEventId: () => randomUUID() })({
+      ...scope, baseVersionId: lutBase.id, baseHash: lutBase.baseHash, selection: { mode: 'none' }, reason: 'W70 readiness: the same grade, re-set by another Command.', actor,
+      idempotencyKey: `w70c-${suffix}-lut-again` })
+    const c9 = await command(TALL, 'cue-2', 'Nona', 'text-9')
+    assert.equal(await opAt(c9.version.id, WIDE), null, 'a render made before a LUT Command is not carried past it')
+    const lutRefused = await carryService({ ...scope, variantId: WIDE, actor })
+    assert.deepEqual([lutRefused.status, lutRefused.reason], ['not-eligible', 'intermediate-command-not-carriable'], 'the address agreed and the LUT Command between them refused it')
+
+    /* ---------------------------------------------------------- 9. (R2, Opus validation) a ColorPlan between the render and the head: the address moves */
+    const colorBase = await head()
+    const sourceColor = { colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709', range: 'limited', bitDepth: 8 }
+    const compilation = await factory.createColorPipelineCompilationRepository().read({ ...scope, compilationId: `color-compilation-${world.source.artifactId}` })
+    assert.ok(compilation, 'the world registered the colour compilation of its recording')
+    const graded = await setProjectColorPlanService({ repository: new PrismaProjectColorPlanRepository(db), luts: new PrismaWorkspaceLutRepository(db), clock: () => new Date(),
+      createEventId: randomUUID, createId: (kind) => `w70c-${suffix}-color-${kind}-${randomUUID()}` })({
+      ...scope, baseVersionId: colorBase.id, baseHash: colorBase.baseHash, actor, idempotencyKey: `w70c-${suffix}-color`, reason: 'W70 readiness: one grade for the whole project.',
+      plan: { schemaVersion: 'color-plan/v1', metadata: sourceColor, outputMetadata: sourceColor, sourceMetadata: { [world.source.artifactId]: sourceColor }, global: compilation.compilation.pipeline.stages },
+    })
+    assert.equal((await head()).id, graded.version.id, 'the ColorPlan Command made the head')
+    const c10 = await command(TALL, 'cue-2', 'Décima', 'text-10')
+    assert.equal(await opAt(c10.version.id, WIDE), null, 'a render made before a ColorPlan is not carried past it')
+    const colorRefused = await carryService({ ...scope, variantId: WIDE, actor })
+    assert.deepEqual([colorRefused.status, colorRefused.reason], ['not-eligible', 'no-source-render'], 'the grade is in the content address: no render was made under it')
+    console.log(`W70-EVIDENCE ${JSON.stringify({ label: 'grade-not-carried', lut: lutRefused.reason, color: colorRefused.reason, colorPlanVersion: graded.version.id })}`)
   } finally {
     await db.$disconnect().catch(() => undefined)
     const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')

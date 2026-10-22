@@ -1,9 +1,16 @@
+import type { DirectorRunInheritance } from '../../domain/director-run-inheritance.ts'
 import type { ProjectProxyRenderSource } from './project-proxy-render-repository.ts'
 
 export interface ApprovedProjectFinalExportSource extends ProjectProxyRenderSource {
   projectVersionHash: string
   locale: string
   directorRunId: string
+  /**
+   * W70 readiness. Present when `directorRunId` is the run of an ANCESTOR of the exported Version, reached through exception Commands only
+   * (a subtitle segment exception, a manual reframe): the Versions and Commands the Director's quality went through. Absent when the exported
+   * Version is the Director's own. It is part of the final's input hash and of its receipt; the worker re-derives it and refuses a chain that moved.
+   */
+  directorInheritance?: Readonly<DirectorRunInheritance>
   qualitySnapshotId: string
   qualitySnapshotHash: string
   qualityStatus: 'approved' | 'approved-with-warnings' | 'review-required'
@@ -99,6 +106,11 @@ export interface ProjectFinalExportRepository {
     projectVersionHash: string
     editPlanSnapshotId: string
     directorRunId: string
+    /**
+     * The inheritance the operation was queued with (`null`: the Version was the Director's own). The repository re-derives the walk and
+     * refuses, with a precise reason, a chain that is not exactly this one.
+     */
+    directorInheritance?: Readonly<DirectorRunInheritance> | null
     qualitySnapshotId: string
     qualitySnapshotHash: string
     proxyReviewId: string

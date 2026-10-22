@@ -1,5 +1,7 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
+import { CAPTION_TEXT_DOES_NOT_FIT, type CaptionLayoutOverflowV1 } from './caption-burn-layout.ts'
 import type { CaptionPixelIssueV1 } from './caption-pixel-verdict.ts'
+import { CAPTION_TEXT_LAYOUT_ID } from './caption-text-layout.ts'
 import type { DirectorQualityReport } from './director-run.ts'
 import { FACE_EVIDENCE_POLICY_SHA256 } from './face-evidence-policy.ts'
 import type { RenderPlacementPlan } from './render-placement-plan.ts'
@@ -54,6 +56,14 @@ export const FINAL_CAPTION_CERTIFICATION_POLICY = deepFreeze({
     action: 'omit',
     listedAs: 'review-item',
     codes: ['FACE_PERCEPTION_UNAVAILABLE', 'NO_SAFE_SUBTITLE_REGION'],
+  },
+  // W70 readiness (R3). A cue whose text does not fit the band it would be burned in (`caption-burn-layout.ts`, decided by the layout before
+  // the encode) is omitted and listed the same way; the pixel critic's tolerance is never what admits it.
+  overflowingCue: {
+    action: 'omit',
+    listedAs: 'review-item',
+    code: CAPTION_TEXT_DOES_NOT_FIT,
+    layout: CAPTION_TEXT_LAYOUT_ID,
   },
   anchorPolicy: FINAL_CAPTION_ANCHOR_POLICY,
   claims: { faceSafety: 'unknown' },
@@ -120,7 +130,7 @@ export type FinalOmittedCueV1 = Readonly<{
   cueId: string
   startFrame: number
   endFrame: number
-  code: 'FACE_PERCEPTION_UNAVAILABLE' | 'NO_SAFE_SUBTITLE_REGION'
+  code: 'FACE_PERCEPTION_UNAVAILABLE' | 'NO_SAFE_SUBTITLE_REGION' | typeof CAPTION_TEXT_DOES_NOT_FIT
   disposition: 'review-required' | 'blocked'
   reasons: readonly string[]
 }>
@@ -156,12 +166,28 @@ export function certifyFinalCaptions(input: Readonly<{
   plan: Readonly<RenderPlacementPlan>
   /** What the pixel critic returned for the delivered MP4; `null`/absent when it did not run. */
   pixelCheck?: FinalPixelCheck | null
+  /**
+   * W70 readiness (R3). The cues left out of the plan (and of the encode) because their text does not fit the band (`captionTextOverflow:
+   * 'omit-and-list'`). They are listed as review items; one the plan still places would be burned, so that is a failure, never a listing.
+   */
+  layoutOmitted?: readonly Readonly<CaptionLayoutOverflowV1>[]
 }>): FinalCaptionCertification {
   const { plan } = input
   const anchorPlan = plan.subtitleAnchorPlan
   const failures: string[] = []
   const burned: FinalBurnedCueV1[] = []
   const omitted: FinalOmittedCueV1[] = []
+  for (const overflow of input.layoutOmitted ?? []) {
+    if (anchorPlan?.decisions.some((decision) => decision.cueId === overflow.cueId)) {
+      failures.push(`Cue ${overflow.cueId} does not fit its band (${overflow.code}) and is still in the caption plan`)
+      continue
+    }
+    omitted.push(Object.freeze({
+      cueId: overflow.cueId, startFrame: overflow.startFrame, endFrame: overflow.endFrame,
+      code: CAPTION_TEXT_DOES_NOT_FIT, disposition: 'review-required' as const,
+      reasons: Object.freeze([`${overflow.lines}/${overflow.maxLines} lines`, `${overflow.widthPx}/${overflow.maxWidthPx} px`]),
+    }))
+  }
   if (anchorPlan) {
     if (anchorPlan.schemaVersion !== 'subtitle-anchor-plan/v3') {
       failures.push(`The caption plan is ${anchorPlan.schemaVersion}, which was not decided by a face clearance of the final canvas`)

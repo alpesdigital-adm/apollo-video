@@ -179,29 +179,43 @@ export async function readSubtitleSegmentOverrideHeads(
 }
 
 /**
- * The head exception of every segment of one variant AS OF a Version: for each segment the newest override whose result Version is at or before
- * `versionSequence`. A render is only ever made for the current Version, and every override write makes a new Version, so the heads a render read
- * are the heads as of its own Version; this is how a reader of a historical render (the sidecar) recovers the exact set the render was drawn
- * with, and it is checked against the set hash the render's review recorded.
+ * The head exception of every segment of one variant AS OF a Version: for each segment the override made by the NEAREST Version of the line
+ * `versionId` descends from (itself included), walking `parentVersionId`. A render is only ever made for the current Version, and every override
+ * write makes a new Version, so the heads a render read are the heads as of its own Version; this is how a reader of a historical render (the
+ * sidecar) recovers the exact set the render was drawn with, and it is checked against the set hash the render's review recorded.
+ *
+ * W70 readiness. It used to take the newest override by Version SEQUENCE at or before the Version's. A project's history is a line today (a
+ * Command is refused unless its base is the head), where both answers agree; ancestry is the one that stays right if a Version is ever made
+ * from an older one: an override of a Version that is not an ancestor never applies to it.
  */
 export async function readSubtitleSegmentOverrideHeadsAsOf(
   client: Reader,
-  input: Readonly<{ workspaceId: string; projectId: string; variantId: string; versionSequence: number }>,
+  input: Readonly<{ workspaceId: string; projectId: string; variantId: string; versionId: string }>,
 ): Promise<readonly Readonly<SubtitleSegmentOverride>[]> {
+  const versions = await client.v2ProjectVersion.findMany({
+    where: { workspaceId: input.workspaceId, projectId: input.projectId },
+    select: { id: true, parentVersionId: true },
+  })
+  const parentOf = new Map(versions.map((row) => [row.id, row.parentVersionId]))
+  // distance from `versionId` along its ancestry: 0 for itself, 1 for its parent, ...
+  const distance = new Map<string, number>()
+  for (let cursor: string | null = input.versionId; cursor !== null && parentOf.has(cursor) && !distance.has(cursor); cursor = parentOf.get(cursor) ?? null) {
+    distance.set(cursor, distance.size)
+  }
+  if (!distance.has(input.versionId)) throw new DomainError('PERSISTENCE_CONFLICT', 'The Version a subtitle exception set is read for is not stored')
   const rows = await client.v2SubtitleSegmentOverride.findMany({
     where: {
       workspaceId: input.workspaceId, projectId: input.projectId, variantId: input.variantId,
-      resultVersion: { is: { sequence: { lte: input.versionSequence } } },
+      resultVersionId: { in: [...distance.keys()] },
     },
-    include: { resultVersion: { select: { sequence: true } } },
     orderBy: [{ startFrame: 'asc' }, { segmentId: 'asc' }],
   })
-  const newest = new Map<string, (typeof rows)[number]>()
+  const nearest = new Map<string, (typeof rows)[number]>()
   for (const row of rows) {
-    const previous = newest.get(row.segmentId)
-    if (!previous || row.resultVersion.sequence > previous.resultVersion.sequence) newest.set(row.segmentId, row)
+    const previous = nearest.get(row.segmentId)
+    if (!previous || distance.get(row.resultVersionId)! < distance.get(previous.resultVersionId)!) nearest.set(row.segmentId, row)
   }
-  return Object.freeze([...newest.values()].map((row) => overrideOf(row)))
+  return Object.freeze([...nearest.values()].map((row) => overrideOf(row)))
 }
 
 export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentOverrideRepository {

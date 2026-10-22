@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { parseLinuxProcessCredentials, parseLinuxProcessStat, readLinuxProcessIdentity } from './run-perception-ci.mjs'
 import { OBSERVER_ABI, OBSERVER_FRAME_LIMIT } from './perception-observer-channel.mjs'
 import { loadPidfdBinding, openObservedPidfd } from './perception-pidfd.mjs'
+import { namespaceEmptyProof, reclaimAdmissionLock } from './perception-addon-registry.mjs'
 
 export const NAMESPACE_BUDGET_MS = 480_000
 export const NAMESPACE_CONTROLLED_FAULTS = Object.freeze([
@@ -436,10 +437,23 @@ export async function runNamespaceSuite({ suite, pattern = null, env = process.e
     report.receiptPath = join(evidence, `${name}.namespace.json`)
     try { await bounded(() => writeFile(report.receiptPath, JSON.stringify(report, null, 2)), deadlineAt, 3000, 'Outer receipt write') }
     catch (error) { report.success = false; report.errors.push(errorFact(error)); process.stderr.write(`Outer receipt write failed\n${JSON.stringify(report)}\n`) }
+    let receiptText = null
     try {
-      writeFileSync(join(env.APOLLO_PERCEPTION_PIDFD_ROOT, 'receipts', `namespace-${config.runId}.json`),
-        JSON.stringify(report, null, 2), { flag: 'wx', mode: 0o600 })
-    } catch (error) { report.success = false; report.errors.push(errorFact(error)) }
+      receiptText = JSON.stringify(report, null, 2)
+      writeFileSync(join(env.APOLLO_PERCEPTION_PIDFD_ROOT, 'receipts', `namespace-${config.runId}.json`), receiptText, { flag: 'wx', mode: 0o600 })
+    } catch (error) { receiptText = null; report.success = false; report.errors.push(errorFact(error)) }
+    // This supervisor has just authenticated the namespace as EMPTY: a registry admission lock whose owner lived inside it
+    // (killed by a controlled fault inside the critical section) is orphaned for good. Reclaim exactly that lock, with a
+    // receipt naming this proof; a lock of any other owner is left alone and keeps failing closed.
+    if (receiptText !== null) {
+      try {
+        const proof = namespaceEmptyProof(report, { path: `receipts/namespace-${config.runId}.json`,
+          sha256: createHash('sha256').update(receiptText).digest('hex') })
+        const outcome = proof && reclaimAdmissionLock(env.APOLLO_PERCEPTION_PIDFD_ROOT, { namespaceProofs: [proof], env })
+        if (outcome?.reclaimed) process.stderr.write(`Reclaimed admission lock of empty namespace: ${JSON.stringify({ reclaimId: outcome.record.reclaimId, proof: outcome.record.proof })}
+`)
+      } catch (error) { report.success = false; report.errors.push(errorFact(error)) }
+    }
     // Do not destroy pipes, unref a live launcher or force-exit to hide it.
     // A missing root close is an explicit inconclusive failure, never PASS.
   }
