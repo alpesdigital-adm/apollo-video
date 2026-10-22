@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { defineEditorialPhraseRules, editorialRulesMatchingSpeech } from '../../src/v2/application/editorial-phrase-rules.ts'
-import { collectRequestedSpeechRemovals } from '../../src/v2/application/requested-speech-removals.ts'
+import { collectRequestedSpeechRemovals, requestedSpeechReintroducedByCaptions } from '../../src/v2/application/requested-speech-removals.ts'
+import { createSubtitleSegmentOverride } from '../../src/v2/domain/subtitle-segment-override.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 
 // The Director forbids in the captions only what the project itself asked to remove. Nothing here is a product phrase: every rule
@@ -100,4 +101,43 @@ test('a Version a remove-spoken-content Command made, whose Command row is missi
     collectRequestedSpeechRemovals({ projectId: 'p1', headVersionId: 'v2', load: async () => wrongType }),
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
   )
+})
+
+// A text exception on a caption can write a removed phrase back after the Director read the plan. The final is judged on what it burns.
+const VARIANT = 'variant-tall-0001'
+let counter = 0
+const exception = (segmentId, range, dimensions, extra = {}) => {
+  counter += 1
+  return createSubtitleSegmentOverride({
+    id: `override-${counter}-${segmentId}`, workspaceId: 'workspace-x', projectId: 'project-x', baseVersionId: 'version-base', resultVersionId: `version-${counter}`,
+    commandId: `command-${counter}`, variantId: VARIANT, segmentId, range, action: 'set', dimensions, protected: false, previousOverrideId: null,
+    createdAt: '2026-10-20T10:00:00.000Z', ...extra,
+  })
+}
+const CUES = [
+  { id: 'cue-a', startFrame: 20, endFrame: 50, text: 'primeira fala' },
+  { id: 'cue-b', startFrame: 100, endFrame: 130, text: 'segunda fala' },
+]
+const requested = defineEditorialPhraseRules([rule('phrase-rule-requested-1', 'promoção relâmpago')])
+
+test('a text exception that writes a requested phrase back is found; one that does not, or a request that was never made, is not', () => {
+  const reintroduces = exception('cue-b', { startFrame: 100, endFrame: 130 }, [{ kind: 'text', text: 'Aproveite a PROMOÇÃO, relâmpago!' }])
+  assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: requested, cues: CUES, overrides: [reintroduces], variantId: VARIANT }), ['phrase-rule-requested-1'])
+  const harmless = exception('cue-b', { startFrame: 100, endFrame: 130 }, [{ kind: 'text', text: 'outra fala' }])
+  assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: requested, cues: CUES, overrides: [harmless], variantId: VARIANT }), [])
+  // nothing was asked: nothing is forbidden, whatever the exception says
+  assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: [], cues: CUES, overrides: [reintroduces], variantId: VARIANT }), [])
+  // an exception of another output does not reach this one
+  assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: requested, cues: CUES, overrides: [reintroduces], variantId: 'variant-wide-0001' }), [])
+  // a phrase split across two cues is found as the Director found it (the cues are read as one speech)
+  const split = [{ id: 'cue-a', startFrame: 20, endFrame: 50, text: 'hoje tem promoção' }, { id: 'cue-b', startFrame: 100, endFrame: 130, text: 'relâmpago na loja' }]
+  assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: requested, cues: split, overrides: [], variantId: VARIANT }), ['phrase-rule-requested-1'])
+})
+
+test('a caption hidden by an exception says nothing, and a text exception that removes the phrase clears it', () => {
+  const cues = [{ id: 'cue-a', startFrame: 20, endFrame: 50, text: 'promoção relâmpago' }]
+  const hidden = exception('cue-a', { startFrame: 20, endFrame: 50 }, [{ kind: 'visibility', visible: false }])
+  assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: requested, cues, overrides: [hidden], variantId: VARIANT }), [])
+  const rewritten = exception('cue-a', { startFrame: 20, endFrame: 50 }, [{ kind: 'text', text: 'fala sem o pedido' }])
+  assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: requested, cues, overrides: [rewritten], variantId: VARIANT }), [])
 })
