@@ -61,6 +61,10 @@ Não é necessário realizar migração completa do banco ou preservar tabelas. 
 
 Apenas masters brutos selecionados podem ser preservados. Eles devem ser reingeridos pelo fluxo novo e receber novas identidades, rights, lineage e artifacts V2. Arquivo bruto é insumo; não é compatibilidade arquitetural.
 
+## Regra pétrea: nada é fixo, tudo vem do pedido de cada vídeo
+
+Decisão do proprietário (22/10/2026). No Apollo nada é fixo — tudo vem do pedido de cada vídeo. Conteúdo (frases, datas, cortes, CTA) e política editorial (movimento/zoom, abertura, estrutura narrativa, layout, idioma, legendas) são decididos a partir do briefing e dos Commands daquele vídeo. Nenhum valor de um vídeo ou teste vira regra, default, valor de substituição, recomendação ou exemplo de API; conteúdo de caso de teste só existe em `tests/`. Briefing: o produto pode orientar o que um bom briefing contém, mas aceita briefing simples; exemplos nunca viram default nem recomendação.
+
 ## Arquitetura obrigatória
 
 O único fluxo permitido é:
@@ -311,16 +315,14 @@ Estas regras são vinculantes para agentes, scripts manuais e CI:
 
 ## Caso de teste de regressão: E2E de recuperação do master da Imersão
 
-Esta seção descreve **um caso de teste de regressão**, não uma regra do produto. O primeiro E2E usa o master bruto já preservado do projeto de boas-vindas da Imersão.
+Esta seção descreve **um caso de teste de regressão**, não uma regra do produto (veja a regra pétrea acima). O primeiro E2E usa o master bruto já preservado do projeto de boas-vindas da Imersão. Tudo abaixo são critérios **daquele caso de teste**: valem para aquele pedido e não se generalizam para outros vídeos.
 
-**Regra geral, sem exceção:** conteúdo de um vídeo de teste (frases, datas, timestamps, nomes, CTA, número de cortes) nunca entra no produto — nem como regra, default, valor de substituição ou exemplo de API. O Apollo edita conforme o pedido de cada vídeo; esse conteúdo só pode existir em `tests/`.
-
-Específico deste caso (o pedido que o teste envia como Command `remove-spoken-content`; vive em `tests/v2/helpers/recovery-master-regression-case.mjs`):
+O pedido que o teste envia como Command `remove-spoken-content` vive em `tests/v2/helpers/recovery-master-regression-case.mjs`:
 
 - remover todas as falas que mencionem as datas “31 de janeiro” e “1 de fevereiro”, além de referências à duração de dois dias/dois dias de aula;
 - timestamps antigos (36,66–58,24 e 86,58–87,76) podem ajudar a localizar as falas no master, mas não são fonte de verdade. O ingest V2 deve gerar e validar seu próprio alinhamento.
 
-Critérios editoriais gerais exercitados pelo mesmo E2E (o dono ainda vai decidir quais viram regra do produto; aqui não são rotulados como “do teste”):
+Critérios do caso (o briefing e o formato daquele pedido):
 
 - informar e respeitar briefing e formato antes da direção;
 - preservar sentido e continuidade do discurso após os cortes;
