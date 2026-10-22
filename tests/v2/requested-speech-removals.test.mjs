@@ -12,10 +12,13 @@ const rule = (id, ...alternatives) => ({ id, label: alternatives[0], alternative
 const removal = (id, ...rules) => ({ id, type: 'remove-spoken-content', payload: { schemaVersion: 3, rules } })
 const manualRestore = (id, restoresVersionId) => ({ id, type: 'manual-edit', payload: { schemaVersion: 2, action: 'undo', restoresVersionId } })
 const version = (id, parentVersionId, commandId = null, fork = {}) => ({
-  id, parentVersionId, commandId, forkedFromProjectId: fork.projectId ?? null, forkedFromVersionId: fork.versionId ?? null,
+  id, parentVersionId, commandId, commandType: fork.commandType, forkedFromProjectId: fork.projectId ?? null, forkedFromVersionId: fork.versionId ?? null,
 })
+// The type of a Version's Command is what the Command row says, unless the fixture states it (a row that is missing).
 const project = (versions, commands) => ({
-  versions: new Map(versions.map((item) => [item.id, item])),
+  versions: new Map(versions.map((item) => [item.id, {
+    ...item, commandType: item.commandType ?? commands.find((command) => command.id === item.commandId)?.type ?? null,
+  }])),
   commands: new Map(commands.map((item) => [item.id, item])),
 })
 const idsOf = (rules) => rules.map((item) => item.id)
@@ -78,6 +81,23 @@ test('a lineage that loops terminates, and stored rules that are not valid are a
   )
   await assert.rejects(
     collectRequestedSpeechRemovals({ projectId: 'p1', headVersionId: 'missing', load: async () => loop }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+})
+
+test('a Version a remove-spoken-content Command made, whose Command row is missing, fails closed instead of being skipped', async () => {
+  const missingRow = project([version('v1', null), version('v2', 'v1', 'c2', { commandType: 'remove-spoken-content' })], [])
+  await assert.rejects(
+    collectRequestedSpeechRemovals({ projectId: 'p1', headVersionId: 'v2', load: async () => missingRow }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT' && /does not exist/.test(error.message),
+  )
+  // a Command of another type that the walk does not load is not a missing request
+  const other = project([version('v1', null), version('v2', 'v1', 'c2', { commandType: 'run-director' })], [])
+  assert.deepEqual(await collectRequestedSpeechRemovals({ projectId: 'p1', headVersionId: 'v2', load: async () => other }), [])
+  // a row of another type under a removal Version is a conflict too
+  const wrongType = project([version('v2', null, 'c2', { commandType: 'remove-spoken-content' })], [{ id: 'c2', type: 'run-director', payload: {} }])
+  await assert.rejects(
+    collectRequestedSpeechRemovals({ projectId: 'p1', headVersionId: 'v2', load: async () => wrongType }),
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
   )
 })

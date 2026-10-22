@@ -737,7 +737,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     const [versions, commands] = await Promise.all([
       this.client.v2ProjectVersion.findMany({
         where: { workspaceId, projectId },
-        select: { id: true, parentVersionId: true, commandId: true, forkedFromProjectId: true, forkedFromVersionId: true },
+        select: { id: true, parentVersionId: true, commandId: true, command: { select: { type: true } }, forkedFromProjectId: true, forkedFromVersionId: true },
       }),
       this.client.v2EditCommand.findMany({
         where: {
@@ -748,7 +748,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       }),
     ])
     return Object.freeze({
-      versions: new Map(versions.map((version) => [version.id, Object.freeze({ ...version })] as const)),
+      versions: new Map(versions.map(({ command, ...version }) => [version.id, Object.freeze({ ...version, commandType: command?.type ?? null })] as const)),
       commands: new Map(commands.map((command) => [command.id, Object.freeze({
         id: command.id, type: command.type, payload: Object.freeze(parseRecord(command.payloadJson, 'Director lineage command payload')),
       })] as const)),

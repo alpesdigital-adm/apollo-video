@@ -9,6 +9,8 @@ export interface SpeechRemovalLineageVersion {
   id: string
   parentVersionId: string | null
   commandId: string | null
+  /** The type of the Command that made the Version (null: none). A `remove-spoken-content` Version must find its row in `commands`. */
+  commandType: string | null
   forkedFromProjectId: string | null
   forkedFromVersionId: string | null
 }
@@ -69,6 +71,10 @@ export async function collectRequestedSpeechRemovals(input: {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Director lineage names a Version that does not exist', { versionId })
     }
     const command = version.commandId === null ? undefined : project.commands.get(version.commandId)
+    // Fail closed: a Version the lineage says a removal made, whose Command row is not there, would silently drop a request.
+    if (version.commandType === REMOVAL_COMMAND && command?.type !== REMOVAL_COMMAND) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Director lineage names a remove-spoken-content Command that does not exist', { versionId, commandId: version.commandId })
+    }
     const restores = command?.type === MANUAL_EDIT_COMMAND ? command.payload.restoresVersionId : undefined
     if (typeof restores === 'string') {
       versionId = restores
