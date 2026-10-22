@@ -21,7 +21,7 @@ import {
   deriveEditorialPhraseMatches,
   type EditorialExclusionRange,
   type SourceTimeRange,
-} from './recovery-project-acceptance.ts'
+} from './editorial-phrase-rules.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 import type { ManualCropRegion } from '../domain/manual-editing.ts'
 import type { EditorialCutImpactV1 } from '../domain/editorial-cut-impact.ts'

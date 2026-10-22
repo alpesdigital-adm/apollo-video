@@ -1,35 +1,5 @@
-import { DomainError, assertDomain } from '../domain/errors.ts'
+import { assertDomain } from '../domain/errors.ts'
 import type { MediaTranscript, TranscriptWord } from '../domain/media-transcript.ts'
-
-export const RECOVERY_EDITORIAL_EXCLUSION_RULES = Object.freeze([
-  Object.freeze({
-    id: 'date-january-31',
-    label: '31 de janeiro',
-    alternatives: Object.freeze([
-      Object.freeze(['31', 'de', 'janeiro']),
-      Object.freeze(['trinta', 'e', 'um', 'de', 'janeiro']),
-    ]),
-  }),
-  Object.freeze({
-    id: 'date-february-1',
-    label: '1 de fevereiro',
-    alternatives: Object.freeze([
-      Object.freeze(['1', 'de', 'fevereiro']),
-      Object.freeze(['primeiro', 'de', 'fevereiro']),
-    ]),
-  }),
-  Object.freeze({
-    id: 'duration-two-days',
-    label: 'dois dias',
-    alternatives: Object.freeze([
-      Object.freeze(['dois', 'dias']),
-      Object.freeze(['2', 'dias']),
-    ]),
-  }),
-] as const)
-
-export type RecoveryEditorialExclusionRuleId =
-  (typeof RECOVERY_EDITORIAL_EXCLUSION_RULES)[number]['id']
 
 export interface EditorialPhraseRule {
   id: string
@@ -163,12 +133,6 @@ export function deriveEditorialPhraseMatches(
   return Object.freeze(matches.map((match) => Object.freeze(match)))
 }
 
-export function deriveRecoveryEditorialExclusions(
-  transcript: Readonly<MediaTranscript>,
-): readonly EditorialExclusionRange[] {
-  return deriveEditorialExclusions(transcript, RECOVERY_EDITORIAL_EXCLUSION_RULES)
-}
-
 export function buildRetainedSourceRanges(
   durationSeconds: number,
   exclusions: readonly SourceTimeRange[],
@@ -200,52 +164,4 @@ export function buildRetainedSourceRanges(
     retained.push({ sourceStartSeconds: cursor, sourceEndSeconds: durationSeconds })
   }
   return Object.freeze(retained.map((range) => Object.freeze(range)))
-}
-
-function overlaps(left: SourceTimeRange, right: SourceTimeRange): boolean {
-  return left.sourceStartSeconds < right.sourceEndSeconds - 0.001 &&
-    right.sourceStartSeconds < left.sourceEndSeconds - 0.001
-}
-
-export function validateRecoveryEditorialAcceptance(input: {
-  transcript: Readonly<MediaTranscript>
-  retainedSourceRanges: readonly SourceTimeRange[]
-}): Readonly<{
-  accepted: true
-  excludedRuleIds: readonly RecoveryEditorialExclusionRuleId[]
-  exclusions: readonly EditorialExclusionRange[]
-}> {
-  const exclusions = deriveRecoveryEditorialExclusions(input.transcript)
-  const matchedRuleIds = new Set(exclusions.flatMap((range) => range.ruleIds))
-  const missing = RECOVERY_EDITORIAL_EXCLUSION_RULES
-    .map((rule) => rule.id)
-    .filter((ruleId) => !matchedRuleIds.has(ruleId))
-  if (missing.length > 0) {
-    throw new DomainError(
-      'EDITORIAL_ACCEPTANCE_FAILED',
-      'The recovery master does not prove every required editorial exclusion',
-      { missingRuleIds: missing },
-    )
-  }
-  const retainedForbidden = exclusions.filter((exclusion) =>
-    input.retainedSourceRanges.some((retained) => overlaps(exclusion, retained)),
-  )
-  if (retainedForbidden.length > 0) {
-    throw new DomainError(
-      'EDITORIAL_ACCEPTANCE_FAILED',
-      'The EditPlan still retains forbidden date or duration speech',
-      {
-        retainedRuleIds: [...new Set(retainedForbidden.flatMap((range) => range.ruleIds))],
-        retainedRanges: retainedForbidden.map((range) => ({
-          sourceStartSeconds: range.sourceStartSeconds,
-          sourceEndSeconds: range.sourceEndSeconds,
-        })),
-      },
-    )
-  }
-  return Object.freeze({
-    accepted: true as const,
-    excludedRuleIds: Object.freeze([...matchedRuleIds].sort()) as readonly RecoveryEditorialExclusionRuleId[],
-    exclusions,
-  })
 }
