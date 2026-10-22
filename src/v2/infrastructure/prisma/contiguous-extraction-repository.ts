@@ -24,6 +24,7 @@ import {
   externalActorAuditData,
   hydrateExternalActorAudit,
 } from './external-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 const DIMENSIONS = [
   'selfContained',
@@ -414,14 +415,17 @@ implements ContiguousExtractionRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.persist(value, authenticationAudit, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotent({
-          workspaceId: result.workspaceId,
-          projectId: result.projectId,
-          createdByClientId: value.createdBy.id,
-          idempotencyKey: value.idempotencyKey,
-          actorContextHash: authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({
+            workspaceId: result.workspaceId,
+            projectId: result.projectId,
+            createdByClientId: value.createdBy.id,
+            idempotencyKey: value.idempotencyKey,
+            actorContextHash: authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (
             replay.requestFingerprint !== value.requestFingerprint

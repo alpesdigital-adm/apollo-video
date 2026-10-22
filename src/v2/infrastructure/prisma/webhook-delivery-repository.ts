@@ -27,7 +27,9 @@ import type {
   WebhookDeliveryReplayResult,
 } from '../../application/ports/webhook-delivery-replay-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
-import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
+import { readCompletedIdempotencyResponse,
+  pauseBeforeLostRaceRetry,
+} from './idempotency-record-persistence.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
 import {
@@ -574,12 +576,11 @@ export class PrismaWebhookDeliveryRepository
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (isSerializationConflict(error)) {
-        await new Promise<void>((resolve) => setTimeout(resolve, serializationAttempt * 10))
         const committed = await this.client.v2IdempotencyRecord.findUnique({ where: key })
         if (committed && committed.expiresAt > requestedAt && committed.status === 'completed') {
           return await readReplay(this.client, committed)
         }
-        if (serializationAttempt < 3) {
+        if (await pauseBeforeLostRaceRetry(serializationAttempt)) {
           return this.replay(command, serializationAttempt + 1)
         }
         throw new DomainError(

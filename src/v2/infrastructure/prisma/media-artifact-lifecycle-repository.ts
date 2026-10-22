@@ -24,7 +24,9 @@ import { persistPublicEvents } from './public-event-outbox.ts'
 import { createApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { ApiEnvironment } from '../../domain/api-client.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
-import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
+import { readCompletedIdempotencyResponse,
+  pauseBeforeLostRaceRetry,
+} from './idempotency-record-persistence.ts'
 
 interface StoredResponse {
   transitionId: string
@@ -316,7 +318,7 @@ implements MediaArtifactLifecycleRepository {
         return { transition: hydrateTransition(transition), replayed: false }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      if (isSerializationConflict(error) && serializationAttempt < 3) {
+      if (isSerializationConflict(error) && await pauseBeforeLostRaceRetry(serializationAttempt)) {
         return this.transitionOrReplay(bundle, serializationAttempt + 1)
       }
       if (isSerializationConflict(error)) {

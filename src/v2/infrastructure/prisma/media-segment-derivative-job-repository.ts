@@ -6,6 +6,7 @@ import { PrismaMediaArtifactRepository } from './media-artifact-repository.ts'
 import { PrismaMediaSegmentRepository } from './media-segment-repository.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { mediaLibraryRights } from '../../domain/media-library.ts'
+import { pauseBeforeLostRaceRetry } from './idempotency-record-persistence.ts'
 
 function mapped(row: V2MediaSegmentDerivativeJob): Readonly<MediaSegmentDerivativeJob> {
   const statuses = ['queued', 'running', 'retrying', 'succeeded', 'failed', 'canceled']
@@ -52,7 +53,7 @@ export class PrismaMediaSegmentDerivativeJobRepository implements MediaSegmentDe
   }
 
   async enqueue(input: Omit<MediaSegmentDerivativeJob, 'status' | 'attempt' | 'maxAttempts' | 'updatedAt'>) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; ; attempt += 1) {
       try {
         return await this.client.$transaction(async (tx) => {
           const sameKey = await tx.v2MediaSegmentDerivativeJob.findUnique({ where: { workspaceId_clientId_idempotencyKey: { workspaceId: input.workspaceId, clientId: input.clientId, idempotencyKey: input.idempotencyKey } } })
@@ -72,11 +73,13 @@ export class PrismaMediaSegmentDerivativeJobRepository implements MediaSegmentDe
         }, { isolationLevel: 'Serializable' })
       } catch (error) {
         const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : ''
-        if (attempt < 2 && (code === 'P2002' || code === 'P2034')) continue
+        if (code === 'P2002' || code === 'P2034') {
+          if (await pauseBeforeLostRaceRetry(attempt + 1)) continue
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Derivative job could not be serialized')
+        }
         throw error
       }
     }
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Derivative job could not be serialized')
   }
 
   async read(workspaceId: string, jobId: string) {

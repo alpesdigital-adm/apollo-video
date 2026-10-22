@@ -26,6 +26,7 @@ import { mp4EvidenceSealMismatches, type Mp4EvidenceSealV1 } from '../../domain/
 import { projectStatusTransitionSources } from '../../domain/project.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type StoredProxyReview = Prisma.V2ProxyReviewGetPayload<Record<string, never>>
 type StoredProxyReviewDecision = Prisma.V2ProxyReviewDecisionGetPayload<Record<string, never>>
@@ -766,8 +767,11 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
         return this.acknowledgeWarnings(input, serializationAttempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findDecisionReplay(input)
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findDecisionReplay(input),
+        )
         if (replay) return replay
         throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy review acknowledgement collided with persisted state')
       }

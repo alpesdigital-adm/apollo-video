@@ -50,6 +50,7 @@ import {
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { batchActorAuditData, hydrateBatchActorAudit } from './batch-actor-audit.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type ItemRow = V2ProductionBatchItem & {
   steps: V2ProductionBatchStep[]
@@ -654,13 +655,16 @@ implements ProductionBatchRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.create(record, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findCreateReplay({
-          workspaceId: record.batch.workspaceId,
-          actorClientId: record.batch.createdBy.id,
-          actorContextHash: record.authenticationAudit.contextHash,
-          idempotencyKey: record.idempotencyKey,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findCreateReplay({
+            workspaceId: record.batch.workspaceId,
+            actorClientId: record.batch.createdBy.id,
+            actorContextHash: record.authenticationAudit.contextHash,
+            idempotencyKey: record.idempotencyKey,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
@@ -1266,20 +1270,21 @@ implements ProductionBatchRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.persistAction(record, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = record.action === 'partial-retry'
-          ? await this.findPartialRetryReplay({
-              workspaceId: record.workspaceId,
-              actorClientId: record.actorClientId,
-              actorContextHash: record.authenticationAudit.contextHash,
-              idempotencyKey: record.idempotencyKey,
-            })
-          : await this.findActionReplay({
-              workspaceId: record.workspaceId,
-              actorClientId: record.actorClientId,
-              actorContextHash: record.authenticationAudit.contextHash,
-              idempotencyKey: record.idempotencyKey,
-            })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(error, () =>
+          record.action === 'partial-retry'
+            ? this.findPartialRetryReplay({
+                workspaceId: record.workspaceId,
+                actorClientId: record.actorClientId,
+                actorContextHash: record.authenticationAudit.contextHash,
+                idempotencyKey: record.idempotencyKey,
+              })
+            : this.findActionReplay({
+                workspaceId: record.workspaceId,
+                actorClientId: record.actorClientId,
+                actorContextHash: record.authenticationAudit.contextHash,
+                idempotencyKey: record.idempotencyKey,
+              }))
         if (replay) {
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(

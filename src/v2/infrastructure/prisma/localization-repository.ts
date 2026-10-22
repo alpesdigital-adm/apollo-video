@@ -9,6 +9,7 @@ import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { batchActorAuditData, hydrateBatchActorAudit } from './batch-actor-audit.ts'
 import { childRowId } from './child-row-id.ts'
+import { retryAfterLostRace } from './idempotency-record-persistence.ts'
 
 function parse<T>(value: string, label: string): T {
   try { return JSON.parse(value) as T } catch { throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${label} is invalid JSON`) }
@@ -120,7 +121,7 @@ export class PrismaLocalizationRepository implements LocalizationRepository {
 
   async insertCanonical(input: Parameters<LocalizationRepository['insertCanonical']>[0]) {
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      return await retryAfterLostRace(() => this.prisma.$transaction(async (tx) => {
         const replay = await tx.v2LocalizationCanonicalScript.findFirst({ where: { workspaceId: input.canonical.workspaceId, approvedByClientId: input.canonical.approvedByClientId, idempotencyKey: input.idempotencyKey } })
         if (replay) {
           if (hydrateBatchActorAudit(replay, replay.approvedByClientId).contextHash !== input.authenticationAudit.contextHash || replay.requestFingerprint !== input.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Canonical idempotency key belongs to another request or actor context')
@@ -141,7 +142,7 @@ export class PrismaLocalizationRepository implements LocalizationRepository {
           approvedByClientId: input.canonical.approvedByClientId, ...batchActorAuditData(input.authenticationAudit, input.canonical.workspaceId, input.canonical.approvedByClientId), approvedAt: new Date(input.canonical.approvedAt),
         } })
         return Object.freeze({ canonical: hydrateCanonical(row), replayed: false })
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }))
     } catch (error) { if (prismaCode(error, 'P2002') || prismaCode(error, 'P2034')) throw new DomainError('PERSISTENCE_CONFLICT', 'Canonical localization creation conflicted'); throw error }
   }
 

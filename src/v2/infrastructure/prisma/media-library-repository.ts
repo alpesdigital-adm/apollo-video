@@ -21,6 +21,7 @@ import { reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../.
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
+import { pauseBeforeLostRaceRetry } from './idempotency-record-persistence.ts'
 
 type LibraryMetadata = V2MediaLibraryEntry & {
   thumbnailArtifact: { id: string; status: string } | null
@@ -279,7 +280,7 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
       commandId: row.commandId, baseVersionId: row.baseVersionId, resultVersionId: row.resultVersionId, resultVersionHash: row.resultVersionHash,
       role: 'selected-insert' as const, bytesDuplicated: false as const, replayed, createdAt: row.createdAt.toISOString(),
     })
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (let attempt = 1; ; attempt += 1) {
       try {
         return await this.client.$transaction(async (transaction) => {
           const existing = await transaction.v2MediaLibraryAttachment.findUnique({ where: { workspaceId_projectId_idempotencyKey: { workspaceId: input.workspaceId, projectId: input.projectId, idempotencyKey: input.idempotencyKey } } })
@@ -327,10 +328,12 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
         }, { isolationLevel: 'Serializable' as Prisma.TransactionIsolationLevel, timeout: 30_000 })
       } catch (error) {
         const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : ''
-        if (attempt < 3 && (code === 'P2034' || code === 'P2002')) continue
+        if (code === 'P2034' || code === 'P2002') {
+          if (await pauseBeforeLostRaceRetry(attempt)) continue
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Media library attachment could not be serialized')
+        }
         throw error
       }
     }
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Media library attachment could not be serialized')
   }
 }
