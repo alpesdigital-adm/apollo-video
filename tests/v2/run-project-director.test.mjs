@@ -224,6 +224,8 @@ class InMemoryDirectorRepository {
       snapshotHash: 'd'.repeat(64), status: 'approved', consentStatus: 'not-required',
     }
     this.baseEditPlan = options.editPlan
+    // The language the project declares; null: it declares none (ADR-160).
+    this.projectLocale = options.projectLocale === undefined ? 'pt-BR' : options.projectLocale
     // The speech the project asked to remove (the rules of its remove-spoken-content Commands); none unless a test sends a request.
     this.requestedSpeechRemovals = options.requestedSpeechRemovals ?? []
     this.requested = []
@@ -252,7 +254,7 @@ class InMemoryDirectorRepository {
     if (workspaceId !== 'workspace-1' || projectId !== 'project-1') return null
     return {
       workspaceId,
-      project: { id: projectId, objective: this.projectObjective, locale: 'pt-BR' },
+      project: { id: projectId, objective: this.projectObjective, ...(this.projectLocale ? { locale: this.projectLocale } : {}) },
       ...(this.latestDirectorObjective
         ? { latestDirectorObjective: this.latestDirectorObjective }
         : {}),
@@ -2027,4 +2029,30 @@ test('ADR-160 F5: a source with the frame shape of every output is used as it is
   assert.equal(different.run.policyResolution.policies.layout.value.mode, 'fit-with-backdrop')
   assert.equal(different.run.editPlan.composition.layout, 'landscape-inset')
   assert.equal(different.run.editPlan.composition.background, 'blurred-source')
+})
+
+test('ADR-160: the caption language of a project that declares none is the language detected in the speech, and the resolution says where it came from', async () => {
+  const detected = fixture({ projectLocale: null, transcript: { id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'pt', languageBasis: 'detected-from-media',
+    provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64) } })
+  const result = await detected.service(request({ idempotency: { key: 'director-language-detected' } }))
+  const language = result.run.policyResolution.policies.language
+  assert.deepEqual(language.value, { captionLanguage: 'pt' })
+  assert.equal(language.origin, 'media-context')
+  assert.equal(language.rule, 'source-observation')
+  assert.equal(result.run.policyResolution.openQuestions.some((item) => item.id === 'declared-language-differs-from-speech'), false)
+  // the language the project declares is the requester's word: it is never recorded as observed in the media
+  const declared = fixture({ transcript: { id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'pt-BR', languageBasis: 'declared-not-verified',
+    provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64) } })
+  const declaredLanguage = (await declared.service(request({ idempotency: { key: 'director-language-declared' } }))).run.policyResolution.policies.language
+  assert.equal(declaredLanguage.origin, 'request-field')
+  assert.match(declaredLanguage.reason, /not verified/)
+})
+
+test('ADR-160: a transcript whose language the provider could not tell is the undetermined language - the captions wait for the answer', async () => {
+  const unknown = fixture({ projectLocale: null, transcript: { id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'und', languageBasis: 'detected-from-media',
+    provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64) } })
+  await assert.rejects(
+    () => unknown.service(request({ idempotency: { key: 'director-language-undetermined' } })),
+    (error) => error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' && JSON.stringify(error.details).includes('caption-language-unknown'),
+  )
 })
