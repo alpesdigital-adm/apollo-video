@@ -67,6 +67,7 @@ import {
   persistPublicEvents,
   type PublicEventOutboxTransaction,
 } from './public-event-outbox.ts'
+import { pauseBeforeLostRaceRetry } from './idempotency-record-persistence.ts'
 
 export type StoredOperation = Prisma.V2PublicOperationGetPayload<{
   include: {
@@ -2634,7 +2635,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (isSerializationConflict(error)) {
-        if (serializationAttempt < 3) {
+        if (await pauseBeforeLostRaceRetry(serializationAttempt)) {
           return this.createOrReplay(input, serializationAttempt + 1)
         }
         throw new DomainError(

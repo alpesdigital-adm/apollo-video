@@ -39,7 +39,12 @@ import {
 } from '../../domain/api-administration-command.ts'
 import { createApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
-import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
+import {
+  DEFAULT_IDEMPOTENCY_WINNER_WAIT,
+  awaitCommittedIdempotencyWinner,
+  readCompletedIdempotencyResponse,
+  type IdempotencyWinnerWait,
+} from './idempotency-record-persistence.ts'
 
 interface StoredAdministrationResponse {
   operation: 'api-client.create' | 'api-credential.rotate'
@@ -202,9 +207,14 @@ export class PrismaApiClientRepository
   implements ApiClientRepository, ApiClientAdministrationRepository
 {
   private readonly client: PrismaClient
+  private readonly winnerWait: Readonly<IdempotencyWinnerWait>
 
-  constructor(client: PrismaClient = getV2PostgresClient()) {
+  constructor(
+    client: PrismaClient = getV2PostgresClient(),
+    winnerWait: Readonly<IdempotencyWinnerWait> = DEFAULT_IDEMPOTENCY_WINNER_WAIT,
+  ) {
     this.client = client
+    this.winnerWait = winnerWait
   }
 
   async findActiveClientById(clientId: string): Promise<ApiClient | null> {
@@ -354,34 +364,30 @@ export class PrismaApiClientRepository
     return rows.map(hydrateClient)
   }
 
-  private async reconcileCreateAfterConcurrentWrite(
-    bundle: CreateApiClientBundle,
-  ): Promise<ApiCredentialMutationResult> {
-    if (!this.client.v2IdempotencyRecord?.findUnique) {
-      throw new DomainError(
-        'PERSISTENCE_CONFLICT',
-        'API client creation conflicted with another transaction',
-      )
-    }
+  /**
+   * Reads the committed result of an administration command that lost a race on its idempotency key. Null while no
+   * winner is visible yet (the Serializable loser was cancelled while the winner is still in flight).
+   */
+  private async readCommittedAdministrationWinner(input: {
+    action: 'api-client.create' | 'api-credential.rotate'
+    workspaceId: string
+    idempotency: CreateApiClientBundle['idempotency']
+    command: ApiAdministrationCommand
+  }): Promise<ApiCredentialMutationResult | null> {
     const existing = await this.client.v2IdempotencyRecord.findUnique({
       where: {
         workspaceId_clientId_key: {
-          workspaceId: bundle.idempotency.workspaceId,
-          clientId: bundle.idempotency.actorClientId,
-          key: bundle.idempotency.key,
+          workspaceId: input.idempotency.workspaceId,
+          clientId: input.idempotency.actorClientId,
+          key: input.idempotency.key,
         },
       },
     })
-    if (!existing || existing.expiresAt <= new Date(bundle.idempotency.createdAt)) {
-      throw new DomainError(
-        'PERSISTENCE_CONFLICT',
-        'API client creation conflicted with another transaction',
-      )
-    }
+    if (!existing || existing.expiresAt <= new Date(input.idempotency.createdAt)) return null
     const stored = parseAdministrationResponse(
       existing,
-      bundle.idempotency.requestFingerprint,
-      'api-client.create',
+      input.idempotency.requestFingerprint,
+      input.action,
     )
     const [clientRow, credentialRow, commandRow] = await Promise.all([
       this.client.v2ApiClient.findUnique({ where: { id: stored.clientId } }),
@@ -391,23 +397,42 @@ export class PrismaApiClientRepository
       this.client.v2ApiAdministrationCommand.findUnique({
         where: {
           workspaceId_action_targetClientId_targetCredentialId: {
-            workspaceId: bundle.idempotency.workspaceId,
-            action: 'api-client.create',
+            workspaceId: input.idempotency.workspaceId,
+            action: input.action,
             targetClientId: stored.clientId,
             targetCredentialId: stored.credentialId,
           },
         },
       }),
     ])
-    if (!clientRow || !credentialRow || clientRow.workspaceId !== bundle.client.workspaceId) {
+    if (!clientRow || !credentialRow || clientRow.workspaceId !== input.workspaceId) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Idempotency result is missing')
     }
-    assertAdministrationReplay(commandRow, bundle.command)
+    assertAdministrationReplay(commandRow, input.command)
     return {
       client: hydrateClient(clientRow),
       credential: hydrateCredential(credentialRow),
       replayed: true,
     }
+  }
+
+  /**
+   * Answers a lost race exactly as a sequential duplicate would (replay, or IDEMPOTENCY_PAYLOAD_MISMATCH): waits, bounded,
+   * for the winner's committed record. PERSISTENCE_CONFLICT only when no winner ever commits.
+   */
+  private async reconcileAfterConcurrentWrite(
+    input: Parameters<PrismaApiClientRepository['readCommittedAdministrationWinner']>[0],
+    conflictMessage: string,
+  ): Promise<ApiCredentialMutationResult> {
+    if (!this.client.v2IdempotencyRecord?.findUnique) {
+      throw new DomainError('PERSISTENCE_CONFLICT', conflictMessage)
+    }
+    const winner = await awaitCommittedIdempotencyWinner(
+      () => this.readCommittedAdministrationWinner(input),
+      this.winnerWait,
+    )
+    if (winner) return winner
+    throw new DomainError('PERSISTENCE_CONFLICT', conflictMessage)
   }
 
   async createOrReplay(
@@ -538,7 +563,15 @@ export class PrismaApiClientRepository
       if (concurrentWriteAttempt < 3) {
         return this.createOrReplay(bundle, concurrentWriteAttempt + 1)
       }
-      return this.reconcileCreateAfterConcurrentWrite(bundle)
+      return this.reconcileAfterConcurrentWrite(
+        {
+          action: 'api-client.create',
+          workspaceId: bundle.client.workspaceId,
+          idempotency: bundle.idempotency,
+          command: bundle.command,
+        },
+        'API client creation conflicted with another transaction',
+      )
     })
   }
 
@@ -669,8 +702,13 @@ export class PrismaApiClientRepository
       if (concurrentWriteAttempt < 3) {
         return this.rotateOrReplay(bundle, concurrentWriteAttempt + 1)
       }
-      throw new DomainError(
-        'PERSISTENCE_CONFLICT',
+      return this.reconcileAfterConcurrentWrite(
+        {
+          action: 'api-credential.rotate',
+          workspaceId: bundle.workspaceId,
+          idempotency: bundle.idempotency,
+          command: bundle.command,
+        },
         'API credential rotation conflicted with another transaction',
       )
     })

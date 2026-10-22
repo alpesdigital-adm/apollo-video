@@ -39,6 +39,7 @@ import {
   CONTAMINATION_REPORT_INCLUDE,
   hydrateContaminationReportRow,
 } from './contamination-report-repository.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 const CLEANUP_INCLUDE = {
   contaminationReport: {
@@ -639,13 +640,16 @@ implements SourceCleanupRepository {
       })
     } catch (error) {
       if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
-        const replay = await this.findCreateReplay({
-          workspaceId: record.plan.workspaceId,
-          projectId: record.plan.projectId,
-          actorClientId: record.plan.createdByClientId,
-          actorContextHash: audit.contextHash,
-          idempotencyKey: record.idempotencyKey,
-        })
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findCreateReplay({
+            workspaceId: record.plan.workspaceId,
+            projectId: record.plan.projectId,
+            actorClientId: record.plan.createdByClientId,
+            actorContextHash: audit.contextHash,
+            idempotencyKey: record.idempotencyKey,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(

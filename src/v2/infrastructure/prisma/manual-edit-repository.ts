@@ -34,6 +34,7 @@ import { assertManualOutputReferencesV3 } from './output-version-bundle-reposito
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import { readVersionRenderReferences } from './version-render-references.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type StoredManualCommand = Prisma.V2EditCommandGetPayload<{
   include: {
@@ -525,13 +526,16 @@ export class PrismaManualEditRepository implements ManualEditRepository {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
         return this.commitOrReplay(input, serializationAttempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const existing = await this.findIdempotentResult({
-          workspaceId: bundle.command.workspaceId,
-          projectId: bundle.command.projectId,
-          idempotencyKey: bundle.command.idempotencyKey,
-          actorContextHash: bundle.authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const existing = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotentResult({
+            workspaceId: bundle.command.workspaceId,
+            projectId: bundle.command.projectId,
+            idempotencyKey: bundle.command.idempotencyKey,
+            actorContextHash: bundle.authenticationAudit.contextHash,
+          }),
+        )
         if (existing) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) {
             throw new DomainError(

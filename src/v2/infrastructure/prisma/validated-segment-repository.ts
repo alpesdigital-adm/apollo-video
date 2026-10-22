@@ -37,6 +37,7 @@ import {
   type ValidationSource,
 } from '../../domain/validated-segment.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type SearchRow = V2ValidatedSegment & {
   sourceArtifact: {
@@ -632,13 +633,16 @@ implements ValidatedSegmentRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.persist(segment, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotent({
-          workspaceId: segment.workspaceId,
-          projectId: segment.projectId,
-          idempotencyKey: segment.idempotencyKey,
-          actorContextHash: segment.authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({
+            workspaceId: segment.workspaceId,
+            projectId: segment.projectId,
+            idempotencyKey: segment.idempotencyKey,
+            actorContextHash: segment.authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== segment.requestFingerprint) {
             throw new DomainError(

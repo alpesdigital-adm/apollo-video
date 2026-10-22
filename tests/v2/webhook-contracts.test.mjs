@@ -114,6 +114,10 @@ import {
   createWebhookSigningSecretProtector,
   webhookSigningSecretCipherContext,
 } from '../../src/v2/infrastructure/security/webhook-signing-secret-protector.ts'
+import { configureIdempotencyWinnerWait } from '../../src/v2/infrastructure/prisma/idempotency-record-persistence.ts'
+
+// The exhaustion tests below count attempts: keep the lost-race budget at three attempts and never sleep (this file's process only).
+configureIdempotencyWinnerWait({ delaysMs: [0, 0], async sleep() {} })
 
 function webhookAdministratorActor(credentialId = 'credential-1') {
   const auditContext = createExternalAuditContext({

@@ -21,6 +21,7 @@ import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData } from './external-actor-audit.ts'
 import { hydratePublicOperationRecord, OPERATION_INCLUDE, persistOperationStatusEvents } from './public-operation-repository.ts'
 import { hydrateProxyReview } from './proxy-review-repository.ts'
+import { pauseBeforeLostRaceRetry } from './idempotency-record-persistence.ts'
 
 const MAX_ANCESTOR_STEPS = 500
 
@@ -50,7 +51,7 @@ export class PrismaProxyCarryOverRepository implements ProxyCarryOverRepository 
       return await this.client.$transaction((transaction) => this.carryInTransaction(transaction, request), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       const code = typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: string }).code : undefined
-      if ((code === 'P2034' || code === 'P2002') && attempt < 2) return this.carry(request, attempt + 1)
+      if ((code === 'P2034' || code === 'P2002') && await pauseBeforeLostRaceRetry(attempt + 1)) return this.carry(request, attempt + 1)
       throw error
     }
   }

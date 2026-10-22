@@ -19,6 +19,7 @@ import {
   editCommandExternalActorAuditData,
   hydrateEditCommandExternalActorAudit,
 } from './edit-command-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type StoredCompareCommand = Prisma.V2EditCommandGetPayload<{
   include: { baseVersion: true }
@@ -254,13 +255,16 @@ export class PrismaVersionCompareRepository implements VersionCompareRepository 
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
         return this.commitDecision(bundle, serializationAttempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const existing = await this.findIdempotentDecision({
-          workspaceId: bundle.command.workspaceId,
-          projectId: bundle.command.projectId,
-          idempotencyKey: bundle.command.idempotencyKey,
-          actorContextHash: bundle.authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const existing = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotentDecision({
+            workspaceId: bundle.command.workspaceId,
+            projectId: bundle.command.projectId,
+            idempotencyKey: bundle.command.idempotencyKey,
+            actorContextHash: bundle.authenticationAudit.contextHash,
+          }),
+        )
         if (existing) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) {
             throw new DomainError(

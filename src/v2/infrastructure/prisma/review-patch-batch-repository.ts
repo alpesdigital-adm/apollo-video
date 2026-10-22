@@ -42,6 +42,7 @@ import {
   externalActorAuditData,
   hydrateExternalActorAudit,
 } from './external-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 function parseJson<T>(value: string, field: string): T {
   try {
@@ -344,6 +345,7 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
       actorContextHash: bundle.authenticationAudit.contextHash,
     })
     if (replay) return replay
+    let lostRace: unknown = null
     try {
       await this.client.$transaction(async (transaction) => {
         const batch = await transaction.v2ReviewPatchBatch.findFirst({
@@ -453,16 +455,17 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(input, serializationAttempt + 1)
-      if (!isPrismaCode(error, 'P2002')) throw error
+      if (!isPrismaCode(error, 'P2002') && !isPrismaCode(error, 'P2034')) throw error
+      lostRace = error
     }
-    const result = await this.readAppliedResult({
+    const result = await reconcileAfterConflict(lostRace, () => this.readAppliedResult({
       workspaceId: bundle.version.workspaceId,
       projectId: bundle.version.projectId,
       batchId: bundle.batchId,
       applyIdempotencyKey: bundle.applyIdempotencyKey,
       applyRequestFingerprint: bundle.applyRequestFingerprint,
       actorContextHash: bundle.authenticationAudit.contextHash,
-    })
+    }))
     if (!result) throw new DomainError('PERSISTENCE_CONFLICT', 'Applied batch review could not be reconstructed')
     return Object.freeze({ ...result, replayed: false })
   }

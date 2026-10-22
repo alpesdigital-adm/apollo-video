@@ -312,6 +312,10 @@ test('W66 child author and time remain tied to the exact authenticated Command a
 
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
 import { PrismaCreationOutputBundleRepositoryV2 } from '../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
+import { configureIdempotencyWinnerWait } from '../../src/v2/infrastructure/prisma/idempotency-record-persistence.ts'
+
+// The exhaustion tests below count attempts: keep the lost-race budget at three attempts and never sleep (this file's process only).
+configureIdempotencyWinnerWait({ delaysMs: [0, 0], async sleep() {} })
 function isolatedCreation2Root() {
   const intent=normalizeProjectCreationIntentV2({schemaVersion:'project-creation-intent/v2',kind:'initialize-empty',name:'Creation2 contract',objective:'discovery',locale:'pt-BR',briefing:null,desiredAction:{}})
   const projectId='project-creation2-bundle',versionId='version-creation2-bundle'

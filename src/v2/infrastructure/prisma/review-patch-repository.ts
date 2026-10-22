@@ -39,6 +39,7 @@ import {
   externalActorAuditData,
   hydrateExternalActorAudit,
 } from './external-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 function parseJson<T>(value: string, field: string): T {
   try {
@@ -355,6 +356,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
     }
     const replay = await this.readAppliedResult({ workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId, proposalId: bundle.proposalId, applyIdempotencyKey: bundle.applyIdempotencyKey, applyRequestFingerprint: bundle.applyRequestFingerprint, actorContextHash: bundle.authenticationAudit.contextHash })
     if (replay) return replay
+    let lostRace: unknown = null
     try {
       await this.client.$transaction(async (transaction) => {
         const proposal = await transaction.v2ReviewPatchProposal.findFirst({ where: { id: bundle.proposalId, workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId } })
@@ -433,9 +435,10 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(input, serializationAttempt + 1)
-      if (!isPrismaCode(error, 'P2002')) throw error
+      if (!isPrismaCode(error, 'P2002') && !isPrismaCode(error, 'P2034')) throw error
+      lostRace = error
     }
-    const result = await this.readAppliedResult({ workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId, proposalId: bundle.proposalId, applyIdempotencyKey: bundle.applyIdempotencyKey, applyRequestFingerprint: bundle.applyRequestFingerprint, actorContextHash: bundle.authenticationAudit.contextHash })
+    const result = await reconcileAfterConflict(lostRace, () => this.readAppliedResult({ workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId, proposalId: bundle.proposalId, applyIdempotencyKey: bundle.applyIdempotencyKey, applyRequestFingerprint: bundle.applyRequestFingerprint, actorContextHash: bundle.authenticationAudit.contextHash }))
     if (!result) throw new DomainError('PERSISTENCE_CONFLICT', 'Applied review patch could not be reconstructed')
     return Object.freeze({ ...result, replayed: false })
   }

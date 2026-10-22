@@ -25,6 +25,7 @@ import {
 } from '../../domain/validation-envelope.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type ReuseWithDecisions = ReuseRow & {
   decisions: DecisionRow[]
@@ -430,14 +431,17 @@ implements ValidationEnvelopeRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.create(record, authenticationAudit, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findCreateReplay({
-          workspaceId: record.plan.workspaceId,
-          projectId: record.plan.projectId,
-          actorClientId: record.plan.createdByClientId,
-          idempotencyKey: record.idempotencyKey,
-          actorContextHash: authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findCreateReplay({
+            workspaceId: record.plan.workspaceId,
+            projectId: record.plan.projectId,
+            actorClientId: record.plan.createdByClientId,
+            idempotencyKey: record.idempotencyKey,
+            actorContextHash: authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
@@ -674,19 +678,22 @@ implements ValidationEnvelopeRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.appendDecision(record, authenticationAudit, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
         const plan = await this.prisma.v2ValidationEnvelopeReuse
           .findUnique({
             where: { id: record.decision.reusePlanId },
             select: { workspaceId: true, projectId: true },
           })
         if (plan) {
-          const replay = await this.findDecisionReplay({
-            ...plan,
-            actorClientId: record.decision.actorClientId,
-            idempotencyKey: record.idempotencyKey,
-            actorContextHash: authenticationAudit.contextHash,
-          })
+          const replay = await reconcileAfterConflict(
+            error,
+            () => this.findDecisionReplay({
+              ...plan,
+              actorClientId: record.decision.actorClientId,
+              idempotencyKey: record.idempotencyKey,
+              actorContextHash: authenticationAudit.contextHash,
+            }),
+          )
           if (replay) {
             if (
               replay.requestFingerprint !== record.requestFingerprint

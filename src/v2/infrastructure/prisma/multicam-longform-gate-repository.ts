@@ -57,6 +57,7 @@ import { PrismaMulticamMatchPlanRepository } from './multicam-match-plan-reposit
 import { PrismaPlaybackMapRepository } from './playback-map-repository.ts'
 import { PrismaRenderablePlanSnapshotRepository } from './renderable-plan-snapshot-repository.ts'
 import { PrismaSyncDiagnosticRepository } from './sync-diagnostic-repository.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 /**
  * The F4.016 gate's reader and writer.
@@ -2145,13 +2146,16 @@ implements MulticamLongformGateRepository {
           'multicam long-form gate conflicted with another transaction',
         )
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotent({
-          workspaceId: gate.workspaceId,
-          projectId: gate.projectId,
-          idempotencyKey: gate.idempotencyKey,
-          actorContextHash: authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({
+            workspaceId: gate.workspaceId,
+            projectId: gate.projectId,
+            idempotencyKey: gate.idempotencyKey,
+            actorContextHash: authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== gate.requestFingerprint) {
             throw new DomainError(

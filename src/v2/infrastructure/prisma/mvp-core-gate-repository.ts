@@ -32,6 +32,7 @@ import { hydrateProxyReview } from './proxy-review-repository.ts'
 import { hydrateQualityIteration } from './quality-iteration-repository.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 const SHA_256_PATTERN = /^[a-f0-9]{64}$/
 
@@ -1549,13 +1550,16 @@ export class PrismaMvpCoreGateRepository implements MvpCoreGateRepository {
           'MVP gate conflicted with another transaction',
         )
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotent({
-          workspaceId: gate.workspaceId,
-          primaryProjectId: gate.primaryProjectId,
-          idempotencyKey: gate.idempotencyKey,
-          actorContextHash: authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({
+            workspaceId: gate.workspaceId,
+            primaryProjectId: gate.primaryProjectId,
+            idempotencyKey: gate.idempotencyKey,
+            actorContextHash: authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== gate.requestFingerprint) {
             throw new DomainError(

@@ -105,6 +105,10 @@ import {
 import {
   createPublicOperationStatusEvents,
 } from '../../src/v2/domain/public-operation-event.ts'
+import { configureIdempotencyWinnerWait } from '../../src/v2/infrastructure/prisma/idempotency-record-persistence.ts'
+
+// The exhaustion tests below count attempts: keep the lost-race budget at three attempts and never sleep (this file's process only).
+configureIdempotencyWinnerWait({ delaysMs: [0, 0], async sleep() {} })
 
 function authenticatedActor({
   clientId = 'client-1', credentialId = `credential-${clientId}`, workspaceId = 'workspace-1',

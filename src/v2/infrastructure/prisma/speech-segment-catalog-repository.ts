@@ -35,6 +35,7 @@ import {
   type SpeechSegmentClassification,
 } from '../../domain/speech-segment-catalog.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 interface RunWithSegments extends V2SpeechSegmentCatalogRun {
   segments: V2SpeechSegment[]
@@ -399,9 +400,11 @@ function segmentData(segment: Readonly<CatalogedSpeechSegment>) {
 
 export class PrismaSpeechSegmentCatalogRepository
 implements SpeechSegmentCatalogRepository {
-  constructor(
-    private readonly client: PrismaClient = getV2PostgresClient(),
-  ) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
+  }
 
   async readExtractionContext(input: {
     workspaceId: string
@@ -600,13 +603,16 @@ implements SpeechSegmentCatalogRepository {
           'Speech catalog conflicted with another transaction',
         )
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotent({
-          workspaceId: run.workspaceId,
-          projectId: run.projectId,
-          idempotencyKey: run.idempotencyKey,
-          actorContextHash: run.authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({
+            workspaceId: run.workspaceId,
+            projectId: run.projectId,
+            idempotencyKey: run.idempotencyKey,
+            actorContextHash: run.authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== run.requestFingerprint) {
             throw new DomainError(

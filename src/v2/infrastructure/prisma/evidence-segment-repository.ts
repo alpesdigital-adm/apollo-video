@@ -43,6 +43,7 @@ import {
   hydrateStoredMediaTranscript,
   hydrateStoredSpeechSegment,
 } from './speech-segment-catalog-repository.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 function isPrismaCode(error: unknown, code: string): boolean {
   return (
@@ -582,13 +583,16 @@ implements EvidenceSegmentRepository {
           'Evidence catalog conflicted with another transaction',
         )
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotent({
-          workspaceId: evidence.workspaceId,
-          projectId: evidence.projectId,
-          idempotencyKey: evidence.idempotencyKey,
-          actorContextHash: evidence.authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({
+            workspaceId: evidence.workspaceId,
+            projectId: evidence.projectId,
+            idempotencyKey: evidence.idempotencyKey,
+            actorContextHash: evidence.authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== evidence.requestFingerprint) {
             throw new DomainError(

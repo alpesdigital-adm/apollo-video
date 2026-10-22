@@ -25,6 +25,10 @@ import { buildCreationOutputVersionBundleV2 } from '../../src/v2/domain/output-v
 import { createPublicEvent } from '../../src/v2/domain/public-event.ts'
 import { createWorkspace } from '../../src/v2/domain/workspace.ts'
 import { PrismaCreationOutputBundleRepositoryV2 } from '../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
+import { configureIdempotencyWinnerWait } from '../../src/v2/infrastructure/prisma/idempotency-record-persistence.ts'
+
+// The exhaustion tests below count attempts: keep the lost-race budget at three attempts and never sleep (this file's process only).
+configureIdempotencyWinnerWait({ delaysMs: [0, 0], async sleep() {} })
 
 class InMemoryProjectCreationRepository {
   constructor(workspaces) {
