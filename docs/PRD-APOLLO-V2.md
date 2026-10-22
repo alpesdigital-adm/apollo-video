@@ -547,7 +547,9 @@ O workspace deve permitir:
 
 ### FR-023 — Precedência
 
-Segurança do produto → direitos/consentimento → Guardrails do workspace → restrições do projeto → briefing → defaults → inferência.
+Segurança do produto → direitos/consentimento → Guardrails do workspace → restrições do projeto → briefing → inferência.
+
+Não existe camada de "defaults": nada é fixo, tudo vem do pedido de cada vídeo (regra pétrea, ADR-160). Quando o pedido é silencioso sobre um assunto, vale a regra nomeada `minimal-intervention` — o produto não inventa o que não foi pedido nem observado na fonte — e a política resolvida registra origem e motivo.
 
 ### FR-024 — Policy Snapshot
 

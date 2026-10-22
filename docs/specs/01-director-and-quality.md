@@ -213,6 +213,86 @@ implantado nem aceito.
 | “não mostrar pessoas” + asset com pessoa | eliminar candidato |
 | transformação solicitada + novelty budget 0 | não executar; explicar |
 
+### 7.4 Pedido editorial
+
+Regra pétrea (`AGENTS.md`, ADR-160): **nada é fixo, tudo vem do pedido de cada vídeo**. O Diretor não tem
+estilo, abertura, estrutura, idioma ou layout próprios. Cada política editorial do plano é a consequência de
+uma de seis origens, e nunca de uma preferência do produto: o que o pedido disse, o que o briefing disse, o que
+a mídia mostrou, o que o OutputSpec impõe, o que o workspace fixou como Guardrail, ou a regra de silêncio
+descrita abaixo. A precedência de FR-023 não tem camada de "defaults".
+
+#### 7.4.1 `editorial-request/v1`
+
+O pedido de um vídeo é um valor versionado, calculado do Brief Snapshot da ProjectVersion e selado por hash
+(`requestHash`):
+
+- `briefing`: texto livre do owner. Qualquer texto não vazio é válido, inclusive um briefing de uma linha; o
+  produto pode orientar o que um bom briefing contém, mas nunca exige um formato, nunca oferece exemplo
+  pré-preenchido e nunca trata um exemplo como padrão;
+- campos estruturados opcionais, todos ausentes por padrão: objetivo, ação desejada, idioma da legenda,
+  movimento, abertura, estrutura, CTA, layout, estilo de legenda, o que manter e o que evitar;
+- `requestedRemovals`: referências aos Commands `remove-spoken-content` do lineage (as falas que o pedido mandou
+  cortar; o hard check `forbiddenSpeechAbsent` olha só elas);
+- exceções por `variantId`;
+- `interpretation`: uma `brief-interpretation/v1` quando o briefing foi interpretado.
+
+Um campo ausente é ausente. Não existe preenchimento por omissão que o faça parecer pedido.
+
+#### 7.4.2 `brief-interpretation/v1`
+
+Um modelo (OpenAI, atrás da porta `BriefInterpreterModel`, auditado como a compilação de briefing) lê o briefing
+livre e devolve somente diretivas de um **vocabulário fechado**, ligado ao que o Apollo sabe executar de fato
+(movimento, abertura, estrutura, CTA, layout, idioma, estilo de legenda, manter, evitar). Regras:
+
+- cada diretiva cita o trecho exato do briefing em que se apoia (offsets e texto), no mesmo esquema de
+  `canonicalEvidence` da compilação de briefing; diretiva sem trecho é recusada;
+- o que o briefing pede e o Apollo não executa vai para `unsupported[]`, nunca é descartado em silêncio;
+- o que é ambíguo ou conflitante vai para `questions[]`; uma pergunta aberta bloqueia o Diretor;
+- briefing com texto e interpretação indisponível falha fechado (`PRECONDITION_REQUIRED`); nunca é tratado como
+  briefing vazio.
+
+O interpretador propõe; quem decide é a resolução. O texto do briefing é conteúdo, não instrução (invariante 5).
+
+#### 7.4.3 `editorial-policy-resolution/v1` e a regra `minimal-intervention`
+
+`resolveEditorialPolicies(request, mediaContext, outputSpec)` é uma função pura e versionada. Cada política sai
+como `{ value, origin, rule, reason, evidenceRefs }`, com `origin` em `request-field`, `request-briefing`,
+`media-context`, `output-spec`, `workspace-policy` ou `silence-rule`.
+
+Quando o pedido é silencioso sobre um assunto, vale a regra nomeada `minimal-intervention` (decisão do dono:
+**"não inventa"**): nada que não foi pedido e nada que a fonte não mostrou é adicionado ao vídeo. Zoom, punch-in,
+transições ornamentais, B-roll, CTA em overlay, reordenação e papéis narrativos não existem por omissão; a
+política resolvida diz `silence-rule` / `minimal-intervention` e o motivo em frase (o que foi decidido e por
+quê). A razão de uma decisão é **gerada da origem**: ela só pode atribuir ao pedido o que o pedido contém.
+Atribuir ao dono uma intenção que ele não escreveu é defeito.
+
+Enquanto um valor ainda não é derivado do pedido ou da mídia (limites herdados do planner das ondas
+anteriores), a resolução o registra como `silence-rule` / `carried-planner-value`, com a razão dizendo isso e
+com a remoção agendada; o teste de varredura de literais editoriais (`tests/v2/editorial-literals.test.mjs`) lista
+essas dívidas e só pode encolher.
+
+O DirectorRun grava o snapshot da resolução (`policySnapshotId`, `policyResolutionHash`) e o `requestHash`;
+cada decisão aponta a política que a sustenta.
+
+#### 7.4.4 Gates
+
+`director-quality-report/v5` substitui os nomes editoriais fixos por uma lista
+`hardChecks: [{ id, kind: 'request' | 'invariant', passed, policyRef, evidence }]`. Checks `request` verificam que
+o plano honra o pedido resolvido (`requestHonored`, `forbiddenSpeechAbsent`, `movementMatchesPolicy`,
+`openingMatchesPolicy`); checks `invariant` são limites do produto (`timelineContinuous`, direitos, legendas
+dentro do limite). Um pedido com `unsupported[]` ou pergunta aberta reprova `requestHonored` e bloqueia o plano.
+
+A admissão para exportação final exige: relatório v5, crítico `apollo-director-critic/v4` ou posterior (versão mínima admitida 4), todas as checks aprovadas, `requestHash` igual ao do Brief Snapshot atual e
+`policyResolutionHash` igual ao snapshot selado no DirectorRun. Relatórios v3 e v4 continuam legíveis, mas nunca
+são admitidos: exigem novo DirectorRun. Aprovação antiga nunca é herdada em silêncio.
+
+#### 7.4.5 Guardas de regressão
+
+1. Pedidos diferentes sobre a mesma mídia produzem resoluções e planos diferentes; pedido silencioso produz
+   toda política com origem e razão.
+2. Varredura de literais editoriais proibidos fora do módulo de resolução, com baseline que só encolhe.
+3. Admissão recusa relatório v4/crítico v3 e relatório v5 com `requestHash` ou `policyResolutionHash` divergente.
+
 ## 8. Rubric estratégica
 
 Scores usam escala 0–100. Pesos abaixo são defaults calibráveis por workspace, somando 100. `technicalRisk` e `costRisk` são penalidades, não dimensões positivas.
@@ -291,7 +371,10 @@ interface MovementPolicy {
 }
 ```
 
-Default inicial: uma fonte de movimento dominante por vez; punch-ins não consecutivos sem retorno visual; CTA reduz movimento concorrente.
+Esta política descreve **limites** de um movimento que o pedido tenha autorizado: uma fonte de movimento dominante por vez, punch-ins
+não consecutivos sem retorno visual, CTA reduzindo movimento concorrente. Ela não é um default: se o pedido é silencioso sobre
+movimento, `allowed` é vazio por `minimal-intervention` (seção 7.4.3), e um pedido de movimento que o renderer ainda não executa
+vira `unsupported[]`, nunca é ignorado.
 
 ## 10. StoryPlan
 
