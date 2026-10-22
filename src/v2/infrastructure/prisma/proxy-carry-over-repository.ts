@@ -225,7 +225,9 @@ export class PrismaProxyCarryOverRepository implements ProxyCarryOverRepository 
         where: { id: review.id },
         data: {
           status: 'ready-for-final', warningsAcknowledged: true, finalAllowed: true, reviewHash, revision: { increment: 1 },
-          acknowledgedByType: source.review.acknowledgedByType, acknowledgedById: source.review.acknowledgedById, acknowledgedAt: source.review.acknowledgedAt, updatedAt: now,
+          // The row names who acknowledged THIS review: the automatic carry, by the decision created below. The person who acknowledged the
+          // source review is not copied; it stays on the source review (`carriedFromReviewId`), and the decision's base hash names that review.
+          acknowledgedByType: 'automatic-carry', acknowledgedById: request.ids.decision, acknowledgedAt: now, updatedAt: now,
         },
       })
       await transaction.v2ProxyReviewDecision.create({
