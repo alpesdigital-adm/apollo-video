@@ -29,12 +29,6 @@ export function searchImages(records: readonly ImageCatalogRecord[], query: { te
   return records.map((record) => ({ record, usage: query.usage, score: terms.filter((term) => `${record.observedDescription} ${record.inferredTags.map((tag) => tag.value).join(' ')}`.toLocaleLowerCase().includes(term)).length / Math.max(terms.length, 1) })).filter((match) => match.score > 0).toSorted((a, b) => b.score - a.score)
 }
 
-export const IMAGE_EVAL_FIXTURES = Object.freeze([
-  { id: 'no-text', ocr: [], expected: 'sem texto detectado' },
-  { id: 'small-text', ocr: [{ text: 'Oferta válida hoje', language: 'pt-BR', box: [0.7, 0.8, 0.2, 0.05], confidence: 0.61 }], expected: 'Oferta válida hoje' },
-  { id: 'multilingual', ocr: [{ text: 'Olá', language: 'pt-BR', box: [0, 0, 0.2, 0.1], confidence: 0.97 }, { text: 'Welcome', language: 'en', box: [0, 0.2, 0.3, 0.1], confidence: 0.96 }], expected: 'Welcome' }
-])
-
 export interface ImageReuseSearchQuery {
   workspaceId: string
   text: string
