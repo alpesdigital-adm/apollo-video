@@ -4,7 +4,7 @@ import type { Prisma, PrismaClient, V2ImageAnalysis, V2ImageReuseReference } fro
 
 import type { ImageAnalysisRepository } from '../../application/ports/image-analysis-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
-import { evaluateAssetUse } from '../../domain/asset-rights.ts'
+import { evaluateAssetUse, UNDETERMINED_LOCALE } from '../../domain/asset-rights.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createImageAnalysis, type ImageAnalysis } from '../../domain/image-analysis.ts'
 import {
@@ -96,7 +96,7 @@ export class PrismaImageAnalysisRepository implements ImageAnalysisRepository {
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
       take: 500,
     }), { isolationLevel: 'RepeatableRead' })
-    const candidates = rows.map((row) => authorizedCandidate(row, now, 'pt-BR')).filter((candidate) => candidate !== null)
+    const candidates = rows.map((row) => authorizedCandidate(row, now, UNDETERMINED_LOCALE)).filter((candidate) => candidate !== null)
     return rankReusableImages(query, candidates)
   }
 
@@ -116,7 +116,7 @@ export class PrismaImageAnalysisRepository implements ImageAnalysisRepository {
           ])
           if (!project) throw new DomainError('PROJECT_NOT_FOUND', 'Project was not found')
           if (!row) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Reusable image analysis was not found')
-          const authorized = authorizedCandidate(row, createdAt, project.locale ?? 'pt-BR')
+          const authorized = authorizedCandidate(row, createdAt, project.locale ?? UNDETERMINED_LOCALE)
           if (!authorized) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Image is not currently eligible for editorial reuse')
           const ranked = rankReusableImages(query, [authorized])[0]
           if (!ranked) throw new DomainError('ASSET_NOT_USABLE', 'Image does not match the requested reuse query')

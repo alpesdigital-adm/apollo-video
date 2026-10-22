@@ -14,7 +14,7 @@ import { PROXY_OUTPUT_SPECS } from '../../src/v2/application/render-workflow.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
 test('T-FR-160 registry v1 owns five content-addressed format presets and renderer defaults', () => {
-  assert.equal(OUTPUT_FORMAT_REGISTRY.schemaVersion, 'output-format-registry/v1')
+  assert.equal(OUTPUT_FORMAT_REGISTRY.schemaVersion, 'output-format-registry/v2')
   assert.equal(OUTPUT_FORMAT_REGISTRY.registryVersion, 1)
   assert.deepEqual(Object.keys(OUTPUT_FORMAT_REGISTRY.presets), [...OUTPUT_ASPECT_RATIOS])
   const { registryHash: _registryHash, ...registryBody } = OUTPUT_FORMAT_REGISTRY

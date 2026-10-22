@@ -118,13 +118,13 @@ export type { ForkIdentityKindV2, ForkIdentityRemapV2, V2RenderablePlanSnapshotF
 
 export type ProjectCreationCallerIntentV2 = Readonly<
   { schemaVersion: 'project-creation-intent/v2'; kind: 'initialize-empty'; name: string;
-    objective: StrategicObjectiveId; locale: string; briefing: string | null;
+    objective: StrategicObjectiveId; locale: string | null; briefing: string | null;
     desiredAction: Readonly<DesiredActionInput> } |
   { schemaVersion: 'project-creation-intent/v2'; kind: 'fork-with-content'; name: string }
 >
 export type NormalizedProjectCreationIntentV2 = Readonly<
   { schemaVersion: 'project-creation-intent/v2'; kind: 'initialize-empty'; name: string;
-    objective: StrategicObjectiveId; locale: string; briefing: string | null;
+    objective: StrategicObjectiveId; locale: string | null; briefing: string | null;
     desiredAction: Readonly<DesiredAction> } |
   { schemaVersion: 'project-creation-intent/v2'; kind: 'fork-with-content'; name: string }
 >
@@ -165,11 +165,14 @@ export function normalizeProjectCreationIntentV2(input: ProjectCreationCallerInt
   const name = normalizeProjectName(input.name)
   assertDomain(name.length >= 1 && name.length <= 120, 'INVALID_COMMAND', 'Creation V2 name is invalid')
   if (input.kind === 'fork-with-content') return Object.freeze({ schemaVersion: input.schemaVersion, kind: input.kind, name })
-  assertDomain(typeof input.locale === 'string' && input.locale.trim().length > 0 &&
-    (input.briefing === null || typeof input.briefing === 'string'), 'INVALID_COMMAND', 'Creation V2 requires explicit locale and briefing presence')
-  let locale = ''
-  try { locale = Intl.getCanonicalLocales(input.locale.trim())[0] ?? '' } catch { /* invalid below */ }
-  assertDomain(locale.length > 0, 'INVALID_COMMAND', 'Creation V2 locale is invalid')
+  // A project may be created without a language (ADR-160: no locale is assumed); when one is given it must be a valid language tag.
+  assertDomain((input.locale === null || (typeof input.locale === 'string' && input.locale.trim().length > 0)) &&
+    (input.briefing === null || typeof input.briefing === 'string'), 'INVALID_COMMAND', 'Creation V2 requires an explicit locale (or its explicit absence) and briefing presence')
+  let locale: string | null = null
+  if (input.locale !== null) {
+    try { locale = Intl.getCanonicalLocales(input.locale.trim())[0] ?? '' } catch { locale = '' }
+    assertDomain(locale.length > 0, 'INVALID_COMMAND', 'Creation V2 locale is invalid')
+  }
   const objective = resolveStrategicObjective(input.objective).id
   const productionBrief = createProductionBrief({ ...(input.briefing === null ? {} : { ownerText: input.briefing }) })
   const desiredAction = createDesiredAction({ objective, desiredAction: parseDesiredActionInput(input.desiredAction) })
@@ -503,7 +506,7 @@ export function validateProjectCreationOutputCommandV2(input: ProjectCreationOut
 
 /** Creation2 administrative metadata only; format never supplies output geometry. */
 export function creationProjectMetadataV2(input: ProjectCreationOutputCommandV2): Readonly<{
-  name: string; ownerId: string; format: string | null; objective: string; locale: string
+  name: string; ownerId: string; format: string | null; objective: string; locale: string | null
 }> {
   const command = validateProjectCreationOutputCommandV2(input), intent = command.payload.callerIntent
   const source = command.payload.forkDerivation?.document.sourceProject

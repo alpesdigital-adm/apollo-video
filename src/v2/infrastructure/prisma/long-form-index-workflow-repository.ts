@@ -1,3 +1,4 @@
+import { UNDETERMINED_LOCALE } from '../../domain/asset-rights.ts'
 import { randomUUID } from 'node:crypto'
 
 import {
@@ -1116,7 +1117,7 @@ implements LongFormIndexWorkflowRepository {
       }),
     ])
     if (!artifact || !manifest || !project) return null
-    const language = project.locale ?? 'pt-BR'
+    const language = project.locale ?? UNDETERMINED_LOCALE
     assertTranscriptRights(
       artifact.currentRightsSnapshot,
       workflow.workspaceId,
@@ -1305,7 +1306,7 @@ implements LongFormIndexWorkflowRepository {
           assertTranscriptRights(
             artifact.currentRightsSnapshot,
             input.workspaceId,
-            project.locale ?? 'pt-BR',
+            project.locale ?? UNDETERMINED_LOCALE,
             now,
           )
           if (replay) {

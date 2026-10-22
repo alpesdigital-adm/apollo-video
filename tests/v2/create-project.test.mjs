@@ -206,7 +206,7 @@ async function createDuplicationFixture({editorialSource=false}={}) {
     bundle: prepared?.bundle??source.bundle,
     projectFacts:{id:currentProject.id,workspaceId:currentProject.workspaceId,currentVersionId:currentVersion.id,name:currentProject.name,
       status:'draft',format:null,ownerId:currentProject.ownerId,administrationRevision:1,updatedAt:currentVersion.createdAt,
-      objective:currentProject.objective,locale:currentProject.locale,createdByType:currentProject.createdBy.type,createdById:currentProject.createdBy.id,createdAt:currentProject.createdAt},
+      objective:currentProject.objective,locale:currentProject.locale ?? null,createdByType:currentProject.createdBy.type,createdById:currentProject.createdBy.id,createdAt:currentProject.createdAt},
     renderablePlanSnapshot:null,
     snapshots: prepared?.bundle.snapshots??creation.repository.lastBundle.snapshots,
     media: prepared?.refs??[{
@@ -278,7 +278,7 @@ test('create project persists an initial version and immutable snapshots', async
   assert.equal(project.status, 'draft')
   assert.equal(project.objective, 'discovery')
   assert.equal(project.format, undefined)
-  assert.equal(project.locale, 'pt-BR')
+  assert.equal(project.locale, undefined, 'no language is assumed when the request states none (ADR-160)')
   assert.equal(project.currentVersionId, undefined)
   assert.equal(version.sequence, 1)
   assert.equal(version.outputContractVersion, 2)
@@ -670,4 +670,12 @@ test('snapshot rebinding changes only owner-binding fields and recomputes the ca
     () => rebindSnapshotContentForDuplicate({ kind: 'brief', contentJson: '{', contentHash: 'f'.repeat(64), source, copy }),
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
   )
+})
+
+test('a language the request states is kept, canonicalized, and none is invented when it is absent', async () => {
+  const stated = await createFixture().service({ ...request(), locale: 'en-us' })
+  assert.equal(stated.projectAtCreation.locale, 'en-US')
+  const absent = await createFixture().service(request())
+  assert.equal(absent.bundle.command.payload.callerIntent.locale, null)
+  assert.equal('locale' in absent.projectAtCreation, false)
 })

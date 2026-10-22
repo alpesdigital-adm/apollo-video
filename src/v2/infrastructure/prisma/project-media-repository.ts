@@ -30,7 +30,8 @@ export class PrismaProjectMediaRepository implements ProjectMediaRepository {
     const bundle=await readPersistedOperationalOutputBundleV3(this.client,{...input,versionId:project.currentVersionId})
     if(!bundle||bundle.schemaVersion!=='operational-output-version-bundle/v3'||bundle.state.document.entries.length===0)
       throw new DomainError('PRECONDITION_REQUIRED','Ingest requires an explicit operational output variant')
-    if(!project.locale)throw new DomainError('PERSISTENCE_CONFLICT','Ingest project locale missing')
+    // The transcription language is stated, not assumed (ADR-160): a project created without one is asked for it.
+    if(!project.locale)throw new DomainError('PRECONDITION_REQUIRED','The project states no language: state the language of the media before it is transcribed')
     return Object.freeze({id:project.id,locale:project.locale,currentVersion:bundle.version,outputBundle:bundle})
   }
   async persistCompletedIngest(input:Parameters<ProjectMediaRepository['persistCompletedIngest']>[0]):Promise<void> {

@@ -1,6 +1,7 @@
 import {
   evaluateAssetUse,
   normalizeAssetUseContext,
+  UNDETERMINED_LOCALE,
 } from '../domain/asset-rights.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import { renderInputLineageMatches } from '../domain/media-artifact.ts'
@@ -132,7 +133,7 @@ export function authorizeRenderInputMaterializationService(dependencies: {
 
     const context = normalizeAssetUseContext({
       ...requestContext,
-      locale: input.output.locale,
+      locale: input.output.locale ?? UNDETERMINED_LOCALE,
     })
     const now = dependencies.clock()
     assertDomain(!Number.isNaN(now.getTime()), 'INVALID_ARGUMENT', 'clock returned an invalid date')
