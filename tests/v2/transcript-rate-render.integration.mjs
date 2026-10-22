@@ -12,6 +12,7 @@ import {
 } from '../../src/v2/application/authenticate-api-client.ts'
 import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
 import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
+import { proxyDirectorCriticIssuesDigest, proxyFaceEvidenceDigest } from '../../src/v2/application/proxy-render-evidence.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
@@ -19,10 +20,12 @@ import { ASS_EMISSION_POLICY } from '../../src/v2/domain/ass-emission-policy.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
+import { planRequiredSourceWindows, projectTimelineSpansToSource } from '../../src/v2/domain/face-evidence-time-map.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
 import { FINAL_CAPTION_ANCHOR_POLICY } from '../../src/v2/domain/final-caption-certification.ts'
 import { readOutputFormatPreset } from '../../src/v2/domain/output-format-registry.ts'
+import { DEFAULT_SUBTITLE_ANCHOR_POLICY } from '../../src/v2/domain/subtitle-anchor-plan.ts'
 import {
   advancePublicOperationPhase,
   retryOrFailPublicOperation,
@@ -359,6 +362,32 @@ function sequentialClock(start) {
  * hash, render input, manifest, element map, review — is produced by production
  * code.
  */
+/**
+ * W70 readiness (R2). What the completion records beside the review, recomputed here from the inputs of this render, never read back from
+ * the completion: no face reader is wired to this worker (so nothing was read), the caption placement still names the source windows its
+ * cues would need (each cue widened by the anchor stability window, through the unit-rate clips that are a pure frame offset of the
+ * source), and the Director issues the review is built over are the source's.
+ */
+function expectedRenderEvidence(source, expected) {
+  const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video').clips
+  const spans = expected.cues.map(([, startFrame, endFrame]) => ({
+    startFrame, endFrame: Math.min(expected.durationFrames, Math.max(endFrame, startFrame + DEFAULT_SUBTITLE_ANCHOR_POLICY.minFramesBetweenChanges)),
+  }))
+  const requiredFaceWindows = [...new Set(clips.map((clip) => clip.sourceArtifactId))].toSorted().flatMap((sourceArtifactId) => {
+    const sourceClips = clips.filter((clip) => clip.sourceArtifactId === sourceArtifactId)
+    const sourceSpans = projectTimelineSpansToSource(sourceClips, sourceArtifactId, spans)
+    if (sourceSpans.length === 0) return []
+    const sourceDurationFrames = Math.max(...sourceClips.map((clip) => clip.sourceOutFrame))
+    return [{ sourceArtifactId, windows: planRequiredSourceWindows({ sourceDurationFrames, fps: { num: FPS, den: 1 }, spans: sourceSpans }) }]
+  })
+  assert.ok(requiredFaceWindows.length > 0, 'the cues of this render do ask about source frames a unit-rate clip plays')
+  assert.deepEqual(source.criticIssues, [], 'this source carries no Director issues')
+  return {
+    faceEvidenceDigest: proxyFaceEvidenceDigest({ wired: false, reads: [], requiredFaceWindows }),
+    criticIssuesDigest: proxyDirectorCriticIssuesDigest(source.criticIssues),
+  }
+}
+
 async function renderThroughRealWorker(input) {
   const artifactRoot = join(input.root, 'artifacts')
   const masterTarget = join(artifactRoot, ...MASTER_ARTIFACT_KEY.split('/'))
@@ -776,6 +805,7 @@ function assertWorkerContract(rendered, expected) {
     originalFileName: 'rate-master-editorial.mp4', createdAt: rendered.attached.createdAt,
     lease: { owner: `worker-${expected.operationId.slice('operation-'.length)}`, attempt: 1, now: rendered.attached.lease.now },
     review: rendered.review, recipeParameters: rendered.attached.recipeParameters, ocrReceipt: null,
+    renderEvidence: expectedRenderEvidence(rendered.source, expected),
   })
   // The worker always releases the renderer scratch space and the LUT selection.
   assert.equal(rendered.rendererCleaned, 1)
