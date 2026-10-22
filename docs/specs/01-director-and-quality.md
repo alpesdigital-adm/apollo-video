@@ -276,6 +276,16 @@ ou se a lista deixar de ser verdadeira; ela só pode encolher e, ao fim da fatia
 O DirectorRun grava o snapshot da resolução (`policySnapshotId`, `policyResolutionHash`) e o `requestHash`;
 cada decisão aponta a política que a sustenta.
 
+Derivações de F3–F5 (`editorial-policy-resolution/v2`): **idioma** = pedido ou `transcript.language`, divergência sem tradução é
+pergunta; **legenda** = estilo do pedido, senão do override `subtitleStyle` (com a origem do override), senão a base do
+registro do renderer (regra `renderer-baseline`), agrupamento do preset e largura medida em cada saída que queima legenda;
+**CTA** exigido só se objetivo/ação pedem, julgado no idioma da fala (léxico por idioma, ou o `verbalCta` explícito);
+**overlay de CTA** segue o pedido ou a fala de CTA observada; **abertura** só tem janela se o pedido a nomeia;
+**estrutura** sem pedido = ordem da fonte, sem papel por posição (o bloco `cta` é onde a fala é observada);
+**layout** = proporção da fonte × de cada saída (`source-native` quando iguais, senão o pedido decide e o silêncio mantém o
+quadro inteiro sobre fundo); **orçamento** (`budget`) e **rubrica** (`rubric`: critérios não pedidos não pontuam, pesos
+renormalizados) são políticas da resolução. A regra `carried-planner-value` não existe mais.
+
 #### 7.4.4 Gates
 
 `director-quality-report/v5` substitui os nomes editoriais fixos por uma lista
@@ -284,7 +294,7 @@ o plano honra o pedido resolvido (`requestHonored`, `forbiddenSpeechAbsent`, `mo
 `openingMatchesPolicy`); checks `invariant` são limites do produto (`timelineContinuous`, direitos, legendas
 dentro do limite). Um pedido com `unsupported[]` ou pergunta aberta reprova `requestHonored` e bloqueia o plano.
 
-A admissão para exportação final exige: relatório v5, crítico `apollo-director-critic/v4` ou posterior (versão mínima admitida 4), todas as checks aprovadas, `requestHash` igual ao do Brief Snapshot atual e
+A admissão para exportação final exige: relatório v5, crítico `apollo-director-critic/v5` ou posterior (versão mínima admitida 5), todas as checks aprovadas, `requestHash` igual ao do Brief Snapshot atual e
 `policyResolutionHash` igual ao snapshot selado no DirectorRun. Relatórios v3 e v4 continuam legíveis, mas nunca
 são admitidos: exigem novo DirectorRun. Aprovação antiga nunca é herdada em silêncio.
 

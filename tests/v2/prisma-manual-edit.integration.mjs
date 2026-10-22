@@ -108,7 +108,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const brief = {
       desiredAction: createDesiredAction({
         objective: 'discovery',
-        desiredAction: { visualCta: 'Continue assistindo', disclosures: [] },
+        desiredAction: { disclosures: [] },
       }),
     }
     const editPlan = {
@@ -209,7 +209,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     // explicit 9:16 output variant, the two recordings' persisted ingests, and a child Command that adopts the first one and plays it.
     await seedReviewProject(client, { workspaceId, actor: authenticatedActor, prefix: 'manual', ids: { project: projectId, 'output-variant': '9:16' },
       name: 'Manual Project', objective: 'discovery', aspectRatio: '9:16', status: 'reviewing-proxy', briefing,
-      desiredAction: { visualCta: 'Continue assistindo', disclosures: [] } })
+      desiredAction: { disclosures: [] } })
     for (const [slug, artifactId] of [[slugA, sourceA], [slugB, sourceB]]) {
       // Both recordings are 6 s at 30 fps; their source grants are the ones this test writes below, through the production service.
       await persistRecording(client, { workspaceId, projectId, actor: authenticatedActor, slug, durationFrames: 180, rights: { source: false } })
@@ -1336,7 +1336,7 @@ ${editorialDiagnostic}`)
     })
     const directorResponse = await runDirector()
     const directorApplied = await directorResponse.json()
-    assert.equal(directorResponse.status, 201, JSON.stringify(directorApplied))
+    assert.equal(directorResponse.status, 201, JSON.stringify(directorApplied) + ' --- server log tail --- ' + serverLogs.slice(-3000))
     assert.equal(directorApplied.data.version.sequence, rev(15))
     assert.equal(directorApplied.data.directorRun.impact.schemaVersion, 'director-run-impact/v1')
     assert.equal(directorApplied.data.directorRun.impact.sourceTranscriptId, replacementTranscriptId)
@@ -1649,10 +1649,9 @@ ${editorialDiagnostic}`)
     assert.equal(storedStoryPlan.desiredActionRef.actionHash.length, 64)
     assert.equal(storedEditPlan.desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
     assert.equal(storedEditPlan.subtitleTracks[0].desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
-    assert.equal(storedEditPlan.overlayTracks.length, 1)
-    assert.equal(storedEditPlan.overlayTracks[0].desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
-    assert.equal(storedEditPlan.overlayTracks[0].text, currentDesiredAction.visualCta)
-    assert.equal(currentDesiredAction.visualCta, 'Continue assistindo')
+    // The project asked for no visual call to action (ADR-160: one is drawn only where a request or the speech places it), so none is drawn.
+    assert.equal(storedEditPlan.overlayTracks.length, 0)
+    assert.equal(currentDesiredAction.visualCta, undefined)
     const storedAsyncVersion = await client.v2ProjectVersion.findUniqueOrThrow({
       where: { id: allocatedResultVersionId },
       include: { briefSnapshot: true },

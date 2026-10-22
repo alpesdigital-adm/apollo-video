@@ -175,7 +175,7 @@ test('T-W65B final export through the real gate: a certified cue is burned and c
       localeVariantRefs: [], formatVariantRefs: [], lineageRefs: [sourceArtifactId],
       subtitleTracks: cues.length ? [{ id: 'track-captions', kind: 'captions', presetId: 'clean-color', anchor: 'bottom', faceProtection: true,
         maxLines: 2, maxCharactersPerBlock: 32, cues: cues.map((cue) => ({ ...cue })) }] : [],
-      transitions: [], movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
+      transitions: [], movementPolicy: { automaticZoom: false, protectedOpeningFrames: 0 },
       ...(landscape ? { composition: { layout: 'landscape-inset', background: 'blurred-source', foregroundScale: 1, verticalPosition: 0.5,
         faceSafeFallback: [0.08, 0.08, 0.84, 0.84], subtitleSafeRegion: [0.08, 0.68, 0.84, 0.22] } } : {}),
     }

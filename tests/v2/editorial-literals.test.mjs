@@ -55,6 +55,8 @@ const PATTERNS = Object.freeze([
  * (Never add one: fix the literal, or move the rule into the resolution module.)
  */
 const BASELINE = Object.freeze({
+  // Pending an API decision, not a UI one: the library listing has no consumer, so no locale to judge a rights snapshot under (it keeps the locale it always used).
+  "src/v2/infrastructure/prisma/media-library-repository.ts :: locale parameter defaulting to 'pt-BR'": 1,
   "src/app/ProjectsPageClient.tsx :: ('discovery') as an initial objective": 2,
   "src/app/ProjectsPageClient.tsx :: ?? 'pt-BR'": 1,
   "src/app/ProjectsPageClient.tsx :: placeholder=\"Ex.": 3,

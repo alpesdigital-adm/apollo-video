@@ -76,7 +76,7 @@ export interface EditorialPolicies {
   transitions: ResolvedPolicy<{ type: 'straight-cut'; audioFadeMs: number }>
   inserts: ResolvedPolicy<{ mode: 'use-selected-insert' | 'no-insert' }>
   cta: ResolvedPolicy<{ required: boolean; evaluation: CtaEvaluation }>
-  ctaOverlay: ResolvedPolicy<{ mode: 'none' } | { mode: 'window'; startSeconds: number; endSeconds: number; anchoredTo: 'spoken-cta' | 'spoken-cta-to-end' }>
+  ctaOverlay: ResolvedPolicy<{ mode: 'none' } | { mode: 'window'; startSeconds: number; endSeconds: number; anchoredTo: 'spoken-cta' | 'spoken-cta-to-end' | 'closing-sentence' }>
   layout: ResolvedPolicy<{ mode: 'fit-with-backdrop' | 'source-native' }>
   language: ResolvedPolicy<{ captionLanguage: string | null }>
   captions: ResolvedPolicy<CaptionPolicyValue>
@@ -156,6 +156,8 @@ export interface EditorialMediaContext {
   firstSentenceEndSeconds?: number
   /** Seconds, on the timeline, where the call to action is spoken (its last occurrence): absent when the speech has none or it cannot be recognised. */
   spokenCta?: Readonly<{ startSeconds: number; endSeconds: number }>
+  /** Seconds, on the timeline, where the last sentence of the speech begins (absent: no word). */
+  closingSentenceStartSeconds?: number
   /** Seconds of the compiled timeline. */
   timelineDurationSeconds?: number
   /** Rights-approved selected inserts the compiled timeline already holds (the proofs it shows). */
@@ -408,8 +410,9 @@ export function resolveEditorialPolicies(
   })
 
   // CTA overlay. A visual call to action is drawn only when the request asks (the cta directive) or gives its text (the desired action), and it is
-  // drawn where the speech says the call: at the spoken call, or - when the request says closing - from the spoken call to the end. Without a
-  // spoken call there is nowhere to draw it from, which is a question.
+  // drawn where the speech says the call: at the spoken call, or - when the request says closing - from the spoken call to the end (from the last
+  // sentence of the speech, when the speech has no call). Without a spoken call and without a closing request there is nowhere to draw it from,
+  // which is a question.
   const visualText = action?.visualCta?.trim()
   const spoken = mediaContext.spokenCta
   const overlayWanted = ctaSelection !== undefined
@@ -428,18 +431,21 @@ export function resolveEditorialPolicies(
     let effect = 'No visual call to action is drawn until the question is answered'
     if (!visualText) {
       openQuestions.push(Object.freeze({ id: 'cta-overlay-text-missing', question: 'The request asks for a visual call to action and the desired action has no visual text. What should it say?', source: 'resolution' as const }))
-    } else if (spoken === undefined) {
+    } else if (spoken === undefined && !(toEnd && mediaContext.closingSentenceStartSeconds !== undefined)) {
       openQuestions.push(Object.freeze({
         id: 'cta-overlay-placement-unknown',
         question: 'The visual call to action is drawn where the speech says the call, and the speech shows none that can be recognised. Where should it be drawn?',
         source: 'resolution' as const,
       }))
     } else {
-      const endSeconds = toEnd ? Math.max(spoken.endSeconds, mediaContext.timelineDurationSeconds ?? spoken.endSeconds) : spoken.endSeconds
-      value = { mode: 'window' as const, startSeconds: spoken.startSeconds, endSeconds, anchoredTo: toEnd ? 'spoken-cta-to-end' as const : 'spoken-cta' as const }
-      effect = toEnd
-        ? `The visual call to action is drawn from the spoken call (${spoken.startSeconds} s) to the end of the video (${endSeconds} s)`
-        : `The visual call to action is drawn while the call is spoken (${spoken.startSeconds} s to ${spoken.endSeconds} s)`
+      const startSeconds = spoken?.startSeconds ?? mediaContext.closingSentenceStartSeconds!
+      const endSeconds = toEnd ? Math.max(spoken?.endSeconds ?? startSeconds, mediaContext.timelineDurationSeconds ?? spoken?.endSeconds ?? startSeconds) : spoken!.endSeconds
+      value = { mode: 'window' as const, startSeconds, endSeconds, anchoredTo: !toEnd ? 'spoken-cta' as const : spoken ? 'spoken-cta-to-end' as const : 'closing-sentence' as const }
+      effect = !toEnd
+        ? `The visual call to action is drawn while the call is spoken (${startSeconds} s to ${endSeconds} s)`
+        : spoken
+          ? `The visual call to action is drawn from the spoken call (${startSeconds} s) to the end of the video (${endSeconds} s)`
+          : `The speech has no call to action, so the closing of the video is its last sentence: the visual call to action is drawn from there (${startSeconds} s) to the end of the video (${endSeconds} s)`
     }
     if (ctaSelection !== undefined) {
       ctaOverlay = requested(request, builder, 'ctaOverlay', ctaSelection, value, effect, noOverlay)

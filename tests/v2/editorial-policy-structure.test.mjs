@@ -56,6 +56,13 @@ test('the visual call follows the request or where the speech says the call - an
   assert.equal(toEnd.policies.ctaOverlay.origin, 'request-field')
   // different calls, different windows
   assert.notEqual(at.policyResolutionHash, toEnd.policyResolutionHash)
+  // a request that says closing, over a speech with no call: the closing of the video is the last sentence of the speech, from there to the end
+  const closingOnly = resolveEditorialPolicies(closing, { ...media, transcriptLanguage: 'xx', closingSentenceStartSeconds: 9.5, timelineDurationSeconds: 12 }, [])
+  assert.deepEqual(closingOnly.policies.ctaOverlay.value, { mode: 'window', startSeconds: 9.5, endSeconds: 12, anchoredTo: 'closing-sentence' })
+  assert.match(closingOnly.policies.ctaOverlay.reason, /last sentence/)
+  // ... but a request that says only "at the spoken call" still needs the call
+  const atOnly = createEditorialRequest({ objective: 'sale', desiredAction: sale({ visualCta: 'label' }), directives: [{ id: 'c', kind: 'cta', value: 'overlay-at-spoken-cta' }] })
+  assert.deepEqual(resolveEditorialPolicies(atOnly, { ...media, transcriptLanguage: 'pt', closingSentenceStartSeconds: 9.5, timelineDurationSeconds: 12 }, []).openQuestions.map((item) => item.id), ['cta-overlay-placement-unknown'])
   // the speech shows no call: there is nowhere to draw it from
   const nowhere = resolveEditorialPolicies(withText, { ...media, transcriptLanguage: 'pt' }, [])
   assert.deepEqual(nowhere.openQuestions.map((item) => item.id), ['cta-overlay-placement-unknown'])

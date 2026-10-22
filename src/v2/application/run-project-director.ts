@@ -598,6 +598,14 @@ function subtitleStyleOverrideOf(policies: Readonly<Record<string, unknown>>): E
     ? Object.freeze({ presetId: value, origin }) : undefined
 }
 
+/** Seconds, on the timeline, where the last sentence of the speech begins: the word after the last sentence-closing word that precedes the final one. */
+function closingSentenceStartSecondsOf(words: readonly Readonly<{ text: string; timelineStartFrame: number }>[], fps: number): number | undefined {
+  if (words.length === 0) return undefined
+  let index = words.length - 1
+  while (index > 0 && !/[.!?]$/u.test(words[index - 1]!.text)) index -= 1
+  return Math.round(words[index]!.timelineStartFrame / fps * 1_000) / 1_000
+}
+
 /** Seconds, on the timeline, at which the first sentence of the speech ends: the first word that closes a sentence (absent: no word does). */
 function firstSentenceEndSecondsOf(words: readonly Readonly<{ text: string; timelineEndFrame: number }>[], fps: number): number | undefined {
   const closing = words.find((word) => /[.!?]$/u.test(word.text))
@@ -1104,6 +1112,8 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       ...(subtitleStyleOverrideOf(context.policies) ? { subtitleStyleOverride: subtitleStyleOverrideOf(context.policies)! } : {}),
       ...(spokenCta ? { spokenCta: { startSeconds: spokenCta.startSeconds, endSeconds: spokenCta.endSeconds } } : {}),
       timelineDurationSeconds: Math.round(context.editPlan.durationFrames / fpsOfPlan * 1_000) / 1_000,
+      ...(closingSentenceStartSecondsOf(context.editPlan.retimedTranscript.words, fpsOfPlan) !== undefined
+        ? { closingSentenceStartSeconds: closingSentenceStartSecondsOf(context.editPlan.retimedTranscript.words, fpsOfPlan)! } : {}),
       selectedInsertCount: clips.filter((clip) => clip.sourceArtifactId !== context.transcript.sourceArtifactId).length,
       ...(context.sourceDimensions ? { sourceAspectRatio: `${context.sourceDimensions.width}:${context.sourceDimensions.height}` } : {}),
       ...(firstSentenceEndSecondsOf(context.editPlan.retimedTranscript.words, context.editPlan.fps) !== undefined

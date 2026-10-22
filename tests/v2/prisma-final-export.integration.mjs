@@ -340,7 +340,7 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
       localeVariantRefs: [], formatVariantRefs: [], lineageRefs: [sourceArtifactId],
       subtitleTracks: [],
       transitions: [],
-      movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
+      movementPolicy: { automaticZoom: false, protectedOpeningFrames: 0 },
       composition: {
         layout: 'landscape-inset',
         background: 'blurred-source',

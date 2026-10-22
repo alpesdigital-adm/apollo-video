@@ -96,7 +96,7 @@ export class PrismaImageAnalysisRepository implements ImageAnalysisRepository {
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
       take: 500,
     }), { isolationLevel: 'RepeatableRead' })
-    const candidates = rows.map((row) => authorizedCandidate(row, now, UNDETERMINED_LOCALE)).filter((candidate) => candidate !== null)
+    const candidates = rows.map((row) => authorizedCandidate(row, now, 'pt-BR')).filter((candidate) => candidate !== null)
     return rankReusableImages(query, candidates)
   }
 
