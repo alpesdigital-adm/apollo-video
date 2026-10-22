@@ -15,7 +15,7 @@ import {
 import { captionCuesThatDoNotFit, captionTextFitsEveryOutput } from '../domain/caption-fit.ts'
 import { createEditCommand } from '../domain/edit-command.ts'
 import type { OutputSpecRevisionBody } from '../domain/output-spec-revision.ts'
-import { deriveEditorialRequestFromBrief } from '../domain/editorial-request.ts'
+import { assertBriefingInterpreted, deriveEditorialRequestFromBrief } from '../domain/editorial-request.ts'
 import {
   POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION, assertResolutionPlannable, planMovementPolicyUnder, captionTrackId, compositionUnderPolicy, movementMatchesPolicy,
   openingMatchesPolicy, policyRef, protectedOpeningSeconds, resolveEditorialPolicies, storyBlockUnderPolicy,
@@ -1107,6 +1107,8 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     // remove) resolves to the policies the plan is made from. A request the Apollo cannot execute, or a question it left open, stops here.
     const requestedRemovalIds = (context.requestedSpeechRemovals ?? []).map((rule) => rule.id)
     const editorialRequest = deriveEditorialRequestFromBrief({ ...context.brief, objective: objective.id, desiredAction }, requestedRemovalIds)
+    // A briefing with text that nobody has interpreted is a request nobody read: refused here, never planned over as if it were empty.
+    assertBriefingInterpreted(editorialRequest)
     const resolution = resolveEditorialPolicies(editorialRequest, {
       transcriptId: context.transcript.id, ...(transcriptLanguage ? { transcriptLanguage } : {}), hasSelectedInsert,
       ...(subtitleStyleOverrideOf(context.policies) ? { subtitleStyleOverride: subtitleStyleOverrideOf(context.policies)! } : {}),

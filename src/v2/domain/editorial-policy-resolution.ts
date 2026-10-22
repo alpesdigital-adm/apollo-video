@@ -641,7 +641,7 @@ export function resolutionOwnsPolicyRef(resolution: Readonly<EditorialPolicyReso
 export function assertResolutionPlannable(resolution: Readonly<EditorialPolicyResolutionV1>): void {
   assertDomain(!resolution.blocked, 'PRECONDITION_REQUIRED',
     'The editorial request asks for something the Apollo cannot execute, or leaves a question open; it must be revised before a plan is made',
-    { unsupported: resolution.unsupported.map((item) => ({ directiveId: item.directiveId, value: item.value, reason: item.reason })),
+    { reason: 'editorial-request-blocked', unsupported: resolution.unsupported.map((item) => ({ directiveId: item.directiveId, value: item.value, reason: item.reason })),
       openQuestions: resolution.openQuestions.map((item) => ({ id: item.id, question: item.question })) })
 }
 

@@ -9,17 +9,11 @@ import {
   type CompiledBriefField,
   type CompiledBriefFields,
 } from '../../application/compile-brief.ts'
+import { briefLabelIndex, briefMentionsUnsupportedClaim } from '../../application/brief-lexicon.ts'
 import { assertDomain } from '../../domain/errors.ts'
 
-const LABELS: Readonly<Record<string, CompiledBriefField>> = Object.freeze({
-  público: 'audience', publico: 'audience', audiência: 'audience', audiencia: 'audience', persona: 'audience',
-  oferta: 'offer', produto: 'offer', serviço: 'offer', servico: 'offer',
-  restrição: 'constraints', restricao: 'constraints', restrições: 'constraints', restricoes: 'constraints',
-  'deve usar': 'mustUse', incluir: 'mustUse', obrigatório: 'mustUse', obrigatorio: 'mustUse',
-  evitar: 'avoid', 'não usar': 'avoid', 'nao usar': 'avoid', proibido: 'avoid',
-  tom: 'tone', estilo: 'tone', linguagem: 'tone',
-  sucesso: 'successCriteria', meta: 'successCriteria', critério: 'successCriteria', criterio: 'successCriteria',
-})
+// Labels are recognised by language, from the reviewed lexicons; a briefing in a language without one is read only by the interpreter.
+const LABELS: Readonly<Record<string, CompiledBriefField>> = briefLabelIndex()
 
 const LABEL_PATTERN = Object.keys(LABELS)
   .sort((left, right) => right.length - left.length)
@@ -62,7 +56,7 @@ export class EvidenceBoundBriefCompilerModel implements BriefCompilerModel {
     const fields = emptyFields()
     const evidence: BriefEvidenceSpan[] = []
     for (const match of input.text.matchAll(LABELED_VALUE)) {
-      const label = match[1]!.toLocaleLowerCase('pt-BR')
+      const label = match[1]!.toLowerCase()
       const field = LABELS[label]
       if (!field) continue
       const raw = match[2]!
@@ -100,7 +94,7 @@ export class EvidenceBoundBriefCompilerModel implements BriefCompilerModel {
         })
       }
     }
-    const unsupportedClaim = /\b(garantid[oa]s?|resultado garantido|sem risco)\b/iu.test(input.text)
+    const unsupportedClaim = briefMentionsUnsupportedClaim(input.text)
     if (unsupportedClaim) {
       conflicts.push({
         code: 'unsupported-claim',

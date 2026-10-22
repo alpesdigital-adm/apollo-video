@@ -4,10 +4,10 @@ const { stableSerialize } = await import('../../../src/v2/application/version-ha
 const { requestDirectorFaceWindows } = await import('../../../src/v2/application/director-face-window-requests.ts')
 const { createDirectorPerceptionEvidenceReport } = await import('../../../src/v2/domain/director-perception-evidence.ts')
 const { policyRef, resolveEditorialPolicies } = await import('../../../src/v2/domain/editorial-policy-resolution.ts')
-const { deriveEditorialRequestFromBrief } = await import('../../../src/v2/domain/editorial-request.ts')
+const { createBriefInterpretation, deriveEditorialRequestFromBrief } = await import('../../../src/v2/domain/editorial-request.ts')
 const { assembleServerPerceptionSnapshot } = await import('../../../src/v2/domain/server-perception-snapshot.ts')
 const { createDesiredAction } = await import('../../../src/v2/domain/desired-action.ts')
-const { createProductionBrief } = await import('../../../src/v2/domain/production-brief.ts')
+const { createProductionBrief, normalizeBriefingText } = await import('../../../src/v2/domain/production-brief.ts')
 
 /**
  * Fixtures for the sealed editorial request of a Director run (ADR-160), for the tests that seed a DirectorRun by hand instead of running
@@ -80,10 +80,25 @@ export function policySnapshotRow({ id, workspaceId, projectId, resolution, crea
   }
 }
 
+/**
+ * The `editorialRequest` part of a brief whose briefing was read by an interpreter that found nothing to map: the state of a project whose
+ * `revise-editorial-request` has run on a briefing the model could not translate into a directive. A briefing with text and no reading is
+ * refused by the Director (ADR-160 F6); tests that are about something else say that the briefing was read.
+ */
+export function readByInterpreter(ownerText, found = {}) {
+  const briefingText = normalizeBriefingText(ownerText)
+  return {
+    interpretation: createBriefInterpretation({
+      briefingText, interpreter: { provider: 'test-double', model: 'stub-1', promptVersion: 'brief-interpreter/v1' }, directives: [], ...found,
+    }),
+  }
+}
+
 /** The contentJson of a Brief Snapshot as the project creation writes it, for a given objective and (optional) free briefing. */
-export function controlledBriefJson({ objective = 'discovery', ownerText } = {}) {
+export function controlledBriefJson({ objective = 'discovery', ownerText, readByDefault = true } = {}) {
   return stableSerialize({
     schemaVersion: 2, objective, desiredAction: createDesiredAction({ objective }),
     productionBrief: createProductionBrief({ ...(ownerText ? { ownerText } : {}) }),
+    ...(ownerText && readByDefault ? { editorialRequest: readByInterpreter(ownerText) } : {}),
   })
 }

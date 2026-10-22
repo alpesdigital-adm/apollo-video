@@ -22,6 +22,7 @@ import { defineEditorialPhraseRules } from '../../src/v2/application/editorial-p
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
 import { createPerceptionProducerEnvelope } from '../../src/v2/domain/perception-producer-envelope.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
+import { readByInterpreter } from './helpers/editorial-request-fixture.mjs'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { createDirectorRunImpact, createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 import { validateDirectorDecisions } from '../../src/v2/domain/director-run.ts'
@@ -197,7 +198,8 @@ class InMemoryDirectorRepository {
       ? options.ownerText
       : 'Tom: direto, natural e sem efeitos gratuitos.'
     this.guardrails = options.guardrails ?? []
-    this.editorialRequest = options.editorialRequest
+    // A briefing with text is a request the Director refuses until an interpreter has read it (ADR-160 F6): unless a test says otherwise, it was read and held nothing to map.
+    this.editorialRequest = this.ownerText && !options.unread ? { ...readByInterpreter(this.ownerText), ...(options.editorialRequest ?? {}) } : options.editorialRequest
     this.ctaText = Object.hasOwn(options, 'ctaText')
       ? options.ctaText
       : ({
@@ -2027,4 +2029,24 @@ test('ADR-160 F5: a source with the frame shape of every output is used as it is
   assert.equal(different.run.policyResolution.policies.layout.value.mode, 'fit-with-backdrop')
   assert.equal(different.run.editPlan.composition.layout, 'landscape-inset')
   assert.equal(different.run.editPlan.composition.background, 'blurred-source')
+})
+
+test('ADR-160 F6 a briefing with text that no interpreter has read stops the Director: it is not planned over as an empty briefing', async () => {
+  const unread = fixture({ ownerText: 'alpha beta gamma', unread: true })
+  await assert.rejects(unread.service(request({ idempotency: { key: 'unread-briefing' } })), (error) =>
+    error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'brief-interpretation-required')
+  assert.equal(unread.repository.lastBundle, undefined)
+  // The same briefing, read, plans; an open question the reading raised stops it again, with the question in the error.
+  const { readByInterpreter: read } = await import('./helpers/editorial-request-fixture.mjs')
+  const asked = fixture({ ownerText: 'alpha beta gamma', editorialRequest: read('alpha beta gamma', {
+    questions: [{ id: 'q1', status: 'open', question: 'Which of the two is meant?', excerpt: { start: 0, end: 5, text: 'alpha' } }],
+  }) })
+  await assert.rejects(asked.service(request({ idempotency: { key: 'open-question' } })), (error) =>
+    error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' && error.details.openQuestions[0].id === 'q1')
+  assert.equal(asked.repository.lastBundle, undefined)
+  const answered = fixture({ ownerText: 'alpha beta gamma', editorialRequest: read('alpha beta gamma', {
+    questions: [{ id: 'q1', status: 'answered', answer: 'neither', question: 'Which of the two is meant?', excerpt: { start: 0, end: 5, text: 'alpha' } }],
+  }) })
+  await answered.service(request({ idempotency: { key: 'answered-question' } }))
+  assert.ok(answered.repository.lastBundle)
 })

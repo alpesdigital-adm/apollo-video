@@ -124,3 +124,32 @@ test('the request is read back from a Brief Snapshot by one function, stable und
   assert.equal(deriveEditorialRequestFromBrief(structured).directives.length, 1)
   assert.throws(() => deriveEditorialRequestFromBrief({ ...brief, editorialRequest: { tone: 'x' } }), (error) => error.code === 'PERSISTENCE_CONFLICT')
 })
+
+test('coverage is part of the interpretation only when the interpreter found a topic, and cites the briefing like everything else', async () => {
+  const { assertBriefingInterpreted, BRIEF_COVERAGE_TOPICS } = await import('../../src/v2/domain/editorial-request.ts')
+  assert.deepEqual([...BRIEF_COVERAGE_TOPICS], ['audience', 'offer', 'tone'])
+  const plain = createBriefInterpretation({ briefingText: BRIEFING, interpreter, directives: [] })
+  const same = createBriefInterpretation({ briefingText: BRIEFING, interpreter, directives: [], coverage: [] })
+  // No coverage found hashes exactly as before coverage existed.
+  assert.equal(same.interpretationHash, plain.interpretationHash)
+  assert.equal(plain.coverage, undefined)
+  const covered = createBriefInterpretation({ briefingText: BRIEFING, interpreter, directives: [], coverage: [{ topic: 'tone', excerpt: excerptOf(BRIEFING, 'beta') }] })
+  assert.notEqual(covered.interpretationHash, plain.interpretationHash)
+  assert.deepEqual(parseBriefInterpretation(JSON.parse(JSON.stringify(covered)), BRIEFING), covered)
+  assert.throws(() => createBriefInterpretation({ briefingText: BRIEFING, interpreter, directives: [], coverage: [{ topic: 'tone', excerpt: { start: 0, end: 4, text: 'beta' } }] }),
+    (error) => error.code === 'INVALID_ARGUMENT')
+  assert.throws(() => createBriefInterpretation({ briefingText: BRIEFING, interpreter, directives: [],
+    coverage: [{ topic: 'tone', excerpt: excerptOf(BRIEFING, 'beta') }, { topic: 'tone', excerpt: excerptOf(BRIEFING, 'gamma') }] }), (error) => error.code === 'INVALID_ARGUMENT')
+  assert.throws(() => createBriefInterpretation({ briefingText: BRIEFING, interpreter, directives: [], coverage: [{ topic: 'budget', excerpt: excerptOf(BRIEFING, 'beta') }] }),
+    (error) => error.code === 'INVALID_ARGUMENT')
+  // Coverage found changes the request: the Director plans from the request it sealed.
+  assert.notEqual(createEditorialRequest({ briefing: BRIEFING, interpretation: covered }).requestHash, createEditorialRequest({ briefing: BRIEFING, interpretation: plain }).requestHash)
+  // A briefing with text and no interpretation of it is a request nobody read: the Director refuses it, it is not an empty briefing.
+  assert.throws(() => assertBriefingInterpreted(createEditorialRequest({ briefing: BRIEFING })),
+    (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'brief-interpretation-required')
+  assert.doesNotThrow(() => assertBriefingInterpreted(createEditorialRequest({ briefing: BRIEFING, interpretation: plain })))
+  assert.doesNotThrow(() => assertBriefingInterpreted(createEditorialRequest({})))
+  // The audit rides in the brief but is not the request.
+  const brief = { objective: 'discovery', productionBrief: { ownerInput: { text: BRIEFING } }, editorialRequest: { interpretation: plain, interpretationAudit: { schemaVersion: 'brief-interpretation-audit/v1' } } }
+  assert.equal(deriveEditorialRequestFromBrief(brief).requestHash, createEditorialRequest({ briefing: BRIEFING, objective: 'discovery', interpretation: plain }).requestHash)
+})

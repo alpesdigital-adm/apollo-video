@@ -97,6 +97,14 @@ export interface BriefQuestion {
   answer?: string
 }
 
+/** What a briefing may be said to state about itself, beyond directives: the production-brief coverage the interpreter (never a regex) answers. */
+export const BRIEF_COVERAGE_TOPICS = Object.freeze(['audience', 'offer', 'tone'] as const)
+export type BriefCoverageTopic = (typeof BRIEF_COVERAGE_TOPICS)[number]
+export interface BriefCoverageItem {
+  topic: BriefCoverageTopic
+  excerpt: Readonly<BriefExcerpt>
+}
+
 export interface BriefInterpretationV1 {
   schemaVersion: typeof BRIEF_INTERPRETATION_SCHEMA
   /** SHA-256 of the exact briefing text the interpreter read: an interpretation of other text is not this briefing's. */
@@ -105,6 +113,8 @@ export interface BriefInterpretationV1 {
   directives: readonly Readonly<InterpretedDirective>[]
   unsupported: readonly Readonly<UnsupportedBriefItem>[]
   questions: readonly Readonly<BriefQuestion>[]
+  /** The topics the briefing states, each with its words. Present only when the interpreter found one: absent is not 'false'. */
+  coverage?: readonly Readonly<BriefCoverageItem>[]
   interpretationHash: string
 }
 
@@ -199,7 +209,7 @@ function interpretationBody(interpretation: Omit<BriefInterpretationV1, 'interpr
  * the briefing's words (exact offsets and text), every directive is inside the closed vocabulary, and the hashes agree. Fail closed.
  */
 export function parseBriefInterpretation(value: unknown, briefingText: string): Readonly<BriefInterpretationV1> {
-  assertDomain(isRecord(value) && onlyKeys(value, ['schemaVersion', 'briefingSha256', 'interpreter', 'directives', 'unsupported', 'questions', 'interpretationHash']),
+  assertDomain(isRecord(value) && onlyKeys(value, ['schemaVersion', 'briefingSha256', 'interpreter', 'directives', 'unsupported', 'questions', 'coverage', 'interpretationHash']),
     'INVALID_ARGUMENT', 'brief interpretation is malformed')
   assertDomain(value.schemaVersion === BRIEF_INTERPRETATION_SCHEMA, 'INVALID_ARGUMENT', 'brief interpretation schema is unknown')
   assertDomain(value.briefingSha256 === sha256(briefingText), 'INVALID_ARGUMENT', 'brief interpretation was made from other text than this briefing')
@@ -237,10 +247,20 @@ export function parseBriefInterpretation(value: unknown, briefingText: string): 
   })
   const ids = [...directives.map((item) => item.id), ...unsupported.map((item) => item.id), ...questions.map((item) => item.id)]
   assertDomain(new Set(ids).size === ids.length, 'INVALID_ARGUMENT', 'brief interpretation ids repeat')
+  assertDomain(value.coverage === undefined || (Array.isArray(value.coverage) && value.coverage.length >= 1 && value.coverage.length <= BRIEF_COVERAGE_TOPICS.length),
+    'INVALID_ARGUMENT', 'brief interpretation coverage is not a bounded, non-empty list (an interpretation that found none states no coverage)')
+  const coverage = value.coverage === undefined ? undefined : (value.coverage as unknown[]).map((item) => {
+    assertDomain(isRecord(item) && onlyKeys(item, ['topic', 'excerpt']) && typeof item.topic === 'string' && (BRIEF_COVERAGE_TOPICS as readonly string[]).includes(item.topic),
+      'INVALID_ARGUMENT', 'brief coverage item is malformed')
+    return Object.freeze({ topic: item.topic as BriefCoverageTopic, excerpt: parseExcerpt(item.excerpt, briefingText, `coverage ${item.topic}`) })
+  })
+  assertDomain(coverage === undefined || new Set(coverage.map((item) => item.topic)).size === coverage.length, 'INVALID_ARGUMENT', 'brief coverage topics repeat')
   const body = {
     schemaVersion: BRIEF_INTERPRETATION_SCHEMA, briefingSha256: value.briefingSha256 as string,
     interpreter: Object.freeze({ provider: interpreter.provider as string, model: interpreter.model as string, promptVersion: interpreter.promptVersion as string }),
     directives: Object.freeze(directives), unsupported: Object.freeze(unsupported), questions: Object.freeze(questions),
+    // Present only when found: an interpretation that states no coverage hashes exactly as it did before coverage existed.
+    ...(coverage !== undefined ? { coverage: Object.freeze(coverage) } : {}),
   } as const
   assertDomain(value.interpretationHash === calculateCanonicalHash(body), 'INVALID_ARGUMENT', 'brief interpretation hash is inconsistent')
   return Object.freeze({ ...body, interpretationHash: value.interpretationHash as string })
@@ -253,10 +273,12 @@ export function createBriefInterpretation(input: Readonly<{
   directives: readonly Readonly<InterpretedDirective>[]
   unsupported?: readonly Readonly<UnsupportedBriefItem>[]
   questions?: readonly Readonly<BriefQuestion>[]
+  coverage?: readonly Readonly<BriefCoverageItem>[]
 }>): Readonly<BriefInterpretationV1> {
   const body = {
     schemaVersion: BRIEF_INTERPRETATION_SCHEMA, briefingSha256: sha256(input.briefingText), interpreter: input.interpreter,
     directives: input.directives, unsupported: input.unsupported ?? [], questions: input.questions ?? [],
+    ...(input.coverage !== undefined && input.coverage.length > 0 ? { coverage: input.coverage } : {}),
   }
   return parseBriefInterpretation({ ...JSON.parse(JSON.stringify(body)) as object, interpretationHash: calculateCanonicalHash(JSON.parse(JSON.stringify(body))) }, input.briefingText)
 }
@@ -319,7 +341,8 @@ export function deriveEditorialRequestFromBrief(brief: Readonly<Record<string, u
   const briefing = typeof ownerInput?.text === 'string' && ownerInput.text.trim().length > 0 ? ownerInput.text : undefined
   const objective = typeof brief.objective === 'string' ? resolveStrategicObjective(brief.objective).id : undefined
   const structured = isRecord(brief.editorialRequest) ? brief.editorialRequest : {}
-  assertDomain(onlyKeys(structured, ['directives', 'variantOverrides', 'interpretation']), 'PERSISTENCE_CONFLICT', 'Stored editorial request is malformed')
+  // `interpretationAudit` is the record of the interpreter's call (prompt and response hashes, cost): evidence, never part of the request.
+  assertDomain(onlyKeys(structured, ['directives', 'variantOverrides', 'interpretation', 'interpretationAudit', 'revision']), 'PERSISTENCE_CONFLICT', 'Stored editorial request is malformed')
   return createEditorialRequest({
     ...(briefing !== undefined ? { briefing } : {}),
     ...(objective !== undefined ? { objective } : {}),
@@ -328,5 +351,57 @@ export function deriveEditorialRequestFromBrief(brief: Readonly<Record<string, u
     ...(structured.variantOverrides !== undefined ? { variantOverrides: structured.variantOverrides as Record<string, readonly EditorialDirective[]> } : {}),
     ...(structured.interpretation !== undefined ? { interpretation: structured.interpretation } : {}),
     requestedRemovals,
+  })
+}
+
+export const BRIEF_INTERPRETATION_REQUIRED_REASON = 'brief-interpretation-required' as const
+/** The Director refuses a request with an unsupported item or an open question (the details name them; the reason is the published code). */
+export const EDITORIAL_REQUEST_BLOCKED_REASON = 'editorial-request-blocked' as const
+/** No interpreter is configured on this deployment, so a briefing with text cannot be read. */
+export const BRIEF_INTERPRETER_UNAVAILABLE_REASON = 'brief-interpreter-unavailable' as const
+/** The `reason` codes the public error envelope publishes for the editorial request (PRECONDITION_REQUIRED). */
+export const EDITORIAL_REQUEST_PUBLISHED_REASONS = Object.freeze([BRIEF_INTERPRETATION_REQUIRED_REASON, EDITORIAL_REQUEST_BLOCKED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON] as const)
+
+/**
+ * A briefing with text and no interpretation of exactly that text is NOT an empty briefing: it is a request nobody has read. The Director
+ * refuses it instead of planning over it in silence; the way forward is the `revise-editorial-request` Command, which interprets the
+ * briefing (and fails closed when no interpreter is configured). An interpretation of other text never reaches this point: the request
+ * constructor refuses it.
+ */
+export function assertBriefingInterpreted(request: Readonly<EditorialRequestV1>): void {
+  assertDomain(request.briefing === undefined || request.interpretation !== undefined, 'PRECONDITION_REQUIRED',
+    'The briefing of this project has not been interpreted; revise the editorial request (apollo.projects.editorial-request.revise) so it is read before a plan is made',
+    { reason: BRIEF_INTERPRETATION_REQUIRED_REASON, briefingSha256: request.briefing?.sha256 })
+}
+
+/**
+ * The owner answers questions the interpretation left open. The answer is the owner's own statement, recorded on the question; it does not
+ * become a directive by itself (a decision that must change the plan is a structured directive of the same revision). Only an OPEN question
+ * of THIS interpretation can be answered, once; a question that is not there (the briefing changed, so it was read again) is not answerable.
+ */
+export function answerBriefQuestions(
+  interpretation: Readonly<BriefInterpretationV1>,
+  briefingText: string,
+  answers: readonly Readonly<{ questionId: string; answer: string }>[],
+): Readonly<BriefInterpretationV1> {
+  assertDomain(Array.isArray(answers) && answers.length >= 1 && answers.length <= MAX_DIRECTIVES, 'INVALID_ARGUMENT', 'answers must be a bounded, non-empty list')
+  const byId = new Map<string, string>()
+  for (const item of answers) {
+    assertDomain(isRecord(item) && onlyKeys(item, ['questionId', 'answer']) && typeof item.questionId === 'string' && typeof item.answer === 'string',
+      'INVALID_ARGUMENT', 'answer is malformed')
+    const answer = item.answer.replace(/\s+/gu, ' ').trim()
+    assertDomain(answer.length >= 1 && answer.length <= 500, 'INVALID_ARGUMENT', 'answer must contain 1 to 500 characters')
+    assertDomain(!byId.has(item.questionId), 'INVALID_ARGUMENT', 'a question is answered once')
+    byId.set(item.questionId, answer)
+  }
+  for (const id of byId.keys()) {
+    const question = interpretation.questions.find((item) => item.id === id)
+    assertDomain(question !== undefined && question.status === 'open', 'INVALID_ARGUMENT', 'only an open question of the current interpretation can be answered', { questionId: id })
+  }
+  return createBriefInterpretation({
+    briefingText, interpreter: interpretation.interpreter, directives: interpretation.directives, unsupported: interpretation.unsupported,
+    questions: interpretation.questions.map((question) => byId.has(question.id)
+      ? Object.freeze({ ...question, status: 'answered' as const, answer: byId.get(question.id)! }) : question),
+    ...(interpretation.coverage ? { coverage: interpretation.coverage } : {}),
   })
 }

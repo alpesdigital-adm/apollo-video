@@ -253,7 +253,7 @@ function request(overrides = {}) {
     workspaceId: 'workspace-1',
     name: '  Campanha   Julho  ',
     objective: 'discovery',
-    briefing: 'Público: gestores. Oferta: conteúdo. Tom: direto e natural.',
+    briefing: 'alpha beta gamma',
     actor: actor(),
     idempotencyKey: idempotency?.key ?? 'create-project-1',
     ...fields,
@@ -294,10 +294,13 @@ test('create project persists an initial version and immutable snapshots', async
   assert.equal(version.snapshotRefs.editPlan, repository.lastBundle.snapshots[1].id)
   const brief = JSON.parse(repository.lastBundle.snapshots[0].contentJson)
   assert.equal(brief.productionBrief.ownerInput.trust, 'owner-authorized')
+  // Creation reads nothing of the briefing: what it covers is answered by the interpretation (revise-editorial-request), so the brief makes no
+  // claim about audience, offer or tone until a reading exists.
   assert.deepEqual(brief.productionBrief.summary.coverage, {
-    audience: true, offer: true, tone: true,
+    audience: false, offer: false, tone: false,
   })
   assert.deepEqual(brief.productionBrief.assumptions, [])
+  assert.equal(brief.editorialRequest, undefined)
   assert.equal(brief.outputSpec, undefined)
   assert.equal(brief.objective, 'discovery')
   assert.deepEqual(
@@ -323,20 +326,18 @@ test('create project persists an initial version and immutable snapshots', async
   assert.equal(repository.lastBundle.auditCommand.commandHash.length, 64)
 })
 
-test('create project persists partial and absent briefing as explicit non-generating states', async () => {
+test('create project persists an unread and an absent briefing as explicit non-generating states', async () => {
   const partialFixture = createFixture()
   await partialFixture.service(request({
-    briefing: 'Público: equipes de marketing.',
+    briefing: 'alpha',
   }))
   const partial = JSON.parse(
     partialFixture.repository.lastBundle.snapshots[0].contentJson,
   ).productionBrief
   assert.deepEqual(partial.summary.coverage, {
-    audience: true, offer: false, tone: false,
+    audience: false, offer: false, tone: false,
   })
-  assert.deepEqual(partial.assumptions, [
-    'offer-not-specified', 'tone-not-specified',
-  ])
+  assert.deepEqual(partial.assumptions, [])
   assert.equal(partial.readyForExpensiveGeneration, false)
 
   const absentFixture = createFixture()
