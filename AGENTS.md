@@ -309,14 +309,20 @@ Estas regras são vinculantes para agentes, scripts manuais e CI:
     remove o diretório efêmero. Antes de um build, confirmar que não existe
     processo dono do arquivo; nunca contornar um handle ativo apagando o log.
 
-## Projeto real usado como E2E de recuperação
+## Caso de teste de regressão: E2E de recuperação do master da Imersão
 
-O primeiro E2E deve usar o master bruto já preservado do projeto de boas-vindas da Imersão.
+Esta seção descreve **um caso de teste de regressão**, não uma regra do produto. O primeiro E2E usa o master bruto já preservado do projeto de boas-vindas da Imersão.
 
-Critérios obrigatórios:
+**Regra geral, sem exceção:** conteúdo de um vídeo de teste (frases, datas, timestamps, nomes, CTA, número de cortes) nunca entra no produto — nem como regra, default, valor de substituição ou exemplo de API. O Apollo edita conforme o pedido de cada vídeo; esse conteúdo só pode existir em `tests/`.
+
+Específico deste caso (o pedido que o teste envia como Command `remove-spoken-content`; vive em `tests/v2/helpers/recovery-master-regression-case.mjs`):
+
+- remover todas as falas que mencionem as datas “31 de janeiro” e “1 de fevereiro”, além de referências à duração de dois dias/dois dias de aula;
+- timestamps antigos (36,66–58,24 e 86,58–87,76) podem ajudar a localizar as falas no master, mas não são fonte de verdade. O ingest V2 deve gerar e validar seu próprio alinhamento.
+
+Critérios editoriais gerais exercitados pelo mesmo E2E (o dono ainda vai decidir quais viram regra do produto; aqui não são rotulados como “do teste”):
 
 - informar e respeitar briefing e formato antes da direção;
-- remover todas as falas que mencionem as datas “31 de janeiro” e “1 de fevereiro”, além de referências à duração de dois dias/dois dias de aula;
 - preservar sentido e continuidade do discurso após os cortes;
 - esconder cortes difíceis com decisão editorial justificável, não efeito gratuito;
 - não aplicar zoom, pan, tilt ou punch-in sem razão registrada pelo Diretor;
@@ -326,8 +332,6 @@ Critérios obrigatórios:
 - produzir MP4 final assistível;
 - executar as alterações pela API nova e registrar Commands/DirectorRun/QualityReport;
 - revisar o MP4 antes de declarar o teste concluído.
-
-Timestamps antigos como 36,66–58,24 e 86,58–87,76 podem ajudar a localizar as falas no master, mas não são fonte de verdade. O ingest V2 deve gerar e validar seu próprio alinhamento.
 
 ## Segurança para reset e remoção
 
