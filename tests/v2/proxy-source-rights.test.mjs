@@ -204,7 +204,7 @@ for (const method of ['attachCompletedOutput', 'attachCompletedSnapshotOutput'])
 }
 
 // Admission retries open a new Serializable transaction, never reinterpret an error message.
-test('inline admission retries only P2034/raw 40001 and exhausts after three attempts', async () => {
+test('inline admission retries only P2034/raw 40001 and exhausts after three attempts (zero-wait schedule: three attempts)', async () => {
   const { createQueuedPublicOperation, startPublicOperationAttempt, advancePublicOperationPhase, succeedPublicOperation } =
     await import('../../src/v2/domain/public-operation.ts')
   const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')

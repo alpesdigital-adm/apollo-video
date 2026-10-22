@@ -9,7 +9,14 @@ import { createExternalAuditContext } from '../../src/v2/application/authenticat
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { PrismaApiClientRepository } from '../../src/v2/infrastructure/prisma/api-client-repository.ts'
 import { PrismaContaminationReportRepository } from '../../src/v2/infrastructure/prisma/contamination-report-repository.ts'
+import { PrismaEvidenceSegmentRepository } from '../../src/v2/infrastructure/prisma/evidence-segment-repository.ts'
+import { PrismaMusicAnalysisRunRepository } from '../../src/v2/infrastructure/prisma/music-analysis-run-repository.ts'
+import { PrismaPerceptionTimelineRepository } from '../../src/v2/infrastructure/prisma/perception-timeline-repository.ts'
+import { PrismaReviewPatchBatchRepository } from '../../src/v2/infrastructure/prisma/review-patch-batch-repository.ts'
+import { PrismaReviewPatchRepository } from '../../src/v2/infrastructure/prisma/review-patch-repository.ts'
+import { PrismaSpeechSegmentCatalogRepository } from '../../src/v2/infrastructure/prisma/speech-segment-catalog-repository.ts'
 import {
+  DEFAULT_IDEMPOTENCY_WINNER_WAIT,
   awaitCommittedIdempotencyWinner,
   configureIdempotencyWinnerWait,
   pauseBeforeLostRaceRetry,
@@ -389,4 +396,208 @@ test('api credential rotate: the P2034 loser replays or reports a mismatch again
     )
     assert.deepEqual(wait.sleeps, [1, 2, 3, 4])
   })
+})
+
+// -------------------------------------------------------------------------------------------------------------------
+// Production budget: pinned so a change of schedule or attempt count is a deliberate edit of this test
+// -------------------------------------------------------------------------------------------------------------------
+
+test('the production lost-race schedule is 25..800 ms, 1.575 s in total, seven attempts for the pause loops', async () => {
+  assert.deepEqual([...DEFAULT_IDEMPOTENCY_WINNER_WAIT.delaysMs], [25, 50, 100, 200, 400, 800])
+  assert.equal(DEFAULT_IDEMPOTENCY_WINNER_WAIT.delaysMs.reduce((total, ms) => total + ms, 0), 1575)
+  const spent = []
+  const wait = { delaysMs: DEFAULT_IDEMPOTENCY_WINNER_WAIT.delaysMs, async sleep(ms) { spent.push(ms) } }
+  let attempts = 1
+  while (await pauseBeforeLostRaceRetry(attempts, wait)) attempts += 1
+  assert.equal(attempts, 7)
+  assert.deepEqual(spent, [25, 50, 100, 200, 400, 800])
+  // The winner wait reads once, then once after each delay: seven reads in the same 1.575 s.
+  let reads = 0
+  assert.equal(await awaitCommittedIdempotencyWinner(async () => { reads += 1; return null }, { delaysMs: wait.delaysMs, async sleep() {} }), null)
+  assert.equal(reads, 7)
+})
+
+// -------------------------------------------------------------------------------------------------------------------
+// Catalogs whose exhausted-P2034 throw used to sit before the reconcile block (evidence segment, speech segment catalog)
+// -------------------------------------------------------------------------------------------------------------------
+
+const catalogRecord = () => ({
+  workspaceId: 'workspace-1', projectId: 'project-1', idempotencyKey: 'race-1', requestFingerprint: 'a'.repeat(64),
+  authenticationAudit: { contextHash: 'c'.repeat(64) },
+})
+
+for (const [label, Repository] of [
+  ['evidence segment', PrismaEvidenceSegmentRepository],
+  ['speech segment catalog', PrismaSpeechSegmentCatalogRepository],
+]) {
+  test(`${label}: an exhausted P2034 loser meets the late-committed winner (replay, mismatch, none)`, async () => {
+    for (const [name, invisibleReads, winnerFingerprint, expected] of [
+      ['replay', 2, 'a'.repeat(64), 'replayed'],
+      ['mismatch', 2, 'b'.repeat(64), 'IDEMPOTENCY_PAYLOAD_MISMATCH'],
+      ['none', Number.MAX_SAFE_INTEGER, 'a'.repeat(64), 'PERSISTENCE_CONFLICT'],
+    ]) {
+      const wait = recordingWait()
+      const restore = configureIdempotencyWinnerWait(wait)
+      try {
+        let attempts = 0
+        let reads = 0
+        const repository = new Repository({ async $transaction() { attempts += 1; throw p2034() } })
+        repository.findIdempotent = async () => (++reads > invisibleReads ? { requestFingerprint: winnerFingerprint, id: 'winner' } : null)
+        const result = await repository.persist(catalogRecord()).then((value) => value, (error) => error)
+        if (expected === 'replayed') {
+          assert.equal(result.replayed, true, name)
+        } else {
+          assert.ok(result instanceof DomainError, `${name}: ${String(result?.message)}`)
+          assert.equal(result.code, expected, name)
+        }
+        assert.equal(attempts, 3, name)
+        assert.deepEqual(wait.sleeps, name === 'none' ? [1, 2, 3, 4] : [1, 2], name)
+      } finally {
+        restore()
+      }
+    }
+  })
+}
+
+// -------------------------------------------------------------------------------------------------------------------
+// Review patch and review batch: a lost-race loser is a replay; another payload is a mismatch, not a conflict
+// -------------------------------------------------------------------------------------------------------------------
+
+function reviewCommit(type) {
+  return {
+    bundle: {
+      origin: {
+        kind: 'child-command',
+        command: { type, id: 'command-1', baseVersionId: 'version-0' },
+        audit: { contextHash: 'c'.repeat(64) },
+        requestFingerprint: 'f'.repeat(64),
+      },
+      version: { commandId: 'command-1', parentVersionId: 'version-0', workspaceId: 'workspace-1', projectId: 'project-1' },
+    },
+    proposalId: 'proposal-1',
+    batchId: 'batch-1',
+    applyIdempotencyKey: 'apply-1',
+    applyRequestFingerprint: 'a'.repeat(64),
+    event: {}, comparison: {}, impact: {},
+  }
+}
+
+for (const [label, Repository, commandType] of [
+  ['review patch', PrismaReviewPatchRepository, 'apply-review-patch'],
+  ['review batch', PrismaReviewPatchBatchRepository, 'apply-review-patch-batch'],
+]) {
+  test(`${label}: a P2034 loser is a replay (replayed: true) and reads the winner through the bounded wait`, async () => {
+    const wait = recordingWait()
+    const restore = configureIdempotencyWinnerWait(wait)
+    try {
+      let transactions = 0
+      let reads = 0
+      const optionsSeen = []
+      const repository = new Repository({ async $transaction() { transactions += 1; throw p2034() } })
+      repository.readAppliedResult = async (_input, options) => {
+        reads += 1
+        optionsSeen.push(options)
+        // three pre-checks (one per Serializable attempt), then the reconcile reads: two empty, the third sees the winner
+        return reads > 5 ? { applied: true } : null
+      }
+      const result = await repository.commitOrReplay(reviewCommit(commandType))
+      assert.equal(result.replayed, true)
+      assert.equal(transactions, 3)
+      assert.deepEqual(wait.sleeps, [1, 2])
+      assert.deepEqual(optionsSeen.slice(0, 3).map((options) => options?.rejectFingerprintMismatch), [undefined, undefined, undefined], 'the sequential pre-check keeps returning null on a fingerprint mismatch')
+      assert.deepEqual(optionsSeen.slice(3).map((options) => options?.rejectFingerprintMismatch), [true, true, true])
+    } finally {
+      restore()
+    }
+  })
+
+  test(`${label}: readAppliedResult throws IDEMPOTENCY_PAYLOAD_MISMATCH against another payload only when asked`, async () => {
+    const row = {
+      id: 'x', status: 'applied', applyIdempotencyKey: 'apply-1', applyRequestFingerprint: 'b'.repeat(64),
+      resultVersion: { command: {} }, comparisonJson: '{}',
+    }
+    const client = { v2ReviewPatchProposal: { async findFirst() { return row } }, v2ReviewPatchBatch: { async findFirst() { return row } } }
+    const repository = new Repository(client)
+    const input = {
+      workspaceId: 'workspace-1', projectId: 'project-1', proposalId: 'proposal-1', batchId: 'batch-1',
+      applyIdempotencyKey: 'apply-1', applyRequestFingerprint: 'a'.repeat(64), actorContextHash: 'c'.repeat(64),
+    }
+    assert.equal(await repository.readAppliedResult(input), null)
+    await assert.rejects(
+      repository.readAppliedResult(input, { rejectFingerprintMismatch: true }),
+      (error) => error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
+    assert.equal(await repository.readAppliedResult({ ...input, applyIdempotencyKey: 'other' }, { rejectFingerprintMismatch: true }), null)
+  })
+}
+
+// -------------------------------------------------------------------------------------------------------------------
+// Pause loops and whole-transaction retries
+// -------------------------------------------------------------------------------------------------------------------
+
+test('perception timeline (pause loop): the loser keeps retrying through the schedule and ends on the winner', async () => {
+  const wait = recordingWait()
+  const restore = configureIdempotencyWinnerWait(wait)
+  try {
+    let attempts = 0
+    const repository = new PrismaPerceptionTimelineRepository({
+      async $transaction() { attempts += 1; if (attempts <= 4) throw p2034(); return { timeline: { id: 'winner' }, replayed: true } },
+    })
+    const result = await repository.persist({ workspaceId: 'w', projectId: 'p', idempotencyKey: 'k' })
+    assert.equal(result.replayed, true)
+    assert.equal(attempts, 5, 'more than the former three immediate attempts')
+    assert.deepEqual(wait.sleeps, [1, 2, 3, 4])
+  } finally {
+    restore()
+  }
+})
+
+test('perception timeline (pause loop): PERSISTENCE_CONFLICT only after the whole schedule', async () => {
+  const wait = recordingWait()
+  const restore = configureIdempotencyWinnerWait(wait)
+  try {
+    let attempts = 0
+    const repository = new PrismaPerceptionTimelineRepository({ async $transaction() { attempts += 1; throw p2034() } })
+    await assert.rejects(
+      repository.persist({ workspaceId: 'w', projectId: 'p', idempotencyKey: 'k' }),
+      (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+    )
+    assert.equal(attempts, 5, 'the first attempt plus one per delay')
+    assert.deepEqual(wait.sleeps, [1, 2, 3, 4])
+  } finally {
+    restore()
+  }
+})
+
+test('music analysis run (whole-transaction retry): a lost race re-runs the transaction and meets the committed winner', async () => {
+  const wait = recordingWait()
+  const restore = configureIdempotencyWinnerWait(wait)
+  try {
+    let attempts = 0
+    const repository = new PrismaMusicAnalysisRunRepository({
+      async $transaction() { attempts += 1; if (attempts < 3) throw p2002(); return { run: { id: 'winner' }, replayed: true } },
+    })
+    const result = await repository.create({})
+    assert.equal(result.replayed, true)
+    assert.equal(attempts, 3)
+    assert.deepEqual(wait.sleeps, [1, 2])
+  } finally {
+    restore()
+  }
+})
+
+test('music analysis run (whole-transaction retry): PERSISTENCE_CONFLICT only after the schedule is spent', async () => {
+  const wait = recordingWait()
+  const restore = configureIdempotencyWinnerWait(wait)
+  try {
+    let attempts = 0
+    const repository = new PrismaMusicAnalysisRunRepository({ async $transaction() { attempts += 1; throw p2034() } })
+    await assert.rejects(
+      repository.create({}),
+      (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+    )
+    assert.equal(attempts, 5)
+  } finally {
+    restore()
+  }
 })

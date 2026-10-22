@@ -517,7 +517,7 @@ test('project duplication replays before source reads and rejects another creden
   )
 })
 
-test('project creation retries serialization conflicts before returning an explicit conflict', async () => {
+test('project creation retries serialization conflicts before returning an explicit conflict (zero-wait schedule: three attempts)', async () => {
   const { repository, service } = createFixture()
   await service(request())
   let attempts = 0

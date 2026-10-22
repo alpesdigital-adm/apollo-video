@@ -338,7 +338,7 @@ test('Creation2 base authority uses a declared new wrapper and does not reinterp
   bad.version.baseHash=createHash('sha256').update(bad.outputBaseHashJson).digest('hex')
   assert.throws(()=>validateCreationOutputVersionBundleV2(bad),e=>e.code==='INVALID_PROJECT_VERSION')
 })
-test('Creation2 transaction retry recognizes only P2034 or raw P2010 SQLSTATE40001 and exhausts at three',async()=>{
+test('Creation2 transaction retry recognizes only P2034 or raw P2010 SQLSTATE40001 and exhausts at three (zero-wait schedule: three attempts)',async()=>{
   const proposal=isolatedCreation2Root()
   for(const [label,error,attempts] of [
     ['Prisma serialization',{code:'P2034'},3],['raw serialization',{code:'P2010',meta:{code:'40001'}},3],

@@ -2140,12 +2140,6 @@ implements MulticamLongformGateRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.persist(gate, authenticationAudit, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2034')) {
-        throw new DomainError(
-          'PERSISTENCE_CONFLICT',
-          'multicam long-form gate conflicted with another transaction',
-        )
-      }
       if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
         const replay = await reconcileAfterConflict(
           error,
@@ -2165,6 +2159,12 @@ implements MulticamLongformGateRepository {
           }
           return Object.freeze({ gate: replay, replayed: true })
         }
+      }
+      if (isPrismaCode(error, 'P2034')) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'multicam long-form gate conflicted with another transaction',
+        )
       }
       throw error
     }

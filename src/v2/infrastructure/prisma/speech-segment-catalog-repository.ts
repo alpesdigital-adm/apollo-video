@@ -597,12 +597,6 @@ implements SpeechSegmentCatalogRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.persist(run, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2034')) {
-        throw new DomainError(
-          'PERSISTENCE_CONFLICT',
-          'Speech catalog conflicted with another transaction',
-        )
-      }
       if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
         const replay = await reconcileAfterConflict(
           error,
@@ -628,6 +622,12 @@ implements SpeechSegmentCatalogRepository {
         throw new DomainError(
           'PERSISTENCE_CONFLICT',
           'Speech catalog active-run transition conflicted with another transaction',
+        )
+      }
+      if (isPrismaCode(error, 'P2034')) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Speech catalog conflicted with another transaction',
         )
       }
       throw error

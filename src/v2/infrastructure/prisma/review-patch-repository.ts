@@ -297,13 +297,18 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
     return context ? Object.freeze({ ...context, proposal: hydrateReviewPatchProposal(row) }) : null
   }
 
-  async readAppliedResult(input: { workspaceId: string; projectId: string; proposalId: string; applyIdempotencyKey: string; applyRequestFingerprint: string; actorContextHash: string }): Promise<Readonly<ReviewPatchApplyResult> | null> {
+  async readAppliedResult(input: { workspaceId: string; projectId: string; proposalId: string; applyIdempotencyKey: string; applyRequestFingerprint: string; actorContextHash: string }, options: { rejectFingerprintMismatch?: boolean } = {}): Promise<Readonly<ReviewPatchApplyResult> | null> {
     const proposal = await this.client.v2ReviewPatchProposal.findFirst({
       where: { id: input.proposalId, workspaceId: input.workspaceId, projectId: input.projectId },
       include: { renderOperation: true, resultVersion: { include: { editPlanSnapshot: true, command: { include: { artifactInvalidations: true } } } } },
     })
     if (!proposal || proposal.status !== 'applied' || !proposal.resultVersion || !proposal.resultVersion.command || !proposal.comparisonJson) return null
-    if (proposal.applyIdempotencyKey !== input.applyIdempotencyKey || proposal.applyRequestFingerprint !== input.applyRequestFingerprint) return null
+    if (proposal.applyIdempotencyKey !== input.applyIdempotencyKey) return null
+    if (proposal.applyRequestFingerprint !== input.applyRequestFingerprint) {
+      // A lost race meeting a winner that used this key for another request must answer like a sequential duplicate.
+      if (options.rejectFingerprintMismatch) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different review patch apply request')
+      return null
+    }
     const commandRow = proposal.resultVersion.command
     if (hydrateEditCommandExternalActorAudit(commandRow).contextHash !== input.actorContextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Review patch replay belongs to another authentication context')
     const payload = parseJson<Record<string, unknown>>(commandRow.payloadJson, 'review patch command payload')
@@ -438,9 +443,10 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
       if (!isPrismaCode(error, 'P2002') && !isPrismaCode(error, 'P2034')) throw error
       lostRace = error
     }
-    const result = await reconcileAfterConflict(lostRace, () => this.readAppliedResult({ workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId, proposalId: bundle.proposalId, applyIdempotencyKey: bundle.applyIdempotencyKey, applyRequestFingerprint: bundle.applyRequestFingerprint, actorContextHash: bundle.authenticationAudit.contextHash }))
+    const result = await reconcileAfterConflict(lostRace, () => this.readAppliedResult({ workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId, proposalId: bundle.proposalId, applyIdempotencyKey: bundle.applyIdempotencyKey, applyRequestFingerprint: bundle.applyRequestFingerprint, actorContextHash: bundle.authenticationAudit.contextHash }, { rejectFingerprintMismatch: true }))
     if (!result) throw new DomainError('PERSISTENCE_CONFLICT', 'Applied review patch could not be reconstructed')
-    return Object.freeze({ ...result, replayed: false })
+    // A lost race answers like a sequential duplicate (replayed); the committer's own readback is not a replay.
+    return Object.freeze({ ...result, replayed: lostRace !== null })
   }
 
   async attachRenderOperation(input: { workspaceId: string; projectId: string; proposalId: string; renderOperationId: string }) {

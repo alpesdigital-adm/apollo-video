@@ -1024,7 +1024,7 @@ test('webhook subscription creation retries serialization conflicts before faili
   assert.equal(attempts, 3)
 })
 
-test('webhook signing secret provisioning retries serialization conflicts', async () => {
+test('webhook signing secret provisioning retries serialization conflicts (zero-wait schedule: three attempts)', async () => {
   const endpointId = '00000000-0000-4000-8000-000000000130'
   const secretId = '00000000-0000-4000-8000-000000000133'
   const baseRevision = 'd'.repeat(64)
@@ -2495,7 +2495,7 @@ test('webhook replay service binds client and delivery into required idempotency
   )
 })
 
-test('webhook delivery replay retries serialization conflicts before failing explicitly', async () => {
+test('webhook delivery replay retries serialization conflicts before failing explicitly (zero-wait schedule: three attempts)', async () => {
   let attempts = 0
   const repository = new PrismaWebhookDeliveryRepository({
     v2IdempotencyRecord: { async findUnique() { return null } },
@@ -2653,7 +2653,7 @@ test('webhook event replay service binds the exact event and bounded batch into 
   )
 })
 
-test('webhook event replay retries serialization conflicts before failing explicitly', async () => {
+test('webhook event replay retries serialization conflicts before failing explicitly (zero-wait schedule: three attempts)', async () => {
   let attempts = 0
   const repository = new PrismaWebhookEventReplayRepository({
     v2IdempotencyRecord: { async findUnique() { return null } },

@@ -824,7 +824,7 @@ test('PublicOperation queue invariants fail closed and presenter omits execution
   )
 })
 
-test('PublicOperation creation retries serialization conflicts before failing explicitly', async () => {
+test('PublicOperation creation retries serialization conflicts before failing explicitly (zero-wait schedule: three attempts)', async () => {
   const operation = createQueuedPublicOperation({
     id: 'operation-serialization-retry-1',
     workspaceId: 'workspace-serialization-retry-1',
@@ -1718,7 +1718,7 @@ test('asset rights and consent are immutable, content-addressed and fail closed'
   )
 })
 
-test('asset rights persistence retries serialization conflicts before failing explicitly', async () => {
+test('asset rights persistence retries serialization conflicts before failing explicitly (zero-wait schedule: three attempts)', async () => {
   let attempts = 0
   const repository = new PrismaAssetRightsRepository({
     async $transaction() {
@@ -1888,7 +1888,7 @@ test('materialization authorization evaluates every RenderInput asset and record
   )
 })
 
-test('materialization authorization retries serialization conflicts before failing explicitly', async () => {
+test('materialization authorization retries serialization conflicts before failing explicitly (zero-wait schedule: three attempts)', async () => {
   const authorization = createMaterializationAuthorization({
     id: 'authorization-serialization-retry-1',
     workspaceId: 'workspace-serialization-retry-1',

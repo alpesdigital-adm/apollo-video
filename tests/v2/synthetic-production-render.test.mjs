@@ -346,7 +346,7 @@ function renderWorkerFixture() {
   return { plan, spec, context, claimed, runtimeIdentity }
 }
 
-test('public operation persistence resolves the protected payload cipher only for synthetic renders', async () => {
+test('public operation persistence resolves the protected payload cipher only for synthetic renders (zero-wait schedule: three attempts)', async () => {
   let cipherResolutionCount = 0
   const missingCipher = () => {
     cipherResolutionCount += 1
