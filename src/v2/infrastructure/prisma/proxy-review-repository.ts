@@ -538,7 +538,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
       where: { id: decision.proxyReviewId },
     })
     if (!review) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy review decision lost its review')
-    return Object.freeze({ review: hydrateProxyReview(review), decision: hydrateDecision(decision), replayed: true })
+    return Object.freeze({ review: await withCarriedFrom(this.client, review), decision: hydrateDecision(decision), replayed: true })
   }
 
   async acknowledgeWarnings(
