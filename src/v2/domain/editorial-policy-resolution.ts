@@ -1,6 +1,7 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain, DomainError } from './errors.ts'
 import {
+  createEditorialRequest,
   EDITORIAL_EXECUTABLE_VALUES,
   type EditorialDirective,
   type EditorialDirectiveKind,
@@ -142,6 +143,8 @@ export interface EditorialMediaContext {
   hasSelectedInsert: boolean
   /** Source frame aspect, `W:H` (absent: unknown). */
   sourceAspectRatio?: string
+  /** Seconds, on the timeline, at which the first sentence of the speech ends (absent: the speech shows none). */
+  firstSentenceEndSeconds?: number
   /**
    * The caption style a project override (or the workspace Guardrail it inherits) fixed, as the policy snapshot resolved it. `project-none`
    * and an inherited nothing are absent here: they name no style.
@@ -161,9 +164,8 @@ export interface EditorialOutputSpec {
   subtitleMode?: CaptionDeliveryMode
 }
 
-// The values the planner of the earlier waves still applies where the request is silent (rule `carried-planner-value`). ADR-160 F4 derives
-// the opening, F5 the structure and the CTA window.
-const CARRIED_OPENING_SECONDS = 4
+// The values the planner of the earlier waves still applies where the request is silent (rule `carried-planner-value`). ADR-160 F5 derives
+// the structure and the CTA window.
 const CARRIED_CTA_WINDOW_SECONDS = 3
 // The caption style the renderer registry designates for an output that must draw captions when nothing else names one (rule `renderer-baseline`).
 export const RENDERER_BASELINE_CAPTION_PRESET: SubtitlePresetId = 'clean-color'
@@ -301,15 +303,38 @@ export function resolveEditorialPolicies(
       'The request does not mention camera movement and none was observed in the source as needed. Nothing that was not asked for is added: no zoom, punch-in, pan, tilt or parallax.')
     : requested(request, builder, 'movement', movementSelection, { mode: 'none' as const }, 'No camera movement is applied.', { mode: 'none' as const })
 
-  // Opening. Without movement there is no motion to protect an opening from; the plan contract of this planner version still carries a
-  // protected window, which is recorded as carried, never as the request's.
+  // Opening. The window an opening keeps out of automatic motion exists only to protect it from a movement; with no movement applied there is
+  // nothing to protect it from. A request that names a window gets exactly that window (from its seconds, or from the end of the first sentence of
+  // the speech); one that says none, and silence, get no window.
   const openingSelection = select(request, outputSpec, 'opening')
-  const opening: EditorialPolicies['opening'] = openingSelection === undefined
-    ? silent(request, 'opening', { mode: 'protected-window' as const, seconds: CARRIED_OPENING_SECONDS }, 'carried-planner-value',
-      `The request does not mention the opening. No movement is applied, so there is no motion to keep out of it. The plan contract of this planner version still carries a protected opening window of ${CARRIED_OPENING_SECONDS} s; it is recorded here as a carried planner value (to be removed in ADR-160 F4), not as a request.`)
-    : requested(request, builder, 'opening', openingSelection, { mode: 'protected-window' as const, seconds: CARRIED_OPENING_SECONDS },
-      `The opening is left as the source has it; the plan contract of this planner version still carries a protected window of ${CARRIED_OPENING_SECONDS} s`,
-      { mode: 'protected-window' as const, seconds: CARRIED_OPENING_SECONDS })
+  const noWindow = { mode: 'not-applicable' as const }
+  let opening: EditorialPolicies['opening']
+  if (openingSelection === undefined) {
+    opening = silent(request, 'opening', noWindow, 'minimal-intervention',
+      'The request does not mention the opening. No movement is applied, so there is no motion to keep out of it: there is no opening window to protect.')
+  } else {
+    const directive = openingSelection.directive
+    let value: EditorialPolicies['opening']['value'] = noWindow
+    let effect = 'No opening window is protected'
+    if (directive.value === 'protect-seconds') {
+      value = { mode: 'protected-window' as const, seconds: Number(directive.param) }
+      effect = `The first ${String(directive.param)} s are kept out of automatic motion`
+    } else if (directive.value === 'protect-first-sentence') {
+      if (mediaContext.firstSentenceEndSeconds !== undefined) {
+        value = { mode: 'protected-window' as const, seconds: mediaContext.firstSentenceEndSeconds }
+        effect = `The first sentence of the speech (up to ${mediaContext.firstSentenceEndSeconds} s) is kept out of automatic motion`
+      } else {
+        openQuestions.push(Object.freeze({
+          id: 'opening-first-sentence-unknown',
+          question: 'The request protects the first sentence of the speech, and the speech shows no end of a first sentence. Until what second should the opening be protected?',
+          source: 'resolution' as const,
+        }))
+        effect = 'The first sentence cannot be located in the speech, so no window is applied until the question is answered'
+      }
+    }
+    opening = requested(request, builder, 'opening', openingSelection, value, effect, noWindow,
+      ...(mediaContext.transcriptId ? [`transcript:${mediaContext.transcriptId}`] : []))
+  }
 
   // Structure. Silence: the source order is kept (nothing reorders). The roles the story plan names by position are the planner's.
   const structureSelection = select(request, outputSpec, 'structure')
@@ -543,10 +568,28 @@ export function protectedOpeningSeconds(policy: EditorialPolicies['opening']): n
   return policy.value.mode === 'protected-window' ? policy.value.seconds : 0
 }
 
-/** `automaticZoom` of a plan under the movement policy: the only executable movement is none. */
-export function automaticZoomUnderPolicy(policy: EditorialPolicies['movement']): false {
+/**
+ * `automaticZoom` of a plan under the movement policy. The renderer executes no effect, so the only movement a plan can carry is none; a
+ * movement the request asked for is `unsupported` and never reaches a plan (see `assertResolutionPlannable`).
+ */
+export function automaticZoomUnderPolicy(policy: EditorialPolicies['movement']): boolean {
   assertDomain(policy.status === 'applied' && policy.value.mode === 'none', 'PRECONDITION_REQUIRED', 'The movement policy is not one this planner version can execute')
-  return false
+  return policy.value.mode !== 'none'
+}
+
+/** The movement envelope a plan carries under the resolved movement and opening policies: exactly what they say, nothing carried over. */
+export function planMovementPolicyUnder(policies: Pick<EditorialPolicies, 'movement' | 'opening'>, fps: number): Readonly<{ automaticZoom: boolean; protectedOpeningFrames: number }> {
+  return Object.freeze({ automaticZoom: automaticZoomUnderPolicy(policies.movement), protectedOpeningFrames: Math.round(fps * protectedOpeningSeconds(policies.opening)) })
+}
+
+let requestlessPolicies: Readonly<EditorialPolicies> | undefined
+/**
+ * The policies of a plan that was made without an editorial request of its own (a cut of the source, a compile of an aggregate somebody else
+ * decided): those of a request that is silent, resolved by this module like any other. Nothing here is a preference of the producer.
+ */
+export function requestlessEditorialPolicies(): Readonly<EditorialPolicies> {
+  requestlessPolicies ??= resolveEditorialPolicies(createEditorialRequest({}), { hasSelectedInsert: false }).policies
+  return requestlessPolicies
 }
 
 /** The composition (frame fit) the plan draws for the layout policy. */
@@ -598,12 +641,41 @@ export interface PlanMovementFacts {
 }
 
 export function movementMatchesPolicy(facts: Readonly<PlanMovementFacts>, policy: EditorialPolicies['movement']): boolean {
-  return policy.status === 'applied' && policy.value.mode === 'none' && facts.automaticZoom === false && facts.effectTrackCount === 0
+  return policy.status === 'applied' && policy.value.mode === 'none' && !facts.automaticZoom && facts.effectTrackCount === 0
 }
 
 export function openingMatchesPolicy(facts: Readonly<PlanMovementFacts>, policy: EditorialPolicies['opening']): boolean {
   if (policy.status !== 'applied' || facts.effectTrackCount !== 0) return false
-  return policy.value.mode === 'not-applicable' || facts.protectedOpeningFrames >= Math.round(facts.fps * policy.value.seconds)
+  // The plan states exactly the window the policy says: none for an opening that has nothing to be protected from, at least the window otherwise.
+  return policy.value.mode === 'not-applicable' ? facts.protectedOpeningFrames === 0 : facts.protectedOpeningFrames >= Math.round(facts.fps * policy.value.seconds)
+}
+
+/** What a plan states of its movement: the facts a worker judges before it renders. */
+export interface PlanMovementDeclaration {
+  fps: number
+  movementPolicy: Readonly<{ automaticZoom: boolean; protectedOpeningFrames: number }>
+  effectTracks?: readonly unknown[]
+}
+
+/**
+ * The check a render worker makes of the plan it is about to render (ADR-160 F4). It replaces the comparison with values the worker used to
+ * carry (no zoom, a window of 4 s): the plan must honour the policy resolution it was made from - and, where the plan has none (a cut of the
+ * source, a compile of an aggregate), it must at least declare nothing the renderer cannot execute. The renderer executes no effect, so a plan
+ * that carries an effect track or an automatic zoom is never rendered, whatever asked for it.
+ */
+export function assertPlanHonorsResolution(plan: Readonly<PlanMovementDeclaration>, resolution: Readonly<EditorialPolicyResolutionV1> | null | undefined): void {
+  const facts: PlanMovementFacts = Object.freeze({
+    fps: plan.fps, automaticZoom: plan.movementPolicy.automaticZoom,
+    protectedOpeningFrames: plan.movementPolicy.protectedOpeningFrames, effectTrackCount: Array.isArray(plan.effectTracks) ? plan.effectTracks.length : 0,
+  })
+  assertDomain(!facts.automaticZoom && facts.effectTrackCount === 0, 'INVALID_RENDER_INPUT',
+    'The EditPlan declares a movement the renderer does not execute')
+  assertDomain(Number.isInteger(facts.protectedOpeningFrames) && facts.protectedOpeningFrames >= 0, 'INVALID_RENDER_INPUT',
+    'The EditPlan declares an invalid opening window')
+  if (resolution === null || resolution === undefined) return
+  assertDomain(!resolution.blocked, 'INVALID_RENDER_INPUT', 'The editorial policy resolution of this EditPlan is blocked: nothing may be rendered from it')
+  assertDomain(movementMatchesPolicy(facts, resolution.policies.movement) && openingMatchesPolicy(facts, resolution.policies.opening),
+    'INVALID_RENDER_INPUT', 'The EditPlan does not honour the editorial policy resolution it was made from')
 }
 
 // ---- Parsing a stored resolution (a Director run is read back from persisted JSON: fail closed on anything that is not what was written).

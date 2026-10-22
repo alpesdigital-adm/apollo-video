@@ -24,7 +24,7 @@ import {
 } from './decision-confidence.ts'
 import { parseDecisionPerceptionEvidence, requiredModalitiesFor, type DecisionPerceptionEvidence } from './director-evidence-rubric.ts'
 import type { DirectorPerceptionEvidenceReport } from './director-perception-evidence.ts'
-import type { EditorialPolicyResolutionV1 } from './editorial-policy-resolution.ts'
+import { assertPlanHonorsResolution, type EditorialPolicyResolutionV1 } from './editorial-policy-resolution.ts'
 
 interface RetimedTranscriptWord {
   text: string
@@ -81,7 +81,8 @@ interface DirectorSourceEditPlan {
     retainedSourceRanges: readonly Readonly<{ sourceStartSeconds: number; sourceEndSeconds: number }>[]
   }>
   retimedTranscript: Readonly<{ sourceTranscriptId: string; words: readonly Readonly<RetimedTranscriptWord>[] }>
-  movementPolicy: Readonly<{ automaticZoom: false; protectedOpeningFrames: number }>
+  /** What the plan declares of its movement. Both values come from the resolved policies (`planMovementPolicyUnder`), never from a constant of the producer. */
+  movementPolicy: Readonly<{ automaticZoom: boolean; protectedOpeningFrames: number }>
   /** A source plan states no caption capacity: it is a cut, and the capacity is the policy of whoever directs it. */
   subtitlePolicy: Readonly<{ faceProtection: true; anchor: 'bottom' }>
   createdAt: string
@@ -580,8 +581,8 @@ export function validateDirectedEditPlan(plan: DirectedEditPlan): Readonly<Direc
     'INVALID_RENDER_INPUT',
     'Director consumers do not share the canonical desired action reference',
   )
-  assertDomain(plan.movementPolicy.automaticZoom === false && plan.movementPolicy.protectedOpeningFrames >= Math.round(plan.fps * 4), 'INVALID_RENDER_INPUT', 'Opening motion protection is invalid')
-  assertDomain(plan.effectTracks.length === 0, 'INVALID_RENDER_INPUT', 'Unjustified camera effects are forbidden')
+  // The renderer executes no effect: a plan that declares one is not a plan it can render. What the plan must honour beyond that is its resolution (assertPlanHonorsResolution).
+  assertPlanHonorsResolution(plan, null)
   const clips = plan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
   assertDomain(clips.length > 0, 'INVALID_RENDER_INPUT', 'Director EditPlan needs source clips')
   assertDomain(plan.audioTimelineHash === createDirectedAudioTimelineHash({ fps: plan.fps, clips, musicTracks: plan.audioTracks ?? [] }), 'INVALID_RENDER_INPUT', 'Director audio timeline hash is inconsistent')

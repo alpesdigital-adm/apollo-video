@@ -1,3 +1,4 @@
+import { planMovementPolicyUnder, requestlessEditorialPolicies } from '../domain/editorial-policy-resolution.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import {
   createEditCommand,
@@ -165,7 +166,7 @@ export interface EditorialCutEditPlan {
     words: readonly Readonly<RetimedTranscriptWord>[]
   }>
   movementPolicy: Readonly<{
-    automaticZoom: false
+    automaticZoom: boolean
     protectedOpeningFrames: number
   }>
   subtitlePolicy: Readonly<{
@@ -501,10 +502,8 @@ function compileEditPlan(input: {
       sourceTranscriptHash: input.transcript.transcriptHash,
       words: retimedWords,
     }),
-    movementPolicy: Object.freeze({
-      automaticZoom: false as const,
-      protectedOpeningFrames: Math.round(input.fps * 4),
-    }),
+    // A cut of the source is made without an editorial request of its own: its movement is that of a silent request, resolved like any other.
+    movementPolicy: planMovementPolicyUnder(requestlessEditorialPolicies(), input.fps),
     subtitlePolicy: Object.freeze({ faceProtection: true as const, anchor: 'bottom' as const }),
     createdAt: input.createdAt,
   })

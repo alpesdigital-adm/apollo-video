@@ -117,7 +117,7 @@ test('the CTA lexicon recognises a call in the language it belongs to and says n
 
 // ADR-160 (validator note on F2): the resolution module is exempt from the literal scan, so the values the planner still carries are NOT in its
 // baseline. They are listed HERE, by policy key, and the list can only shrink. When it is empty the rule `carried-planner-value` is deleted.
-const CARRIED_DEBT = Object.freeze(['opening', 'structure', 'ctaOverlay'])
+const CARRIED_DEBT = Object.freeze(['structure', 'ctaOverlay'])
 
 test('no policy carries a planner value that is not listed as debt, and the debt can only shrink', () => {
   const destination = { type: 'url', value: 'https://example.com/x' }

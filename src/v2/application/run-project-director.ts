@@ -17,7 +17,7 @@ import { createEditCommand } from '../domain/edit-command.ts'
 import type { OutputSpecRevisionBody } from '../domain/output-spec-revision.ts'
 import { deriveEditorialRequestFromBrief } from '../domain/editorial-request.ts'
 import {
-  POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION, assertResolutionPlannable, automaticZoomUnderPolicy, captionTrackId, compositionLayoutUnderPolicy, movementMatchesPolicy,
+  POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION, assertResolutionPlannable, planMovementPolicyUnder, captionTrackId, compositionLayoutUnderPolicy, movementMatchesPolicy,
   openingMatchesPolicy, policyRef, protectedOpeningSeconds, resolveEditorialPolicies, storyBlockUnderPolicy,
   type CaptionPolicyValue, type EditorialMediaContext, type EditorialOutputSpec, type EditorialPolicies, type EditorialPolicyResolutionV1,
 } from '../domain/editorial-policy-resolution.ts'
@@ -553,6 +553,12 @@ function subtitleStyleOverrideOf(policies: Readonly<Record<string, unknown>>): E
     ? Object.freeze({ presetId: value, origin }) : undefined
 }
 
+/** Seconds, on the timeline, at which the first sentence of the speech ends: the first word that closes a sentence (absent: no word does). */
+function firstSentenceEndSecondsOf(words: readonly Readonly<{ text: string; timelineEndFrame: number }>[], fps: number): number | undefined {
+  const closing = words.find((word) => /[.!?]$/u.test(word.text))
+  return closing === undefined ? undefined : Math.round(closing.timelineEndFrame / fps * 1_000) / 1_000
+}
+
 /**
  * The outputs of the project, as the sealed State holds them: the geometry and the caption delivery of each. An output whose revision does
  * not carry a materialized geometry (a fork target before it is materialized) contributes its variant only: nothing is measured on it.
@@ -1039,6 +1045,8 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const resolution = resolveEditorialPolicies(editorialRequest, {
       transcriptId: context.transcript.id, ...(transcriptLanguage ? { transcriptLanguage } : {}), hasSelectedInsert,
       ...(subtitleStyleOverrideOf(context.policies) ? { subtitleStyleOverride: subtitleStyleOverrideOf(context.policies)! } : {}),
+      ...(firstSentenceEndSecondsOf(context.editPlan.retimedTranscript.words, context.editPlan.fps) !== undefined
+        ? { firstSentenceEndSeconds: firstSentenceEndSecondsOf(context.editPlan.retimedTranscript.words, context.editPlan.fps)! } : {}),
     }, outputsOfState(context.parent.state.document.entries))
     assertResolutionPlannable(resolution)
     const { policies } = resolution
@@ -1289,10 +1297,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         subtitleSafeRegion: Object.freeze([0.08, 0.7, 0.84, 0.24] as const),
       }),
       director: Object.freeze({ plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION, decisions, assumptions }),
-      movementPolicy: Object.freeze({
-        automaticZoom: automaticZoomUnderPolicy(policies.movement),
-        protectedOpeningFrames: Math.max(context.editPlan.movementPolicy.protectedOpeningFrames, Math.round(context.editPlan.fps * protectedOpeningSeconds(policies.opening))),
-      }),
+      movementPolicy: planMovementPolicyUnder(policies, context.editPlan.fps),
       subtitlePolicy: Object.freeze({ faceProtection: true as const, anchor: policies.captions.value.anchor, maxCharactersPerBlock: policies.captions.value.capacityCharacters }),
       createdAt,
     }

@@ -517,7 +517,8 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.equal(result.run.storyPlan.blocks.length, 3)
   assert.equal(plan.videoTracks[0].clips.length, 3)
   assert.equal(plan.movementPolicy.automaticZoom, false)
-  assert.equal(plan.movementPolicy.protectedOpeningFrames, 120)
+  // No movement is applied and the request names no window: there is no opening to protect (ADR-160 F4).
+  assert.equal(plan.movementPolicy.protectedOpeningFrames, 0)
   assert.equal(plan.effectTracks.length, 0)
   assert.equal(plan.transitions.length, 2)
   assert.equal(plan.transitions.every((transition) => transition.type === 'straight-cut' && transition.audioFadeMs === 24), true)

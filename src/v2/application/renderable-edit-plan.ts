@@ -1,5 +1,4 @@
-import { createEditorialRequest } from '../domain/editorial-request.ts'
-import { resolveEditorialPolicies } from '../domain/editorial-policy-resolution.ts'
+import { planMovementPolicyUnder, requestlessEditorialPolicies } from '../domain/editorial-policy-resolution.ts'
 import { calculateRenderablePlanHash, RENDERABLE_PLAN_COMPILER_VERSION } from '../domain/renderable-plan-authority.ts'
 export { calculateRenderablePlanHash, RENDERABLE_PLAN_COMPILER_VERSION } from '../domain/renderable-plan-authority.ts'
 import {
@@ -86,7 +85,7 @@ export const RENDERABLE_PLAN_AUDIO_FADE_MS = 24
  * are those of a request that is silent (rule `minimal-intervention`), resolved by the one module that names them. Subtitles are not compiled
  * by these paths; the capacity the plan states is the caption preset's.
  */
-const REQUESTLESS_POLICIES = resolveEditorialPolicies(createEditorialRequest({}), { hasSelectedInsert: false }).policies
+const REQUESTLESS_POLICIES = requestlessEditorialPolicies()
 
 export interface RenderablePlanSource {
   readonly id: string
@@ -284,10 +283,7 @@ export function assembleDirectedEditPlan(
     // No word was retimed. The empty list is the measurement; the id names the
     // absence rather than pointing at a transcript this plan never read.
     retimedTranscript: Object.freeze({ sourceTranscriptId: 'not-retimed', words: Object.freeze([]) }),
-    movementPolicy: Object.freeze({
-      automaticZoom: false as const,
-      protectedOpeningFrames: Math.round(input.fps * 4),
-    }),
+    movementPolicy: planMovementPolicyUnder(REQUESTLESS_POLICIES, input.fps),
     subtitlePolicy: Object.freeze({
       faceProtection: true as const,
       anchor: 'bottom' as const,

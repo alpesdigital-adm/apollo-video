@@ -51,7 +51,7 @@ export const EDITORIAL_DIRECTIVE_VOCABULARY: Readonly<Record<EditorialDirectiveK
  */
 export const EDITORIAL_EXECUTABLE_VALUES: Readonly<Record<EditorialDirectiveKind, readonly string[]>> = Object.freeze({
   movement: Object.freeze(['none']),
-  opening: Object.freeze(['none']),
+  opening: Object.freeze(['none', 'protect-first-sentence', 'protect-seconds']),
   structure: Object.freeze(['source-order']),
   cta: Object.freeze(['none', 'verbal-only', 'overlay-closing']),
   layout: Object.freeze(['fit-with-backdrop']),

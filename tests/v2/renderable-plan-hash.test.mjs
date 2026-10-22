@@ -68,7 +68,7 @@ test('historical renderable authority extraction preserves the independent pre-e
   // 8b390c3f6f2e6dd0ee67e5dc1a21a3a88a716385d1ca89685bac7622228e9548.
   // Re-recorded in ADR-160 F3: the compiled plan's caption capacity is now the preset's (it was a fixed 32), so the document - and its hash - changed.
   // Re-recorded again by F4/F5 when the movement, opening and composition envelope came from the resolution.
-  const expected = 'e5703dfca20790467a555e318c97143678120087def950dc66b51a3001c2a384'
+  const expected = 'df420d685df92ed9e54f53ccb436d693e81657c451ed0a76064adf78984abc4c'
   assert.equal(domainRenderableHash(plan()), expected)
   assert.equal(calculateRenderablePlanHash(plan()), expected)
   assert.equal(domainRenderableHash(plan({ createdAt: '2030-01-01T00:00:00.000Z' })), expected)

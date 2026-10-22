@@ -324,7 +324,8 @@ test('typed editorial Command creates an immutable retimed EditPlan without auto
   assert.equal(result.editPlan.videoTracks[0].clips.length, 4)
   assert.equal(result.editPlan.durationFrames, 2662)
   assert.equal(result.editPlan.movementPolicy.automaticZoom, false)
-  assert.equal(result.editPlan.movementPolicy.protectedOpeningFrames, 120)
+  // A cut is made with no editorial request of its own: no movement is applied, so there is no opening window to protect (ADR-160).
+  assert.equal(result.editPlan.movementPolicy.protectedOpeningFrames, 0)
   assert.equal(Number.isInteger(result.editPlan.movementPolicy.protectedOpeningFrames), true)
   assert.equal(result.editPlan.subtitlePolicy.faceProtection, true)
   assert.deepEqual(result.exclusions.map(({ sourceStartSeconds, sourceEndSeconds }) => ({ sourceStartSeconds, sourceEndSeconds })), [

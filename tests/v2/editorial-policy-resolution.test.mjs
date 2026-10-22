@@ -54,13 +54,12 @@ test('the silence rule invents nothing: no movement, no overlay, no insert, no f
 
 test('values the planner still carries are named as carried, never as the request', () => {
   const { policies } = resolveEditorialPolicies(createEditorialRequest({}), { hasSelectedInsert: false, transcriptLanguage: 'xx-YY' }, {})
-  for (const key of ['opening', 'structure']) {
+  for (const key of ['structure']) {
     assert.equal(policies[key].origin, 'silence-rule', key)
     assert.equal(policies[key].rule, 'carried-planner-value', key)
     assert.match(policies[key].reason, /carried/, key)
     assert.match(policies[key].reason, /ADR-160 F\d/, `${key} points at the slice that removes it`)
   }
-  assert.equal(protectedOpeningSeconds(policies.opening), policies.opening.value.seconds)
 })
 
 test('different requests over the same media give different resolutions', () => {
@@ -226,14 +225,16 @@ test('a decision points at its policy by a reference only that resolution owns',
   assert.equal(parsePolicyRef('policy:nonsense:0000000000000000'), null)
 })
 
-test('the plan facts the gates judge: movement none and the carried opening window', () => {
+test('the plan facts the gates judge: movement none and an opening with no window to protect', () => {
   const { policies } = resolveEditorialPolicies(createEditorialRequest({}), media, {})
-  const facts = { fps: 30, automaticZoom: false, protectedOpeningFrames: 120, effectTrackCount: 0 }
+  const facts = { fps: 30, automaticZoom: false, protectedOpeningFrames: 0, effectTrackCount: 0 }
+  assert.deepEqual(policies.opening.value, { mode: 'not-applicable' })
   assert.equal(movementMatchesPolicy(facts, policies.movement), true)
   assert.equal(openingMatchesPolicy(facts, policies.opening), true)
   assert.equal(movementMatchesPolicy({ ...facts, effectTrackCount: 1 }, policies.movement), false)
   assert.equal(movementMatchesPolicy({ ...facts, automaticZoom: true }, policies.movement), false)
-  assert.equal(openingMatchesPolicy({ ...facts, protectedOpeningFrames: 10 }, policies.opening), false)
+  // a plan that states a window nobody asked for does not state the policy
+  assert.equal(openingMatchesPolicy({ ...facts, protectedOpeningFrames: 120 }, policies.opening), false)
   assert.equal(openingMatchesPolicy({ ...facts, effectTrackCount: 2 }, policies.opening), false)
   assert.equal(automaticZoomUnderPolicy(policies.movement), false)
 })

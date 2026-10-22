@@ -1012,10 +1012,8 @@ export function buildMulticamEditPlan(input: {
       decisions: validateDirectorDecisions(input.decisions),
       assumptions: Object.freeze([...input.assumptions]),
     }),
-    movementPolicy: Object.freeze({
-      automaticZoom: false as const,
-      protectedOpeningFrames: Math.max(input.base.movementPolicy.protectedOpeningFrames, Math.round(fps * 4)),
-    }),
+    // The multicam direction adds no movement of its own: the plan states the movement of the plan it directs, as it is.
+    movementPolicy: Object.freeze({ ...input.base.movementPolicy }),
     audioTimelineHash: createEditorialAudioTimelineHash({ fps, clips }),
     lineageRefs: Object.freeze([...new Set([
       ...input.base.lineageRefs,

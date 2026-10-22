@@ -67,21 +67,8 @@ const BASELINE = Object.freeze({
   "src/app/projects/[id]/page.tsx :: ?? 'pt-BR'": 1,
   "src/app/projects/[id]/page.tsx :: automaticZoom: false": 1,
   "src/app/projects/[id]/page.tsx :: placeholder=\"Ex.": 2,
-  "src/v2/application/apply-editorial-cut-command.ts :: automaticZoom: false": 2,
-  "src/v2/application/apply-editorial-cut-command.ts :: fps * 4": 1,
-  "src/v2/application/multicam-direction.ts :: automaticZoom: false": 1,
-  "src/v2/application/multicam-direction.ts :: fps * 4": 1,
   "src/v2/application/renderable-edit-plan.ts :: 'landscape-inset' as const": 1,
-  "src/v2/application/renderable-edit-plan.ts :: automaticZoom: false": 1,
-  "src/v2/application/renderable-edit-plan.ts :: fps * 4": 1,
-  "src/v2/application/run-project-final-export-worker.ts :: fps * 4": 1,
-  "src/v2/application/run-project-proxy-render-worker.ts :: fps * 4": 1,
-  "src/v2/domain/contiguous-extraction.ts :: automaticZoom: false": 2,
-  "src/v2/domain/director-run.ts :: automaticZoom: false": 1,
-  "src/v2/domain/director-run.ts :: fps * 4": 1,
   "src/v2/domain/production-modes.ts :: index === 0 ? 'hook'": 1,
-  "src/v2/public-api/schema-examples.ts :: automaticZoom: false": 20,
-  "src/v2/public-api/schema-registry.ts :: automaticZoom: { const: false } (public schema)": 11,
 })
 
 const keyOf = (file, patternId) => `${file} :: ${patternId}`
