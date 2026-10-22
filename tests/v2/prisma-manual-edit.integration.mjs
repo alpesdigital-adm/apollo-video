@@ -1702,7 +1702,7 @@ ${editorialDiagnostic}`)
     const persistedQualitySnapshot = await client.v2ProjectSnapshot.findUniqueOrThrow({
       where: { id: storedAsyncOperation.projectDirectorRun.directorRun.qualitySnapshotId },
     })
-    assert.equal(persistedQualitySnapshot.schemaVersion, 4)
+    assert.equal(persistedQualitySnapshot.schemaVersion, 5)
     assert.equal(JSON.parse(persistedQualitySnapshot.contentJson).status, 'review-required')
     assert.equal(
       qualityRead.data.qualityReport.report.desiredActionRef.id,
