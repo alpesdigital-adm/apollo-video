@@ -1716,15 +1716,12 @@ ${editorialDiagnostic}`)
       qualityRead.data.qualityReport.report.strategic.evidence.map((item) => ({
         criterionId: item.criterionId, weight: item.weight,
       })),
-      [
-        { criterionId: 'hook-clarity', weight: .35 },
-        { criterionId: 'problem-recognition', weight: .25 },
-        { criterionId: 'trust-building', weight: .10 },
-        { criterionId: 'narrative-integrity', weight: .15 },
-        { criterionId: 'legibility', weight: .10 },
-        { criterionId: 'rights-compliance', weight: .05 },
-      ],
+      // ADR-160 F5: the request asked for neither a hook nor a call to action, so those criteria are not scored and the rest keep their proportions.
+      (await import('../../src/v2/domain/strategic-rubric.ts')).effectiveRubricCriteria(
+        (await import('../../src/v2/domain/strategic-rubric.ts')).resolveStrategicRubric('discovery'), ['hook-clarity', 'cta-clarity', 'friction-reduction'])
+        .map((criterion) => ({ criterionId: criterion.id, weight: criterion.weight })),
     )
+    assert.equal(qualityRead.data.qualityReport.report.strategic.evidence.some((item) => item.criterionId === 'hook-clarity'), false)
     const projectAfterSameDirection = await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })
     assert.equal(projectAfterSameDirection.currentVersionId, allocatedResultVersionId)
     assert.equal(projectAfterSameDirection.objective, 'discovery')
