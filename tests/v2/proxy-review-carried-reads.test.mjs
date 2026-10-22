@@ -62,12 +62,17 @@ function world(overrides = {}) {
     ['operation-review-carried-1', { carriedFromReviewId: 'review-source', carriedFromReviewHash: hash, reuseBaseVersionId: 'version-source', renderContentHash: 'd'.repeat(64) }],
     ['operation-review-carried-2', { carriedFromReviewId: 'review-carried-1', carriedFromReviewHash: hash, reuseBaseVersionId: 'version-carried-1', renderContentHash: 'd'.repeat(64) }],
   ])
+  for (const [id, patch] of Object.entries(overrides.operations ?? {})) operations.set(id, { ...operations.get(id), ...patch })
   const decisions = [
     decisionRow('decision-carry-1', 'review-carried-1', 'carry-over-approval', T1),
     decisionRow('decision-carry-2', 'review-carried-2', 'carry-over-approval', T2),
     decisionRow('decision-replay', 'review-carried-1', 'acknowledge-warnings', T2, { idempotencyKey: 'replayed-key', requestFingerprint: 'e'.repeat(64) }),
     decisionRow('decision-replay-2', 'review-carried-2', 'acknowledge-warnings', T2, { idempotencyKey: 'replayed-key-2', requestFingerprint: 'e'.repeat(64) }),
   ]
+  const withoutDecisions = new Set(overrides.withoutCarryDecisionFor ?? [])
+  for (let index = decisions.length - 1; index >= 0; index -= 1) {
+    if (decisions[index].action === 'carry-over-approval' && withoutDecisions.has(decisions[index].proxyReviewId)) decisions.splice(index, 1)
+  }
   const client = {
     v2ProxyReview: {
       findFirst: async ({ where }) => reviews.get(where.id) ?? null,
@@ -118,4 +123,28 @@ test('a carried review whose row does not name its automatic carry is refused, n
       (error) => error.code === 'PERSISTENCE_CONFLICT' && /automatic carry/.test(error.message),
     )
   }
+})
+
+const replayOf = (repository) => repository.findDecisionReplay({ workspaceId, projectId, idempotencyKey: 'replayed-key', requestFingerprint: 'e'.repeat(64), authenticationAudit: audit })
+
+test('a review that names an automatic carry with no carry-over, or no carry-over approval decision, is refused instead of published unverified', async () => {
+  for (const [label, overrides] of [
+    ['no carry on the operation', { operations: { 'operation-review-carried-1': { carriedFromReviewId: null, carriedFromReviewHash: null, reuseBaseVersionId: null, renderContentHash: null } } }],
+    ['carry without its approval decision', { withoutCarryDecisionFor: ['review-carried-1'] }],
+  ]) {
+    const { client } = world(overrides)
+    await assert.rejects(
+      replayOf(new PrismaProxyReviewRepository(client)),
+      (error) => error.code === 'PERSISTENCE_CONFLICT' && /automatic carry that has no carry-over/.test(error.message),
+      label,
+    )
+  }
+})
+
+test('a carried review a person acknowledged on this Version, with no carry approval, is still read as stored', async () => {
+  const { client } = world({ reviews: { 'review-carried-1': { acknowledgedByType: 'api-client', acknowledgedById: person.id, acknowledgedAt: person.at } }, withoutCarryDecisionFor: ['review-carried-1'] })
+  const replay = await replayOf(new PrismaProxyReviewRepository(client))
+  assert.deepEqual(replay.review.acknowledgedBy, { type: 'api-client', id: person.id, at: person.at.toISOString() })
+  assert.equal(replay.review.carriedFrom.decisionId, null)
+  assert.equal(replay.review.carriedFrom.acknowledgedBy, null)
 })

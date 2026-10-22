@@ -302,8 +302,15 @@ async function withCarriedFrom(
 ): Promise<Readonly<PersistedProxyReview>> {
   const review = hydrateProxyReview(row)
   const carry = await readCarry(client, row)
-  if (!carry) return review
+  // An automatic-carry acknowledger exists only because a carry re-bound the approval: without the carry and its decision there is nothing
+  // the row can be checked against, so it is refused rather than published unverified.
+  const automatic = row.acknowledgedByType === 'automatic-carry'
+  if (!carry) {
+    if (automatic) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review names an automatic carry that has no carry-over')
+    return review
+  }
   if (carry.carriedFrom.decisionId === null || carry.decidedAt === null) {
+    if (automatic) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review names an automatic carry that has no carry-over approval')
     return Object.freeze({ ...review, carriedFrom: Object.freeze({ ...carry.carriedFrom, acknowledgedBy: null }) })
   }
   const stored = review.acknowledgedBy
