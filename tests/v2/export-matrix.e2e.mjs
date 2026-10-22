@@ -636,7 +636,7 @@ test('T-F2-GATE/F2.028 admits the real API per burned caption without a global f
       ])
       if (!project || (!immutable && project.currentVersionId !== cell.projectVersionId) ||
           !version || version.editPlanSnapshotId !== evidence.editPlanSnapshotId ||
-          !run || !quality || quality.schemaVersion !== 4 ||
+          !run || !quality || quality.schemaVersion !== 5 ||
           quality.contentHash !== evidence.qualitySnapshotHash ||
           quality.contentJson !== stableSerialize(evidence.quality) ||
           !review || !sourceArtifact || Number(sourceArtifact.byteSize) !== sourceBytes.byteLength ||

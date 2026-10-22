@@ -840,7 +840,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           const resolvedIds = new Set<string>()
           const resolve: ResolveDirectorSnapshots = async (candidates) => {
             await this.assertSnapshotOwner(transaction, scope)
-            if (candidates.length < 1 || candidates.length > 6 ||
+            if (candidates.length < 1 || candidates.length > 7 ||
               new Set(candidates.map((item) => item.kind)).size !== candidates.length) {
               throw new DomainError('PERSISTENCE_CONFLICT', 'Director snapshot candidates are incomplete')
             }
