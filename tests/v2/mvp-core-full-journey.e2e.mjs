@@ -19,6 +19,7 @@ import { promisify } from 'node:util'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 import { createProjectWithVariant } from './helpers/explicit-project-http.mjs'
+import { measureStateAssertion } from './helpers/state-assertion-timing.mjs'
 import { commitSealedChild, persistReceiptForExistingVideo, testActor } from './helpers/pg-output-world.mjs'
 
 const execFileAsync = promisify(execFile)
@@ -157,6 +158,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
   const protectedKey = Buffer.alloc(32, 17).toString('base64url')
   let server
   let serverLogs = ''
+  let governanceWaits = 0
   let journeyCompleted = false
 
   const artifactIds = {
@@ -318,16 +320,28 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       key,
       expected = [200],
     }) {
-      const response = await fetch(`${baseUrl}${path}`, {
-        method,
-        headers: {
-          authorization,
-          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-          ...(key ? { 'idempotency-key': key } : {}),
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      })
-      const payload = await response.json()
+      let response
+      let payload
+      // Governance admission judges the requests of the last minute against the five minutes before it, and answers a burst with a retryable 429
+      // that executes nothing. A journey whose long steps got faster meets that burst sooner, so the client does what the error says: it waits for
+      // the window to move and sends the same request again (same idempotency key). The thresholds are the product's, untouched.
+      for (let attempt = 0; ; attempt += 1) {
+        response = await fetch(`${baseUrl}${path}`, {
+          method,
+          headers: {
+            authorization,
+            ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+            ...(key ? { 'idempotency-key': key } : {}),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        })
+        payload = await response.json()
+        const governed = response.status === 429 &&
+          payload?.error?.code === 'GOVERNANCE_LIMIT_EXCEEDED' && payload.error.retryable === true
+        if (!governed || attempt >= 18) break
+        governanceWaits += 1
+        await new Promise((resolve) => setTimeout(resolve, 5_000))
+      }
       assert.ok(
         expected.includes(response.status),
         `${method} ${path} returned ${response.status}: ${JSON.stringify(payload)}\n${serverLogs.slice(-8_000)}`,
@@ -342,6 +356,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       objective,
       aspectRatio,
       destination,
+      briefing,
       key,
     }) {
       const call = async (path, body, idempotencyKey) => (await api({
@@ -358,6 +373,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
           name,
           objective,
           locale: 'pt-BR',
+          ...(briefing ? { briefing } : {}),
           ...(destination ? { desiredAction: {
             destination: { type: 'url', value: destination },
           } } : {}),
@@ -381,6 +397,9 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       objective: 'sale',
       aspectRatio: '16:9',
       destination: 'https://example.com/checkout',
+      // Without an owner briefing the Director treats a project as media-only (evidence-bound, no treatment mode of its own to claim); the montage this
+      // journey proves is the one the owner asked for: a voiceover over the visual source, no person on screen.
+      briefing: 'Público: quem decide a compra. Oferta: o material de comunicação. Tom: claro e direto. Voiceover sobre a imagem, sem pessoa em cena.',
       key: `mvp-companion-${suffix}`,
     })
 
@@ -598,7 +617,8 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       sourceArtifact: companionMaster,
       entries: [
         {
-          text: 'Uma mensagem clara aproxima pessoas e oportunidades',
+          // A sale video says its call to action: the Director refuses (cta-required) a conversion objective whose action is not spoken.
+          text: 'Uma mensagem clara aproxima pessoas e oportunidades garanta a sua vaga no link',
           start: 0.2,
           end: 4.2,
         },
@@ -722,7 +742,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       environment: 'production',
       scopes: ['projects:write', 'media:write'],
     })
-    async function commitIngestedSource({ world, label, receipt, master, insert, transcript, transcriptId, durationSeconds, fps }) {
+    async function commitIngestedSource({ world, label, receipt, master, insert, insertOwnAudio = false, transcript, transcriptId, durationSeconds, fps }) {
       await receipt()
       const bundle = await commitSealedChild(client, {
         workspaceId,
@@ -758,6 +778,10 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
                 timelineInFrame: initial.durationFrames,
                 timelineOutFrame: initial.durationFrames + insertFrames,
                 rate: 1,
+                // The Director treats a project as a montage only when every clip names the recording its sound comes from.
+                ...(insertOwnAudio
+                  ? { audioSourceArtifactId: insert.artifactId, audioSourceInFrame: 0, audioSourceOutFrame: insertFrames }
+                  : {}),
               }],
             }],
             sources: [...initial.sources, {
@@ -839,6 +863,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       }),
       master: companionMaster,
       insert: companionBroll,
+      insertOwnAudio: true,
       transcript: companionTranscript,
       transcriptId: transcriptIds.companion,
       durationSeconds: 5,
@@ -915,6 +940,11 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
     assert.equal(primaryCut.editorial.invalidations.length, 0)
     assert.equal(primaryCut.operation.type, 'project-proxy-render')
     assert.equal(primaryCut.operation.status, 'queued')
+    // The cut of the real master is a multi-megabyte State; its integrity assertion runs twice inside the 10 s commit, so its cost is measured here.
+    const cutStateAssertion = await measureStateAssertion(client, primaryCut.version.id)
+    console.log(`STATE_ASSERTION_TIMING ${JSON.stringify(cutStateAssertion)}`)
+    // The cut leaves its proxy render queued; the worker takes the oldest queued render, and this journey renders the Director's, so the cut's is canceled.
+    await cancelOperation(primaryCut.operation.id)
 
     const companionCut = (await api({
       method: 'POST',
@@ -940,6 +970,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
         }],
       },
     })).payload
+    await cancelOperation(companionCut.operation.id)
 
     const selectionBrief = {
       intention: 'Criar uma quebra de padrão curta sem interromper a fala.',
@@ -1078,9 +1109,11 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
     }
 
     let primaryTimeline = await timeline(primary.project.id)
-    const lastPrimaryClip = primaryTimeline.timeline.clips.at(-1)
-    // The cut kept three stretches of the master, so the timeline has three clips; their ids are derived by the product.
-    assert.equal(primaryTimeline.timeline.clips.length, 3)
+    // The cut kept three stretches of the master and left the insert the ingest placed after them, so the timeline has four clips; the ids of
+    // the stretches are derived by the product, the insert keeps the id the ingest gave it. The edits below work on the last stretch of the master.
+    assert.equal(primaryTimeline.timeline.clips.length, 4)
+    assert.equal(primaryTimeline.timeline.clips.at(-1).id, 'ingest-insert-primary')
+    const lastPrimaryClip = primaryTimeline.timeline.clips[2]
     const splitAtMs = lastPrimaryClip.startMs + 3000
     await manual(
       primary.project.id,
@@ -1153,7 +1186,9 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
     )
 
     let companionTimeline = await timeline(companion.project.id)
-    assert.equal(companionTimeline.timeline.clips.length, 1)
+    // The companion's cut kept its one stretch of the master and left the insert the ingest placed after it.
+    assert.equal(companionTimeline.timeline.clips.length, 2)
+    assert.equal(companionTimeline.timeline.clips.at(-1).id, 'ingest-insert-companion')
     await manual(
       companion.project.id,
       companionTimeline,
@@ -1166,6 +1201,24 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
     )
 
     await new Promise((resolve) => setTimeout(resolve, 10))
+    // A Version renders only under an explicit project LUT selection (the renderer refuses to guess a grade); this journey grades nothing and says so.
+    async function selectNoLut(projectId, key) {
+      const current = await timeline(projectId)
+      const selected = (await api({
+        method: 'POST',
+        path: `/v1/projects/${projectId}/lut-selection`,
+        key,
+        expected: [201],
+        body: {
+          baseVersionId: current.timeline.versionId,
+          baseHash: current.baseHash,
+          selection: { mode: 'none' },
+          reason: 'MVP Core E2E renders the sources as they are, without a creative LUT.',
+        },
+      })).payload
+      if (selected.operation) await cancelOperation(selected.operation.id)
+    }
+    await selectNoLut(primary.project.id, `primary-no-lut-${suffix}`)
     primaryTimeline = await timeline(primary.project.id)
     const primaryDirector = (await api({
       method: 'POST',
@@ -1190,6 +1243,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
         decision.choice === 'use_selected_insert'),
       true,
     )
+    await selectNoLut(companion.project.id, `companion-no-lut-${suffix}`)
     companionTimeline = await timeline(companion.project.id)
     const companionDirector = (await api({
       method: 'POST',
@@ -1457,6 +1511,8 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
         check.passed && check.references.length > 0)), true)
 
     const evidence = {
+      cutStateAssertion,
+      governanceWaits,
       schemaVersion: 'mvp-core-full-e2e-evidence/v1',
       workspaceId,
       primaryProjectId: primary.project.id,
