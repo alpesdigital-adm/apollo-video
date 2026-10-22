@@ -23,7 +23,8 @@ export interface DirectorRunContext {
   project: Readonly<{
     id: string
     objective: StrategicObjectiveId
-    locale: string
+    /** The language the project states, when it states one. The Director takes the language of its captions from the request or the observed transcript, never from here. */
+    locale?: string
   }>
   latestDirectorObjective?: Readonly<PreviousDirectorObjectiveBinding>
   /** The sealed output bundle of the current head: the exact parent the Director's Version is born from. */

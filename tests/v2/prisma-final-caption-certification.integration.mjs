@@ -203,7 +203,7 @@ test('T-W65B final export through the real gate: a certified cue is burned and c
       [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.quality, 'quality-report', 5, qualityReport],
-      [policySnapshotId, 'policy-resolution', 1, sealed.resolution],
+      [policySnapshotId, 'policy-resolution', 2, sealed.resolution],
     ]) {
       await client.v2ProjectSnapshot.create({ data: { id: snapshotId, workspaceId, projectId, kind, schemaVersion,
         contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt } })

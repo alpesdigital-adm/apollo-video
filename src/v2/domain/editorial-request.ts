@@ -56,7 +56,7 @@ export const EDITORIAL_EXECUTABLE_VALUES: Readonly<Record<EditorialDirectiveKind
   cta: Object.freeze(['none', 'verbal-only', 'overlay-closing']),
   layout: Object.freeze(['fit-with-backdrop']),
   'caption-language': Object.freeze(['set']),
-  'caption-style': Object.freeze(['clean-color']),
+  'caption-style': Object.freeze([...SUBTITLE_PRESET_IDS]),
   keep: Object.freeze([]),
   avoid: Object.freeze([]),
 })

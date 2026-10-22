@@ -12,12 +12,14 @@ import {
   validateDirectedEditPlan,
   validateDirectorDecisions,
 } from '../domain/director-run.ts'
+import { captionCuesThatDoNotFit, captionTextFitsEveryOutput } from '../domain/caption-fit.ts'
 import { createEditCommand } from '../domain/edit-command.ts'
+import type { OutputSpecRevisionBody } from '../domain/output-spec-revision.ts'
 import { deriveEditorialRequestFromBrief } from '../domain/editorial-request.ts'
 import {
-  assertResolutionPlannable, automaticZoomUnderPolicy, captionTrackId, compositionLayoutUnderPolicy, movementMatchesPolicy,
+  POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION, assertResolutionPlannable, automaticZoomUnderPolicy, captionTrackId, compositionLayoutUnderPolicy, movementMatchesPolicy,
   openingMatchesPolicy, policyRef, protectedOpeningSeconds, resolveEditorialPolicies, storyBlockUnderPolicy,
-  type EditorialPolicies, type EditorialPolicyResolutionV1,
+  type CaptionPolicyValue, type EditorialMediaContext, type EditorialOutputSpec, type EditorialPolicies, type EditorialPolicyResolutionV1,
 } from '../domain/editorial-policy-resolution.ts'
 import {
   createDesiredAction,
@@ -47,6 +49,7 @@ import { requestDirectorFaceWindows, type DirectorFaceWindowRequester } from './
 import type { PerceptionProducerEnvelope } from '../domain/perception-producer-envelope.ts'
 import { createProjectSnapshot, type ProjectSnapshot, type ProjectSnapshotKind } from '../domain/project-snapshot.ts'
 import { offeredObservationsFor } from './adoptable-observations.ts'
+import { observeSpokenCta } from '../domain/cta-lexicon.ts'
 import { transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import {
@@ -82,11 +85,14 @@ import {
 
 // v3 (ADR-160): the plan is made from the policy resolution of the editorial request; every decision names the policy it stands on and its
 // reason is generated from that policy's origin.
-export const PROJECT_DIRECTOR_PLANNER_VERSION = 'apollo-director-policy/v3'
+// v4 (ADR-160 F3-F5): captions are grouped by the preset and fitted to the measured band of each output, the spoken CTA is judged in the language of the
+// speech, and the opening, structure, layout and budgets are derived from the request (a v3 plan carried 4 s, 32 characters and roles by position).
+export const PROJECT_DIRECTOR_PLANNER_VERSION = 'apollo-director-policy/v4'
 // v4 (ADR-160): the critic judges the plan against the sealed policy resolution and writes `director-quality-report/v5`; a report born
 // under v1-v3 is not admitted to final export (see `admitDirectorQualityForFinal`). v3 had made `forbiddenSpeechAbsent` the project's own
 // request instead of a fixed list.
-export const PROJECT_DIRECTOR_CRITIC_VERSION = 'apollo-director-critic/v4'
+// v5 (ADR-160 F3-F5): `captionsFitMeasured` replaces `captionsBounded`, and the rubric counts only the criteria the request asked for; a report born under v4 is not admitted.
+export const PROJECT_DIRECTOR_CRITIC_VERSION = 'apollo-director-critic/v5'
 
 export interface RunProjectDirectorRequest {
   workspaceId: string
@@ -304,8 +310,11 @@ function buildSubtitleCues(input: {
   }>[]
   durationFrames: number
   fps: number
-  /** The caption policy's block width: a cue never exceeds it. */
-  maxCharacters: number
+  /**
+   * The caption policy: a cue holds at most the preset's words and time on screen and the preset's capacity in characters, ends at a silence
+   * longer than the preset's minimum time on screen, and is never wider than the band of any output that burns captions (measured).
+   */
+  captions: Readonly<EditorialPolicies['captions']>['value']
   /** When present, every cue names the transcript words it is made of; if any word cannot be named, no cue does. */
   indexOf?: ((word: Readonly<{ text: string; sourceStartSeconds: number; sourceEndSeconds: number }>) => number | null) | null
 }): readonly Readonly<DirectedSubtitleCue>[] {
@@ -327,18 +336,21 @@ function buildSubtitleCues(input: {
     }
     group = []
   }
+  const { grouping, capacityCharacters, deliveries } = input.captions
+  const burned = deliveries.flatMap((delivery) => delivery.fit ? [delivery.fit] : [])
   for (const word of input.words) {
     const candidateText = [...group, word].map((item) => item.text).join(' ').replace(/\s+/g, ' ').trim()
-    const candidateDuration = group.length === 0 ? 0 : (word.timelineEndFrame - group[0]!.timelineStartFrame) / input.fps
-    const gapFrames = group.length === 0 ? 0 : word.timelineStartFrame - group.at(-1)!.timelineEndFrame
+    const candidateDurationMs = group.length === 0 ? 0 : (word.timelineEndFrame - group[0]!.timelineStartFrame) / input.fps * 1_000
+    const gapMs = group.length === 0 ? 0 : (word.timelineStartFrame - group.at(-1)!.timelineEndFrame) / input.fps * 1_000
     if (group.length > 0 && (
-      candidateText.length > input.maxCharacters ||
-      candidateDuration > 2.4 ||
-      gapFrames > input.fps * 0.55 ||
-      group.length >= 5
+      candidateText.length > capacityCharacters ||
+      candidateDurationMs > grouping.maxOnScreenMs ||
+      gapMs > grouping.silenceBreakMs ||
+      group.length >= grouping.maxWordsPerGroup ||
+      !captionTextFitsEveryOutput(candidateText, burned)
     )) flush()
     group = [...group, word]
-    if (/[.!?]$/.test(word.text) || group.length >= 5) flush()
+    if (/[.!?]$/.test(word.text) || group.length >= grouping.maxWordsPerGroup) flush()
   }
   flush()
   // All or nothing: a track whose cues are only partly named would be trusted for the cues that are and refused for the others.
@@ -527,21 +539,36 @@ function desiredActionFromBrief(
   return parseDesiredAction(brief.desiredAction, objective)
 }
 
-function hasObservableCta(
-  action: Readonly<DesiredAction>,
-  words: readonly Readonly<{ text: string }>[],
-): boolean {
-  if (action.kind === 'continue-viewing') return true
-  if (action.visualCta?.trim() || action.verbalCta?.trim()) return true
-  const transcript = normalizedSpeech(words.map((word) => word.text).join(' '))
-  const patterns: Record<Exclude<DesiredAction['kind'], 'continue-viewing'>, RegExp> = {
-    'submit-lead': /\b(cadastre|cadastro|inscreva|formulario|deixe seu contato)\b/,
-    buy: /\b(compre|comprar|checkout|garanta|adquira)\b/,
-    'message-whatsapp': /\bwhatsapp\b/,
-    book: /\b(agende|agendar|agenda|marque|marcar)\b/,
-    download: /\b(baixe|baixar|download|material|guia|arquivo)\b/,
-  }
-  return patterns[action.kind].test(transcript)
+/**
+ * The caption style a project override fixed, as the policy snapshot resolved it (`resolved.subtitleStyle`, schema 2): the project's own
+ * override, or the workspace Guardrail it inherits. An explicit `none` and a project that inherits nothing name no style.
+ */
+function subtitleStyleOverrideOf(policies: Readonly<Record<string, unknown>>): EditorialMediaContext['subtitleStyleOverride'] {
+  const resolved = policies.resolved
+  if (typeof resolved !== 'object' || resolved === null || Array.isArray(resolved)) return undefined
+  const entry = (resolved as Record<string, unknown>).subtitleStyle
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return undefined
+  const { value, origin } = entry as { value?: unknown; origin?: unknown }
+  return typeof value === 'string' && (origin === 'workspace' || origin === 'project-custom')
+    ? Object.freeze({ presetId: value, origin }) : undefined
+}
+
+/**
+ * The outputs of the project, as the sealed State holds them: the geometry and the caption delivery of each. An output whose revision does
+ * not carry a materialized geometry (a fork target before it is materialized) contributes its variant only: nothing is measured on it.
+ */
+function outputsOfState(entries: readonly Readonly<{ variantId: string; spec: unknown }>[]): readonly EditorialOutputSpec[] {
+  return Object.freeze(entries.map((entry) => {
+    const spec = entry.spec as Partial<OutputSpecRevisionBody> & { effectiveSpec?: Partial<OutputSpecRevisionBody> }
+    const body = spec.output !== undefined ? spec : spec.effectiveSpec
+    const output = body?.output
+    const mode = body?.profile?.subtitles?.mode
+    return Object.freeze({
+      variantId: entry.variantId,
+      ...(output ? { id: output.id, aspectRatio: output.aspectRatio, spec: output } : {}),
+      ...(mode === 'none' || mode === 'burn-in' || mode === 'sidecar' ? { subtitleMode: mode } : {}),
+    })
+  }))
 }
 
 const check = (id: string, kind: DirectorHardCheck['kind'], policy: string | null, passed: boolean, evidence: readonly string[]): Readonly<DirectorHardCheck> =>
@@ -599,7 +626,10 @@ function buildQualityReport(input: {
   const openingOk = openingMatchesPolicy(movementFacts, policies.opening)
   const requestHonored = !input.resolution.blocked
   const longestCue = cues.reduce((longest, cue) => Math.max(longest, cue.text.length), 0)
-  const captionsBounded = longestCue <= Math.min(policies.captions.value.maxCharactersPerBlock, input.plan.subtitlePolicy.maxCharactersPerBlock)
+  // Captions fit: within the preset's capacity (the plan declares it) and, on every output that burns captions, within the band measured there.
+  const burnedGeometries = policies.captions.value.deliveries.flatMap((delivery) => delivery.fit ? [delivery.fit] : [])
+  const cuesThatDoNotFit = captionCuesThatDoNotFit(cues.map((cue) => ({ id: cue.id, text: cue.text })), burnedGeometries)
+  const captionsFitMeasured = longestCue <= Math.min(policies.captions.value.capacityCharacters, input.plan.subtitlePolicy.maxCharactersPerBlock) && cuesThatDoNotFit.length === 0
   const removalMatches = editorialRulesMatchingSpeech(cues.map((cue) => cue.text).join(' '), input.requestedSpeechRemovals).length
   // Rights are integral (W64): the master and every insert the plan plays must be certain. One source that is revoked, expired, in a
   // consent that is not approved or simply unknown is a failed gate - there is no partial certainty to average over the others.
@@ -616,14 +646,15 @@ function buildQualityReport(input: {
       [`policy-mode=${policies.opening.value.mode}`, `protected-opening-frames=${movementFacts.protectedOpeningFrames}`, `effect-tracks=${movementFacts.effectTrackCount}`]),
     check('forbiddenSpeechAbsent', 'request', ref('speechRemovals'), forbiddenSpeechAbsent,
       [`removal-rules=${input.requestedSpeechRemovals.length}`, `matches-in-captions=${removalMatches}`]),
-    check('captionsBounded', 'invariant', ref('captions'), captionsBounded,
-      [`cues=${cues.length}`, `longest-cue-characters=${longestCue}`, `policy-max-characters=${policies.captions.value.maxCharactersPerBlock}`]),
+    check('captionsFitMeasured', 'invariant', ref('captions'), captionsFitMeasured,
+      [`cues=${cues.length}`, `longest-cue-characters=${longestCue}`, `preset-capacity-characters=${policies.captions.value.capacityCharacters}`,
+        `burn-in-outputs=${burnedGeometries.length}`, `cues-that-do-not-fit=${cuesThatDoNotFit.length}${cuesThatDoNotFit[0] ? `:first=${cuesThatDoNotFit[0].cueId}@${cuesThatDoNotFit[0].variantId}` : ''}`]),
     check('timelineContinuous', 'invariant', null, timelineContinuous,
       [`clips=${clips.length}`, `duration-frames=${input.plan.durationFrames}`]),
     check('sourceRightsCertain', 'invariant', null, rightsPassed, [rightsSummary]),
   ])
   const narrativeIntegrity = requestHonored && movementOk && openingOk && forbiddenSpeechAbsent && timelineContinuous
-  const legibility = captionsBounded
+  const legibility = captionsFitMeasured
   const structuredCta = input.storyPlan.blocks.some((block) =>
     block.role === 'cta' && block.content.ctaId === input.desiredActionRef.id)
   assertDomain(
@@ -685,7 +716,7 @@ function buildQualityReport(input: {
         `edit-plan:${input.plan.id}:timeline-continuous=${timelineContinuous}`,
       ]],
       legibility: [legibility ? 100 : 0, [
-        `edit-plan:${input.plan.id}:subtitle-bounded=${captionsBounded}:text-only`,
+        `edit-plan:${input.plan.id}:subtitle-fit-measured=${captionsFitMeasured}:text-only`,
       ]],
       'rights-compliance': [rightsPassed ? 100 : 0, [
         input.sourceRights.state === 'present'
@@ -992,19 +1023,23 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const hasSelectedInsert = clips.some(
       (clip) => clip.sourceArtifactId !== context.transcript.sourceArtifactId,
     )
-    const ctaPresent = hasObservableCta(
-      desiredAction,
-      context.editPlan.retimedTranscript.words,
-    )
+    // The spoken call is recognised by the words of the language of the speech (the observed transcript), never by a list of one language.
+    const transcriptLanguage = typeof context.transcript.language === 'string' ? context.transcript.language.trim() : ''
+    const ctaObservation = observeSpokenCta({
+      action: desiredAction, spokenText: context.editPlan.retimedTranscript.words.map((word) => word.text).join(' '),
+      ...(transcriptLanguage ? { language: transcriptLanguage } : {}),
+    })
+    // `not-evaluable` stops at the resolution below (a question to the requester); until then it is not taken for presence.
+    const ctaPresent = ctaObservation.state === 'present' || ctaObservation.state === 'not-required'
     const desiredActionRef = createDesiredActionReference(desiredAction)
     // ADR-160. Nothing below is fixed: the editorial request of the brief this run leaves behind (and the speech its Commands asked to
     // remove) resolves to the policies the plan is made from. A request the Apollo cannot execute, or a question it left open, stops here.
     const requestedRemovalIds = (context.requestedSpeechRemovals ?? []).map((rule) => rule.id)
     const editorialRequest = deriveEditorialRequestFromBrief({ ...context.brief, objective: objective.id, desiredAction }, requestedRemovalIds)
-    const transcriptLanguage = typeof context.transcript.language === 'string' ? context.transcript.language.trim() : ''
     const resolution = resolveEditorialPolicies(editorialRequest, {
       transcriptId: context.transcript.id, ...(transcriptLanguage ? { transcriptLanguage } : {}), hasSelectedInsert,
-    }, {})
+      ...(subtitleStyleOverrideOf(context.policies) ? { subtitleStyleOverride: subtitleStyleOverrideOf(context.policies)! } : {}),
+    }, outputsOfState(context.parent.state.document.entries))
     assertResolutionPlannable(resolution)
     const { policies } = resolution
     const createdAt = dependencies.clock().toISOString()
@@ -1107,7 +1142,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       words: context.editPlan.retimedTranscript.words,
       durationFrames: context.editPlan.durationFrames,
       fps: context.editPlan.fps,
-      maxCharacters: policies.captions.value.maxCharactersPerBlock,
+      captions: policies.captions.value,
       indexOf,
     })
     // Confirmed review Commands own their caption text. Replanning must assess
@@ -1235,7 +1270,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       subtitleTracks: Object.freeze([Object.freeze({
         id: captionTrackId(policies.language), kind: 'captions' as const, presetId: policies.captions.value.presetId,
         anchor: policies.captions.value.anchor, faceProtection: true as const, maxLines: policies.captions.value.maxLines,
-        maxCharactersPerBlock: policies.captions.value.maxCharactersPerBlock, cues: subtitleCues,
+        maxCharactersPerBlock: policies.captions.value.capacityCharacters, cues: subtitleCues,
         desiredActionRef,
         // The same cue track shape the ingest compiles: an editorial cut that ends inside one of these captions rebuilds the part
         // that remains from the transcript words the cue names, and refuses a cue that names none.
@@ -1258,7 +1293,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         automaticZoom: automaticZoomUnderPolicy(policies.movement),
         protectedOpeningFrames: Math.max(context.editPlan.movementPolicy.protectedOpeningFrames, Math.round(context.editPlan.fps * protectedOpeningSeconds(policies.opening))),
       }),
-      subtitlePolicy: Object.freeze({ faceProtection: true as const, anchor: policies.captions.value.anchor, maxCharactersPerBlock: policies.captions.value.maxCharactersPerBlock }),
+      subtitlePolicy: Object.freeze({ faceProtection: true as const, anchor: policies.captions.value.anchor, maxCharactersPerBlock: policies.captions.value.capacityCharacters }),
       createdAt,
     }
     // Source-space OCR remains valid only while the result keeps the input clip map.
@@ -1377,7 +1412,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         snapshot({ id: proposedStorySnapshotId, workspaceId, projectId, kind: 'story', contentSchemaVersion: 1, value: storyPlan, createdAt }),
         snapshot({ id: proposedEditPlanSnapshotId, workspaceId, projectId, kind: 'edit-plan', contentSchemaVersion: 2, value: editPlan, createdAt }),
         snapshot({ id: proposedQualitySnapshotId, workspaceId, projectId, kind: 'quality-report', contentSchemaVersion: 5, value: qualityReport, createdAt }),
-        snapshot({ id: proposedPolicySnapshotId, workspaceId, projectId, kind: 'policy-resolution', contentSchemaVersion: 1, value: resolution, createdAt }),
+        snapshot({ id: proposedPolicySnapshotId, workspaceId, projectId, kind: 'policy-resolution', contentSchemaVersion: POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION, value: resolution, createdAt }),
       ])
       const snapshots = bindDirectorSnapshotIdentities(candidates, await resolveSnapshots(candidates))
       const byKind = new Map(snapshots.map((item) => [item.kind, item.id]))

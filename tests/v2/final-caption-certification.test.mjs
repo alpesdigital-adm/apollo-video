@@ -42,7 +42,7 @@ const REQUEST_HASH = 'a'.repeat(64)
 const RESOLUTION_HASH = 'b'.repeat(64)
 const check = (id, kind = 'invariant', passed = true, policyRef = null) => ({ id, kind, passed, policyRef, evidence: [`${id}=${passed}`] })
 const quality = (overrides = {}) => ({
-  schemaVersion: 'director-quality-report/v5', id: 'quality-1', status: 'review-required', criticVersion: 'apollo-director-critic/v4',
+  schemaVersion: 'director-quality-report/v5', id: 'quality-1', status: 'review-required', criticVersion: 'apollo-director-critic/v5',
   faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
   strategic: { passed: true, score: 91, gateFailures: [], rubric: { threshold: 70 } },
   hardChecks: [check('requestHonored', 'request'), check('forbiddenSpeechAbsent', 'request', true, `policy:speechRemovals:${'b'.repeat(16)}`), check('timelineContinuous'), check('sourceRightsCertain')],
@@ -114,9 +114,9 @@ test('the admission is bound to the request now in the brief and to the resoluti
 })
 
 test('only the v5 report with critic v4 or later is admitted: older reports and critics are never inherited', () => {
-  assert.equal(MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION, 4)
+  assert.equal(MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION, 5)
   assert.equal(ADMITTED_DIRECTOR_QUALITY_REPORT_SCHEMA, 'director-quality-report/v5')
-  for (const criticVersion of ['apollo-director-critic/v1', 'apollo-director-critic/v2', 'apollo-director-critic/v3', 'critic-e2e-1.0.0', 'project-director-critic/v2', '', undefined]) {
+  for (const criticVersion of ['apollo-director-critic/v1', 'apollo-director-critic/v2', 'apollo-director-critic/v3', 'apollo-director-critic/v4', 'critic-e2e-1.0.0', 'project-director-critic/v2', '', undefined]) {
     const verdict = admitDirectorQualityForFinal(quality({ criticVersion }), BOUND)
     assert.equal(verdict.admitted, false, String(criticVersion))
     assert.match(verdict.reason, /superseded/)
@@ -126,7 +126,7 @@ test('only the v5 report with critic v4 or later is admitted: older reports and 
     assert.equal(verdict.admitted, false, String(schemaVersion))
     assert.match(verdict.reason, /new Director run is required/)
   }
-  assert.deepEqual(admitDirectorQualityForFinal(quality({ criticVersion: 'apollo-director-critic/v4' }), BOUND), { admitted: true, basis: 'per-cue-caption-certification' })
+  assert.deepEqual(admitDirectorQualityForFinal(quality({ criticVersion: 'apollo-director-critic/v5' }), BOUND), { admitted: true, basis: 'per-cue-caption-certification' })
   assert.deepEqual(admitDirectorQualityForFinal(quality({ criticVersion: 'apollo-director-critic/v10' }), BOUND), { admitted: true, basis: 'per-cue-caption-certification' })
   // the required checks carry no editorial name
   assert.deepEqual([...REQUIRED_HARD_CHECKS], ['requestHonored', 'timelineContinuous', 'sourceRightsCertain'])

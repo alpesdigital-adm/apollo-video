@@ -268,8 +268,10 @@ Atribuir ao dono uma intenção que ele não escreveu é defeito.
 
 Enquanto um valor ainda não é derivado do pedido ou da mídia (limites herdados do planner das ondas
 anteriores), a resolução o registra como `silence-rule` / `carried-planner-value`, com a razão dizendo isso e
-com a remoção agendada; o teste de varredura de literais editoriais (`tests/v2/editorial-literals.test.mjs`) lista
-essas dívidas e só pode encolher.
+com a remoção agendada. O módulo de resolução é o único isento da varredura de literais, portanto essas dívidas NÃO
+estão na baseline da varredura: estão listadas, por chave de política, em `CARRIED_DEBT`
+(`tests/v2/editorial-policy-captions.test.mjs`), cujo teste falha se uma política carregar valor herdado fora da lista
+ou se a lista deixar de ser verdadeira; ela só pode encolher e, ao fim da fatia F5, fica vazia e a regra é removida.
 
 O DirectorRun grava o snapshot da resolução (`policySnapshotId`, `policyResolutionHash`) e o `requestHash`;
 cada decisão aponta a política que a sustenta.

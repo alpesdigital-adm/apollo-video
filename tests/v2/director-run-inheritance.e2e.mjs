@@ -106,7 +106,7 @@ test('W70 readiness: an exception Version inherits the Director quality (final a
       [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.quality, 'quality-report', 5, qualityReport],
-      [snapshotIds.policy, 'policy-resolution', 1, sealed.resolution],
+      [snapshotIds.policy, 'policy-resolution', 2, sealed.resolution],
     ]) {
       await db.v2ProjectSnapshot.create({ data: { id, workspaceId, projectId, kind, schemaVersion, contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt: now } })
     }

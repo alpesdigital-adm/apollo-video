@@ -1,3 +1,4 @@
+import { UNDETERMINED_LOCALE } from '../../domain/asset-rights.ts'
 import { randomUUID } from 'node:crypto'
 import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
@@ -9,7 +10,7 @@ import type {
 import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { admitDirectorQualityForFinal } from '../../domain/final-caption-certification.ts'
-import { parseEditorialPolicyResolution } from '../../domain/editorial-policy-resolution.ts'
+import { parseEditorialPolicyResolution, POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION } from '../../domain/editorial-policy-resolution.ts'
 import { deriveEditorialRequestFromBrief } from '../../domain/editorial-request.ts'
 import { projectStatusTransitionPath } from '../../domain/project.ts'
 import { readOutputFormatPreset } from '../../domain/output-format-registry.ts'
@@ -174,11 +175,13 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       currentRequestHash = deriveEditorialRequestFromBrief(JSON.parse(version.briefSnapshot.contentJson) as Record<string, unknown>).requestHash
     } catch { return null }
     let sealedPolicyResolutionHash: string | null = null
+    let sealedCaptionLanguage: string | null = null
     if (directorRun.policySnapshot) {
-      if (directorRun.policySnapshot.kind !== 'policy-resolution' || directorRun.policySnapshot.schemaVersion !== 1) return null
+      if (directorRun.policySnapshot.kind !== 'policy-resolution' || directorRun.policySnapshot.schemaVersion !== POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION) return null
       const resolution = parseEditorialPolicyResolution(JSON.parse(directorRun.policySnapshot.contentJson))
       if (resolution.requestHash !== directorRun.requestHash) return null
       sealedPolicyResolutionHash = resolution.policyResolutionHash
+      sealedCaptionLanguage = resolution.policies.language.value.captionLanguage
     }
     const admission = admitDirectorQualityForFinal(quality, {
       currentRequestHash, sealedRequestHash: directorRun.requestHash, sealedPolicyResolutionHash,
@@ -194,7 +197,8 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       }
     }
     return Object.freeze({
-      locale: project.locale ?? 'pt-BR',
+      // The language the project states; failing that, the one the sealed resolution found in the speech; failing that, none (rights are then judged as undetermined).
+      locale: project.locale ?? sealedCaptionLanguage ?? UNDETERMINED_LOCALE,
       directorRunId: directorRun.id,
       ...(inheritance ? { directorInheritance: inheritance } : {}),
       qualitySnapshotId: directorRun.qualitySnapshotId,

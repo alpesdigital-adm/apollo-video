@@ -82,7 +82,8 @@ interface DirectorSourceEditPlan {
   }>
   retimedTranscript: Readonly<{ sourceTranscriptId: string; words: readonly Readonly<RetimedTranscriptWord>[] }>
   movementPolicy: Readonly<{ automaticZoom: false; protectedOpeningFrames: number }>
-  subtitlePolicy: Readonly<{ faceProtection: true; anchor: 'bottom'; maxCharactersPerBlock: number }>
+  /** A source plan states no caption capacity: it is a cut, and the capacity is the policy of whoever directs it. */
+  subtitlePolicy: Readonly<{ faceProtection: true; anchor: 'bottom' }>
   createdAt: string
 }
 
@@ -366,7 +367,7 @@ export type DirectedEditPlan = Omit<DirectorSourceEditPlan, 'storyPlanId' | 'ove
     presetId: SubtitlePresetId
     anchor: SubtitleAnchor
     faceProtection: true
-    maxLines: 2
+    maxLines: number
     maxCharactersPerBlock: number
     desiredActionRef: Readonly<DesiredActionReference>
     cues: readonly Readonly<DirectedSubtitleCue>[]

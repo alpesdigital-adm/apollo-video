@@ -7,7 +7,11 @@ import {
   type EditorialRequestV1,
   type BriefExcerpt,
 } from './editorial-request.ts'
-import type { SubtitlePresetId } from './subtitle-style-tokens.ts'
+import { captionFitGeometryFor, type CaptionDeliveryMode, type CaptionFitGeometry } from './caption-fit.ts'
+import { ctaLexiconFor } from './cta-lexicon.ts'
+import type { OutputSpec } from './output-spec.ts'
+import { readSubtitlePreset } from './subtitle-system.ts'
+import { SUBTITLE_PRESET_IDS, type SubtitlePresetId } from './subtitle-style-tokens.ts'
 
 /**
  * Editorial policy resolution (ADR-160, docs/specs/01 s7.4.3). `resolveEditorialPolicies` turns an editorial request, the observed media
@@ -18,8 +22,13 @@ import type { SubtitlePresetId } from './subtitle-style-tokens.ts'
  * This is the one module of the product allowed to name an editorial value (tests/v2/editorial-literals.test.mjs exempts it). A value
  * that is named here is here under a named rule, and each rule is tested in tests/v2/editorial-policy-resolution.test.mjs.
  */
-export const EDITORIAL_POLICY_RESOLUTION_SCHEMA = 'editorial-policy-resolution/v1' as const
-export const EDITORIAL_POLICY_RESOLVER_VERSION = 'editorial-policy-resolver/v1' as const
+// v2 (ADR-160 F3-F5): the caption policy is derived from the preset and the measured width of each output (no fixed block width), the CTA
+// policy states how the spoken call is judged, and the opening, structure, layout and budgets are derived from the request. A v1 resolution
+// stays readable in its snapshot and is never admitted to final export (see `MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION`).
+export const EDITORIAL_POLICY_RESOLUTION_SCHEMA = 'editorial-policy-resolution/v2' as const
+export const EDITORIAL_POLICY_RESOLVER_VERSION = 'editorial-policy-resolver/v2' as const
+/** The `contentSchemaVersion` of the `policy-resolution` snapshot that holds a resolution of this schema. */
+export const POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION = 2 as const
 
 export const POLICY_ORIGINS = Object.freeze([
   'request-field', 'request-briefing', 'media-context', 'output-spec', 'workspace-policy', 'silence-rule',
@@ -30,7 +39,7 @@ export type PolicyOrigin = (typeof POLICY_ORIGINS)[number]
  * The named rules. `minimal-intervention` is the owner's "does not invent" rule: where the request is silent, nothing is added that was
  * not asked for and not observed in the source. `carried-planner-value` is NOT a rule of the product: it marks a value the planner of the
  * earlier waves still applies and that no slice of ADR-160 has yet derived from the request; it never attributes the value to the owner,
- * and each use is a debt listed in the editorial literals baseline.
+ * and each use is a debt listed in `CARRIED_DEBT` (tests/v2/editorial-policy-captions.test.mjs): this module is exempt from the literal scan, so the scan cannot hold it.
  */
 export const EDITORIAL_POLICY_RULES = Object.freeze({
   'explicit-request': Object.freeze({ origins: Object.freeze(['request-field', 'request-briefing'] as const), summary: 'The requester said it, in a structured field or in the briefing.' }),
@@ -38,6 +47,8 @@ export const EDITORIAL_POLICY_RULES = Object.freeze({
   'source-observation': Object.freeze({ origins: Object.freeze(['media-context'] as const), summary: 'The media shows it (the transcript, the compiled timeline).' }),
   'output-geometry': Object.freeze({ origins: Object.freeze(['output-spec'] as const), summary: 'The output specification and the source geometry decide it.' }),
   'minimal-intervention': Object.freeze({ origins: Object.freeze(['silence-rule'] as const), summary: 'The request is silent: nothing is added that was not asked for and not observed in the source.' }),
+  'project-override': Object.freeze({ origins: Object.freeze(['request-field', 'workspace-policy'] as const), summary: 'A project override (or, failing it, the workspace Guardrail it inherits) fixed it.' }),
+  'renderer-baseline': Object.freeze({ origins: Object.freeze(['silence-rule'] as const), summary: 'Nothing named it and the output cannot be drawn without one: the baseline of the renderer registry is used, which is not an editorial preference.' }),
   'carried-planner-value': Object.freeze({ origins: Object.freeze(['silence-rule'] as const), summary: 'The request is silent and the planner of the earlier waves still applies this value; scheduled to be derived (ADR-160 F3-F5).' }),
 } as const)
 export type PolicyRuleId = keyof typeof EDITORIAL_POLICY_RULES
@@ -64,12 +75,31 @@ export interface EditorialPolicies {
   structure: ResolvedPolicy<{ order: 'source-order'; roles: 'by-position' }>
   transitions: ResolvedPolicy<{ type: 'straight-cut'; audioFadeMs: number }>
   inserts: ResolvedPolicy<{ mode: 'use-selected-insert' | 'no-insert' }>
-  cta: ResolvedPolicy<{ required: boolean }>
+  cta: ResolvedPolicy<{ required: boolean; evaluation: CtaEvaluation }>
   ctaOverlay: ResolvedPolicy<{ mode: 'none' } | { mode: 'closing-window'; seconds: number }>
   layout: ResolvedPolicy<{ mode: 'fit-with-backdrop' | 'source-native' }>
   language: ResolvedPolicy<{ captionLanguage: string | null }>
-  captions: ResolvedPolicy<{ presetId: SubtitlePresetId; maxCharactersPerBlock: number; maxLines: 2; anchor: 'bottom' }>
+  captions: ResolvedPolicy<CaptionPolicyValue>
   speechRemovals: ResolvedPolicy<{ ruleIds: readonly string[] }>
+}
+
+/** How the spoken call to action is judged: not at all (none required), by the explicit text the requester gave, by the lexicon of the language, or it cannot be. */
+export type CtaEvaluation = 'not-required' | 'explicit-text' | 'lexicon' | 'not-evaluable'
+
+/**
+ * The caption policy. Nothing in it is a number the planner carries: the grouping is the preset's, the capacity is the preset's lines
+ * times its characters per line, and the width a cue may take is each burn-in output's own, measured (`caption-fit.ts`).
+ */
+export interface CaptionPolicyValue {
+  presetId: SubtitlePresetId
+  maxLines: number
+  anchor: 'bottom'
+  /** Words per cue and time on screen, from the preset's `grouping`; a silence longer than `silenceBreakMs` (the preset's minimum time on screen) ends a cue. */
+  grouping: Readonly<{ maxWordsPerGroup: number; maxOnScreenMs: number; silenceBreakMs: number }>
+  /** The characters a cue may hold: the preset's `maxLines` times its `lineBreaking.maxCharacters`. */
+  capacityCharacters: number
+  /** One entry per output the resolution knew: how captions are delivered there and, for a burned output, the geometry the cue must fit. */
+  deliveries: readonly Readonly<{ variantId: string; mode: CaptionDeliveryMode | 'unspecified'; fit: Readonly<CaptionFitGeometry> | null }>[]
 }
 
 export interface UnsupportedRequestItem {
@@ -112,6 +142,11 @@ export interface EditorialMediaContext {
   hasSelectedInsert: boolean
   /** Source frame aspect, `W:H` (absent: unknown). */
   sourceAspectRatio?: string
+  /**
+   * The caption style a project override (or the workspace Guardrail it inherits) fixed, as the policy snapshot resolved it. `project-none`
+   * and an inherited nothing are absent here: they name no style.
+   */
+  subtitleStyleOverride?: Readonly<{ presetId: string; origin: 'workspace' | 'project-custom' }>
 }
 
 /** What the output imposes. */
@@ -120,14 +155,18 @@ export interface EditorialOutputSpec {
   variantId?: string
   /** Output frame aspect, `W:H` (absent: unknown). */
   aspectRatio?: string
+  /** The sealed OutputSpec: with it and a burn-in `subtitleMode`, captions are measured against this output's own band. */
+  spec?: Readonly<OutputSpec>
+  /** How captions are delivered on this output (the delivery profile's subtitle mode); absent: not stated. */
+  subtitleMode?: CaptionDeliveryMode
 }
 
-// The values the planner of the earlier waves still applies where the request is silent (rule `carried-planner-value`). ADR-160 F3
-// derives the caption ones from the preset and the measured width, F4 the opening, F5 the structure and the CTA window.
+// The values the planner of the earlier waves still applies where the request is silent (rule `carried-planner-value`). ADR-160 F4 derives
+// the opening, F5 the structure and the CTA window.
 const CARRIED_OPENING_SECONDS = 4
 const CARRIED_CTA_WINDOW_SECONDS = 3
-const CARRIED_CAPTION_BLOCK_CHARACTERS = 32
-const CARRIED_CAPTION_PRESET: SubtitlePresetId = 'clean-color'
+// The caption style the renderer registry designates for an output that must draw captions when nothing else names one (rule `renderer-baseline`).
+export const RENDERER_BASELINE_CAPTION_PRESET: SubtitlePresetId = 'clean-color'
 // Not editorial: a click guard at an audio seam.
 const AUDIO_SEAM_FADE_MS = 24
 
@@ -182,7 +221,7 @@ function evidenceOf(request: Readonly<EditorialRequestV1>, selection: Selection 
 }
 
 /** A policy where the request is silent: the rule is named, and the reason says what was decided and why. */
-function silent<V>(request: Readonly<EditorialRequestV1>, key: PolicyKey, value: V, rule: 'minimal-intervention' | 'carried-planner-value', reason: string, ...extra: string[]): ResolvedPolicy<V> {
+function silent<V>(request: Readonly<EditorialRequestV1>, key: PolicyKey, value: V, rule: 'minimal-intervention' | 'carried-planner-value' | 'renderer-baseline', reason: string, ...extra: string[]): ResolvedPolicy<V> {
   return Object.freeze({ key, status: 'applied' as const, value: Object.freeze(value) as Readonly<V>, origin: 'silence-rule' as const, rule, reason, evidenceRefs: evidenceOf(request, undefined, ...extra) })
 }
 
@@ -210,6 +249,25 @@ function requested<V>(request: Readonly<EditorialRequestV1>, builder: Builder, k
   })
 }
 
+/** The caption policy of a preset over the outputs of the project: the preset's grouping and capacity, and the measured geometry of each burn-in output. */
+function captionPolicyValue(presetId: SubtitlePresetId, outputs: readonly Readonly<EditorialOutputSpec>[]): CaptionPolicyValue {
+  const preset = readSubtitlePreset(presetId)
+  const deliveries = outputs.flatMap((output) => {
+    if (output.variantId === undefined) return []
+    const mode = output.subtitleMode ?? 'unspecified' as const
+    return [Object.freeze({
+      variantId: output.variantId, mode,
+      fit: mode === 'burn-in' && output.spec !== undefined ? captionFitGeometryFor({ variantId: output.variantId, spec: output.spec, presetId }) : null,
+    })]
+  }).toSorted((left, right) => left.variantId.localeCompare(right.variantId))
+  return Object.freeze({
+    presetId, maxLines: preset.lineBreaking.maxLines, anchor: 'bottom' as const,
+    grouping: Object.freeze({ maxWordsPerGroup: preset.grouping.maxWordsPerGroup, maxOnScreenMs: preset.grouping.maxOnScreenMs, silenceBreakMs: preset.grouping.minOnScreenMs }),
+    capacityCharacters: preset.lineBreaking.maxLines * preset.lineBreaking.maxCharacters,
+    deliveries: Object.freeze(deliveries),
+  })
+}
+
 function primaryLanguage(tag: string): string {
   return tag.split('-')[0]!.toLowerCase()
 }
@@ -227,10 +285,14 @@ function aspectOf(value: string | undefined): number | undefined {
 export function resolveEditorialPolicies(
   request: Readonly<EditorialRequestV1>,
   mediaContext: Readonly<EditorialMediaContext>,
-  outputSpec: Readonly<EditorialOutputSpec> = {},
+  outputsInput: Readonly<EditorialOutputSpec> | readonly Readonly<EditorialOutputSpec>[] = [],
 ): Readonly<EditorialPolicyResolutionV1> {
   const builder: Builder = { unsupported: [] }
   const openQuestions: OpenQuestion[] = []
+  // The Director plans one timeline for every output of the project; a single output is that project's only one. A request that is about one
+  // output (a variant override) is read for that output only when it is the only one the plan serves.
+  const outputs: readonly Readonly<EditorialOutputSpec>[] = Array.isArray(outputsInput) ? outputsInput : [outputsInput as Readonly<EditorialOutputSpec>]
+  const outputSpec: Readonly<EditorialOutputSpec> = outputs.length === 1 ? outputs[0]! : {}
 
   // Movement. Silence: no movement. The renderer executes no effect, so any movement other than none is understood and unsupported.
   const movementSelection = select(request, outputSpec, 'movement')
@@ -272,9 +334,22 @@ export function resolveEditorialPolicies(
 
   // CTA. The objective and desired action are fields the requester gives; the CTA is required only when they ask for an action.
   const action = request.desiredAction
+  const ctaRequired = action !== undefined && action.kind !== 'continue-viewing'
+  // The spoken call is recognised by the explicit text the requester gave, or by the words of the language of the speech; with neither it is not evaluable.
+  const explicitCtaText = Boolean(action?.verbalCta?.trim() || action?.visualCta?.trim())
+  const evaluation: CtaEvaluation = !ctaRequired ? 'not-required'
+    : explicitCtaText ? 'explicit-text'
+      : ctaLexiconFor(mediaContext.transcriptLanguage) !== null ? 'lexicon' : 'not-evaluable'
+  if (evaluation === 'not-evaluable' && mediaContext.transcriptLanguage !== undefined) {
+    openQuestions.push(Object.freeze({
+      id: 'cta-not-evaluable',
+      question: `The objective asks for the action ${action!.kind}, and the Apollo has no list of the words that ask for it in ${mediaContext.transcriptLanguage}. What is the exact spoken call to action (the verbal CTA text), so that it can be checked?`,
+      source: 'resolution' as const,
+    }))
+  }
   const cta: EditorialPolicies['cta'] = Object.freeze({
     key: 'cta' as const, status: 'applied' as const,
-    value: Object.freeze({ required: action !== undefined && action.kind !== 'continue-viewing' }),
+    value: Object.freeze({ required: ctaRequired, evaluation }),
     origin: action !== undefined ? 'request-field' as const : 'silence-rule' as const,
     rule: action !== undefined ? 'desired-action' as const : 'minimal-intervention' as const,
     reason: action === undefined
@@ -351,15 +426,31 @@ export function resolveEditorialPolicies(
     openQuestions.push(Object.freeze({ id: 'caption-language-unknown', question: 'In which language should the captions be written? The request does not say and the transcript does not state it.', source: 'resolution' as const }))
   }
 
-  // Captions.
+  // Captions. The style is the request's, else the project override's (or the Guardrail it inherits), else the baseline of the renderer registry;
+  // the grouping is the preset's and the width a cue may take is measured on each output that burns captions.
   const styleSelection = select(request, outputSpec, 'caption-style')
-  const captions: EditorialPolicies['captions'] = styleSelection === undefined
-    ? silent(request, 'captions', { presetId: CARRIED_CAPTION_PRESET, maxCharactersPerBlock: CARRIED_CAPTION_BLOCK_CHARACTERS, maxLines: 2 as const, anchor: 'bottom' as const }, 'carried-planner-value',
-      `The request does not mention caption style. The captions are the transcript's own words; their preset (${CARRIED_CAPTION_PRESET}) and block width (${CARRIED_CAPTION_BLOCK_CHARACTERS} characters) are the planner's carried values (to be derived from the preset and the measured width in ADR-160 F3), not the request's.`)
-    : requested(request, builder, 'captions', styleSelection,
-      { presetId: styleSelection.directive.value as SubtitlePresetId, maxCharactersPerBlock: CARRIED_CAPTION_BLOCK_CHARACTERS, maxLines: 2 as const, anchor: 'bottom' as const },
-      `Captions use the ${styleSelection.directive.value} preset; the block width (${CARRIED_CAPTION_BLOCK_CHARACTERS} characters) is still the planner's carried value`,
-      { presetId: CARRIED_CAPTION_PRESET, maxCharactersPerBlock: CARRIED_CAPTION_BLOCK_CHARACTERS, maxLines: 2 as const, anchor: 'bottom' as const })
+  const override = mediaContext.subtitleStyleOverride !== undefined && (SUBTITLE_PRESET_IDS as readonly string[]).includes(mediaContext.subtitleStyleOverride.presetId)
+    ? mediaContext.subtitleStyleOverride : undefined
+  const captionValue = (presetId: SubtitlePresetId): CaptionPolicyValue => captionPolicyValue(presetId, outputs)
+  let captions: EditorialPolicies['captions']
+  if (styleSelection !== undefined) {
+    const presetId = styleSelection.directive.value as SubtitlePresetId
+    captions = requested(request, builder, 'captions', styleSelection, captionValue(presetId),
+      `Captions use the ${presetId} preset; their grouping is the preset's and their width is measured on each output that burns captions`, captionValue(presetId))
+  } else if (override !== undefined) {
+    const presetId = override.presetId as SubtitlePresetId
+    captions = Object.freeze({
+      key: 'captions' as const, status: 'applied' as const, value: Object.freeze(captionValue(presetId)),
+      origin: override.origin === 'project-custom' ? 'request-field' as const : 'workspace-policy' as const, rule: 'project-override' as const,
+      reason: override.origin === 'project-custom'
+        ? `The project fixed the caption style ${presetId} (override subtitleStyle). The grouping is the preset's and the width is measured on each output that burns captions.`
+        : `The workspace Guardrail fixed the caption style ${presetId} (override subtitleStyle, inherited by the project). The grouping is the preset's and the width is measured on each output that burns captions.`,
+      evidenceRefs: Object.freeze([requestRef(request), `override:subtitleStyle:${override.origin}`]),
+    })
+  } else {
+    captions = silent(request, 'captions', captionValue(RENDERER_BASELINE_CAPTION_PRESET), 'renderer-baseline',
+      `The request, the project and the workspace do not name a caption style. The captions are the transcript's own words and need some style to be drawn: the baseline preset of the renderer registry (${RENDERER_BASELINE_CAPTION_PRESET}) is used. That is not a choice of the requester. Its grouping is the preset's and the width is measured on each output that burns captions.`)
+  }
 
   // The speech the requester asked to remove.
   const removals = request.requestedRemovals
@@ -370,6 +461,24 @@ export function resolveEditorialPolicies(
       evidenceRefs: Object.freeze([requestRef(request), ...removals.map((ruleId) => `removal:${ruleId}`)]),
     })
     : silent(request, 'speechRemovals', { ruleIds: Object.freeze([] as string[]) }, 'minimal-intervention', 'The request asks to remove no speech; no spoken phrase is forbidden.')
+
+  // The plan is one timeline for every output of the project. A value asked for one output of several cannot be executed by that plan, and is
+  // therefore listed (never applied to all, never dropped). With one output the override has been read for it above.
+  if (outputs.length > 1) {
+    const policyKeyOf: Readonly<Record<EditorialDirectiveKind, PolicyKey | 'interpretation'>> = {
+      movement: 'movement', opening: 'opening', structure: 'structure', cta: 'ctaOverlay', layout: 'layout',
+      'caption-language': 'language', 'caption-style': 'captions', keep: 'interpretation', avoid: 'interpretation',
+    }
+    for (const output of outputs) {
+      for (const directive of output.variantId !== undefined ? request.variantOverrides[output.variantId] ?? [] : []) {
+        builder.unsupported.push(Object.freeze({
+          policyKey: policyKeyOf[directive.kind], directiveId: directive.id, kind: directive.kind, value: describe(directive),
+          source: 'variant-override' as const, reason: 'not-executable' as const,
+          summary: `The plan is one for the ${outputs.length} outputs of the project: ${describe(directive)} for output variant ${output.variantId} alone cannot be executed.`,
+        }))
+      }
+    }
+  }
 
   // What the request asks for and the Apollo does not do at all: listed, never dropped.
   for (const directive of [...request.directives, ...Object.values(request.variantOverrides).flat(), ...(request.interpretation?.directives ?? [])]) {

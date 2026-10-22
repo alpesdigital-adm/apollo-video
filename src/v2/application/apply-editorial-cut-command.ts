@@ -171,7 +171,6 @@ export interface EditorialCutEditPlan {
   subtitlePolicy: Readonly<{
     faceProtection: true
     anchor: 'bottom'
-    maxCharactersPerBlock: 42
   }>
   createdAt: string
 }
@@ -506,7 +505,7 @@ function compileEditPlan(input: {
       automaticZoom: false as const,
       protectedOpeningFrames: Math.round(input.fps * 4),
     }),
-    subtitlePolicy: Object.freeze({ faceProtection: true as const, anchor: 'bottom' as const, maxCharactersPerBlock: 42 }),
+    subtitlePolicy: Object.freeze({ faceProtection: true as const, anchor: 'bottom' as const }),
     createdAt: input.createdAt,
   })
 }

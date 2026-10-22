@@ -388,7 +388,7 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
       [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.quality, 'quality-report', 5, qualityReport],
-      [policySnapshotId, 'policy-resolution', 1, sealed.resolution],
+      [policySnapshotId, 'policy-resolution', 2, sealed.resolution],
     ]) {
       await client.v2ProjectSnapshot.create({
         data: {

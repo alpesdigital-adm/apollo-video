@@ -57,7 +57,7 @@ export async function sealedEditorialFixture({ briefContentJson, strategic, suff
       check('movementMatchesPolicy', 'request', 'movement'),
       check('openingMatchesPolicy', 'request', 'opening'),
       check('forbiddenSpeechAbsent', 'request', 'speechRemovals'),
-      check('captionsBounded', 'invariant', 'captions'),
+      check('captionsFitMeasured', 'invariant', 'captions'),
       check('timelineContinuous', 'invariant'),
       check('sourceRightsCertain', 'invariant'),
     ],
@@ -66,7 +66,7 @@ export async function sealedEditorialFixture({ briefContentJson, strategic, suff
     perceptionEvidence,
     requestHash: request.requestHash,
     policyResolutionHash: resolution.policyResolutionHash,
-    criticVersion: 'apollo-director-critic/v4',
+    criticVersion: 'apollo-director-critic/v5',
     evaluatedAt,
   }
   return { request, resolution, qualityReport }
@@ -75,7 +75,7 @@ export async function sealedEditorialFixture({ briefContentJson, strategic, suff
 /** The project snapshot row that holds a sealed resolution (what a real run writes next to its quality report). */
 export function policySnapshotRow({ id, workspaceId, projectId, resolution, createdAt }) {
   return {
-    id, workspaceId, projectId, kind: 'policy-resolution', schemaVersion: 1,
+    id, workspaceId, projectId, kind: 'policy-resolution', schemaVersion: 2,
     contentJson: stableSerialize(resolution), contentHash: calculateCanonicalHash(resolution), createdAt,
   }
 }

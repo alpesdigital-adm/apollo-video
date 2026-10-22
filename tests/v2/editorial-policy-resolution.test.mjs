@@ -54,7 +54,7 @@ test('the silence rule invents nothing: no movement, no overlay, no insert, no f
 
 test('values the planner still carries are named as carried, never as the request', () => {
   const { policies } = resolveEditorialPolicies(createEditorialRequest({}), { hasSelectedInsert: false, transcriptLanguage: 'xx-YY' }, {})
-  for (const key of ['opening', 'structure', 'captions']) {
+  for (const key of ['opening', 'structure']) {
     assert.equal(policies[key].origin, 'silence-rule', key)
     assert.equal(policies[key].rule, 'carried-planner-value', key)
     assert.match(policies[key].reason, /carried/, key)

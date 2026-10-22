@@ -34,17 +34,20 @@ const RESOLUTION_MODULES = Object.freeze([
  *    never as an analysis tag.
  */
 const PATTERNS = Object.freeze([
-  { id: "automaticZoom: false", regex: /automaticZoom: false/ },
+  { id: "automaticZoom: false", regex: /automaticZoom\s*:\s*false\b/ },
+  { id: "automaticZoom: { const: false } (public schema)", regex: /automaticZoom\s*:\s*\{\s*const\s*:\s*false\s*\}/ },
   { id: "fps * 4", regex: /fps \* 4\b/ },
   { id: "'landscape-inset' as const", regex: /'landscape-inset' as const/ },
   { id: "maxCharactersPerBlock: <digit>", regex: /maxCharactersPerBlock: \d/ },
   { id: "track-captions-pt-br", regex: /track-captions-pt-br/ },
-  { id: "presetId: 'clean-color'", regex: /presetId: 'clean-color'/ },
   { id: "index === 0 ? 'hook'", regex: /index === 0 \? 'hook'/ },
   { id: "['workspace-default'] (list of one)", regex: /\[\s*'workspace-default'\s*\]/ },
   { id: 'placeholder="Ex.', regex: /placeholder="Ex\./ },
   { id: "('discovery') as an initial objective", regex: /(?:useState<[^>]*>|setObjective)\('discovery'\)/ },
-  { id: "?? 'pt-BR'", regex: /\?\? 'pt-BR'/ },
+  { id: "?? 'pt-BR'", regex: /\?\?\s*['"]pt-BR['"]/ },
+  { id: "useState('pt-BR')", regex: /useState(?:<[^>]*>)?\(\s*['"]pt-BR['"]\s*\)/ },
+  { id: "locale parameter defaulting to 'pt-BR'", regex: /\blocale\s*(?::\s*string\s*)?=\s*['"]pt-BR['"]/ },
+  { id: "'clean-color' as a default style", regex: /(?:subtitleStyle|presetId)\s*:\s*['"]clean-color['"]|\?\?\s*['"]clean-color['"]/ },
 ])
 
 /**
@@ -55,8 +58,10 @@ const BASELINE = Object.freeze({
   "src/app/ProjectsPageClient.tsx :: ('discovery') as an initial objective": 2,
   "src/app/ProjectsPageClient.tsx :: ?? 'pt-BR'": 1,
   "src/app/ProjectsPageClient.tsx :: placeholder=\"Ex.": 3,
+  "src/app/ProjectsPageClient.tsx :: useState('pt-BR')": 1,
   "src/app/batches/page.tsx :: ['workspace-default'] (list of one)": 1,
   "src/app/batches/page.tsx :: placeholder=\"Ex.": 1,
+  "src/app/batches/page.tsx :: useState('pt-BR')": 2,
   "src/app/localization/page.tsx :: placeholder=\"Ex.": 1,
   "src/app/projects/[id]/page.tsx :: ('discovery') as an initial objective": 2,
   "src/app/projects/[id]/page.tsx :: ?? 'pt-BR'": 1,
@@ -64,8 +69,6 @@ const BASELINE = Object.freeze({
   "src/app/projects/[id]/page.tsx :: placeholder=\"Ex.": 2,
   "src/v2/application/apply-editorial-cut-command.ts :: automaticZoom: false": 2,
   "src/v2/application/apply-editorial-cut-command.ts :: fps * 4": 1,
-  "src/v2/application/apply-editorial-cut-command.ts :: maxCharactersPerBlock: <digit>": 2,
-  "src/v2/application/create-project.ts :: ?? 'pt-BR'": 1,
   "src/v2/application/multicam-direction.ts :: automaticZoom: false": 1,
   "src/v2/application/multicam-direction.ts :: fps * 4": 1,
   "src/v2/application/renderable-edit-plan.ts :: 'landscape-inset' as const": 1,
@@ -77,12 +80,8 @@ const BASELINE = Object.freeze({
   "src/v2/domain/director-run.ts :: automaticZoom: false": 1,
   "src/v2/domain/director-run.ts :: fps * 4": 1,
   "src/v2/domain/production-modes.ts :: index === 0 ? 'hook'": 1,
-  "src/v2/infrastructure/prisma/image-analysis-repository.ts :: ?? 'pt-BR'": 1,
-  "src/v2/infrastructure/prisma/long-form-index-workflow-repository.ts :: ?? 'pt-BR'": 2,
-  "src/v2/infrastructure/prisma/media-library-repository.ts :: ?? 'pt-BR'": 1,
-  "src/v2/infrastructure/prisma/project-final-export-repository.ts :: ?? 'pt-BR'": 1,
-  "src/v2/infrastructure/prisma/review-annotation-repository.ts :: ?? 'pt-BR'": 1,
   "src/v2/public-api/schema-examples.ts :: automaticZoom: false": 20,
+  "src/v2/public-api/schema-registry.ts :: automaticZoom: { const: false } (public schema)": 11,
 })
 
 const keyOf = (file, patternId) => `${file} :: ${patternId}`
@@ -128,7 +127,8 @@ test('the scan recognises each forbidden editorial literal, and only as code', (
     "automaticZoom: false", "Math.round(input.fps * 4)", "layout: 'landscape-inset' as const", 'maxCharactersPerBlock: 42',
     "id: 'track-captions-pt-br'", "presetId: 'clean-color' as const", "role: index === 0 ? 'hook' : 'argument'",
     "audienceTags: ['workspace-default']", '<input placeholder="Ex.: uma frase" />', "useState<StrategicObjectiveId>('discovery')",
-    "setObjective('discovery')", "locale: request.locale ?? 'pt-BR'",
+    "setObjective('discovery')", "locale: request.locale ?? 'pt-BR'", 'const x = { automaticZoom:false }', 'automaticZoom: { const: false },',
+    "useState('pt-BR')", "async find(id: string, locale = 'pt-BR')", "subtitleStyle: 'clean-color',", 'const p = preset ?? "clean-color"', 'x ?? "pt-BR"',
   ]
   for (const sample of samples) assert.ok(findEditorialLiterals(sample).length === 1, `the scan missed: ${sample}`)
   for (const sample of [

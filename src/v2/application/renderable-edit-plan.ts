@@ -1,3 +1,5 @@
+import { createEditorialRequest } from '../domain/editorial-request.ts'
+import { resolveEditorialPolicies } from '../domain/editorial-policy-resolution.ts'
 import { calculateRenderablePlanHash, RENDERABLE_PLAN_COMPILER_VERSION } from '../domain/renderable-plan-authority.ts'
 export { calculateRenderablePlanHash, RENDERABLE_PLAN_COMPILER_VERSION } from '../domain/renderable-plan-authority.ts'
 import {
@@ -79,8 +81,12 @@ export type RenderablePlanOrigin = (typeof RENDERABLE_PLAN_ORIGINS)[number]
  */
 export const RENDERABLE_PLAN_AUDIO_FADE_MS = 24
 
-/** Subtitles are not compiled by these paths; the policy still has to be stated. */
-const SUBTITLE_MAX_CHARACTERS = 32
+/**
+ * These compilers materialize an aggregate somebody else decided and hold no editorial request of their own, so the policies their plan states
+ * are those of a request that is silent (rule `minimal-intervention`), resolved by the one module that names them. Subtitles are not compiled
+ * by these paths; the capacity the plan states is the caption preset's.
+ */
+const REQUESTLESS_POLICIES = resolveEditorialPolicies(createEditorialRequest({}), { hasSelectedInsert: false }).policies
 
 export interface RenderablePlanSource {
   readonly id: string
@@ -285,7 +291,7 @@ export function assembleDirectedEditPlan(
     subtitlePolicy: Object.freeze({
       faceProtection: true as const,
       anchor: 'bottom' as const,
-      maxCharactersPerBlock: SUBTITLE_MAX_CHARACTERS,
+      maxCharactersPerBlock: REQUESTLESS_POLICIES.captions.value.capacityCharacters,
     }),
     composition: Object.freeze({
       layout: 'landscape-inset' as const,

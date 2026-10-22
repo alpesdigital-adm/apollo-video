@@ -50,7 +50,7 @@ import {
   resolveStrategicObjective,
 } from '../../domain/strategic-objective.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
-import { parseEditorialPolicyResolution, resolutionOwnsPolicyRef, type EditorialPolicyResolutionV1 } from '../../domain/editorial-policy-resolution.ts'
+import { parseEditorialPolicyResolution, POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION, resolutionOwnsPolicyRef, type EditorialPolicyResolutionV1 } from '../../domain/editorial-policy-resolution.ts'
 import { collectRequestedSpeechRemovals, type SpeechRemovalLineageProject } from '../../application/requested-speech-removals.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { readEditorialSourceBindingV1 } from './output-version-materializer.ts'
@@ -435,7 +435,7 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
   if (row.policySnapshotId !== null || row.requestHash !== null || payload.snapshotRefs.policyResolution !== undefined || qualityReport.schemaVersion === 'director-quality-report/v5') {
     if (row.policySnapshot === null || row.policySnapshotId === null || row.requestHash === null ||
         payload.snapshotRefs.policyResolution !== row.policySnapshotId || qualityReport.schemaVersion !== 'director-quality-report/v5' ||
-        row.policySnapshot.kind !== 'policy-resolution' || row.policySnapshot.schemaVersion !== 1) {
+        row.policySnapshot.kind !== 'policy-resolution' || row.policySnapshot.schemaVersion !== POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Stored DirectorRun editorial request bindings are inconsistent')
     }
     policyResolution = parseEditorialPolicyResolution(parseRecord(row.policySnapshot.contentJson, 'Director policy resolution'))
@@ -605,7 +605,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     const versionRow = project?.currentVersion
     const master = project?.mediaAssets[0]
     if (!project || !versionRow || !master) return null
-    if (!project.objective || !project.locale) throw new DomainError('PERSISTENCE_CONFLICT', 'Project direction metadata is incomplete')
+    if (!project.objective) throw new DomainError('PERSISTENCE_CONFLICT', 'Project direction metadata is incomplete')
     const projectObjective = resolveStrategicObjective(project.objective)
     const latestDirectorRun = project.directorRuns[0]
     const latestDirectorObjective = latestDirectorRun
@@ -738,7 +738,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       workspaceId: project.workspaceId, projectId: project.id, projectVersionId: versionRow.id, now: this.clock() })
     return Object.freeze({
       workspaceId: project.workspaceId,
-      project: Object.freeze({ id: project.id, objective: projectObjective.id, locale: project.locale }),
+      project: Object.freeze({ id: project.id, objective: projectObjective.id, ...(project.locale ? { locale: project.locale } : {}) }),
       ...(latestDirectorObjective ? { latestDirectorObjective } : {}),
       parent,
       currentVersion: parent.version,

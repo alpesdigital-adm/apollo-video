@@ -1558,7 +1558,7 @@ test('W65b the gate still refuses everything the Director report does not honest
     assert.equal(await repository.readApproval(request), null, label)
   }
   await refuse({ hardChecks: report.hardChecks.map((check) => check.id === 'timelineContinuous' ? { ...check, passed: false } : check) }, 'a hard check that failed')
-  await refuse({ hardChecks: report.hardChecks.map((check) => check.id === 'captionsBounded' ? { ...check, passed: false } : check) }, 'captions not bounded')
+  await refuse({ hardChecks: report.hardChecks.map((check) => check.id === 'captionsFitMeasured' ? { ...check, passed: false } : check) }, 'captions not bounded')
   // ADR-160: the report must answer the request the Version's brief states NOW, and the run must have sealed the resolution it names
   await refuse({}, 'the brief states another request than the one the report answered', { briefContentJson: controlledBriefJson({ ownerText: 'a request the report never answered' }) })
   await refuse({}, 'the run sealed no policy resolution', { sealed: undefined })

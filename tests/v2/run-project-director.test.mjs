@@ -435,7 +435,7 @@ test('Director binds controlled OCR samples to snapshot v2 while face safety rem
     const result = await service(request())
     const snapshot = repository.lastBundle.snapshots.find((item) => item.kind === 'perception')
     assert.equal(snapshot.contentSchemaVersion, 2)
-    assert.equal(result.run.plannerVersion, 'apollo-director-policy/v3')
+    assert.equal(result.run.plannerVersion, 'apollo-director-policy/v4')
     assert.equal(result.run.perception.schemaVersion, 2)
     assert.equal(result.run.perception.inputVersionId, 'project-version-4')
     assert.equal(result.run.perception.ocrEvidence.envelopeId, envelope.id)
@@ -637,7 +637,7 @@ test('a video that says "dois dias" and "31 de janeiro" is not blocked when noth
   assert.equal(hardCheck(result.run.qualityReport, 'forbiddenSpeechAbsent'), true)
   assert.notEqual(result.run.qualityReport.status, 'blocked')
   assert.equal(admitDirectorQualityForFinal(result.run.qualityReport, bindingOf(result.run)).admitted, true)
-  assert.equal(result.run.qualityReport.criticVersion, 'apollo-director-critic/v4')
+  assert.equal(result.run.qualityReport.criticVersion, 'apollo-director-critic/v5')
   assert.ok(repository.lastBundle)
 })
 
@@ -974,7 +974,7 @@ test('W66 multi-output: the Director impact document refuses a render of a stran
   const base = {
     commandId: 'command-director-two-outputs', baseVersionId: 'version-director-two-outputs-base', resultVersionId: 'version-director-two-outputs-result',
     sourceTranscriptId: 'transcript-director-two-outputs', sourceTranscriptHash: 'a'.repeat(64),
-    plannerVersion: 'apollo-director-policy/v3', criticVersion: 'apollo-director-critic/v4', affectedEndFrame: 300, renderEndFrame: 280,
+    plannerVersion: 'apollo-director-policy/v4', criticVersion: 'apollo-director-critic/v5', affectedEndFrame: 300, renderEndFrame: 280,
   }
   const reference = (variantId) => ({ artifactId: `artifact-${variantId}`, kind: 'proxy', sourceVersionId: base.baseVersionId, variantId })
   const ok = createDirectorRunImpact({ ...base, variantIds: ['variant-wide', 'variant-vertical'], outputReferences: [reference('variant-wide')] })
@@ -1873,7 +1873,7 @@ test('ADR-160 the run seals the request it answers and the policy resolution it 
   assert.equal(run.policyResolution.requestHash, run.requestHash)
   assert.equal(run.qualityReport.requestHash, run.requestHash)
   assert.equal(run.qualityReport.policyResolutionHash, run.policyResolution.policyResolutionHash)
-  assert.equal(run.qualityReport.criticVersion, 'apollo-director-critic/v4')
+  assert.equal(run.qualityReport.criticVersion, 'apollo-director-critic/v5')
   // the sealed resolution is a snapshot of its own, named by the command and by the run
   const sealed = repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'policy-resolution')
   assert.equal(command.payload.snapshotRefs.policyResolution, sealed.id)
@@ -1892,7 +1892,7 @@ test('ADR-160 the run seals the request it answers and the policy resolution it 
     assert.ok(check.evidence.length > 0)
   }
   assert.deepEqual(run.qualityReport.hardChecks.map((check) => check.id),
-    ['requestHonored', 'movementMatchesPolicy', 'openingMatchesPolicy', 'forbiddenSpeechAbsent', 'captionsBounded', 'timelineContinuous', 'sourceRightsCertain'])
+    ['requestHonored', 'movementMatchesPolicy', 'openingMatchesPolicy', 'forbiddenSpeechAbsent', 'captionsFitMeasured', 'timelineContinuous', 'sourceRightsCertain'])
 })
 
 test('ADR-160 the reason of a decision is generated from the origin of its policy, never from a wish the request did not state', async () => {

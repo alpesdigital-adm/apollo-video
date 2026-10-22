@@ -86,11 +86,11 @@ export const REQUIRED_HARD_CHECKS = Object.freeze(['requestHonored', 'timelineCo
 const refuse = (reason: string): FinalQualityAdmission => Object.freeze({ admitted: false as const, reason })
 
 /**
- * The oldest Director critic whose report names the request it answers. `apollo-director-critic/v4` judges the plan against a sealed policy
- * resolution (ADR-160); a report born under an earlier critic checked fixed editorial values or fixed phrases, never the request, so its
- * approval is not inherited - the Director runs again.
+ * The oldest Director critic whose report names the request it answers. `apollo-director-critic/v4` judged the plan against a sealed policy
+ * resolution whose caption width, opening window, structure roles and rubric were still values the planner carried; `v5` judges it against
+ * a resolution derived from the request (ADR-160 F3-F5). A report born under an earlier critic is not inherited - the Director runs again.
  */
-export const MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION = 4
+export const MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION = 5
 const APOLLO_DIRECTOR_CRITIC_VERSION = /^apollo-director-critic\/v(\d+)$/
 /** The only report schema a final export admits. v3 and v4 stay readable and are never admitted. */
 export const ADMITTED_DIRECTOR_QUALITY_REPORT_SCHEMA = 'director-quality-report/v5'

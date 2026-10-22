@@ -66,7 +66,9 @@ const copy = (value) => JSON.parse(JSON.stringify(value))
 test('historical renderable authority extraction preserves the independent pre-extraction golden', () => {
   // Astra recorded this value before moving the authority. Receipt SHA256:
   // 8b390c3f6f2e6dd0ee67e5dc1a21a3a88a716385d1ca89685bac7622228e9548.
-  const expected = 'f19d60a735a979ef7d221776d948e2025632886cdd70a33d78afd11fdb3a9885'
+  // Re-recorded in ADR-160 F3: the compiled plan's caption capacity is now the preset's (it was a fixed 32), so the document - and its hash - changed.
+  // Re-recorded again by F4/F5 when the movement, opening and composition envelope came from the resolution.
+  const expected = 'e5703dfca20790467a555e318c97143678120087def950dc66b51a3001c2a384'
   assert.equal(domainRenderableHash(plan()), expected)
   assert.equal(calculateRenderablePlanHash(plan()), expected)
   assert.equal(domainRenderableHash(plan({ createdAt: '2030-01-01T00:00:00.000Z' })), expected)

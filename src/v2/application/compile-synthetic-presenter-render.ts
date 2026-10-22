@@ -5,6 +5,8 @@ import {
   readOutputFormatPreset,
 } from '../domain/output-format-registry.ts'
 import type { OutputAspectRatio } from '../domain/output-spec.ts'
+import { RENDERER_BASELINE_CAPTION_PRESET } from '../domain/editorial-policy-resolution.ts'
+import type { SubtitlePresetId } from '../domain/subtitle-style-tokens.ts'
 import { createRenderInputSpec, type RenderInputSpecV1 } from '../domain/render-input.ts'
 import {
   assertSyntheticPresenterEditPlan,
@@ -30,6 +32,8 @@ function frames(milliseconds: number, fps: number): number {
  * absent: only Apollo artifact identities and checksums cross this boundary.
  */
 export function compileSyntheticPresenterRenderInputs(input: {
+  /** The caption style the project fixed (an override or the request); without one, the renderer baseline is drawn (rule `renderer-baseline`). */
+  subtitleStyle?: SubtitlePresetId
   plan: Readonly<SyntheticPresenterEditPlan>
   renderer: RenderInputSpecV1['renderer']
   aspectRatio?: OutputAspectRatio
@@ -150,7 +154,7 @@ export function compileSyntheticPresenterRenderInputs(input: {
     subtitles,
     palette: { ...PALETTE },
     stylePreset: 'creator-clean',
-    subtitleStyle: 'clean-color',
+    subtitleStyle: input.subtitleStyle ?? RENDERER_BASELINE_CAPTION_PRESET,
     gradePreset: 'natural',
   }
   const compile = (kind: 'proxy' | 'final') => createRenderInputSpec({
