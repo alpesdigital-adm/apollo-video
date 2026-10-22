@@ -266,4 +266,3 @@ export function calculateProxyReviewPolicySha256(parts: Readonly<ProxyReviewPoli
   return calculateCanonicalHash(buildProxyReviewPolicyIdentity(parts))
 }
 export const PROXY_REVIEW_POLICY_SHA256: string = calculateProxyReviewPolicySha256()
-
