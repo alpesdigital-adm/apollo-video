@@ -329,7 +329,8 @@ test('provider language reports normalise to BCP-47 deterministically', () => {
   // measured on Groq whisper-large-v3-turbo (verbose_json, no language sent): the capitalised English name, and no region
   assert.equal(normalizeDetectedLanguage('Portuguese'), 'pt')
   assert.equal(normalizeDetectedLanguage('Haitian Creole'), 'ht')
-  assert.equal(normalizeDetectedLanguage('Cantonese'), 'yue')  assert.equal(normalizeDetectedLanguage('pt'), 'pt')
+  assert.equal(normalizeDetectedLanguage('Cantonese'), 'yue')
+  assert.equal(normalizeDetectedLanguage('pt'), 'pt')
   assert.equal(normalizeDetectedLanguage('pt_br'), 'pt-BR')
   assert.equal(normalizeDetectedLanguage('und'), null)
   assert.equal(normalizeDetectedLanguage('not a language'), null)
