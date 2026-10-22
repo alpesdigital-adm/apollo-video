@@ -727,6 +727,18 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     const timelineSourceRights = Object.freeze(planSourceIds.map((artifactId) => Object.freeze({
       artifactId, rights: sourceRightsOf(sourceArtifacts.find((artifact) => artifact.id === artifactId)?.currentRightsSnapshot),
     })))
+    // The pixels of the source master, as its manifest probed them: the Director compares the shape of the source with the shape of the outputs.
+    const sourceDimensions = await (async () => {
+      const manifest = await this.client.v2MediaArtifactManifest.findFirst({
+        where: { workspaceId: project.workspaceId, artifactId: transcriptRow.sourceArtifactId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { manifestJson: true },
+      })
+      if (!manifest) return undefined
+      try {
+        const probe = (JSON.parse(manifest.manifestJson) as { probe?: { width?: unknown; height?: unknown } }).probe
+        return Number.isSafeInteger(probe?.width) && Number.isSafeInteger(probe?.height) && Number(probe!.width) >= 2 && Number(probe!.height) >= 2
+          ? Object.freeze({ width: Number(probe!.width), height: Number(probe!.height) }) : undefined
+      } catch { return undefined }
+    })()
     // What THIS project asked to have cut from the speech: the rules of the remove-spoken-content Commands in the lineage of the head.
     const requestedSpeechRemovals = await collectRequestedSpeechRemovals({
       projectId: project.id, headVersionId: versionRow.id,
@@ -746,6 +758,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       policies: Object.freeze(parseRecord(versionRow.policiesSnapshot.contentJson, 'project policies')),
       editPlan: Object.freeze(editPlan),
       currentDurationFrames,
+      ...(sourceDimensions ? { sourceDimensions } : {}),
       variantIds: Object.freeze(variantIds),
       sourceRights: sourceRightsOf(master.artifact.currentRightsSnapshot),
       timelineSourceRights,

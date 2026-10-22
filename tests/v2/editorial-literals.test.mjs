@@ -67,8 +67,6 @@ const BASELINE = Object.freeze({
   "src/app/projects/[id]/page.tsx :: ?? 'pt-BR'": 1,
   "src/app/projects/[id]/page.tsx :: automaticZoom: false": 1,
   "src/app/projects/[id]/page.tsx :: placeholder=\"Ex.": 2,
-  "src/v2/application/renderable-edit-plan.ts :: 'landscape-inset' as const": 1,
-  "src/v2/domain/production-modes.ts :: index === 0 ? 'hook'": 1,
 })
 
 const keyOf = (file, patternId) => `${file} :: ${patternId}`

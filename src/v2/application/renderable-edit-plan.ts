@@ -1,4 +1,4 @@
-import { planMovementPolicyUnder, requestlessEditorialPolicies } from '../domain/editorial-policy-resolution.ts'
+import { compositionUnderPolicy, planMovementPolicyUnder, requestlessEditorialPolicies } from '../domain/editorial-policy-resolution.ts'
 import { calculateRenderablePlanHash, RENDERABLE_PLAN_COMPILER_VERSION } from '../domain/renderable-plan-authority.ts'
 export { calculateRenderablePlanHash, RENDERABLE_PLAN_COMPILER_VERSION } from '../domain/renderable-plan-authority.ts'
 import {
@@ -289,14 +289,7 @@ export function assembleDirectedEditPlan(
       anchor: 'bottom' as const,
       maxCharactersPerBlock: REQUESTLESS_POLICIES.captions.value.capacityCharacters,
     }),
-    composition: Object.freeze({
-      layout: 'landscape-inset' as const,
-      background: 'blurred-source' as const,
-      foregroundScale: 1 as const,
-      verticalPosition: 0.5 as const,
-      faceSafeFallback: Object.freeze([0.14, 0.08, 0.72, 0.56] as const),
-      subtitleSafeRegion: Object.freeze([0.08, 0.7, 0.84, 0.24] as const),
-    }),
+    composition: compositionUnderPolicy(REQUESTLESS_POLICIES.layout),
     director: Object.freeze({
       plannerVersion: RENDERABLE_PLAN_COMPILER_VERSION,
       decisions: input.decisions === undefined

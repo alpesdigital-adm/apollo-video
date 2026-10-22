@@ -11,6 +11,7 @@ import {
 import { captionFitGeometryFor, type CaptionDeliveryMode, type CaptionFitGeometry } from './caption-fit.ts'
 import { ctaLexiconFor } from './cta-lexicon.ts'
 import type { OutputSpec } from './output-spec.ts'
+import type { RubricCriterionId } from './strategic-rubric.ts'
 import { readSubtitlePreset } from './subtitle-system.ts'
 import { SUBTITLE_PRESET_IDS, type SubtitlePresetId } from './subtitle-style-tokens.ts'
 
@@ -38,9 +39,8 @@ export type PolicyOrigin = (typeof POLICY_ORIGINS)[number]
 
 /**
  * The named rules. `minimal-intervention` is the owner's "does not invent" rule: where the request is silent, nothing is added that was
- * not asked for and not observed in the source. `carried-planner-value` is NOT a rule of the product: it marks a value the planner of the
- * earlier waves still applies and that no slice of ADR-160 has yet derived from the request; it never attributes the value to the owner,
- * and each use is a debt listed in `CARRIED_DEBT` (tests/v2/editorial-policy-captions.test.mjs): this module is exempt from the literal scan, so the scan cannot hold it.
+ * not asked for and not observed in the source. (F2 had a third silence rule, `carried-planner-value`, for values the planner of the earlier waves
+ * still applied; every one was derived from the request in F3-F5 and the rule no longer exists - a stored resolution that names it is refused.)
  */
 export const EDITORIAL_POLICY_RULES = Object.freeze({
   'explicit-request': Object.freeze({ origins: Object.freeze(['request-field', 'request-briefing'] as const), summary: 'The requester said it, in a structured field or in the briefing.' }),
@@ -50,12 +50,11 @@ export const EDITORIAL_POLICY_RULES = Object.freeze({
   'minimal-intervention': Object.freeze({ origins: Object.freeze(['silence-rule'] as const), summary: 'The request is silent: nothing is added that was not asked for and not observed in the source.' }),
   'project-override': Object.freeze({ origins: Object.freeze(['request-field', 'workspace-policy'] as const), summary: 'A project override (or, failing it, the workspace Guardrail it inherits) fixed it.' }),
   'renderer-baseline': Object.freeze({ origins: Object.freeze(['silence-rule'] as const), summary: 'Nothing named it and the output cannot be drawn without one: the baseline of the renderer registry is used, which is not an editorial preference.' }),
-  'carried-planner-value': Object.freeze({ origins: Object.freeze(['silence-rule'] as const), summary: 'The request is silent and the planner of the earlier waves still applies this value; scheduled to be derived (ADR-160 F3-F5).' }),
 } as const)
 export type PolicyRuleId = keyof typeof EDITORIAL_POLICY_RULES
 
 export const POLICY_KEYS = Object.freeze([
-  'movement', 'opening', 'structure', 'transitions', 'inserts', 'cta', 'ctaOverlay', 'layout', 'language', 'captions', 'speechRemovals',
+  'movement', 'opening', 'structure', 'transitions', 'inserts', 'cta', 'ctaOverlay', 'layout', 'language', 'captions', 'speechRemovals', 'budget', 'rubric',
 ] as const)
 export type PolicyKey = (typeof POLICY_KEYS)[number]
 
@@ -73,15 +72,25 @@ export interface ResolvedPolicy<V> {
 export interface EditorialPolicies {
   movement: ResolvedPolicy<{ mode: 'none' }>
   opening: ResolvedPolicy<{ mode: 'protected-window'; seconds: number } | { mode: 'not-applicable' }>
-  structure: ResolvedPolicy<{ order: 'source-order'; roles: 'by-position' }>
+  structure: ResolvedPolicy<{ order: 'source-order'; roles: 'none' }>
   transitions: ResolvedPolicy<{ type: 'straight-cut'; audioFadeMs: number }>
   inserts: ResolvedPolicy<{ mode: 'use-selected-insert' | 'no-insert' }>
   cta: ResolvedPolicy<{ required: boolean; evaluation: CtaEvaluation }>
-  ctaOverlay: ResolvedPolicy<{ mode: 'none' } | { mode: 'closing-window'; seconds: number }>
+  ctaOverlay: ResolvedPolicy<{ mode: 'none' } | { mode: 'window'; startSeconds: number; endSeconds: number; anchoredTo: 'spoken-cta' | 'spoken-cta-to-end' }>
   layout: ResolvedPolicy<{ mode: 'fit-with-backdrop' | 'source-native' }>
   language: ResolvedPolicy<{ captionLanguage: string | null }>
   captions: ResolvedPolicy<CaptionPolicyValue>
   speechRemovals: ResolvedPolicy<{ ruleIds: readonly string[] }>
+  budget: ResolvedPolicy<EditorialBudgetValue>
+  rubric: ResolvedPolicy<{ notRequested: readonly RubricCriterionId[] }>
+}
+
+/** What the plan is allowed to add, derived from the policies: nothing the request did not ask for, and what the timeline already holds. */
+export interface EditorialBudgetValue {
+  maxPatternBreaksPer30s: number
+  allowedEffects: readonly string[]
+  maxProofItems: number
+  maxCtaOccurrences: number
 }
 
 /** How the spoken call to action is judged: not at all (none required), by the explicit text the requester gave, by the lexicon of the language, or it cannot be. */
@@ -145,6 +154,12 @@ export interface EditorialMediaContext {
   sourceAspectRatio?: string
   /** Seconds, on the timeline, at which the first sentence of the speech ends (absent: the speech shows none). */
   firstSentenceEndSeconds?: number
+  /** Seconds, on the timeline, where the call to action is spoken (its last occurrence): absent when the speech has none or it cannot be recognised. */
+  spokenCta?: Readonly<{ startSeconds: number; endSeconds: number }>
+  /** Seconds of the compiled timeline. */
+  timelineDurationSeconds?: number
+  /** Rights-approved selected inserts the compiled timeline already holds (the proofs it shows). */
+  selectedInsertCount?: number
   /**
    * The caption style a project override (or the workspace Guardrail it inherits) fixed, as the policy snapshot resolved it. `project-none`
    * and an inherited nothing are absent here: they name no style.
@@ -164,9 +179,6 @@ export interface EditorialOutputSpec {
   subtitleMode?: CaptionDeliveryMode
 }
 
-// The values the planner of the earlier waves still applies where the request is silent (rule `carried-planner-value`). ADR-160 F5 derives
-// the structure and the CTA window.
-const CARRIED_CTA_WINDOW_SECONDS = 3
 // The caption style the renderer registry designates for an output that must draw captions when nothing else names one (rule `renderer-baseline`).
 export const RENDERER_BASELINE_CAPTION_PRESET: SubtitlePresetId = 'clean-color'
 // Not editorial: a click guard at an audio seam.
@@ -223,7 +235,7 @@ function evidenceOf(request: Readonly<EditorialRequestV1>, selection: Selection 
 }
 
 /** A policy where the request is silent: the rule is named, and the reason says what was decided and why. */
-function silent<V>(request: Readonly<EditorialRequestV1>, key: PolicyKey, value: V, rule: 'minimal-intervention' | 'carried-planner-value' | 'renderer-baseline', reason: string, ...extra: string[]): ResolvedPolicy<V> {
+function silent<V>(request: Readonly<EditorialRequestV1>, key: PolicyKey, value: V, rule: 'minimal-intervention' | 'renderer-baseline', reason: string, ...extra: string[]): ResolvedPolicy<V> {
   return Object.freeze({ key, status: 'applied' as const, value: Object.freeze(value) as Readonly<V>, origin: 'silence-rule' as const, rule, reason, evidenceRefs: evidenceOf(request, undefined, ...extra) })
 }
 
@@ -336,13 +348,15 @@ export function resolveEditorialPolicies(
       ...(mediaContext.transcriptId ? [`transcript:${mediaContext.transcriptId}`] : []))
   }
 
-  // Structure. Silence: the source order is kept (nothing reorders). The roles the story plan names by position are the planner's.
+  // Structure. The source order is kept, and no block is given a narrative role: a hook, a closing or a development are claims about the video that
+  // only a request (or the speech, for the call to action) can make.
   const structureSelection = select(request, outputSpec, 'structure')
+  const sourceOrder = { order: 'source-order' as const, roles: 'none' as const }
   const structure: EditorialPolicies['structure'] = structureSelection === undefined
-    ? silent(request, 'structure', { order: 'source-order' as const, roles: 'by-position' as const }, 'carried-planner-value',
-      'The request does not mention the structure. The retained clips keep the order of the source; nothing is reordered. The story plan of this planner version still names block roles by position; that is recorded as a carried planner value (to be derived from the request in ADR-160 F5), not as a request.')
-    : requested(request, builder, 'structure', structureSelection, { order: 'source-order' as const, roles: 'by-position' as const },
-      'The retained clips keep the order of the source', { order: 'source-order' as const, roles: 'by-position' as const })
+    ? silent(request, 'structure', sourceOrder, 'minimal-intervention',
+      'The request does not mention the structure. The retained clips keep the order of the source, and no block is given a narrative role (no hook, no development, no closing): nothing is reordered or named that the request did not ask for and the source did not show.')
+    : requested(request, builder, 'structure', structureSelection, sourceOrder,
+      'The retained clips keep the order of the source, and no block is given a narrative role', sourceOrder)
 
   // Transitions. No ornamental transition exists unless asked for; the audio seam fade only prevents a click.
   const transitions: EditorialPolicies['transitions'] = silent(request, 'transitions', { type: 'straight-cut' as const, audioFadeMs: AUDIO_SEAM_FADE_MS }, 'minimal-intervention',
@@ -360,6 +374,7 @@ export function resolveEditorialPolicies(
   // CTA. The objective and desired action are fields the requester gives; the CTA is required only when they ask for an action.
   const action = request.desiredAction
   const ctaRequired = action !== undefined && action.kind !== 'continue-viewing'
+  const ctaSelection = select(request, outputSpec, 'cta')
   // The spoken call is recognised by the explicit text the requester gave, or by the words of the language of the speech; with neither it is not evaluable.
   const explicitCtaText = Boolean(action?.verbalCta?.trim() || action?.visualCta?.trim())
   const evaluation: CtaEvaluation = !ctaRequired ? 'not-required'
@@ -369,6 +384,13 @@ export function resolveEditorialPolicies(
     openQuestions.push(Object.freeze({
       id: 'cta-not-evaluable',
       question: `The objective asks for the action ${action!.kind}, and the Apollo has no list of the words that ask for it in ${mediaContext.transcriptLanguage}. What is the exact spoken call to action (the verbal CTA text), so that it can be checked?`,
+      source: 'resolution' as const,
+    }))
+  }
+  if (ctaRequired && ctaSelection?.directive.value === 'none') {
+    openQuestions.push(Object.freeze({
+      id: 'cta-conflicts-with-action',
+      question: `The objective asks for the action ${action!.kind}, and the request asks for no call to action. Which of the two holds?`,
       source: 'resolution' as const,
     }))
   }
@@ -385,43 +407,82 @@ export function resolveEditorialPolicies(
     evidenceRefs: Object.freeze([requestRef(request), ...(action !== undefined ? [`desired-action:${action.kind}`] : [])]),
   })
 
-  // CTA overlay. Only when the requester gave a visual CTA text.
-  const ctaSelection = select(request, outputSpec, 'cta')
+  // CTA overlay. A visual call to action is drawn only when the request asks (the cta directive) or gives its text (the desired action), and it is
+  // drawn where the speech says the call: at the spoken call, or - when the request says closing - from the spoken call to the end. Without a
+  // spoken call there is nowhere to draw it from, which is a question.
+  const visualText = action?.visualCta?.trim()
+  const spoken = mediaContext.spokenCta
+  const overlayWanted = ctaSelection !== undefined
+    ? ctaSelection.directive.value === 'overlay-closing' || ctaSelection.directive.value === 'overlay-at-spoken-cta'
+    : Boolean(visualText)
+  const noOverlay = { mode: 'none' as const }
   let ctaOverlay: EditorialPolicies['ctaOverlay']
-  if (ctaSelection !== undefined) {
-    const wantsOverlay = ctaSelection.directive.value === 'overlay-closing' || ctaSelection.directive.value === 'overlay-at-spoken-cta'
-    ctaOverlay = requested(request, builder, 'ctaOverlay', ctaSelection,
-      wantsOverlay ? { mode: 'closing-window' as const, seconds: CARRIED_CTA_WINDOW_SECONDS } : { mode: 'none' as const },
-      wantsOverlay ? `The visual call to action is placed in the closing ${CARRIED_CTA_WINDOW_SECONDS} s window (the planner's carried placement)` : 'No visual call to action is drawn',
-      { mode: 'none' as const })
-  } else if (action?.visualCta?.trim()) {
-    ctaOverlay = Object.freeze({
-      key: 'ctaOverlay' as const, status: 'applied' as const, value: Object.freeze({ mode: 'closing-window' as const, seconds: CARRIED_CTA_WINDOW_SECONDS }),
-      origin: 'request-field' as const, rule: 'explicit-request' as const,
-      reason: `The desired action carries a visual call to action text, so it is drawn. Where it is drawn (the closing ${CARRIED_CTA_WINDOW_SECONDS} s) is the planner's carried placement, to be derived from the request in ADR-160 F5.`,
-      evidenceRefs: Object.freeze([requestRef(request), `desired-action:${action.kind}`]),
-    })
+  if (!overlayWanted) {
+    ctaOverlay = ctaSelection !== undefined
+      ? requested(request, builder, 'ctaOverlay', ctaSelection, noOverlay,
+        ctaSelection.directive.value === 'verbal-only' && visualText ? 'The call to action is only spoken: the visual call to action text of the desired action is not drawn' : 'No visual call to action is drawn', noOverlay)
+      : silent(request, 'ctaOverlay', noOverlay, 'minimal-intervention', 'The request gives no visual call to action text, so none is drawn.')
   } else {
-    ctaOverlay = silent(request, 'ctaOverlay', { mode: 'none' as const }, 'minimal-intervention', 'The request gives no visual call to action text, so none is drawn.')
+    const toEnd = ctaSelection?.directive.value === 'overlay-closing'
+    let value: EditorialPolicies['ctaOverlay']['value'] = noOverlay
+    let effect = 'No visual call to action is drawn until the question is answered'
+    if (!visualText) {
+      openQuestions.push(Object.freeze({ id: 'cta-overlay-text-missing', question: 'The request asks for a visual call to action and the desired action has no visual text. What should it say?', source: 'resolution' as const }))
+    } else if (spoken === undefined) {
+      openQuestions.push(Object.freeze({
+        id: 'cta-overlay-placement-unknown',
+        question: 'The visual call to action is drawn where the speech says the call, and the speech shows none that can be recognised. Where should it be drawn?',
+        source: 'resolution' as const,
+      }))
+    } else {
+      const endSeconds = toEnd ? Math.max(spoken.endSeconds, mediaContext.timelineDurationSeconds ?? spoken.endSeconds) : spoken.endSeconds
+      value = { mode: 'window' as const, startSeconds: spoken.startSeconds, endSeconds, anchoredTo: toEnd ? 'spoken-cta-to-end' as const : 'spoken-cta' as const }
+      effect = toEnd
+        ? `The visual call to action is drawn from the spoken call (${spoken.startSeconds} s) to the end of the video (${endSeconds} s)`
+        : `The visual call to action is drawn while the call is spoken (${spoken.startSeconds} s to ${spoken.endSeconds} s)`
+    }
+    if (ctaSelection !== undefined) {
+      ctaOverlay = requested(request, builder, 'ctaOverlay', ctaSelection, value, effect, noOverlay)
+    } else {
+      ctaOverlay = Object.freeze({
+        key: 'ctaOverlay' as const, status: 'applied' as const, value: Object.freeze(value), origin: 'request-field' as const, rule: 'explicit-request' as const,
+        reason: `The desired action carries a visual call to action text, so it is drawn. ${sentence(effect)}`,
+        evidenceRefs: Object.freeze([requestRef(request), `desired-action:${action!.kind}`]),
+      })
+    }
   }
 
-  // Layout. The geometry of the source and of the output decide it unless the request does.
+  // Layout. The geometry of the source and of every output decides it unless the request does: where they have one frame shape the source is used
+  // as it is; where they differ, the request decides how the frame is fitted, and silence keeps the whole frame visible over a backdrop.
   const layoutSelection = select(request, outputSpec, 'layout')
   const sourceAspect = aspectOf(mediaContext.sourceAspectRatio)
-  const outputAspect = aspectOf(outputSpec.aspectRatio)
+  const outputShapes = outputs.map((output) => aspectOf(output.aspectRatio ?? output.spec?.aspectRatio))
+  const shapesKnown = sourceAspect !== undefined && outputShapes.length > 0 && outputShapes.every((shape) => shape !== undefined)
+  const sameShape = shapesKnown && outputShapes.every((shape) => Math.abs(shape! - sourceAspect!) < 0.005)
+  const outputsText = outputs.map((output) => output.aspectRatio ?? output.spec?.aspectRatio ?? 'unknown').join(', ')
+  const fitWithBackdrop = { mode: 'fit-with-backdrop' as const }
   let layout: EditorialPolicies['layout']
   if (layoutSelection !== undefined) {
-    layout = requested(request, builder, 'layout', layoutSelection, { mode: 'fit-with-backdrop' as const }, 'The whole frame stays visible over a backdrop', { mode: 'fit-with-backdrop' as const })
-  } else if (sourceAspect !== undefined && outputAspect !== undefined && Math.abs(sourceAspect - outputAspect) < 0.005) {
+    const nativeAsked = layoutSelection.directive.value === 'source-native'
+    if (nativeAsked && !sameShape) {
+      openQuestions.push(Object.freeze({
+        id: 'layout-source-native-mismatch',
+        question: `The request keeps the source frame as it is, and the source (${mediaContext.sourceAspectRatio ?? 'unknown shape'}) does not have the frame shape of the output(s) (${outputsText || 'unknown'}). Should the whole frame stay visible over a backdrop?`,
+        source: 'resolution' as const,
+      }))
+    }
+    layout = requested(request, builder, 'layout', layoutSelection, nativeAsked && sameShape ? { mode: 'source-native' as const } : fitWithBackdrop,
+      nativeAsked ? 'The source frame is used as it is' : 'The whole frame stays visible over a backdrop', fitWithBackdrop)
+  } else if (sameShape) {
     layout = Object.freeze({
       key: 'layout' as const, status: 'applied' as const, value: Object.freeze({ mode: 'source-native' as const }), origin: 'output-spec' as const, rule: 'output-geometry' as const,
-      reason: `The source (${mediaContext.sourceAspectRatio}) and the output (${outputSpec.aspectRatio}) have the same frame shape, so the source is used as it is.`,
-      evidenceRefs: Object.freeze([requestRef(request), ...(outputSpec.id ? [`output-spec:${outputSpec.id}`] : [])]),
+      reason: `The source (${mediaContext.sourceAspectRatio}) and the output(s) (${outputsText}) have the same frame shape, so the source is used as it is.`,
+      evidenceRefs: Object.freeze([requestRef(request), ...outputs.flatMap((output) => output.id ? [`output-spec:${output.id}`] : [])]),
     })
   } else {
-    layout = silent(request, 'layout', { mode: 'fit-with-backdrop' as const }, 'minimal-intervention',
-      sourceAspect !== undefined && outputAspect !== undefined
-        ? `The request does not mention layout and the source (${mediaContext.sourceAspectRatio}) does not have the shape of the output (${outputSpec.aspectRatio}). The whole frame stays visible over a backdrop: it removes nothing from what was filmed.`
+    layout = silent(request, 'layout', fitWithBackdrop, 'minimal-intervention',
+      shapesKnown
+        ? `The request does not mention layout and the source (${mediaContext.sourceAspectRatio}) does not have the frame shape of every output (${outputsText}). The whole frame stays visible over a backdrop: it removes nothing from what was filmed.`
         : 'The request does not mention layout and no source or output geometry was given to the resolution. The whole frame stays visible over a backdrop: it removes nothing from what was filmed.')
   }
 
@@ -525,8 +586,25 @@ export function resolveEditorialPolicies(
     if (question.status === 'open') openQuestions.push(Object.freeze({ id: question.id, question: question.question, source: 'interpretation' as const }))
   }
 
+  // Budget. What the plan may add: nothing the request did not ask for (no pattern break, no effect), the proofs the timeline already shows, and
+  // the one call to action the objective asks for.
+  const budget: EditorialPolicies['budget'] = silent(request, 'budget', Object.freeze({
+    maxPatternBreaksPer30s: 0, allowedEffects: Object.freeze([] as string[]), maxProofItems: mediaContext.selectedInsertCount ?? 0, maxCtaOccurrences: ctaRequired ? 1 : 0,
+  }), 'minimal-intervention',
+  `The request asks for no pattern break and no effect, so none is allowed. The proofs are the ${mediaContext.selectedInsertCount ?? 0} selected insert(s) the timeline already holds, and the call to action is ${ctaRequired ? 'the one the objective asks for' : 'not required'}.`)
+
+  // Rubric. A criterion that measures what the request did not ask for is not scored; the others are renormalized (see effectiveRubricCriteria).
+  const notRequested: RubricCriterionId[] = [
+    ...(structure.value.roles === 'none' ? ['hook-clarity' as const] : []),
+    ...(!cta.value.required ? ['cta-clarity' as const, 'friction-reduction' as const] : []),
+  ]
+  const rubric: EditorialPolicies['rubric'] = silent(request, 'rubric', Object.freeze({ notRequested: Object.freeze(notRequested) }), 'minimal-intervention',
+    notRequested.length === 0 ? 'Every criterion of the objective rubric is about something the request asked for.'
+      : `Not scored, because the request did not ask for what they measure: ${notRequested.join(', ')}. The other criteria keep their proportions and their weights sum to one.`,
+  ...(structure.value.roles === 'none' ? ['policy-key:structure'] : []), ...(!cta.value.required ? ['policy-key:cta'] : []))
+
   const policies: EditorialPolicies = Object.freeze({
-    movement, opening, structure, transitions, inserts, cta, ctaOverlay, layout, language, captions, speechRemovals,
+    movement, opening, structure, transitions, inserts, cta, ctaOverlay, layout, language, captions, speechRemovals, budget, rubric,
   })
   const body = {
     schemaVersion: EDITORIAL_POLICY_RESOLUTION_SCHEMA, resolverVersion: EDITORIAL_POLICY_RESOLVER_VERSION, requestHash: request.requestHash,
@@ -592,10 +670,24 @@ export function requestlessEditorialPolicies(): Readonly<EditorialPolicies> {
   return requestlessPolicies
 }
 
-/** The composition (frame fit) the plan draws for the layout policy. */
-export function compositionLayoutUnderPolicy(policy: EditorialPolicies['layout']): Readonly<{ layout: 'landscape-inset'; background: 'blurred-source' }> {
+/**
+ * The composition (frame fit) the plan draws for the layout policy: the source as it is, or the whole frame over a blurred backdrop. The two
+ * safety regions are limits of the renderer (a face is assumed in the upper part of the frame until perception says otherwise; captions keep to
+ * the lower band), not choices of the requester.
+ */
+export function compositionUnderPolicy(policy: EditorialPolicies['layout']): Readonly<{
+  layout: 'landscape-inset' | 'source-native'; background: 'blurred-source' | 'none'; foregroundScale: 1; verticalPosition: 0.5
+  faceSafeFallback: readonly [number, number, number, number]; subtitleSafeRegion: readonly [number, number, number, number]
+}> {
   assertDomain(policy.status === 'applied', 'PRECONDITION_REQUIRED', 'The layout policy is not one this planner version can execute')
-  return Object.freeze({ layout: 'landscape-inset' as const, background: 'blurred-source' as const })
+  const native = policy.value.mode === 'source-native'
+  return Object.freeze({
+    layout: native ? 'source-native' as const : 'landscape-inset' as const,
+    background: native ? 'none' as const : 'blurred-source' as const,
+    foregroundScale: 1 as const, verticalPosition: 0.5 as const,
+    faceSafeFallback: Object.freeze([0.14, 0.08, 0.72, 0.56] as const),
+    subtitleSafeRegion: Object.freeze([0.08, 0.7, 0.84, 0.24] as const),
+  })
 }
 
 /** The id of the caption track: the language of its words, or `unspecified` when the language is not known. */
@@ -606,29 +698,22 @@ export function captionTrackId(policy: EditorialPolicies['language']): string {
 
 /** The act, role and intent of one story block. */
 export interface StoryBlockShape {
-  actId: 'opening' | 'development' | 'resolution'
-  role: 'hook' | 'cta' | 'context' | 'argument'
+  actId: 'sequence'
+  role: 'segment' | 'cta'
   intent: string
 }
 
 /**
- * The block of a story plan under the structure policy. The only structure this planner version can express is the carried one - the
- * roles follow the position of the clip (rule `carried-planner-value`, ADR-160 F5 derives them from the request). A call to action
- * block exists only where the CTA policy requires one and the speech shows it.
+ * The block of a story plan under the structure policy. The only structure this planner version can express keeps the source order and names
+ * no role: a block is a segment of the source, and the one block where the call to action is spoken (the CTA policy requires one and the speech
+ * shows it) is the call to action. Position decides nothing.
  */
-export function storyBlockUnderPolicy(policy: EditorialPolicies['structure'], input: Readonly<{ index: number; count: number; isCta: boolean; actionKind: string }>): StoryBlockShape {
-  assertDomain(policy.status === 'applied' && policy.value.roles === 'by-position', 'PRECONDITION_REQUIRED', 'The structure policy is not one this planner version can execute')
-  const { index, count, isCta, actionKind } = input
+export function storyBlockUnderPolicy(policy: EditorialPolicies['structure'], input: Readonly<{ isCta: boolean; actionKind: string }>): StoryBlockShape {
+  assertDomain(policy.status === 'applied' && policy.value.roles === 'none', 'PRECONDITION_REQUIRED', 'The structure policy is not one this planner version can execute')
   return Object.freeze({
-    actId: index === 0 ? 'opening' as const : isCta ? 'resolution' as const : 'development' as const,
-    role: index === 0 ? 'hook' as const : isCta ? 'cta' as const : index === count - 1 ? 'context' as const : 'argument' as const,
-    intent: index === 0
-      ? 'establish-speaker-and-premise'
-      : isCta
-        ? `perform-${actionKind}`
-        : index === count - 1
-          ? 'close-with-next-understanding'
-          : 'develop-value-and-proof-context',
+    actId: 'sequence' as const,
+    role: input.isCta ? 'cta' as const : 'segment' as const,
+    intent: input.isCta ? `observed-${input.actionKind}-call` : 'retain-source-segment',
   })
 }
 

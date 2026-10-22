@@ -91,3 +91,14 @@ test('W66r the render element map says a reframed clip is the whole canvas, and 
   assert.equal(plain.elements.length, 60 * 2, "a background and a presenter per frame of the 60 frames")
   assert.equal(REFRAME_COMPOSITION_ID, 'reframe-fills-canvas/v1')
 })
+
+test('ADR-160 F5 a source-native composition lays the join on the canvas as it is: no split, no blurred copy, no overlay', () => {
+  const sameShape = { ...prepared({}), width: 1280, height: 720, compositionLayout: { foregroundScale: 1, verticalPosition: 0.5, layout: 'source-native' } }
+  const { filters, videoLabel } = buildEditorialCompositionPrefix(sameShape)
+  assert.ok(!filters.some((line) => line.includes('gblur') || line.includes('overlay=') || line.includes('split=')), 'nothing is laid over a backdrop')
+  assert.equal(filters.at(-1), '[joinedv]scale=1280:720,setsar=1,format=yuv420p[composed]')
+  assert.equal(videoLabel, 'composed')
+  // the whole frame over a backdrop stays what it always was
+  const inset = buildEditorialCompositionPrefix({ ...sameShape, compositionLayout: { foregroundScale: 1, verticalPosition: 0.5, layout: 'landscape-inset' } })
+  assert.ok(inset.filters.some((line) => line.includes('gblur')))
+})

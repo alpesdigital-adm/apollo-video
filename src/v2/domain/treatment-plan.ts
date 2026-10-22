@@ -4,6 +4,7 @@ import { STRATEGIC_OBJECTIVES, type StrategicObjectiveId } from './strategic-obj
 
 export type ProductionMode = 'talking-head' | 'visual-montage' | 'media-only'
 export type TreatmentEffect = 'zoom' | 'insert' | 'cutaway' | 'layout-change'
+export const TREATMENT_EFFECTS: readonly TreatmentEffect[] = Object.freeze(['zoom', 'insert', 'cutaway', 'layout-change'] as const)
 
 export interface TreatmentPlanDecision {
   id: string
@@ -28,7 +29,7 @@ export interface TreatmentPlan {
   }
   patternBreaks: { maxPer30s: number; allowed: readonly TreatmentEffect[] }
   proofPolicy: { required: boolean; minimumEvidenceItems: number }
-  ctaPolicy: { required: boolean; placement: 'none' | 'close' | 'throughout'; maxOccurrences: number }
+  ctaPolicy: { required: boolean; placement: 'none' | 'close' | 'throughout' | 'at-observed-call'; maxOccurrences: number }
   budget: { patternBreaksPer30s: number; proofItems: number; ctaOccurrences: number; decisions: number }
   assumptions: readonly string[]
   alternatives: readonly { id: string; difference: string; tradeoff: string }[]
@@ -60,6 +61,10 @@ export interface TreatmentPlanFactoryInput {
     maxProofItems?: number
     maxCtaOccurrences?: number
     maxDecisions?: number
+    /** ADR-160. When the editorial policy resolution states them, they replace what the objective would imply (proof and call to action required for a conversion objective, a closing call). */
+    proofRequired?: boolean
+    ctaRequired?: boolean
+    ctaPlacement?: 'none' | 'close' | 'throughout' | 'at-observed-call'
   }
   perception: {
     summaryId: string
@@ -81,7 +86,7 @@ export interface TreatmentPlanFactoryInput {
 
 const conversionObjectives = new Set<StrategicObjectiveId>(['lead-generation', 'sale', 'whatsapp', 'booking', 'download'])
 const objectiveIds: readonly StrategicObjectiveId[] = STRATEGIC_OBJECTIVES.map((objective) => objective.id)
-const effects = ['zoom', 'insert', 'cutaway', 'layout-change'] as const
+const effects = TREATMENT_EFFECTS
 const SHA256 = /^[a-f0-9]{64}$/
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 
@@ -134,9 +139,10 @@ export function createTreatmentPlan(input: TreatmentPlanFactoryInput): Readonly<
   const maxProofItems = boundedInteger(input.policy.maxProofItems ?? 3, 0, 20, 'Proof budget')
   const maxCtaOccurrences = boundedInteger(input.policy.maxCtaOccurrences ?? 1, 0, 5, 'CTA budget')
   const maxDecisions = boundedInteger(input.policy.maxDecisions ?? 12, 2, 50, 'Decision budget')
-  const proofRequired = input.rubric.proofRequired || conversion
+  const proofRequired = input.policy.proofRequired ?? (input.rubric.proofRequired || conversion)
+  const ctaRequired = input.policy.ctaRequired ?? conversion
   assertDomain(!proofRequired || maxProofItems >= 1, 'INVALID_ARGUMENT', 'Required proof exceeds policy budget')
-  assertDomain(!conversion || maxCtaOccurrences >= 1, 'INVALID_ARGUMENT', 'Required CTA exceeds policy budget')
+  assertDomain(!ctaRequired || maxCtaOccurrences >= 1, 'INVALID_ARGUMENT', 'Required CTA exceeds policy budget')
   const rubricVersion = version(input.rubric.version, 'Rubric version')
   const policySchemaVersion = version(input.policy.schemaVersion, 'Policy schema version')
   const perceptionSchemaVersion = version(input.perception.schemaVersion, 'Perception schema version')
@@ -171,7 +177,7 @@ export function createTreatmentPlan(input: TreatmentPlanFactoryInput): Readonly<
     grammar: Object.freeze({ primary: input.mode !== 'visual-montage' && input.perception.speakerCoverage >= .5 ? 'speaker' : 'b-roll', shotRhythm: energy >= .75 ? 'dynamic' : 'measured', subtitleMode: input.mode === 'visual-montage' ? 'narrative' : 'support' }),
     patternBreaks: Object.freeze({ maxPer30s: Math.min(maxPatternBreaks, energy >= .75 ? 5 : 3), allowed: Object.freeze(allowed) }),
     proofPolicy: Object.freeze({ required: proofRequired, minimumEvidenceItems: proofRequired ? 1 : 0 }),
-    ctaPolicy: Object.freeze({ required: conversion, placement: conversion ? 'close' : 'none', maxOccurrences: conversion ? 1 : 0 }),
+    ctaPolicy: Object.freeze({ required: ctaRequired, placement: ctaRequired ? (input.policy.ctaPlacement ?? 'close') : 'none', maxOccurrences: ctaRequired ? 1 : 0 }),
     budget: Object.freeze({ patternBreaksPer30s: maxPatternBreaks, proofItems: maxProofItems, ctaOccurrences: maxCtaOccurrences, decisions: maxDecisions }),
     assumptions: textList(assumptions, 'Treatment assumptions', 20),
     alternatives: Object.freeze([{ id: 'lower-density', difference: 'Reduce visual density by 20% while preserving narrative structure.', tradeoff: 'Lower interruption risk at the cost of slower visual pacing.' }]),

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { captionCuesThatDoNotFit, captionTextFitsEveryOutput } from '../../src/v2/domain/caption-fit.ts'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
-import { resolveEditorialPolicies } from '../../src/v2/domain/editorial-policy-resolution.ts'
+import { EDITORIAL_POLICY_RULES, resolveEditorialPolicies } from '../../src/v2/domain/editorial-policy-resolution.ts'
 import { createEditorialRequest } from '../../src/v2/domain/editorial-request.ts'
 import { createOutputSpec } from '../../src/v2/domain/output-spec.ts'
 import { ctaLexiconFor, observeSpokenCta } from '../../src/v2/domain/cta-lexicon.ts'
@@ -115,23 +115,24 @@ test('the CTA lexicon recognises a call in the language it belongs to and says n
   assert.equal(observeSpokenCta({ action: createDesiredAction({ objective: 'discovery' }), spokenText: '', language: 'xx' }).state, 'not-required')
 })
 
-// ADR-160 (validator note on F2): the resolution module is exempt from the literal scan, so the values the planner still carries are NOT in its
-// baseline. They are listed HERE, by policy key, and the list can only shrink. When it is empty the rule `carried-planner-value` is deleted.
-const CARRIED_DEBT = Object.freeze(['structure', 'ctaOverlay'])
-
-test('no policy carries a planner value that is not listed as debt, and the debt can only shrink', () => {
+// ADR-160 (validator note on F2): the resolution module is exempt from the literal scan, so a value the planner of the earlier waves still carried was NOT in
+// its baseline. It was listed here, by policy key (opening, structure, captions, the CTA window), and could only shrink. It is empty: F3-F5 derived every one
+// from the request, the media or the output, and the rule `carried-planner-value` no longer exists. This test keeps it so.
+test('no policy of any request carries a value of the planner, and none names a rule that does not exist', () => {
   const destination = { type: 'url', value: 'https://example.com/x' }
   const requests = [
     createEditorialRequest({}),
     createEditorialRequest({ objective: 'sale', desiredAction: createDesiredAction({ objective: 'sale', desiredAction: { destination, visualCta: 'label', verbalCta: 'phrase' } }) }),
     createEditorialRequest({ directives: [{ id: 'o', kind: 'opening', value: 'none' }, { id: 's', kind: 'structure', value: 'source-order' }, { id: 'c', kind: 'cta', value: 'overlay-closing' }] }),
+    createEditorialRequest({ directives: [{ id: 'l', kind: 'layout', value: 'source-native' }, { id: 'w', kind: 'opening', value: 'protect-seconds', param: 2 }] }),
   ]
-  const carried = new Set()
   for (const request of requests) {
-    const { policies } = resolveEditorialPolicies(request, media, [{ variantId: 'v', spec: spec9x16, subtitleMode: 'burn-in' }])
-    for (const [key, policy] of Object.entries(policies)) if (policy.rule === 'carried-planner-value' || /carried/i.test(policy.reason)) carried.add(key)
+    const { policies } = resolveEditorialPolicies(request, { ...media, spokenCta: { startSeconds: 1, endSeconds: 2 }, timelineDurationSeconds: 5 }, [{ variantId: 'v', spec: spec9x16, subtitleMode: 'burn-in' }])
+    for (const [key, policy] of Object.entries(policies)) {
+      assert.ok(EDITORIAL_POLICY_RULES[policy.rule], `${key} names a catalogued rule`)
+      assert.doesNotMatch(policy.reason, /carried|to be removed|scheduled/i, `${key} must not describe a carried value`)
+    }
   }
-  assert.deepEqual([...carried].sort(), [...CARRIED_DEBT].sort(), 'a carried value was fixed (shrink CARRIED_DEBT) or a new one appeared (never allowed)')
 })
 
 test('an override for one output of several is listed as unsupported by the shared plan, never ignored and never applied to all', () => {

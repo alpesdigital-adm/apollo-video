@@ -17,7 +17,7 @@ import { createEditCommand } from '../domain/edit-command.ts'
 import type { OutputSpecRevisionBody } from '../domain/output-spec-revision.ts'
 import { deriveEditorialRequestFromBrief } from '../domain/editorial-request.ts'
 import {
-  POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION, assertResolutionPlannable, planMovementPolicyUnder, captionTrackId, compositionLayoutUnderPolicy, movementMatchesPolicy,
+  POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION, assertResolutionPlannable, planMovementPolicyUnder, captionTrackId, compositionUnderPolicy, movementMatchesPolicy,
   openingMatchesPolicy, policyRef, protectedOpeningSeconds, resolveEditorialPolicies, storyBlockUnderPolicy,
   type CaptionPolicyValue, type EditorialMediaContext, type EditorialOutputSpec, type EditorialPolicies, type EditorialPolicyResolutionV1,
 } from '../domain/editorial-policy-resolution.ts'
@@ -49,7 +49,7 @@ import { requestDirectorFaceWindows, type DirectorFaceWindowRequester } from './
 import type { PerceptionProducerEnvelope } from '../domain/perception-producer-envelope.ts'
 import { createProjectSnapshot, type ProjectSnapshot, type ProjectSnapshotKind } from '../domain/project-snapshot.ts'
 import { offeredObservationsFor } from './adoptable-observations.ts'
-import { observeSpokenCta } from '../domain/cta-lexicon.ts'
+import { ctaLexiconFor, normalizeSpeechForLexicon, observeSpokenCta } from '../domain/cta-lexicon.ts'
 import { transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import {
@@ -59,6 +59,7 @@ import {
 } from '../domain/strategic-objective.ts'
 import {
   createQualityReport as createStrategicQualityReport,
+  effectiveRubricCriteria,
   resolveStrategicRubric,
   type QualityEvidence,
   type RubricCriterionId,
@@ -66,7 +67,7 @@ import {
 import { validateStoryPlan, type StoryBlock, type StoryPlan } from '../domain/story-plan.ts'
 import { createDirectorDecisionLog } from '../domain/director-decision.ts'
 import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
-import { createTreatmentPlan } from '../domain/treatment-plan.ts'
+import { createTreatmentPlan, TREATMENT_EFFECTS } from '../domain/treatment-plan.ts'
 import { createDirectorRunImpact } from '../domain/director-run-impact.ts'
 import type { DirectorRunContext, DirectorRunRepository } from './ports/director-run-repository.ts'
 import { bindDirectorSnapshotIdentities } from './director-snapshot-identity.ts'
@@ -361,12 +362,63 @@ function buildSubtitleCues(input: {
   }))
 }
 
+/**
+ * Where the call to action is spoken: the sentence, in the last clip that has it, in which the words of the language of the speech (or the exact
+ * text the requester gave) ask for the action. Nothing is assumed about where a call usually is: it is found or it is not.
+ */
+function locateSpokenCta(input: {
+  action: Readonly<DesiredAction>
+  language?: string
+  fps: number
+  words: readonly Readonly<{ text: string; timelineStartFrame: number; timelineEndFrame: number }>[]
+  clips: readonly Readonly<{ id: string; timelineInFrame: number; timelineOutFrame: number }>[]
+}): Readonly<{ clipId: string; startSeconds: number; endSeconds: number }> | undefined {
+  if (input.action.kind === 'continue-viewing') return undefined
+  const lexicon = ctaLexiconFor(input.language)
+  const verbal = input.action.verbalCta?.trim() ? normalizeSpeechForLexicon(input.action.verbalCta) : ''
+  if (!verbal && lexicon === null) return undefined
+  const pattern = lexicon?.patterns[input.action.kind]
+  for (const clip of [...input.clips].reverse()) {
+    const words = input.words.filter((word) => word.timelineStartFrame >= clip.timelineInFrame && word.timelineEndFrame <= clip.timelineOutFrame)
+    if (words.length === 0) continue
+    const normalized = words.map((word) => normalizeSpeechForLexicon(word.text))
+    const offsets: number[] = []
+    let joined = ''
+    normalized.forEach((text, index) => { if (index > 0) joined += ' '; offsets.push(joined.length); joined += text })
+    const found: { start: number; end: number }[] = []
+    if (verbal) {
+      const at = joined.lastIndexOf(verbal)
+      if (at >= 0) found.push({ start: at, end: at + verbal.length })
+    }
+    if (found.length === 0 && pattern) {
+      const global = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`)
+      for (const match of joined.matchAll(global)) found.push({ start: match.index ?? 0, end: (match.index ?? 0) + match[0].length })
+    }
+    const last = found.at(-1)
+    if (!last) continue
+    const wordAt = (offset: number) => Math.max(0, offsets.findLastIndex((start) => start <= offset))
+    const first = wordAt(last.start)
+    const closing = wordAt(Math.max(last.start, last.end - 1))
+    let from = first
+    while (from > 0 && !/[.!?]$/u.test(words[from - 1]!.text)) from -= 1
+    let to = closing
+    while (to < words.length - 1 && !/[.!?]$/u.test(words[to]!.text)) to += 1
+    return Object.freeze({
+      clipId: clip.id,
+      startSeconds: Math.round(words[from]!.timelineStartFrame / input.fps * 1_000) / 1_000,
+      endSeconds: Math.round(words[to]!.timelineEndFrame / input.fps * 1_000) / 1_000,
+    })
+  }
+  return undefined
+}
+
 function buildStoryPlan(input: {
   id: string
   objective: string
   desiredAction: Readonly<DesiredAction>
   desiredActionRef: Readonly<DesiredActionReference>
-  ctaPresent: boolean
+  /** The clip where the call to action is spoken (its last occurrence), when the speech has one: the block of the call is there, not at an end. */
+  ctaClipId?: string
   /** The resolved structure and CTA policies: the blocks are the policy's, not the builder's. */
   policies: Pick<EditorialPolicies, 'structure' | 'cta'>
   clips: readonly Readonly<{
@@ -379,9 +431,8 @@ function buildStoryPlan(input: {
 }): Readonly<StoryPlan> & Readonly<{ id: string }> {
   const blocks: StoryBlock[] = input.clips.map((clip, index) => {
     const durationMs = Math.max(1, Math.round((clip.timelineOutFrame - clip.timelineInFrame) / input.fps * 1000))
-    const isCta = input.policies.cta.value.required && input.desiredAction.kind !== 'continue-viewing' &&
-      input.ctaPresent && index === input.clips.length - 1
-    const shape = storyBlockUnderPolicy(input.policies.structure, { index, count: input.clips.length, isCta, actionKind: input.desiredAction.kind })
+    const isCta = input.policies.cta.value.required && input.desiredAction.kind !== 'continue-viewing' && input.ctaClipId === clip.id
+    const shape = storyBlockUnderPolicy(input.policies.structure, { isCta, actionKind: input.desiredAction.kind })
     return {
       id: `story-block-${index + 1}`,
       actId: shape.actId,
@@ -398,9 +449,6 @@ function buildStoryPlan(input: {
       sourceRangeId: clip.id,
     }
   })
-  const opening = blocks.filter((block) => block.actId === 'opening').map((block) => block.id)
-  const development = blocks.filter((block) => block.actId === 'development').map((block) => block.id)
-  const resolution = blocks.filter((block) => block.actId === 'resolution').map((block) => block.id)
   const durationMs = Math.max(1, Math.round(input.durationFrames / input.fps * 1000))
   const plan: StoryPlan & { id: string } = {
     id: input.id,
@@ -408,11 +456,8 @@ function buildStoryPlan(input: {
     objective: input.objective,
     desiredActionRef: input.desiredActionRef,
     targetDurationMs: { min: Math.max(1, durationMs - 1_000), max: durationMs + 1_000 },
-    acts: [
-      { id: 'opening', role: 'opening', blockIds: opening },
-      ...(development.length ? [{ id: 'development', role: 'development' as const, blockIds: development }] : []),
-      ...(resolution.length ? [{ id: 'resolution', role: 'resolution' as const, blockIds: resolution }] : []),
-    ],
+    // One act holds the timeline in source order: no part of it is named an opening, a development or a resolution.
+    acts: [{ id: 'sequence', role: 'sequence', blockIds: blocks.map((block) => block.id) }],
     blocks,
   }
   validateStoryPlan(plan)
@@ -476,7 +521,7 @@ function buildDecisions(input: {
       alternatives: ['single-punch-in-after-opening'], bandPolicy,
     },
     {
-      id: 'decision-layout-inset', category: 'layout', choice: 'landscape-inset-on-blurred-source',
+      id: 'decision-layout-inset', category: 'layout', choice: policies.layout.value.mode === 'source-native' ? 'source-native-frame' : 'landscape-inset-on-blurred-source',
       reason: `${policies.layout.reason} It applies no face-driven crop, so it needs no face box; a face-driven crop would need high face evidence. ` +
         `Evidence: ${tierLine(input.evidence.crop)}.`,
       evidenceRefs: evidenceRefsOf([input.briefRef, ...(input.briefCompilationRef ? [input.briefCompilationRef] : []), input.editPlanRef, ref('layout')], input.evidence.crop),
@@ -615,6 +660,8 @@ function buildQualityReport(input: {
   requestedSpeechRemovals: readonly Readonly<EditorialPhraseRule>[]
   /** The sealed resolution the plan is judged against, and the request hash it was made for. */
   resolution: Readonly<EditorialPolicyResolutionV1>
+  /** The language the speech is in (the observed transcript): the words of a spoken call to action are judged in it. */
+  speechLanguage?: string
 }): Readonly<DirectorQualityReportV5> {
   const cues = input.plan.subtitleTracks.flatMap((track) => track.cues)
   const allSubtitleText = normalizedSpeech(cues.map((cue) => cue.text).join(' '))
@@ -661,8 +708,10 @@ function buildQualityReport(input: {
   ])
   const narrativeIntegrity = requestHonored && movementOk && openingOk && forbiddenSpeechAbsent && timelineContinuous
   const legibility = captionsFitMeasured
+  // The structured call to action is the story block where the call is spoken, or the visual overlay the plan draws for it.
   const structuredCta = input.storyPlan.blocks.some((block) =>
-    block.role === 'cta' && block.content.ctaId === input.desiredActionRef.id)
+    block.role === 'cta' && block.content.ctaId === input.desiredActionRef.id) ||
+    input.plan.overlayTracks.some((track) => track.kind === 'cta' && track.desiredActionRef.id === input.desiredActionRef.id)
   assertDomain(
     input.storyPlan.desiredActionRef?.id === input.desiredActionRef.id &&
       input.plan.desiredActionRef.id === input.desiredActionRef.id,
@@ -673,6 +722,7 @@ function buildQualityReport(input: {
     objective: input.objective,
     action: input.desiredAction,
     spokenCta: allSubtitleText,
+    ...(input.speechLanguage ? { language: input.speechLanguage } : {}),
   })
   const ctaAligned = desiredActionAlignment.valid
   const rubric = resolveStrategicRubric(input.objective)
@@ -684,7 +734,7 @@ function buildQualityReport(input: {
   const hasOpening = input.storyPlan.blocks.some((block) => block.role === 'hook') &&
     cues.some((cue) => cue.startFrame <= Math.round(input.plan.fps))
   const hasDevelopment = input.storyPlan.blocks.some((block) =>
-    ['context', 'argument', 'proof'].includes(block.role))
+    ['segment', 'context', 'argument', 'proof'].includes(block.role))
   const hasDestination = Boolean(input.desiredAction.destination?.value)
   const scoreFor = (criterionId: RubricCriterionId): Readonly<QualityEvidence> => {
     const values: Record<RubricCriterionId, readonly [number, readonly string[]]> = {
@@ -736,7 +786,9 @@ function buildQualityReport(input: {
   }
   const strategic = createStrategicQualityReport({
     objective: input.objective,
-    evidence: rubric.criteria.map((criterion) => scoreFor(criterion.id)),
+    // Only the criteria the request asked to be judged on are scored (the resolution names the others, and the weights are renormalized).
+    evidence: effectiveRubricCriteria(rubric, policies.rubric.value.notRequested).map((criterion) => scoreFor(criterion.id)),
+    notRequested: policies.rubric.value.notRequested,
     gates: {
       narrativeIntegrity,
       legibility,
@@ -1037,6 +1089,11 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     })
     // `not-evaluable` stops at the resolution below (a question to the requester); until then it is not taken for presence.
     const ctaPresent = ctaObservation.state === 'present' || ctaObservation.state === 'not-required'
+    const fpsOfPlan = context.editPlan.fps
+    const spokenCta = locateSpokenCta({
+      action: desiredAction, ...(transcriptLanguage ? { language: transcriptLanguage } : {}), fps: fpsOfPlan,
+      words: context.editPlan.retimedTranscript.words, clips,
+    })
     const desiredActionRef = createDesiredActionReference(desiredAction)
     // ADR-160. Nothing below is fixed: the editorial request of the brief this run leaves behind (and the speech its Commands asked to
     // remove) resolves to the policies the plan is made from. A request the Apollo cannot execute, or a question it left open, stops here.
@@ -1045,6 +1102,10 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const resolution = resolveEditorialPolicies(editorialRequest, {
       transcriptId: context.transcript.id, ...(transcriptLanguage ? { transcriptLanguage } : {}), hasSelectedInsert,
       ...(subtitleStyleOverrideOf(context.policies) ? { subtitleStyleOverride: subtitleStyleOverrideOf(context.policies)! } : {}),
+      ...(spokenCta ? { spokenCta: { startSeconds: spokenCta.startSeconds, endSeconds: spokenCta.endSeconds } } : {}),
+      timelineDurationSeconds: Math.round(context.editPlan.durationFrames / fpsOfPlan * 1_000) / 1_000,
+      selectedInsertCount: clips.filter((clip) => clip.sourceArtifactId !== context.transcript.sourceArtifactId).length,
+      ...(context.sourceDimensions ? { sourceAspectRatio: `${context.sourceDimensions.width}:${context.sourceDimensions.height}` } : {}),
       ...(firstSentenceEndSecondsOf(context.editPlan.retimedTranscript.words, context.editPlan.fps) !== undefined
         ? { firstSentenceEndSeconds: firstSentenceEndSecondsOf(context.editPlan.retimedTranscript.words, context.editPlan.fps)! } : {}),
     }, outputsOfState(context.parent.state.document.entries))
@@ -1115,11 +1176,16 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         snapshotId: context.currentVersion.snapshotRefs.policies,
         schemaVersion: Number((context.policies as { schemaVersion?: number }).schemaVersion ?? 1),
         snapshotHash: calculateVersionHash(context.policies),
-        maxPatternBreaksPer30s: 2,
-        forbiddenEffects: policies.movement.value.mode === 'none' ? ['zoom'] : [],
-        maxProofItems: 3,
-        maxCtaOccurrences: 1,
+        // ADR-160 F5: the budgets come from the resolution (what the request allowed, what the timeline already holds), not from numbers of the planner.
+        maxPatternBreaksPer30s: policies.budget.value.maxPatternBreaksPer30s,
+        forbiddenEffects: TREATMENT_EFFECTS.filter((effect) => !policies.budget.value.allowedEffects.includes(effect)),
+        maxProofItems: policies.budget.value.maxProofItems,
+        maxCtaOccurrences: policies.budget.value.maxCtaOccurrences,
+        // A bound of the log itself, not an editorial choice.
         maxDecisions: 12,
+        proofRequired: treatmentRubric.criteria.some((criterion) => criterion.id === 'proof-strength' && criterion.weight >= .15) && policies.budget.value.maxProofItems >= 1,
+        ctaRequired: policies.cta.value.required,
+        ctaPlacement: 'at-observed-call' as const,
       },
       perception: {
         summaryId: perception.summary.id,
@@ -1139,7 +1205,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       objective: objective.id,
       desiredAction,
       desiredActionRef,
-      ctaPresent,
+      ...(spokenCta ? { ctaClipId: spokenCta.clipId } : {}),
       policies,
       clips,
       fps: context.editPlan.fps,
@@ -1265,13 +1331,13 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       directorRunId,
       audioTimelineHash: createEditorialAudioTimelineHash({ fps: context.editPlan.fps, clips }),
       desiredActionRef,
-      overlayTracks: desiredAction.visualCta && policies.ctaOverlay.value.mode === 'closing-window'
+      overlayTracks: desiredAction.visualCta && policies.ctaOverlay.value.mode === 'window'
         ? Object.freeze([Object.freeze({
             id: `overlay-${desiredActionRef.id}`,
             kind: 'cta' as const,
             desiredActionRef,
-            startFrame: Math.max(0, context.editPlan.durationFrames - Math.round(context.editPlan.fps * policies.ctaOverlay.value.seconds)),
-            endFrame: context.editPlan.durationFrames,
+            startFrame: Math.min(context.editPlan.durationFrames - 1, Math.round(context.editPlan.fps * policies.ctaOverlay.value.startSeconds)),
+            endFrame: Math.min(context.editPlan.durationFrames, Math.max(Math.round(context.editPlan.fps * policies.ctaOverlay.value.endSeconds), Math.round(context.editPlan.fps * policies.ctaOverlay.value.startSeconds) + 1)),
             text: desiredAction.visualCta,
           })])
         : Object.freeze([]),
@@ -1289,13 +1355,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       })]),
       effectTracks: Object.freeze([]),
       transitions,
-      composition: Object.freeze({
-        ...compositionLayoutUnderPolicy(policies.layout),
-        foregroundScale: 1 as const,
-        verticalPosition: 0.5 as const,
-        faceSafeFallback: Object.freeze([0.14, 0.08, 0.72, 0.56] as const),
-        subtitleSafeRegion: Object.freeze([0.08, 0.7, 0.84, 0.24] as const),
-      }),
+      composition: compositionUnderPolicy(policies.layout),
       director: Object.freeze({ plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION, decisions, assumptions }),
       movementPolicy: planMovementPolicyUnder(policies, context.editPlan.fps),
       subtitlePolicy: Object.freeze({ faceProtection: true as const, anchor: policies.captions.value.anchor, maxCharactersPerBlock: policies.captions.value.capacityCharacters }),
@@ -1324,6 +1384,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       perceptionEvidence: perceptionEvidenceReport,
       requestedSpeechRemovals: context.requestedSpeechRemovals ?? [],
       resolution,
+      ...(transcriptLanguage ? { speechLanguage: transcriptLanguage } : {}),
     })
     assertDomain(
       qualityReport.status !== 'blocked',

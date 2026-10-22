@@ -34,6 +34,8 @@ export interface DirectorRunContext {
   policies: Readonly<Record<string, unknown>>
   editPlan: Readonly<EditorialCutEditPlan>
   currentDurationFrames: number
+  /** Pixels of the source master, as its manifest probed them (absent: not known). The Director compares the shape of the source with the shape of the outputs. */
+  sourceDimensions?: Readonly<{ width: number; height: number }>
   /** Every output of the project: the stable variant ids of the sealed State the Command's child Version carries. */
   variantIds: readonly string[]
   /** The renders of the head Version, each attributed to its own output. */

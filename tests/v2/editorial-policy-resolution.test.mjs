@@ -52,14 +52,15 @@ test('the silence rule invents nothing: no movement, no overlay, no insert, no f
   assert.match(policies.movement.reason, /does not mention camera movement/)
 })
 
-test('values the planner still carries are named as carried, never as the request', () => {
+test('no value is carried from the planner of the earlier waves: the rule does not exist and a resolution that names it is refused', () => {
+  assert.equal(EDITORIAL_POLICY_RULES['carried-planner-value'], undefined)
   const { policies } = resolveEditorialPolicies(createEditorialRequest({}), { hasSelectedInsert: false, transcriptLanguage: 'xx-YY' }, {})
-  for (const key of ['structure']) {
-    assert.equal(policies[key].origin, 'silence-rule', key)
-    assert.equal(policies[key].rule, 'carried-planner-value', key)
-    assert.match(policies[key].reason, /carried/, key)
-    assert.match(policies[key].reason, /ADR-160 F\d/, `${key} points at the slice that removes it`)
-  }
+  for (const key of POLICY_KEYS) assert.notEqual(policies[key].rule, 'carried-planner-value', key)
+  assert.deepEqual(policies.structure.value, { order: 'source-order', roles: 'none' })
+  assert.equal(policies.structure.rule, 'minimal-intervention')
+  const forged = JSON.parse(JSON.stringify(resolveEditorialPolicies(createEditorialRequest({}), { hasSelectedInsert: false, transcriptLanguage: 'xx-YY' }, {})))
+  forged.policies.structure.rule = 'carried-planner-value'
+  assert.throws(() => parseEditorialPolicyResolution(forged), (error) => error.code === 'PERSISTENCE_CONFLICT')
 })
 
 test('different requests over the same media give different resolutions', () => {
@@ -81,8 +82,13 @@ test('different requests over the same media give different resolutions', () => 
   const sale = resolveEditorialPolicies(action, media, {})
   assert.equal(sale.policies.cta.value.required, true)
   assert.equal(sale.policies.cta.rule, 'desired-action')
-  assert.deepEqual(sale.policies.ctaOverlay.value.mode, 'closing-window')
-  assert.equal(sale.policies.ctaOverlay.origin, 'request-field')
+  // the visual call is drawn where the speech says the call; with none in the speech there is nowhere to draw it, which is a question
+  assert.equal(sale.blocked, true)
+  assert.deepEqual(sale.openQuestions.map((item) => item.id), ['cta-overlay-placement-unknown'])
+  const spoken = resolveEditorialPolicies(action, { ...media, spokenCta: { startSeconds: 4, endSeconds: 6.5 }, timelineDurationSeconds: 9 }, {})
+  assert.deepEqual(spoken.policies.ctaOverlay.value, { mode: 'window', startSeconds: 4, endSeconds: 6.5, anchoredTo: 'spoken-cta' })
+  assert.equal(spoken.policies.ctaOverlay.origin, 'request-field')
+  assert.equal(spoken.blocked, false)
   assert.deepEqual(resolveEditorialPolicies(removal, media, {}).policies.speechRemovals.value.ruleIds, ['rule-a'])
   assert.equal(resolveEditorialPolicies(removal, media, {}).policies.speechRemovals.origin, 'request-field')
 })

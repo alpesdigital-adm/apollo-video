@@ -288,6 +288,7 @@ class InMemoryDirectorRepository {
       outputReferences: this.outputReferences,
       transcript: this.transcript,
       requestedSpeechRemovals: this.requestedSpeechRemovals,
+      ...(this.sourceDimensions ? { sourceDimensions: this.sourceDimensions } : {}),
       ...(this.ocrEnvelope ? { ocrEnvelope: this.ocrEnvelope } : {}),
     }
   }
@@ -524,7 +525,7 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.equal(plan.transitions.every((transition) => transition.type === 'straight-cut' && transition.audioFadeMs === 24), true)
   const cues = plan.subtitleTracks.flatMap((track) => track.cues)
   assert.ok(cues.length > 0)
-  assert.equal(cues.every((cue) => cue.anchor === 'bottom' && cue.text.length <= 32), true)
+  assert.equal(cues.every((cue) => cue.anchor === 'bottom' && cue.text.length <= result.run.policyResolution.policies.captions.value.capacityCharacters), true)
   assert.equal(cues.every((cue, index) => index === 0 || cue.startFrame >= cues[index - 1].endFrame), true)
   const captionText = cues.map((cue) => cue.text).join(' ').toLowerCase()
   assert.equal(captionText.includes('31 de janeiro'), false)
@@ -558,7 +559,12 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.equal(result.run.qualityReport.strategic.rubric.purpose, 'editorial-quality-proxy')
   assert.equal(result.run.qualityReport.strategic.passed, true)
   assert.deepEqual(result.run.qualityReport.strategic.gateFailures, [])
-  assert.equal(result.run.qualityReport.strategic.evidence.length, 6)
+  // The hook criterion measures a role the request did not ask for: it is not scored, and the weights of the other five sum to one (ADR-160 F5).
+  assert.equal(result.run.qualityReport.strategic.evidence.length, 5)
+  assert.equal(result.run.qualityReport.strategic.evidence.some((item) => item.criterionId === 'hook-clarity'), false)
+  assert.ok(Math.abs(result.run.qualityReport.strategic.evidence.reduce((sum, item) => sum + item.weight, 0) - 1) < 1e-9)
+  assert.deepEqual(result.run.policyResolution.policies.rubric.value.notRequested, ['hook-clarity', 'cta-clarity', 'friction-reduction'])
+  assert.equal(result.run.storyPlan.blocks.every((block) => block.role === 'segment'), true, 'no role by position')
   assert.equal(result.run.qualityReport.score, result.run.qualityReport.strategic.score / 100)
   assert.equal(result.run.qualityReport.hardChecks.every((check) => check.passed), true)
   assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'quality-report').contentSchemaVersion, 5)
@@ -1966,4 +1972,59 @@ test('ADR-160 the final admission needs the v5 report, critic v4, every check, t
   refused({ ...report, requestHash: undefined }, bound, /does not name/)
   refused({ ...report, status: 'blocked' }, bound, /blocked/)
   assert.deepEqual([...REQUIRED_HARD_CHECKS], ['requestHonored', 'timelineContinuous', 'sourceRightsCertain'])
+})
+
+test('ADR-160 F5: the call to action is the block where it is spoken, the overlay follows that speech, and no block has a role by position', async () => {
+  const { repository, service } = fixture({ projectObjective: 'sale', ctaText: 'Compre' })
+  // the call is said in the MIDDLE clip, not in the last one
+  const base = compiledEditorialPlan(false, 'Compre')
+  const words = base.retimedTranscript.words
+    .map((word) => word.text === 'Compre' ? { ...word, timelineStartFrame: 178, timelineEndFrame: 190, sourceStartSeconds: 11.9, sourceEndSeconds: 12.3 } : word)
+    .toSorted((left, right) => left.timelineStartFrame - right.timelineStartFrame)
+  repository.baseEditPlan = Object.freeze({ ...base, retimedTranscript: Object.freeze({ ...base.retimedTranscript, words: Object.freeze(words) }) })
+  const result = await service(request({
+    objective: 'sale',
+    desiredAction: { destination: { type: 'url', value: 'https://checkout.example/oferta' }, verbalCta: 'Compre', visualCta: 'Ver oferta' },
+    reason: 'A oferta pede uma ação.',
+    idempotency: { key: 'director-f5-structure' },
+  }))
+  const blocks = result.run.storyPlan.blocks
+  assert.deepEqual(blocks.map((block) => block.role), ['segment', 'cta', 'segment'], 'the call is in clip 2, wherever the clips are')
+  assert.deepEqual(result.run.storyPlan.acts.map((act) => act.id), ['sequence'])
+  assert.equal(blocks.every((block) => block.actId === 'sequence'), true)
+  // the visual call is drawn while the sentence of the call is spoken, not in a closing window of fixed length
+  const [overlay] = result.run.editPlan.overlayTracks
+  assert.equal(overlay.startFrame, 178)
+  assert.equal(overlay.endFrame, 190)
+  const policies = result.run.policyResolution.policies
+  assert.deepEqual(policies.ctaOverlay.value, { mode: 'window', startSeconds: 5.933, endSeconds: 6.333, anchoredTo: 'spoken-cta' })
+  assert.equal(policies.structure.value.roles, 'none')
+  assert.equal(result.run.qualityReport.strategic.gateResults.find((gate) => gate.id === 'cta-required').passed, true)
+  // the treatment plan carries the budgets of the resolution, not numbers of the planner
+  assert.equal(result.run.treatmentPlan.budget.patternBreaksPer30s, policies.budget.value.maxPatternBreaksPer30s)
+  assert.equal(result.run.treatmentPlan.budget.proofItems, policies.budget.value.maxProofItems)
+  assert.deepEqual([...result.run.treatmentPlan.patternBreaks.allowed], [])
+  assert.equal(result.run.treatmentPlan.ctaPolicy.placement, 'at-observed-call')
+  // the layout is the policy's: the fixture's source has no probed shape, so the whole frame stays over a backdrop
+  assert.equal(result.run.editPlan.composition.layout, 'landscape-inset')
+  assert.equal(policies.layout.rule, 'minimal-intervention')
+})
+
+test('ADR-160 F5: a source with the frame shape of every output is used as it is, and a source of another shape keeps the whole frame over a backdrop', async () => {
+  const native = fixture()
+  const ratio = native.repository.parent.state.document.entries[0].spec.output.aspectRatio
+  const [w, h] = ratio.split(':').map(Number)
+  native.repository.sourceDimensions = { width: w * 100, height: h * 100 }
+  const same = await native.service(request({ idempotency: { key: 'director-f5-native' } }))
+  assert.equal(same.run.policyResolution.policies.layout.value.mode, 'source-native')
+  assert.equal(same.run.policyResolution.policies.layout.origin, 'output-spec')
+  assert.equal(same.run.editPlan.composition.layout, 'source-native')
+  assert.equal(same.run.editPlan.composition.background, 'none')
+  assert.equal(same.run.decisions.find((decision) => decision.id === 'decision-layout-inset').choice, 'source-native-frame')
+  const other = fixture()
+  other.repository.sourceDimensions = { width: h * 100, height: w * 100 }
+  const different = await other.service(request({ idempotency: { key: 'director-f5-other-shape' } }))
+  assert.equal(different.run.policyResolution.policies.layout.value.mode, 'fit-with-backdrop')
+  assert.equal(different.run.editPlan.composition.layout, 'landscape-inset')
+  assert.equal(different.run.editPlan.composition.background, 'blurred-source')
 })

@@ -377,8 +377,9 @@ export type DirectedEditPlan = Omit<DirectorSourceEditPlan, 'storyPlanId' | 'ove
   audioTracks: readonly Readonly<DirectedMusicTrack>[]
   transitions: readonly Readonly<DirectedTransition>[]
   composition: Readonly<{
-    layout: 'landscape-inset'
-    background: 'blurred-source'
+    /** `source-native`: the source frame has the shape of the output and is used as it is (no backdrop). `landscape-inset`: the whole frame over a blurred copy of it. */
+    layout: 'landscape-inset' | 'source-native'
+    background: 'blurred-source' | 'none'
     foregroundScale: 1
     verticalPosition: 0.5
     faceSafeFallback: readonly [number, number, number, number]
