@@ -10096,7 +10096,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
           commands: [{
             id: 'edit-command-example-1', type: 'remove-spoken-content',
             baseVersionId: 'project-version-example-1', resultVersionId: 'project-version-example-2',
-            reason: 'Remover datas e duração obsoletas.', createdAt,
+            reason: 'Remover o trecho pedido.', createdAt,
           }],
           media: [], transcripts: [], operationIds: [], operations: [],
         },
@@ -13225,9 +13225,8 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       {
         type: 'remove-spoken-content', baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-example-1',
         rules: [
-          { id: 'date-january-31', label: '31 de janeiro', alternatives: ['31 de janeiro', 'trinta e um de janeiro'] },
-          { id: 'date-february-1', label: '1 de fevereiro', alternatives: ['1 de fevereiro', 'primeiro de fevereiro'] },
-          { id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] },
+          { id: 'phrase-rule-example-1', label: 'frase de exemplo', alternatives: ['frase de exemplo'] },
+          { id: 'phrase-rule-example-2', label: 'outra frase de exemplo', alternatives: ['outra frase de exemplo', 'segunda frase de exemplo'] },
         ],
       },
     ],
@@ -13238,15 +13237,14 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         baseHash: 'a'.repeat(64),
         sourceTranscriptId: 'transcript-example-1',
         rules: [
-          { id: 'date-january-31', label: '31 de janeiro', alternatives: ['31 de janeiro', 'trinta e um de janeiro'] },
-          { id: 'date-february-1', label: '1 de fevereiro', alternatives: ['1 de fevereiro', 'primeiro de fevereiro'] },
-          { id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] },
+          { id: 'phrase-rule-example-1', label: 'frase de exemplo', alternatives: ['frase de exemplo'] },
+          { id: 'phrase-rule-example-2', label: 'outra frase de exemplo', alternatives: ['outra frase de exemplo', 'segunda frase de exemplo'] },
         ],
         exclusionOverrides: [
-          { sourceStartSeconds: 36.26, sourceEndSeconds: 58.12, ruleIds: ['date-january-31', 'date-february-1'], reason: 'Remover o bloco de agenda sem deixar uma frase quebrada.' },
-          { sourceStartSeconds: 86.58, sourceEndSeconds: 87.76, ruleIds: ['duration-two-days'], reason: 'Remover apenas a duração, preservando o restante da promessa.' },
+          { sourceStartSeconds: 12.0, sourceEndSeconds: 15.66, ruleIds: ['phrase-rule-example-1'], reason: 'Remover o trecho pedido.' },
+          { sourceStartSeconds: 40.0, sourceEndSeconds: 41.2, ruleIds: ['phrase-rule-example-2'], reason: 'Remover o trecho pedido.' },
         ],
-        reason: 'Remover informações de data e duração que não pertencem à nova composição.',
+        reason: 'Remover o trecho pedido.',
       },
     ],
     'apollo://schemas/apply-project-edit-command-request/v3': [
@@ -13255,8 +13253,8 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         baseVersionId: 'project-version-example-1',
         baseHash: 'a'.repeat(64),
         sourceTranscriptId: 'transcript-example-1',
-        rules: [{ id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] }],
-        reason: 'Remover a duracao obsoleta.',
+        rules: [{ id: 'phrase-rule-example-1', label: 'frase de exemplo', alternatives: ['frase de exemplo'] }],
+        reason: 'Remover o trecho pedido.',
       },
       {
         type: 'run-director',
@@ -13269,7 +13267,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       {
         type: 'remove-spoken-content', baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64),
         sourceTranscriptId: 'transcript-example-1',
-        rules: [{ id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] }],
+        rules: [{ id: 'phrase-rule-example-1', label: 'frase de exemplo', alternatives: ['frase de exemplo'] }],
       },
       {
         type: 'replace-source-transcript', baseVersionId: 'project-version-example-4', baseHash: 'd'.repeat(64),
@@ -13362,14 +13360,14 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
           editorial: {
             sourceTranscriptId: 'transcript-example-1', sourceArtifactId: artifactId,
             exclusions: [{
-              sourceStartSeconds: 39.02, sourceEndSeconds: 42.68,
-              ruleIds: ['date-january-31', 'date-february-1'],
-              labels: ['31 de janeiro', '1 de fevereiro'],
-              matchedText: '31 de janeiro | 1 de fevereiro',
+              sourceStartSeconds: 12.0, sourceEndSeconds: 15.66,
+              ruleIds: ['phrase-rule-example-1'],
+              labels: ['frase de exemplo'],
+              matchedText: 'frase de exemplo',
             }],
             retainedSourceRanges: [
-              { sourceStartSeconds: 0, sourceEndSeconds: 39.02 },
-              { sourceStartSeconds: 42.68, sourceEndSeconds: 102.166 },
+              { sourceStartSeconds: 0, sourceEndSeconds: 12.0 },
+              { sourceStartSeconds: 15.66, sourceEndSeconds: 102.166 },
             ],
             outputDurationFrames: 2955, fps: 30, automaticZoom: false,
             protectedOpeningFrames: 120, subtitleFaceProtection: true,
@@ -13568,14 +13566,14 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             sourceTranscriptId: editorialCutImpactExample.sourceTranscriptId,
             sourceArtifactId: artifactId,
             exclusions: [{
-              sourceStartSeconds: 39.02, sourceEndSeconds: 42.68,
-              ruleIds: ['date-january-31', 'date-february-1'],
-              labels: ['31 de janeiro', '1 de fevereiro'],
-              matchedText: '31 de janeiro | 1 de fevereiro',
+              sourceStartSeconds: 12.0, sourceEndSeconds: 15.66,
+              ruleIds: ['phrase-rule-example-1'],
+              labels: ['frase de exemplo'],
+              matchedText: 'frase de exemplo',
             }],
             retainedSourceRanges: [
-              { sourceStartSeconds: 0, sourceEndSeconds: 39.02 },
-              { sourceStartSeconds: 42.68, sourceEndSeconds: 102.166 },
+              { sourceStartSeconds: 0, sourceEndSeconds: 12.0 },
+              { sourceStartSeconds: 15.66, sourceEndSeconds: 102.166 },
             ],
             outputDurationFrames: 2955, fps: 30, automaticZoom: false,
             protectedOpeningFrames: 120, subtitleFaceProtection: true,
@@ -13721,7 +13719,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       {
         type: 'remove-spoken-content', baseVersionId: 'project-version-example-3', baseHash: 'c'.repeat(64),
         sourceTranscriptId: 'transcript-example-1', variantId: 'variant-example-16x9',
-        rules: [{ id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] }],
+        rules: [{ id: 'phrase-rule-example-1', label: 'frase de exemplo', alternatives: ['frase de exemplo'] }],
       },
       {
         type: 'replace-source-transcript', baseVersionId: 'project-version-example-4', baseHash: 'd'.repeat(64),
@@ -13767,12 +13765,12 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             sourceTranscriptId: editorialCutImpactExample.sourceTranscriptId,
             sourceArtifactId: artifactId,
             exclusions: [{
-              sourceStartSeconds: 39.02, sourceEndSeconds: 42.68,
-              ruleIds: ['date-january-31', 'date-february-1'],
+              sourceStartSeconds: 12.0, sourceEndSeconds: 15.66,
+              ruleIds: ['phrase-rule-example-1'],
             }],
             retainedSourceRanges: [
-              { sourceStartSeconds: 0, sourceEndSeconds: 39.02 },
-              { sourceStartSeconds: 42.68, sourceEndSeconds: 102.166 },
+              { sourceStartSeconds: 0, sourceEndSeconds: 12.0 },
+              { sourceStartSeconds: 15.66, sourceEndSeconds: 102.166 },
             ],
             outputDurationFrames: 2955, fps: 30, automaticZoom: false,
             protectedOpeningFrames: 120, subtitleFaceProtection: true,
