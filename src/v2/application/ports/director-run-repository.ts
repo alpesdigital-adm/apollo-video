@@ -63,6 +63,8 @@ export interface DirectorRunContext {
     id: string
     sourceArtifactId: string
     language: string
+    /** How the language was found (absent: the transcript records no basis). */
+    languageBasis?: 'detected-from-media' | 'declared-not-verified'
     provider: string
     model: string
     transcriptHash: string

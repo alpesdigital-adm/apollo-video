@@ -506,6 +506,14 @@ function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
 }
 
+/** The recorded basis of a transcript's language, when its document records one. */
+function languageBasisOf(transcriptJson: string): 'detected-from-media' | 'declared-not-verified' | undefined {
+  try {
+    const basis = (JSON.parse(transcriptJson) as { languageBasis?: unknown }).languageBasis
+    return basis === 'detected-from-media' || basis === 'declared-not-verified' ? basis : undefined
+  } catch { return undefined }
+}
+
 export class PrismaDirectorRunRepository implements DirectorRunRepository {
   private readonly client: PrismaClient
   private readonly clock: () => Date
@@ -767,6 +775,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
         id: transcriptRow.id,
         sourceArtifactId: transcriptRow.sourceArtifactId,
         language: transcriptRow.language,
+        ...(ownTranscriptRow !== null && languageBasisOf(ownTranscriptRow.transcriptJson) ? { languageBasis: languageBasisOf(ownTranscriptRow.transcriptJson)! } : {}),
         provider: transcriptRow.provider,
         model: transcriptRow.model,
         transcriptHash: transcriptRow.transcriptHash,

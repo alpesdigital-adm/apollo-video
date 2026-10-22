@@ -146,8 +146,16 @@ export interface EditorialPolicyResolutionV1 {
 /** What the observed media contributes. Nothing here is a preference: it is what the source shows. */
 export interface EditorialMediaContext {
   transcriptId?: string
-  /** BCP-47 language of the observed transcript (absent: unknown). */
+  /** BCP-47 language of the transcript (absent: unknown, or the undetermined language). */
   transcriptLanguage?: string
+  /**
+   * How the transcript's language was found: `detected-from-media` - the provider heard it; `declared-not-verified` - the provider was told the
+   * project's language and the speech was not checked against it (a transcript that records no basis is read this way). Only the first is an
+   * observation of the media.
+   */
+  transcriptLanguageBasis?: 'detected-from-media' | 'declared-not-verified'
+  /** The language the project declares, when it declares one. */
+  declaredLocale?: string
   /** True when the compiled timeline already contains a rights-approved selected insert. */
   hasSelectedInsert: boolean
   /** Source frame aspect, `W:H` (absent: unknown). */
@@ -502,16 +510,30 @@ export function resolveEditorialPolicies(
     if (mediaContext.transcriptLanguage !== undefined && primaryLanguage(requestedLanguage) !== primaryLanguage(mediaContext.transcriptLanguage)) {
       openQuestions.push(Object.freeze({
         id: 'caption-language-translation',
-        question: `Captions were requested in ${requestedLanguage}, but the observed speech is in ${mediaContext.transcriptLanguage} and the Apollo has no translation here. Should the captions stay in ${mediaContext.transcriptLanguage}?`,
+        question: `Captions were requested in ${requestedLanguage}, but the speech is in ${mediaContext.transcriptLanguage} (${mediaContext.transcriptLanguageBasis === 'detected-from-media' ? 'detected from the media' : 'the language declared for the project, not verified against the speech'}) and the Apollo has no translation here. Should the captions stay in ${mediaContext.transcriptLanguage}?`,
         source: 'resolution' as const,
       }))
     }
   } else if (mediaContext.transcriptLanguage !== undefined) {
+    // Only a language the provider detected is an observation of the media. A language the project declared is the requester's word, and the
+    // transcript made under it did not check the speech against it.
+    const detected = mediaContext.transcriptLanguageBasis === 'detected-from-media'
     language = Object.freeze({
-      key: 'language' as const, status: 'applied' as const, value: Object.freeze({ captionLanguage: mediaContext.transcriptLanguage }), origin: 'media-context' as const, rule: 'source-observation' as const,
-      reason: `The request does not name a caption language. The observed transcript is in ${mediaContext.transcriptLanguage}, and the captions are its own words.`,
-      evidenceRefs: Object.freeze([requestRef(request), ...(mediaContext.transcriptId ? [`transcript:${mediaContext.transcriptId}`] : [])]),
+      key: 'language' as const, status: 'applied' as const, value: Object.freeze({ captionLanguage: mediaContext.transcriptLanguage }),
+      origin: detected ? 'media-context' as const : 'request-field' as const, rule: detected ? 'source-observation' as const : 'explicit-request' as const,
+      reason: detected
+        ? `The request does not name a caption language. The speech recognition detected the language of the media: ${mediaContext.transcriptLanguage}. The captions are the transcript's own words.`
+        : `The request does not name a caption language. The project declares ${mediaContext.transcriptLanguage} and the transcript was made under that language: it is the declared language, not verified against the speech. The captions are the transcript's own words.`,
+      evidenceRefs: Object.freeze([requestRef(request), ...(mediaContext.transcriptId ? [`transcript:${mediaContext.transcriptId}`] : []),
+        detected ? 'transcript-language:detected-from-media' : 'transcript-language:declared-not-verified']),
     })
+    if (detected && mediaContext.declaredLocale !== undefined && primaryLanguage(mediaContext.declaredLocale) !== primaryLanguage(mediaContext.transcriptLanguage)) {
+      openQuestions.push(Object.freeze({
+        id: 'declared-language-differs-from-speech',
+        question: `The project declares ${mediaContext.declaredLocale}, and the speech recognition detected ${mediaContext.transcriptLanguage} in the media. Which language are the captions in?`,
+        source: 'resolution' as const,
+      }))
+    }
   } else {
     language = silent(request, 'language', { captionLanguage: null }, 'minimal-intervention',
       'The request does not name a caption language and the transcript does not state one. No language is assumed.')

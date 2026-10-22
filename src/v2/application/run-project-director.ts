@@ -1090,7 +1090,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       (clip) => clip.sourceArtifactId !== context.transcript.sourceArtifactId,
     )
     // The spoken call is recognised by the words of the language of the speech (the observed transcript), never by a list of one language.
-    const transcriptLanguage = typeof context.transcript.language === 'string' ? context.transcript.language.trim() : ''
+    // The undetermined language is no language: it is the report of a provider that could not tell (ADR-160), not a value to write captions in.
+    const reportedLanguage = typeof context.transcript.language === 'string' ? context.transcript.language.trim() : ''
+    const transcriptLanguage = reportedLanguage.toLowerCase() === 'und' ? '' : reportedLanguage
     const ctaObservation = observeSpokenCta({
       action: desiredAction, spokenText: context.editPlan.retimedTranscript.words.map((word) => word.text).join(' '),
       ...(transcriptLanguage ? { language: transcriptLanguage } : {}),
@@ -1108,7 +1110,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const requestedRemovalIds = (context.requestedSpeechRemovals ?? []).map((rule) => rule.id)
     const editorialRequest = deriveEditorialRequestFromBrief({ ...context.brief, objective: objective.id, desiredAction }, requestedRemovalIds)
     const resolution = resolveEditorialPolicies(editorialRequest, {
-      transcriptId: context.transcript.id, ...(transcriptLanguage ? { transcriptLanguage } : {}), hasSelectedInsert,
+      transcriptId: context.transcript.id, ...(transcriptLanguage ? { transcriptLanguage, transcriptLanguageBasis: context.transcript.languageBasis ?? 'declared-not-verified' as const } : {}),
+      ...(context.project.locale ? { declaredLocale: context.project.locale } : {}),
+      hasSelectedInsert,
       ...(subtitleStyleOverrideOf(context.policies) ? { subtitleStyleOverride: subtitleStyleOverrideOf(context.policies)! } : {}),
       ...(spokenCta ? { spokenCta: { startSeconds: spokenCta.startSeconds, endSeconds: spokenCta.endSeconds } } : {}),
       timelineDurationSeconds: Math.round(context.editPlan.durationFrames / fpsOfPlan * 1_000) / 1_000,

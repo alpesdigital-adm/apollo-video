@@ -100,7 +100,7 @@ test('different media over the same request give different resolutions', () => {
   assert.equal(withInsert.policies.inserts.origin, 'media-context')
   assert.equal(without.policies.inserts.origin, 'silence-rule')
   assert.notEqual(withInsert.policyResolutionHash, without.policyResolutionHash)
-  const english = resolveEditorialPolicies(request, { ...media, transcriptLanguage: 'en-US' }, {})
+  const english = resolveEditorialPolicies(request, { ...media, transcriptLanguage: 'en-US', transcriptLanguageBasis: 'detected-from-media' }, {})
   assert.deepEqual(english.policies.language.value, { captionLanguage: 'en-US' })
   assert.equal(english.policies.language.origin, 'media-context')
   assert.equal(captionTrackId(english.policies.language), 'track-captions-en-us')
@@ -243,4 +243,32 @@ test('the plan facts the gates judge: movement none and an opening with no windo
   assert.equal(openingMatchesPolicy({ ...facts, protectedOpeningFrames: 120 }, policies.opening), false)
   assert.equal(openingMatchesPolicy({ ...facts, effectTrackCount: 2 }, policies.opening), false)
   assert.equal(automaticZoomUnderPolicy(policies.movement), false)
+})
+
+test('a language the project declared is never recorded as observed in the media; one the provider detected is', () => {
+  const request = createEditorialRequest({})
+  const declared = resolveEditorialPolicies(request, { ...media, transcriptLanguage: 'en-US', transcriptLanguageBasis: 'declared-not-verified', declaredLocale: 'en-US' }, {})
+  assert.equal(declared.policies.language.origin, 'request-field')
+  assert.equal(declared.policies.language.rule, 'explicit-request')
+  assert.match(declared.policies.language.reason, /not verified/)
+  assert.ok(declared.policies.language.evidenceRefs.includes('transcript-language:declared-not-verified'))
+  // a transcript that records no basis is read as declared and not verified, never as an observation
+  const unrecorded = resolveEditorialPolicies(request, { ...media, transcriptLanguage: 'en-US' }, {})
+  assert.equal(unrecorded.policies.language.origin, 'request-field')
+  const detected = resolveEditorialPolicies(request, { ...media, transcriptLanguage: 'en-US', transcriptLanguageBasis: 'detected-from-media' }, {})
+  assert.equal(detected.policies.language.origin, 'media-context')
+  assert.equal(detected.policies.language.rule, 'source-observation')
+  assert.ok(detected.policies.language.evidenceRefs.includes('transcript-language:detected-from-media'))
+  assert.deepEqual(detected.openQuestions.map((item) => item.id), [])
+})
+
+test('a declared language the detection contradicts is a question, and agreement (any region) is not', () => {
+  const request = createEditorialRequest({})
+  const contradicted = resolveEditorialPolicies(request, { ...media, transcriptLanguage: 'aa', transcriptLanguageBasis: 'detected-from-media', declaredLocale: 'bb-CC' }, {})
+  assert.deepEqual(contradicted.openQuestions.map((item) => item.id), ['declared-language-differs-from-speech'])
+  const sameLanguage = resolveEditorialPolicies(request, { ...media, transcriptLanguage: 'aa', transcriptLanguageBasis: 'detected-from-media', declaredLocale: 'aa-CC' }, {})
+  assert.deepEqual(sameLanguage.openQuestions.map((item) => item.id), [])
+  // no declaration: nothing to contradict
+  const none = resolveEditorialPolicies(request, { ...media, transcriptLanguage: 'aa', transcriptLanguageBasis: 'detected-from-media' }, {})
+  assert.deepEqual(none.openQuestions.map((item) => item.id), [])
 })
