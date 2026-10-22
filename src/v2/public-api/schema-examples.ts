@@ -1222,6 +1222,24 @@ const proxyReviewExampleV3 = {
     },
   },
 }
+// W70 readiness. A review whose render, and the approval it had, were carried from an earlier Version: the approval is the one a person gave THERE
+// (`carriedFrom.acknowledgedBy`); on this Version it was acknowledged by the automatic carry, never by that person.
+const proxyReviewExampleV4Carried = {
+  ...proxyReviewExampleV3,
+  status: 'ready-for-final',
+  warningsAcknowledged: true,
+  finalAllowed: true,
+  revision: 2,
+  acknowledgedBy: { type: 'automatic-carry', id: 'proxy-review-decision-example-carry-1', at: '2026-10-20T12:30:00.000Z' },
+  carriedFrom: {
+    versionId: 'project-version-example-0',
+    reviewId: 'proxy-review-example-0',
+    reviewHash: 'c'.repeat(64),
+    decisionId: 'proxy-review-decision-example-carry-1',
+    renderContentHash: 'd'.repeat(64),
+    acknowledgedBy: { type: 'api-client', id: clientId, at: createdAt },
+  },
+}
 const proxyReviewExampleV1 = {
   ...proxyReviewExampleWithoutOutput,
   criticIssues: proxyReviewExample.criticIssues.map(({ outputSpecId: _o, outputPresetHash: _p, placementPlanHash: _l, reframePlanHash: _f, format: _a, evidenceRange: _r, elementIds: _e, evidenceIds: _v, ...issue }) => issue),
@@ -14481,6 +14499,10 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     'apollo://schemas/project-proxy-review-response/v3': [
       { data: { review: proxyReviewExampleV3 }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/project-proxy-review-response/v4': [
+      { data: { review: proxyReviewExampleV3 }, meta: { apiVersion: 'v1' } },
+      { data: { review: proxyReviewExampleV4Carried }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/project-proxy-review-warning-acknowledgement-request/v1': [
       {
         action: 'acknowledge-warnings',
@@ -14527,6 +14549,16 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       },
     ],
     'apollo://schemas/project-proxy-review-warning-acknowledgement-result/v3': [
+      {
+        data: {
+          review: { ...proxyReviewExampleV3, status: 'ready-for-final', warningsAcknowledged: true, finalAllowed: true, reviewHash: 'b'.repeat(64), revision: 2, acknowledgedBy: { type: 'api-client', id: clientId, at: createdAt } },
+          decision: { id: 'proxy-review-decision-example-1', proxyReviewId: proxyReviewExample.id, action: 'acknowledge-warnings', actor: { type: 'api-client', id: clientId }, baseReviewHash: proxyReviewExample.reviewHash, resultReviewHash: 'b'.repeat(64), createdAt },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-proxy-review-warning-acknowledgement-result/v4': [
       {
         data: {
           review: { ...proxyReviewExampleV3, status: 'ready-for-final', warningsAcknowledged: true, finalAllowed: true, reviewHash: 'b'.repeat(64), revision: 2, acknowledgedBy: { type: 'api-client', id: clientId, at: createdAt } },

@@ -205,10 +205,16 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
   const proxyArtifact = props.proxyArtifact ?? keptReview?.proxyArtifact ?? null
   const router = useRouter()
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
-  const [segments, setSegments] = useState<SegmentsView | null>(null)
+  // The exceptions and the reframe plan are kept with the output they were read for, and only the answer to the LATEST read of each reaches the
+  // editor: a slower answer about the output selected before would otherwise stand for this one (and a Command would carry its texts).
+  const [loadedSegments, setLoadedSegments] = useState<{ variantId: string; view: SegmentsView } | null>(null)
+  const segments = loadedSegments && loadedSegments.variantId === variantId ? loadedSegments.view : null
   const [segmentsFailure, setSegmentsFailure] = useState<string | null>(null)
-  const [plan, setPlan] = useState<ReframePlanView | null>(null)
+  const [loadedPlan, setLoadedPlan] = useState<{ variantId: string; view: ReframePlanView } | null>(null)
+  const plan = loadedPlan && loadedPlan.variantId === variantId ? loadedPlan.view : null
   const [planFailure, setPlanFailure] = useState<string | null>(null)
+  const segmentsRead = useRef(0)
+  const planRead = useRef(0)
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<CommandFailure | null>(null)
   const [applied, setApplied] = useState<AppliedCommand | null>(null)
@@ -241,41 +247,45 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
   /* ---- segments of the selected output (caption issues) ---- */
   const loadSegments = useCallback(async () => {
     if (!variantId || !version) return
+    const ticket = ++segmentsRead.current
     const result = await reads.read<SegmentsView>({
       name: 'subtitle-segments',
       url: `/v1/projects/${encodeURIComponent(projectId)}/subtitle-segments?variantId=${encodeURIComponent(variantId)}`,
       versionId: version.id,
       query: `variantId=${variantId}`,
     })
+    if (ticket !== segmentsRead.current) return
     if (!result.ok) {
       if (result.failure.dropped) return
       if (result.failure.kind === 'auth') { sessionExpired(); return }
-      setSegments(null)
+      setLoadedSegments(null)
       setSegmentsFailure(result.failure.kind === 'not-found' ? 'Este projeto não existe neste workspace.' : result.failure.message)
       return
     }
     setSegmentsFailure(null)
-    setSegments(result.data)
+    setLoadedSegments({ variantId, view: result.data })
   }, [projectId, reads, sessionExpired, variantId, version])
 
   /* ---- reframe plan of the selected output (reframe issues) ---- */
   const loadPlan = useCallback(async () => {
     if (!variantId || !version) return
+    const ticket = ++planRead.current
     const result = await reads.read<ReframePlanView>({
       name: 'reframe-plan',
       url: `/v1/projects/${encodeURIComponent(projectId)}/reframe-plans?variantId=${encodeURIComponent(variantId)}&projectVersionId=${encodeURIComponent(version.id)}`,
       versionId: version.id,
       query: `variantId=${variantId}&projectVersionId=${version.id}`,
     })
+    if (ticket !== planRead.current) return
     if (!result.ok) {
       if (result.failure.dropped) return
       if (result.failure.kind === 'auth') { sessionExpired(); return }
-      setPlan(null)
+      setLoadedPlan(null)
       setPlanFailure(result.failure.message)
       return
     }
     setPlanFailure(null)
-    setPlan(result.data)
+    setLoadedPlan({ variantId, view: result.data })
   }, [projectId, reads, sessionExpired, variantId, version])
 
   // The exceptions of the output are read with its Version, whether or not an issue is open: an exception whose issue is gone must still be reachable.
@@ -563,7 +573,8 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
       </div>
 
       {props.reviewFailure ? <p className="px-4 py-3 text-[10px] text-[#c97870]" data-testid="issue-review-unavailable">{props.reviewFailure}</p> : null}
-      {version && (!review || review.projectVersionId !== version.id) ? (
+      {/* Offered once it is known this output has no render of the current Version: not while its first review is still being read. */}
+      {version && (!review || review.projectVersionId !== version.id) && !(props.reviewLoading && !review) ? (
         <div className="flex flex-wrap items-center gap-3 px-4 py-3" data-testid="issue-render-current-box">
           <button className="rounded-lg border border-[#d9aa3d]/30 px-3 py-2 text-[10px] text-[#ddb858] disabled:opacity-40" data-testid="issue-render-current" disabled={busy || props.operations.some((candidate) => candidate.type === 'project-proxy-render' && !(candidate.visibleState?.terminal ?? TERMINAL.has(candidate.status)))} onClick={() => void renderCurrent()} type="button">Renderizar esta saída na versão atual</button>
           <span className="text-[9px] text-[#716d65]">Só esta saída é renderizada: as outras mantêm os renders que já têm.</span>
@@ -627,7 +638,7 @@ export default function IssueOverridePanel(props: IssueOverridePanelProps) {
                 </label>
               ) : null}
               {segment && form && segments ? (
-                <div className="mt-2" data-segment-id={segment.segmentId} data-segment-state={segment.state} data-testid="caption-form">
+                <div className="mt-2" data-segment-id={segment.segmentId} data-segment-state={segment.state} data-testid="caption-form" data-variant-id={variantId ?? ''}>
                   <p className="font-mono text-[8px] text-[#625f58]">
                     {segment.segmentId} · quadros {segment.startFrame}–{segment.endFrame} · {segment.state === 'overridden' ? 'com exceção' : segment.state === 'stale' ? 'exceção fora da faixa atual (não desenhada)' : 'herdada'}
                     {segment.override ? ` · exceção ${segment.override.overrideHash.slice(0, 12)}` : ''}

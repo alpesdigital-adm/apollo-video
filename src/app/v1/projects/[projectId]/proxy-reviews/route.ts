@@ -6,43 +6,14 @@ import {
   acknowledgeProxyWarningsService,
   readProxyReviewService,
 } from '@/v2/application/proxy-review'
-import type { PersistedProxyReview } from '@/v2/application/ports/proxy-review-repository'
 import { DomainError } from '@/v2/domain/errors'
 import { createProxyReviewRepository } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { presentSuccess } from '@/v2/public-api/presenters'
+import { presentProxyReview } from '@/v2/public-api/proxy-review-presenter'
 
 export const dynamic = 'force-dynamic'
-
-function presentProxyReview(review: Readonly<PersistedProxyReview>) {
-  return {
-    id: review.id,
-    projectId: review.projectId,
-    projectVersionId: review.projectVersionId,
-    operationId: review.operationId,
-    proxyArtifactId: review.proxyArtifactId,
-    proxyManifestId: review.proxyManifestId,
-    inputHash: review.inputHash,
-    outputSpecId: review.outputSpecId,
-    rangeCacheKey: review.rangeCacheKey,
-    spec: review.spec,
-    status: review.status,
-    technicalIssues: review.technicalIssues,
-    criticIssues: review.criticIssues,
-    ...(review.formatQuality ? { formatQuality: review.formatQuality } : {}),
-    warningsAcknowledged: review.warningsAcknowledged,
-    finalAllowed: review.finalAllowed,
-    uploadReceivedAt: review.uploadReceivedAt,
-    renderCompletedAt: review.renderCompletedAt,
-    timeToFirstProxyMs: review.timeToFirstProxyMs,
-    reviewHash: review.reviewHash,
-    revision: review.revision,
-    ...(review.acknowledgedBy ? { acknowledgedBy: review.acknowledgedBy } : {}),
-    createdAt: review.createdAt,
-    updatedAt: review.updatedAt,
-  }
-}
 
 export async function GET(
   request: NextRequest,

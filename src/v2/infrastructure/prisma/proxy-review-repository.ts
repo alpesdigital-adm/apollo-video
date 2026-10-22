@@ -7,6 +7,7 @@ import {
 
 import type {
   PersistedProxyReview,
+  ProxyReviewCarriedFrom,
   ProxyReviewDecision,
   ProxyReviewRepository,
 } from '../../application/ports/proxy-review-repository.ts'
@@ -210,6 +211,70 @@ export function hydrateProxyReview(row: StoredProxyReview): Readonly<PersistedPr
   })
 }
 
+/**
+ * W70 readiness. Where a review's render was carried from, when it was carried (the operation names the review it came from and the hash that
+ * review had); `null` for a render made for this Version. The decision that re-bound the approval is looked up by the review, never assumed, and
+ * the time it was made is the time of the automatic acknowledgement the review shows.
+ */
+async function readCarry(
+  client: Pick<Prisma.TransactionClient, 'v2ProjectProxyRenderOperation' | 'v2ProxyReviewDecision'>,
+  row: Pick<StoredProxyReview, 'id' | 'workspaceId' | 'operationId'>,
+): Promise<Readonly<{ carriedFrom: Omit<ProxyReviewCarriedFrom, 'acknowledgedBy'>; decidedAt: Date | null }> | null> {
+  const operation = await client.v2ProjectProxyRenderOperation.findFirst({
+    where: { operationId: row.operationId, workspaceId: row.workspaceId },
+    select: { carriedFromReviewId: true, carriedFromReviewHash: true, reuseBaseVersionId: true, renderContentHash: true },
+  })
+  if (!operation || operation.carriedFromReviewId === null) return null
+  if (operation.carriedFromReviewHash === null || operation.reuseBaseVersionId === null || operation.renderContentHash === null) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review carry-over is incomplete')
+  }
+  const decision = await client.v2ProxyReviewDecision.findFirst({
+    where: { workspaceId: row.workspaceId, proxyReviewId: row.id, action: 'carry-over-approval' },
+    select: { id: true, createdAt: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  })
+  return Object.freeze({
+    carriedFrom: {
+      versionId: operation.reuseBaseVersionId,
+      reviewId: operation.carriedFromReviewId,
+      reviewHash: operation.carriedFromReviewHash,
+      decisionId: decision?.id ?? null,
+      renderContentHash: operation.renderContentHash,
+    },
+    decidedAt: decision?.createdAt ?? null,
+  })
+}
+
+/**
+ * A hydrated review with the carry it came from, when it came from one.
+ *
+ * W70 readiness (Opus validation, note 3). The row of a review whose approval the carry re-bound holds the acknowledgement of the person who
+ * acknowledged the SOURCE review (the database requires an acknowledged review to name an API client). That person did not acknowledge this
+ * Version, so it is not published as the review's acknowledgement: it moves into `carriedFrom.acknowledgedBy`, and the review's own
+ * acknowledgement is the automatic carry - its `carry-over-approval` decision and the time it was made. A person who acknowledged a carried
+ * review that the carry did NOT approve did it on this Version, and stays the review's acknowledgement.
+ */
+async function withCarriedFrom(
+  client: Pick<Prisma.TransactionClient, 'v2ProjectProxyRenderOperation' | 'v2ProxyReviewDecision'>,
+  row: StoredProxyReview,
+): Promise<Readonly<PersistedProxyReview>> {
+  const review = hydrateProxyReview(row)
+  const carry = await readCarry(client, row)
+  if (!carry) return review
+  if (carry.carriedFrom.decisionId === null || carry.decidedAt === null) {
+    return Object.freeze({ ...review, carriedFrom: Object.freeze({ ...carry.carriedFrom, acknowledgedBy: null }) })
+  }
+  const original = review.acknowledgedBy
+  if (!original || original.type !== 'api-client' || !review.warningsAcknowledged) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review carry-over approval names no acknowledgement')
+  }
+  return Object.freeze({
+    ...review,
+    acknowledgedBy: Object.freeze({ type: 'automatic-carry' as const, id: carry.carriedFrom.decisionId, at: carry.decidedAt.toISOString() }),
+    carriedFrom: Object.freeze({ ...carry.carriedFrom, acknowledgedBy: original }),
+  })
+}
+
 function hydrateDecision(row: StoredProxyReviewDecision): Readonly<ProxyReviewDecision> {
   hydrateExternalActorAudit(row, row.actorId)
   if (row.action !== 'acknowledge-warnings' || row.actorType !== 'api-client') {
@@ -231,7 +296,7 @@ function isPrismaCode(error: unknown, code: string): boolean {
 }
 
 export async function readCurrentProxyReview(
-  client: Pick<Prisma.TransactionClient, 'v2ProxyReview' | 'v2Project' | '$queryRawUnsafe'>,
+  client: Pick<Prisma.TransactionClient, 'v2ProxyReview' | 'v2Project' | '$queryRawUnsafe' | 'v2ProjectProxyRenderOperation' | 'v2ProxyReviewDecision'>,
   input: Parameters<ProxyReviewRepository['findCurrent']>[0],
 ): Promise<Readonly<PersistedProxyReview> | null> {
   // The Version, then its sealed State: which output's review is asked for is decided by the State, never by recency.
@@ -262,7 +327,7 @@ export async function readCurrentProxyReview(
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
   })
-  return row ? hydrateProxyReview(row) : null
+  return row ? withCarriedFrom(client, row) : null
 }
 
 export class PrismaProxyReviewRepository implements ProxyReviewRepository {
@@ -505,7 +570,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
             where: { id: existing.proxyReviewId },
           })
           return Object.freeze({
-            review: hydrateProxyReview(review),
+            review: await withCarriedFrom(transaction, review),
             decision: hydrateDecision(existing),
             replayed: true,
           })
@@ -646,7 +711,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
           where: { id: input.proxyReviewId },
         })
         return Object.freeze({
-          review: hydrateProxyReview(review),
+          review: await withCarriedFrom(transaction, review),
           decision: hydrateDecision(decision),
           replayed: false,
         })

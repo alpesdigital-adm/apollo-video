@@ -19,6 +19,10 @@ import { readStoredOutputStateV3 } from './output-state-consumption.ts'
 import { legacyProxyBelongsToOutput } from './proxy-reuse-safety.ts'
 import { PrismaProjectProxyRenderRepository } from './project-proxy-render-repository.ts'
 import { parseDirectorQualityReport } from './director-run-repository.ts'
+import { readDirectorInheritanceWalk } from './director-run-inheritance.ts'
+import {
+  describeDirectorInheritanceBlock, directorRunInheritanceEquals, type DirectorRunInheritance,
+} from '../../domain/director-run-inheritance.ts'
 import { PrismaPerceptionProducerEnvelopeRepository } from './perception-producer-envelope-repository.ts'
 
 /**
@@ -74,6 +78,8 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     /** The stable State variant the export is for: the approving proxy review must be the one rendered for THIS output. */
     outputVariantId: string
     requireCurrent: boolean
+    /** The inheritance the sealed operation was queued with (`null`: the Director's own Version). `undefined`: nothing to compare, a fresh read. */
+    directorInheritance?: Readonly<DirectorRunInheritance> | null
   }) {
     // A review rendered before the column existed (no stated output) is this output's only when the Version has that one output.
     const legacyReviews = await legacyProxyBelongsToOutput(this.client, { workspaceId: input.workspaceId,
@@ -90,17 +96,6 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
           where: { id: input.projectVersionId, baseHash: input.projectVersionHash },
           take: 1,
           select: { id: true },
-        },
-        directorRuns: {
-          where: {
-            resultVersionId: input.projectVersionId,
-            status: 'succeeded',
-            ...(input.directorRunId ? { id: input.directorRunId } : {}),
-            ...(input.qualitySnapshotId ? { qualitySnapshotId: input.qualitySnapshotId } : {}),
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          include: { qualitySnapshot: true },
         },
         proxyReviews: {
           where: {
@@ -127,9 +122,37 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       },
     })
     const version = project?.versions[0]
-    const directorRun = project?.directorRuns[0]
-    const proxyReview = project?.proxyReviews[0]
-    if (!project || !version || !directorRun || !proxyReview) return null
+    if (!project || !version) return null
+    // W70 readiness. The DirectorRun whose quality this Version carries: its own, or the one an ancestor reached through exception
+    // Commands only (a subtitle segment exception, a manual reframe). Anything else in the chain is refused with its precise reason,
+    // never read past; and a sealed operation re-derives the chain it was queued with and refuses one that moved.
+    const walk = await readDirectorInheritanceWalk(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: input.projectVersionId })
+    if (walk.kind === 'blocked') {
+      throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', describeDirectorInheritanceBlock(walk), {
+        reason: 'director-run-not-inherited', inheritanceReason: walk.reason, versionId: walk.versionId,
+        ...(walk.commandId ? { commandId: walk.commandId } : {}), ...(walk.commandType ? { commandType: walk.commandType } : {}),
+      })
+    }
+    if (walk.kind === 'none') return null
+    const inheritance = walk.kind === 'inherited' ? walk.inheritance : null
+    if (input.directorInheritance !== undefined && !directorRunInheritanceEquals(inheritance, input.directorInheritance)) {
+      throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'The Director run inheritance of this Version is not the one the final export was queued with', {
+        reason: 'director-inheritance-moved', versionId: input.projectVersionId,
+      })
+    }
+    const directorRun = await this.client.v2DirectorRun.findFirst({
+      where: {
+        workspaceId: input.workspaceId, projectId: input.projectId,
+        resultVersionId: walk.kind === 'inherited' ? walk.inheritance.directorResultVersionId : walk.directorResultVersionId,
+        status: 'succeeded',
+        ...(input.directorRunId ? { id: input.directorRunId } : {}),
+        ...(input.qualitySnapshotId ? { qualitySnapshotId: input.qualitySnapshotId } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      include: { qualitySnapshot: true },
+    })
+    const proxyReview = project.proxyReviews[0]
+    if (!directorRun || !proxyReview) return null
     if (input.qualitySnapshotHash && directorRun.qualitySnapshot.contentHash !== input.qualitySnapshotHash) return null
     const quality = parseFinalExportQuality({
       contentJson: directorRun.qualitySnapshot.contentJson,
@@ -155,6 +178,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     return Object.freeze({
       locale: project.locale ?? 'pt-BR',
       directorRunId: directorRun.id,
+      ...(inheritance ? { directorInheritance: inheritance } : {}),
       qualitySnapshotId: directorRun.qualitySnapshotId,
       qualitySnapshotHash: directorRun.qualitySnapshot.contentHash,
       qualityStatus: quality.status as 'approved' | 'approved-with-warnings' | 'review-required',
@@ -225,6 +249,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     proxyArtifactId: string
     sourceArtifactId: string
     sourceManifestId: string
+    directorInheritance?: Readonly<DirectorRunInheritance> | null
     variantId?: string
     requireCurrent?: boolean
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null> {
@@ -235,7 +260,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       ...(input.requireCurrent === true ? { requireCurrent: true } : {}),
     })
     if (!source) return null
-    const approval = await this.readApproval({ ...input, outputVariantId: sourceOutputVariantId(source),
+    const approval = await this.readApproval({ ...input, directorInheritance: input.directorInheritance ?? null, outputVariantId: sourceOutputVariantId(source),
       outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: false })
     if (!approval || !reframeMatchesApproval(source, approval) || !subtitleOverridesMatchApproval(source, approval)) return null
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })

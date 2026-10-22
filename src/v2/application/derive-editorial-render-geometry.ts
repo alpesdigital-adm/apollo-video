@@ -1,3 +1,4 @@
+import { captionLayoutOverflows } from '../domain/caption-burn-layout.ts'
 import { DomainError } from '../domain/errors.ts'
 import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import {
@@ -51,6 +52,13 @@ export async function deriveEditorialRenderGeometry(input: Readonly<{
   faceEvidence?: FaceSourceWindowEvidenceReader
   clock: () => Date
   uncertifiedCues?: CaptionPlacementInput['uncertifiedCues']
+  /**
+   * W70 readiness (R3). What a DRAWN caption whose text does not fit its certified band costs (`caption-burn-layout.ts`). `draw-and-block`
+   * (the default; the proxy): the cue is drawn as it is and returned in `captionOverflows`, for the caller to make a hard issue of it.
+   * `omit-and-list` (the final, W65b rule): the cue is planned and drawn no more - it is left out of `subtitleCues` and of the plan - and
+   * returned in `captionOverflows`, for the caller to list it as a review item.
+   */
+  captionTextOverflow?: 'draw-and-block' | 'omit-and-list'
 }>) {
   const { source } = input
   const cueTracks = emittedSubtitleTracks(source.editPlan.subtitleTracks).filter(
@@ -119,7 +127,7 @@ export async function deriveEditorialRenderGeometry(input: Readonly<{
     minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.5,
     timeRange: { startFrame: overlay.startFrame, endFrame: overlay.endFrame },
   }))
-  const { placementPlan, requiredFaceWindows } = await planCaptionPlacement(
+  const plan = (cues: typeof subtitleCues) => planCaptionPlacement(
     { clock: input.clock, ...(input.faceEvidence ? { faceEvidence: input.faceEvidence } : {}) },
     {
       workspaceId: input.workspaceId, projectId: input.projectId,
@@ -130,7 +138,7 @@ export async function deriveEditorialRenderGeometry(input: Readonly<{
         artifactId: asset.artifactId, sha256: asset.sha256, mediaType: asset.mediaType, ...(asset.probe ? { probe: asset.probe } : {}),
       })),
       ...(reframePlan ? { reframePlan } : {}),
-      subtitleCues: subtitleCues.map((cue) => ({
+      subtitleCues: cues.map((cue) => ({
         id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame,
         ...(subtitleOverrideReceipt?.pinnedAnchors[cue.id] ? { pinnedAnchor: subtitleOverrideReceipt.pinnedAnchors[cue.id]! } : {}),
       })),
@@ -144,9 +152,26 @@ export async function deriveEditorialRenderGeometry(input: Readonly<{
       ...(input.uncertifiedCues ? { uncertifiedCues: input.uncertifiedCues } : {}),
     },
   )
+  const overflowsOf = (planned: Awaited<ReturnType<typeof plan>>, cues: typeof subtitleCues) =>
+    captionLayoutOverflows({ anchorPlan: planned.placementPlan.subtitleAnchorPlan, cues, canvas: input.canvas })
+  let planned = await plan(subtitleCues)
+  let drawnCues = subtitleCues
+  // W70 readiness (R3). Known before anything is rendered, from the same layout the renderer draws with.
+  const captionOverflows = overflowsOf(planned, subtitleCues)
+  if (captionOverflows.length > 0 && input.captionTextOverflow === 'omit-and-list') {
+    // The cues are planned again without the ones that do not fit, so the plan, the renderer and the certification agree that they are not
+    // burned. The five bands share one box, so whether a cue fits does not depend on where the others went: no cue that fitted stops fitting.
+    const omitted = new Set(captionOverflows.map((overflow) => overflow.cueId))
+    drawnCues = subtitleCues.filter((cue) => !omitted.has(cue.id))
+    planned = await plan(drawnCues)
+    if (overflowsOf(planned, drawnCues).length > 0) {
+      throw new DomainError('INVALID_RENDER_INPUT', 'Captions that do not fit their band remain after the ones that did not fit were omitted')
+    }
+  }
+  const { placementPlan, requiredFaceWindows } = planned
   validateRenderPlacementPlan(placementPlan)
   return Object.freeze({
-    subtitleCues, subtitlePresetId, subtitleResolution, ctaOverlays, placementPlan, reframePlan, reframeIssues: source.reframeIssues ?? [], requiredFaceWindows,
-    subtitleOverrideReceipt,
+    subtitleCues: drawnCues, subtitlePresetId, subtitleResolution, ctaOverlays, placementPlan, reframePlan, reframeIssues: source.reframeIssues ?? [], requiredFaceWindows,
+    subtitleOverrideReceipt, captionOverflows,
   })
 }

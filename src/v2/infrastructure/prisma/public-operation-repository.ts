@@ -57,6 +57,8 @@ import { resolveStrategicObjective } from '../../domain/strategic-objective.ts'
 import { bindDirectorObjective } from '../../domain/strategic-objective.ts'
 import { parseDesiredAction } from '../../domain/desired-action.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
+import { readDirectorInheritanceWalk } from './director-run-inheritance.ts'
+import { directorRunInheritanceEquals, parseDirectorRunInheritance } from '../../domain/director-run-inheritance.ts'
 import { materializeManualEditPlan } from '../../domain/manual-editing.ts'
 import { legacyProxyBelongsToOutput, readSafeReusableProxyReceipt } from './proxy-reuse-safety.ts'
 import { assertInlineProxySourceAuthority, lockProxySourceArtifacts } from './proxy-source-authority.ts'
@@ -943,6 +945,8 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
         outputManifestId: projectRenderDetail!.outputManifestId,
         originalFileName: projectRenderDetail!.originalFileName,
         ...(projectRenderDetail!.outputVariantId ? { outputVariantId: projectRenderDetail!.outputVariantId } : {}),
+        // W70 readiness (R2): the worker recomputes it and refuses to render when it moved since enqueue.
+        ...(projectRenderDetail!.renderContentHash ? { renderContentHash: projectRenderDetail!.renderContentHash } : {}),
         ...(projectRenderDetail!.renderablePlanHash ? { renderableSnapshot: {
           planId: projectRenderDetail!.renderablePlanId!,
           planHash: projectRenderDetail!.renderablePlanHash,
@@ -959,6 +963,9 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
         projectVersionHash: finalExportDetail!.projectVersionHash,
         editPlanSnapshotId: finalExportDetail!.editPlanSnapshotId,
         directorRunId: finalExportDetail!.directorRunId,
+        ...(finalExportDetail!.directorInheritanceJson
+          ? { directorInheritance: parseDirectorRunInheritance(parseStoredRecord(finalExportDetail!.directorInheritanceJson, 'final export Director inheritance')) }
+          : {}),
         qualitySnapshotId: finalExportDetail!.qualitySnapshotId,
         qualitySnapshotHash: finalExportDetail!.qualitySnapshotHash,
         proxyReviewId: finalExportDetail!.proxyReviewId,
@@ -1690,6 +1697,13 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         finalExportContext.outputArtifactId !== input.operation.target.id ||
         finalExportContext.outputManifestId !== mediaTarget?.manifestId ||
         (finalExportContext.outputVariantId !== undefined && !ID_PATTERN.test(finalExportContext.outputVariantId)) ||
+        (finalExportContext.directorInheritance !== undefined && (() => {
+          // Sealed and consistent with the Version it claims to be inherited into: a malformed chain is no chain.
+          try {
+            const inheritance = parseDirectorRunInheritance(finalExportContext.directorInheritance)
+            return inheritance.inheritedThroughVersionIds[0] !== finalExportContext.projectVersionId
+          } catch { return true }
+        })()) ||
         !['9:16', '16:9', '4:5', '1:1', '21:9'].includes(finalExportContext.outputSpec.aspectRatio) ||
         ![finalExportContext.outputSpec.width, finalExportContext.outputSpec.height, finalExportContext.outputSpec.fps].every((value) => Number.isSafeInteger(value) && value > 0) ||
         finalExportContext.outputSpec.width % 2 !== 0 || finalExportContext.outputSpec.height % 2 !== 0 ||
@@ -2126,6 +2140,21 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             throw new DomainError('PERSISTENCE_CONFLICT', 'Final export OutputSpec is not the aspect ratio of the output it is approved for')
           }
           admittedOutputVariantId = admittedFinal.seal.variantId
+          // W70 readiness. The DirectorRun is the Version's own, or the one an ancestor reached through exception Commands only; the chain
+          // the context names must be exactly the one the persisted Versions and Commands give now (a moved chain is no admission).
+          const directorWalk = await readDirectorInheritanceWalk(transaction, {
+            workspaceId: input.operation.workspaceId, projectId: finalExportContext.projectId, versionId: finalExportContext.projectVersionId })
+          if (directorWalk.kind === 'blocked') {
+            throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Final export Version does not inherit the quality of a DirectorRun', {
+              reason: 'director-run-not-inherited', inheritanceReason: directorWalk.reason, versionId: directorWalk.versionId,
+              ...(directorWalk.commandId ? { commandId: directorWalk.commandId } : {}), ...(directorWalk.commandType ? { commandType: directorWalk.commandType } : {}) })
+          }
+          if ((directorWalk.kind !== 'direct' && directorWalk.kind !== 'inherited') ||
+              !directorRunInheritanceEquals(directorWalk.kind === 'inherited' ? directorWalk.inheritance : null, finalExportContext.directorInheritance ?? null)) {
+            throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Final export Director run inheritance is not the chain of this Version', {
+              reason: 'director-inheritance-moved', versionId: finalExportContext.projectVersionId })
+          }
+          const directorResultVersionId = directorWalk.kind === 'inherited' ? directorWalk.inheritance.directorResultVersionId : finalExportContext.projectVersionId
           const [source, colorPipelines] = await Promise.all([transaction.v2Project.findFirst({
             where: {
               id: finalExportContext.projectId,
@@ -2144,7 +2173,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               directorRuns: {
                 where: {
                   id: finalExportContext.directorRunId,
-                  resultVersionId: finalExportContext.projectVersionId,
+                  resultVersionId: directorResultVersionId,
                   qualitySnapshotId: finalExportContext.qualitySnapshotId,
                   status: 'succeeded',
                 },
@@ -2494,6 +2523,9 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               projectVersionHash: finalExportContext!.projectVersionHash,
               editPlanSnapshotId: finalExportContext!.editPlanSnapshotId,
               directorRunId: finalExportContext!.directorRunId,
+              ...(finalExportContext!.directorInheritance
+                ? { directorInheritanceJson: stableSerialize(parseDirectorRunInheritance(finalExportContext!.directorInheritance)) }
+                : {}),
               qualitySnapshotId: finalExportContext!.qualitySnapshotId,
               qualitySnapshotHash: finalExportContext!.qualitySnapshotHash,
               proxyReviewId: finalExportContext!.proxyReviewId,

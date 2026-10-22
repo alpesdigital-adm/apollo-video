@@ -1,6 +1,8 @@
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { FormatSubjectEvidenceV1 } from '../../domain/format-quality-critic.ts'
+import type { DirectorRunInheritance } from '../../domain/director-run-inheritance.ts'
+import type { RenderColorGradeV1 } from '../../domain/render-color-grade.ts'
 import type { OutputConsumptionSealV3 } from '../../domain/output-consumption.ts'
 import type { PerceptionTimeline } from '../../domain/perception-timeline.ts'
 import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
@@ -96,6 +98,18 @@ export interface ProjectProxyRenderSource {
   originalFileName: string
   uploadReceivedAt: string
   criticIssues: readonly Readonly<ProxyQualityIssue>[]
+  /**
+   * W70 readiness. Present when `criticIssues` are the issues of a DirectorRun of an ANCESTOR Version, reached through exception Commands
+   * only (a subtitle segment exception, a manual reframe): the Versions and Commands the Director's quality went through. Absent when the
+   * Version is the Director's own (or has no Director run at all).
+   */
+  directorInheritance?: Readonly<DirectorRunInheritance>
+  /**
+   * W70 readiness (R2). The colour grade a render of this Version applies (effective ColorPlan and LUT selection, by ancestry), read with the
+   * source. Part of the input hash and of the content address; the worker refuses to render when the grade it applies is another one. Absent
+   * only on a source not read by the project render repository (a renderable snapshot), which then keeps the identity it always had.
+   */
+  colorGrade?: Readonly<RenderColorGradeV1>
   rangeReuse?: Readonly<ProjectProxyRangeReuse>
   unchangedReuse?: Readonly<ProjectProxyUnchangedReuse>
   unchangedReuseRequired?: true
@@ -157,6 +171,15 @@ export interface ProjectProxyOcrReceipt {
   editPlanHash: string
 }
 
+/**
+ * W70 readiness (R2). The digests a completed render stores beside its content address (`proxy-render-evidence.ts`): the face windows its
+ * caption placement read, with the pending ones, and the Director's quality issues its review is built over.
+ */
+export interface ProjectProxyRenderEvidence {
+  faceEvidenceDigest: string
+  criticIssuesDigest: string
+}
+
 export interface ProjectProxyCompletionLease {
   readonly owner: string
   readonly attempt: number
@@ -214,6 +237,12 @@ export interface ProjectProxyRenderRepository {
     createdAt: string
     recipeParameters: Readonly<Record<string, unknown>>
     ocrReceipt: Readonly<ProjectProxyOcrReceipt> | null
+    /**
+     * W70 readiness (R2). The digests of what the content address cannot see, taken when these frames were decided: the face windows the
+     * placement read (with the ones it still needs) and the Director's issues the review is built over. Stored on the render's operation row;
+     * a carry from this render is refused when the head's are not the same (`face-evidence-moved`, `critic-issues-moved`).
+     */
+    renderEvidence?: Readonly<ProjectProxyRenderEvidence>
   }): Promise<void>
   attachCompletedSnapshotOutput(input: {
     lease: Readonly<ProjectProxyCompletionLease>

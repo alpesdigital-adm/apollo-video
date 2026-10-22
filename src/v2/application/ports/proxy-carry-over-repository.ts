@@ -17,6 +17,13 @@ export interface ProxyCarryOverRequest {
   variantId: string
   /** The Version-independent content address of this output's pre-render identity at `toProjectVersionId`. */
   renderContentHash: string
+  /**
+   * W70 readiness (R2). What the address cannot see, read for `toProjectVersionId` now: the digest of the face windows the caption placement
+   * of this output reads (with the pending ones), and of the Director's quality issues its review would be built over. A source render whose
+   * stored digests are not exactly these is not carried (`face-evidence-moved`, `critic-issues-moved`), and one without them is never a source.
+   */
+  faceEvidenceDigest: string
+  criticIssuesDigest: string
   /** The pre-render input hash a fresh render of `toProjectVersionId` would carry (the operation the carry writes is this one). */
   inputHash: string
   editPlanSnapshotId: string
@@ -48,7 +55,14 @@ export type ProxyCarryOverResult =
     outputArtifactId: string
   }>
   | Readonly<{ status: 'present'; operationId: string }>
-  | Readonly<{ status: 'not-eligible'; reason: 'head-moved' | 'no-source-render' | 'source-not-ancestor' | 'source-incomplete' }>
+  | Readonly<{ status: 'not-eligible'; reason: ProxyCarryOverRefusal }>
+
+export const PROXY_CARRY_OVER_REFUSALS = Object.freeze([
+  'head-moved', 'no-source-render', 'source-not-ancestor', 'source-incomplete', 'command-impact-missing', 'face-evidence-moved', 'critic-issues-moved',
+  // a Version between the source render and the head was made by a Command other than the two exception Commands
+  'intermediate-command-not-carriable',
+] as const)
+export type ProxyCarryOverRefusal = (typeof PROXY_CARRY_OVER_REFUSALS)[number]
 
 export interface ProxyCarryOverRepository {
   carry(request: Readonly<ProxyCarryOverRequest>): Promise<ProxyCarryOverResult>

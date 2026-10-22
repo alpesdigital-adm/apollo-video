@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { artifactOutputStoragePrefix } from '../domain/artifact-storage-identity.ts'
 import { evaluateAssetUse } from '../domain/asset-rights.ts'
+import { appliedColorGradeMatches } from '../domain/render-color-grade.ts'
 import { createReconstructableMediaArtifactManifest } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
 import { readOutputFormatPreset } from '../domain/output-format-registry.ts'
@@ -9,6 +10,7 @@ import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import { createRenderInputSpec } from '../domain/render-input.ts'
 import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import { createDirectedAudioTimelineHash } from '../domain/director-run.ts'
+import { directorRunInheritanceEquals, directorRunInheritanceIdentity } from '../domain/director-run-inheritance.ts'
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
 import type { ArtifactSourceMaterializer, VerifiedMediaStorage } from './ports/media-ingest.ts'
@@ -224,6 +226,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         projectVersionHash: context.projectVersionHash,
         editPlanSnapshotId: context.editPlanSnapshotId,
         directorRunId: context.directorRunId,
+        // The chain of exception Versions the Director's quality was inherited through when this operation was queued (null: the Director's
+        // own Version). The repository re-derives it and refuses one that moved, with its precise reason.
+        directorInheritance: context.directorInheritance ?? null,
         qualitySnapshotId: context.qualitySnapshotId,
         qualitySnapshotHash: context.qualitySnapshotHash,
         proxyReviewId: context.proxyReviewId,
@@ -236,6 +241,12 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         requireCurrent: true,
       })
       if (!source) throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Immutable approved final export source disappeared')
+      // W70 readiness. The chain of exception Versions the Director's quality reached this Version through is the one the operation was queued
+      // with, or there is no operation: checked here on the source the repository returned, whatever the repository compared itself.
+      if (!directorRunInheritanceEquals(context.directorInheritance ?? null, source.directorInheritance ?? null)) {
+        throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'The Director run inheritance of the sealed Version is not the chain the final export was queued with',
+          { reason: 'director-inheritance-moved', versionId: context.projectVersionId })
+      }
       // The output this export was approved for is the one the operation persisted; a source sealed to another output is no source.
       if (context.outputVariantId !== undefined && context.outputVariantId !== sourceOutputVariantId(source)) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Immutable final export source is not the output its operation was approved for')
@@ -262,6 +273,10 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         operationId: operation.id, compilations: [...colorPipelines.values()],
         ...(colorPlan ? { executions: colorPlan.compiled.targets } : {}),
       })
+      // W70 readiness (R2). The grade applied is the one the sealed source was read with (the approving proxy was rendered under it).
+      if (source.colorGrade && !appliedColorGradeMatches(source.colorGrade, {
+        colorPlan, lut: { selectionId: materializedLut.selectionId, selectionHash: materializedLut.selectionHash },
+      })) throw new DomainError('INVALID_RENDER_INPUT', 'The colour grade this final applies is not the one its source was read with')
       failureStage = 'input-validation'
       const immutableInputHash = projectFinalRenderInputHash({
         projectId: context.projectId,
@@ -285,6 +300,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         outputConsumptionSealHash: source.outputConsumption.sealHash,
         ...(source.reframeRecordHash ? { reframeRecordHash: source.reframeRecordHash } : {}),
         ...(source.subtitleOverridesHash ? { subtitleOverridesHash: source.subtitleOverridesHash } : {}),
+        ...(source.directorInheritance ? { directorInheritance: directorRunInheritanceIdentity(source.directorInheritance) } : {}),
       })
       if (
         immutableInputHash !== context.inputHash ||
@@ -315,7 +331,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       // the export before the encode is anything else - a hard issue, a band that is not free-certified under a placed cue, or a
       // burned caption that nothing would confirm in the delivered pixels. When the geometry cannot be derived the export stops here;
       // rendering the cut without its captions is not an option.
-      const { subtitleCues, ctaOverlays, placementPlan, reframePlan, subtitleOverrideReceipt } = await deriveEditorialRenderGeometry({
+      // W70 readiness (R3): a cue whose text does not fit its band on the FINAL canvas is omitted the same way (never burned) and listed in the
+      // receipt as a review item (`captionOverflows`), decided before the encode by the layout the renderer draws with.
+      const { subtitleCues, ctaOverlays, placementPlan, reframePlan, subtitleOverrideReceipt, captionOverflows } = await deriveEditorialRenderGeometry({
         source,
         canvas: { width: context.outputSpec.width, height: context.outputSpec.height },
         workspaceId: operation.workspaceId, projectId: context.projectId, clips,
@@ -323,6 +341,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         ...(dependencies.faceEvidence ? { faceEvidence: dependencies.faceEvidence } : {}),
         clock,
         uncertifiedCues: 'omit-and-list',
+        captionTextOverflow: 'omit-and-list',
       })
       const hardCaptionIssues = placementPlan.subtitleAnchorPlan?.issues.filter((issue) => issue.severity === 'hard') ?? []
       if (hardCaptionIssues.length > 0) {
@@ -330,7 +349,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           `Final export has ${hardCaptionIssues.length} caption(s) that could not be placed (${[...new Set(hardCaptionIssues.map((issue) => issue.code))].join(', ')}); review is required`)
       }
       // Everything about the plan that does not need pixels. `completed` with no issues stands for "the delivered pixels agree".
-      const preflight = certifyFinalCaptions({ plan: placementPlan, pixelCheck: { measurement: 'completed', issues: [] } })
+      const preflight = certifyFinalCaptions({ plan: placementPlan, pixelCheck: { measurement: 'completed', issues: [] }, layoutOmitted: captionOverflows })
       if (!preflight.admissible) {
         throw new DomainError('INVALID_RENDER_INPUT', `Final export captions are not certified (${preflight.failures.slice(0, 3).join('; ')})`)
       }
@@ -414,7 +433,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           await dependencies.renderer.cleanup(controlOperationId).catch(() => undefined)
         }
       }
-      const certification = certifyFinalCaptions({ plan: placementPlan, pixelCheck })
+      const certification = certifyFinalCaptions({ plan: placementPlan, pixelCheck, layoutOmitted: captionOverflows })
       // ---- W67. What the pixels of the delivered file say, by the independent critic; a blocked variant is not promoted ----
       let mp4Validator: { code: string; passed: boolean; message: string } | null = null
       let pendingAcknowledgement: Readonly<{ text: string; sha256: string; gateMessage: string }> | null = null
@@ -661,6 +680,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             projectVersionHash: context.projectVersionHash,
             editPlanSnapshotId: context.editPlanSnapshotId,
             directorRunId: context.directorRunId,
+            // W70 readiness. Present when the Director's quality was inherited through exception Commands: the Version the run produced and
+            // every Version and Command it went through. Absent for the Director's own Version, which keeps every earlier receipt's shape.
+            ...(source.directorInheritance ? { directorInheritance: directorRunInheritanceIdentity(source.directorInheritance) } : {}),
             qualitySnapshotId: context.qualitySnapshotId,
             qualitySnapshotHash: context.qualitySnapshotHash,
             proxyReviewId: context.proxyReviewId,
