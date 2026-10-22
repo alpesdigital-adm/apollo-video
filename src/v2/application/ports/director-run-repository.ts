@@ -1,5 +1,6 @@
 import type { AdoptableObservationReader } from './adoptable-observation-reader.ts'
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
+import type { EditorialPhraseRule } from '../editorial-phrase-rules.ts'
 import type { DirectorRun, RunDirectorCommandPayload } from '../../domain/director-run.ts'
 import type { EditCommand } from '../../domain/edit-command.ts'
 import type { OperationalOutputParentV3, OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
@@ -68,6 +69,12 @@ export interface DirectorRunContext {
      */
     words?: readonly Readonly<{ word: string; start: number; end: number }>[]
   }>
+  /**
+   * The speech this project asked to have removed: the phrase rules of the `remove-spoken-content` Commands in the lineage of the
+   * Version the Director directs (the same rules the cut applied). The Director holds no phrase of its own - what must not be said
+   * is what THIS project asked to cut. Absent or empty: nothing was asked, nothing is forbidden.
+   */
+  requestedSpeechRemovals?: readonly Readonly<EditorialPhraseRule>[]
   /** Absent means no server-produced OCR envelope exists for this input version. */
   ocrEnvelope?: Readonly<PerceptionProducerEnvelope>
   /**

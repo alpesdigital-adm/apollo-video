@@ -1004,6 +1004,14 @@ fixada por digest na identidade pré-render (veja
 `faceSafety.status=verified` mantém o requisito anterior de evidência de percepção
 facial. Um proxy pode servir à revisão, sem promover o resultado a aprovado. Snapshots
 antigos sem esse campo não são prova de segurança para nova exportação.
+O hard check `forbiddenSpeechAbsent` significa: as falas que **este projeto** pediu para
+remover (as `rules` dos Commands `remove-spoken-content` na linhagem da Versão que o Diretor
+dirige, na mesma tokenização do corte) não aparecem nas legendas; sem pedido de remoção ele é
+`true`. O Diretor não carrega lista própria de frases: o Apollo trabalha conforme o pedido de
+cada vídeo. A semântica mudou com o crítico `apollo-director-critic/v3`; um relatório de crítico
+`v1`/`v2` nunca verificou o pedido do projeto e, por isso, não é admitido para exportação final
+(`admitDirectorQualityForFinal`): o Diretor roda de novo. O formato `director-quality-report/v4`
+e a política `confidence-band-policy/v2` não mudam.
 As capabilities `apollo.projects.perception.read` e `.put` passam a 2.0.0,
 com respostas `perception-range-response/v2` e
 `perception-timeline-put-response/v2`. O `PUT` recebe somente observações

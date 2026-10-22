@@ -246,6 +246,11 @@ export interface DirectorQualityReportBase {
     automaticZoomDisabled: boolean
     subtitlesFaceSafe: boolean
     subtitlesBounded: boolean
+    /**
+     * True when none of the speech THIS project asked to remove (the rules of its `remove-spoken-content` Commands) appears in the
+     * captions, and when nothing was asked (since `apollo-director-critic/v3`; earlier critics tested a fixed list). The public schema
+     * is immutable per ref, so this meaning lives here and in docs/specs/09, not in the schema description.
+     */
     forbiddenSpeechAbsent: boolean
     timelineContinuous: boolean
   }>

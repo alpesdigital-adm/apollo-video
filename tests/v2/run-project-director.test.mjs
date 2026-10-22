@@ -15,6 +15,8 @@ import { assertDirectorRunEvidenceConsistency } from '../../src/v2/domain/direct
 import { serverPerceptionSnapshotId } from '../../src/v2/domain/server-perception-snapshot.ts'
 import { childCommandOf } from '../../src/v2/domain/project-output-state-transition.ts'
 import { ingestedRecordings, ingestedWorld, recompiledChild, worldActor } from './helpers/output-world.mjs'
+import { admitDirectorQualityForFinal } from '../../src/v2/domain/final-caption-certification.ts'
+import { defineEditorialPhraseRules } from '../../src/v2/application/editorial-phrase-rules.ts'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
 import { createPerceptionProducerEnvelope } from '../../src/v2/domain/perception-producer-envelope.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
@@ -219,6 +221,8 @@ class InMemoryDirectorRepository {
       snapshotHash: 'd'.repeat(64), status: 'approved', consentStatus: 'not-required',
     }
     this.baseEditPlan = options.editPlan
+    // The speech the project asked to remove (the rules of its remove-spoken-content Commands); none unless a test sends a request.
+    this.requestedSpeechRemovals = options.requestedSpeechRemovals ?? []
     this.requested = []
     this.records = new Map()
   }
@@ -279,6 +283,7 @@ class InMemoryDirectorRepository {
         .map((artifactId) => ({ artifactId, rights: artifactId === this.transcript.sourceArtifactId ? this.sourceRights : this.insertRights })),
       outputReferences: this.outputReferences,
       transcript: this.transcript,
+      requestedSpeechRemovals: this.requestedSpeechRemovals,
       ...(this.ocrEnvelope ? { ocrEnvelope: this.ocrEnvelope } : {}),
     }
   }
@@ -584,12 +589,14 @@ test('Director re-evaluates confirmed caption corrections without reusing the ol
 })
 
 test('Director rejects unsafe or stale reviewed captions before persistence', async () => {
+  // The project asked, through its remove-spoken-content request, to take this phrase out; a reviewed caption that says it again is refused.
+  const requestedSpeechRemovals = defineEditorialPhraseRules([{ id: 'phrase-rule-requested-1', label: 'frase pedida', alternatives: ['promoção relâmpago'] }])
   for (const mutation of [
-    (cue) => { cue.text = '31 de janeiro' },
+    (cue) => { cue.text = 'Promoção relâmpago!' },
     (cue) => { cue.anchor = 'center' },
     (cue) => { cue.startFrame += 1 },
   ]) {
-    const { repository, service } = fixture()
+    const { repository, service } = fixture({ requestedSpeechRemovals })
     const original = await service(request())
     const reviewed = structuredClone(original.run.editPlan)
     reviewed.reviewPatch = { patchId: 'reviewed-patch-1', annotationIds: ['annotation-caption-1'] }
@@ -599,6 +606,48 @@ test('Director rejects unsafe or stale reviewed captions before persistence', as
     await assert.rejects(service(request({ baseVersionId: original.version.id, baseHash: original.version.baseHash, idempotency: { key: 'unsafe-caption' } })), (error) => error.code === 'INVALID_RENDER_INPUT')
     assert.equal(repository.lastBundle.run.id, original.run.id)
   }
+})
+
+// The Director works from what each video's own request asks, never from a context fixed in the product: what it forbids in the
+// captions is the speech THIS project asked to remove (the rules of its remove-spoken-content Commands), and nothing else.
+function planSaying(words) {
+  const plan = structuredClone(compiledEditorialPlan())
+  words.forEach((text, index) => { plan.retimedTranscript.words[index].text = text })
+  return plan
+}
+
+test('a video that says "dois dias" and "31 de janeiro" is not blocked when nothing asked to remove them', async () => {
+  const editPlan = planSaying(['Seja', 'bem-vindo.', '31', 'de', 'janeiro,', 'em', 'dois', 'dias.'])
+  const { repository, service } = fixture({ editPlan })
+  const result = await service(request({ idempotency: { key: 'speech-without-request' } }))
+  const captions = result.run.editPlan.subtitleTracks.flatMap((track) => track.cues).map((cue) => cue.text).join(' ')
+  assert.match(captions, /31 de janeiro/)
+  assert.match(captions, /dois dias/)
+  assert.equal(result.run.qualityReport.hardChecks.forbiddenSpeechAbsent, true)
+  assert.notEqual(result.run.qualityReport.status, 'blocked')
+  assert.equal(admitDirectorQualityForFinal(result.run.qualityReport).admitted, true)
+  assert.equal(result.run.qualityReport.criticVersion, 'apollo-director-critic/v3')
+  assert.ok(repository.lastBundle)
+})
+
+test('a request to remove a phrase that the captions still say blocks the Director on forbiddenSpeechAbsent', async () => {
+  const editPlan = planSaying(['Seja', 'bem-vindo.', 'Hoje', 'tem', 'promoção', 'relâmpago.'])
+  const requestedSpeechRemovals = defineEditorialPhraseRules([
+    { id: 'phrase-rule-requested-1', label: 'frase pedida', alternatives: ['promoção relâmpago', 'oferta relampago'] },
+  ])
+  const asked = fixture({ editPlan, requestedSpeechRemovals })
+  await assert.rejects(
+    asked.service(request({ idempotency: { key: 'speech-still-present' } })),
+    (error) => error instanceof DomainError && error.code === 'INVALID_RENDER_INPUT' &&
+      error.details.gateFailures.includes('narrative-integrity') &&
+      JSON.stringify(error.details.requestedSpeechStillPresent) === JSON.stringify(['phrase-rule-requested-1']),
+  )
+  assert.equal(asked.repository.lastBundle, undefined)
+  // The same words with no request, and the request over words that do not say it, both pass: the rule is the request, not the words.
+  const unasked = fixture({ editPlan })
+  assert.equal((await unasked.service(request({ idempotency: { key: 'speech-no-request' } }))).run.qualityReport.hardChecks.forbiddenSpeechAbsent, true)
+  const removed = fixture({ requestedSpeechRemovals })
+  assert.equal((await removed.service(request({ idempotency: { key: 'speech-request-honoured' } }))).run.qualityReport.hardChecks.forbiddenSpeechAbsent, true)
 })
 
 test('Director blocks material brief conflicts before creating or persisting plans', async () => {

@@ -49,6 +49,7 @@ import {
   resolveStrategicObjective,
 } from '../../domain/strategic-objective.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
+import { collectRequestedSpeechRemovals, type SpeechRemovalLineageProject } from '../../application/requested-speech-removals.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { readEditorialSourceBindingV1 } from './output-version-materializer.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
@@ -693,6 +694,11 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     const timelineSourceRights = Object.freeze(planSourceIds.map((artifactId) => Object.freeze({
       artifactId, rights: sourceRightsOf(sourceArtifacts.find((artifact) => artifact.id === artifactId)?.currentRightsSnapshot),
     })))
+    // What THIS project asked to have cut from the speech: the rules of the remove-spoken-content Commands in the lineage of the head.
+    const requestedSpeechRemovals = await collectRequestedSpeechRemovals({
+      projectId: project.id, headVersionId: versionRow.id,
+      load: (lineageProjectId) => this.readSpeechRemovalLineage(project.workspaceId, lineageProjectId),
+    })
     // The rest of the sealed evidence of this Version (temporal, source-keyed face windows, the plan's own transcript), read by the
     // same reader the public snapshot uses, so the Director's perception and the API's are the same bytes (W63a).
     const evidence = await new PrismaServerPerceptionEvidenceReader(this.client).readForVersion({
@@ -720,8 +726,32 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
         transcriptHash: transcriptRow.transcriptHash,
         words: Object.freeze(transcriptWords.map((word) => Object.freeze({ word: word.word, start: word.start, end: word.end }))),
       }),
+      requestedSpeechRemovals,
       ...(ocrEnvelope ? { ocrEnvelope } : {}),
       ...(evidence !== null && evidence !== 'no-timeline' ? { perceptionEvidence: evidence } : {}),
+    })
+  }
+
+  /** One project's Versions and the Commands that decide which removal requests still stand (`remove-spoken-content`, manual undo/redo/restore). */
+  private async readSpeechRemovalLineage(workspaceId: string, projectId: string): Promise<SpeechRemovalLineageProject> {
+    const [versions, commands] = await Promise.all([
+      this.client.v2ProjectVersion.findMany({
+        where: { workspaceId, projectId },
+        select: { id: true, parentVersionId: true, commandId: true, forkedFromProjectId: true, forkedFromVersionId: true },
+      }),
+      this.client.v2EditCommand.findMany({
+        where: {
+          workspaceId, projectId,
+          OR: [{ type: 'remove-spoken-content' }, { type: 'manual-edit', payloadJson: { contains: 'restoresVersionId' } }],
+        },
+        select: { id: true, type: true, payloadJson: true },
+      }),
+    ])
+    return Object.freeze({
+      versions: new Map(versions.map((version) => [version.id, Object.freeze({ ...version })] as const)),
+      commands: new Map(commands.map((command) => [command.id, Object.freeze({
+        id: command.id, type: command.type, payload: Object.freeze(parseRecord(command.payloadJson, 'Director lineage command payload')),
+      })] as const)),
     })
   }
 

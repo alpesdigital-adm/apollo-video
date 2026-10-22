@@ -95,6 +95,36 @@ function mergeRanges(ranges: readonly EditorialExclusionRange[]): readonly Edito
   return Object.freeze(merged.map((range) => Object.freeze(range)))
 }
 
+/**
+ * The words of a text as the editorial cut compares them: split on whitespace, each normalised like a transcript word is
+ * (diacritics, case, punctuation), the ones that normalise to nothing dropped.
+ */
+export function editorialSpeechTokens(text: string): readonly string[] {
+  return Object.freeze(text.split(/\s+/).map(normalizeToken).filter(Boolean))
+}
+
+/**
+ * The ids of the rules whose phrase (any alternative) is spoken in `text`: the same tokens and the same word-for-word comparison
+ * that cut the phrase out of the transcript, applied to a text such as the captions of a plan.
+ */
+export function editorialRulesMatchingSpeech(
+  text: string,
+  rules: readonly Readonly<EditorialPhraseRule>[],
+): readonly string[] {
+  const tokens = editorialSpeechTokens(text)
+  const found: string[] = []
+  for (const rule of rules) {
+    const present = rule.alternatives.some((phrase) => {
+      for (let start = 0; start + phrase.length <= tokens.length; start += 1) {
+        if (phrase.every((token, offset) => tokens[start + offset] === token)) return true
+      }
+      return false
+    })
+    if (present && !found.includes(rule.id)) found.push(rule.id)
+  }
+  return Object.freeze(found)
+}
+
 export function deriveEditorialExclusions(
   transcript: Readonly<MediaTranscript>,
   rules: readonly Readonly<EditorialPhraseRule>[],

@@ -5,7 +5,7 @@ import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createCaptionProjection } from '../../src/v2/domain/caption-canvas-projection.ts'
 import { evaluateCaptionPixels } from '../../src/v2/domain/caption-pixel-verdict.ts'
 import {
-  admitDirectorQualityForFinal, certifyFinalCaptions, FINAL_CAPTION_ANCHOR_POLICY, FINAL_CAPTION_CERTIFICATION_POLICY,
+  admitDirectorQualityForFinal, certifyFinalCaptions, MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION, FINAL_CAPTION_ANCHOR_POLICY, FINAL_CAPTION_CERTIFICATION_POLICY,
   FINAL_CAPTION_CERTIFICATION_POLICY_SHA256,
 } from '../../src/v2/domain/final-caption-certification.ts'
 import { collectFaceSourceEvidenceStream } from '../../src/v2/domain/face-source-evidence-stream.ts'
@@ -87,6 +87,17 @@ test('a Director report that is review-required ONLY because face safety is unkn
     status: 'approved', faceSafety: { status: 'verified', reasonCode: 'FACE_VERIFIED', evidenceRefs: ['perception-1'] },
     hardChecks: { ...quality().hardChecks, subtitlesFaceSafe: true },
   })), { admitted: true, basis: 'verified-face-safety' })
+})
+
+test('a report from a superseded Apollo Director critic is not inherited: its forbiddenSpeechAbsent never read the project request', () => {
+  assert.equal(MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION, 3)
+  for (const criticVersion of ['apollo-director-critic/v1', 'apollo-director-critic/v2']) {
+    const verdict = admitDirectorQualityForFinal(quality({ criticVersion }))
+    assert.equal(verdict.admitted, false)
+    assert.match(verdict.reason, /superseded/)
+  }
+  assert.deepEqual(admitDirectorQualityForFinal(quality({ criticVersion: 'apollo-director-critic/v3' })), { admitted: true, basis: 'per-cue-caption-certification' })
+  assert.deepEqual(admitDirectorQualityForFinal(quality({ criticVersion: 'apollo-director-critic/v10' })), { admitted: true, basis: 'per-cue-caption-certification' })
 })
 
 test('every burned cue is placed in a free-certified band and confirmed in pixels; the receipt names how each band was certified', () => {

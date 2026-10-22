@@ -65,6 +65,7 @@ import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
 import { parseProductionBrief } from '../domain/production-brief.ts'
 import { canonicalProjectMutationAudit } from './project-analysis-execution.ts'
 import type { BriefCompilation } from './compile-brief.ts'
+import { editorialRulesMatchingSpeech, type EditorialPhraseRule } from './editorial-phrase-rules.ts'
 import { createMediaOnlyAnalysis, inferMediaOnlyTreatment } from './media-only-production.ts'
 import {
   materializeActorAuditContext,
@@ -73,7 +74,9 @@ import {
 } from './authenticate-api-client.ts'
 
 export const PROJECT_DIRECTOR_PLANNER_VERSION = 'apollo-director-policy/v2'
-export const PROJECT_DIRECTOR_CRITIC_VERSION = 'apollo-director-critic/v2'
+// v3: `forbiddenSpeechAbsent` is the project's own request (the phrases its `remove-spoken-content` Commands asked to cut), no longer a
+// fixed list; a report born under v1/v2 is not admitted to final export (see `admitDirectorQualityForFinal`).
+export const PROJECT_DIRECTOR_CRITIC_VERSION = 'apollo-director-critic/v3'
 const SUBTITLE_MAX_CHARACTERS = 32
 
 export interface RunProjectDirectorRequest {
@@ -562,10 +565,13 @@ function buildQualityReport(input: {
   decisions: readonly Readonly<DirectorDecision>[]
   /** The critic's account of the perception behind the plan, sealed in the report. */
   perceptionEvidence: Readonly<DirectorPerceptionEvidenceReport>
+  /** The speech the project asked to remove (its `remove-spoken-content` rules); the captions must not say any of it. */
+  requestedSpeechRemovals: readonly Readonly<EditorialPhraseRule>[]
 }): Readonly<DirectorQualityReport> {
   const cues = input.plan.subtitleTracks.flatMap((track) => track.cues)
   const allSubtitleText = normalizedSpeech(cues.map((cue) => cue.text).join(' '))
-  const forbiddenSpeechAbsent = !['31 de janeiro', '1 de fevereiro', 'dois dias'].some((phrase) => allSubtitleText.includes(normalizedSpeech(phrase)))
+  // What must not be said is what THIS project asked to remove; a project that asked for nothing forbids nothing.
+  const forbiddenSpeechAbsent = editorialRulesMatchingSpeech(cues.map((cue) => cue.text).join(' '), input.requestedSpeechRemovals).length === 0
   const clips = input.plan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
   const timelineContinuous = clips.every((clip, index) => clip.timelineInFrame === (index === 0 ? 0 : clips[index - 1]!.timelineOutFrame)) && clips.at(-1)?.timelineOutFrame === input.plan.durationFrames
   const hardChecks = Object.freeze({
@@ -1229,6 +1235,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       rightsVerdicts,
       decisions,
       perceptionEvidence: perceptionEvidenceReport,
+      requestedSpeechRemovals: context.requestedSpeechRemovals ?? [],
     })
     assertDomain(
       qualityReport.status !== 'blocked',
@@ -1239,6 +1246,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         score: qualityReport.strategic.score,
         threshold: qualityReport.strategic.rubric.threshold,
         gateFailures: qualityReport.strategic.gateFailures,
+        requestedSpeechStillPresent: editorialRulesMatchingSpeech(
+          editPlan.subtitleTracks.flatMap((track) => track.cues).map((cue) => cue.text).join(' '),
+          context.requestedSpeechRemovals ?? []),
         blockedDecisions: decisions.filter((decision) => decision.perceptionEvidence !== undefined && decision.confidenceBand === 'block')
           .map((decision) => decision.id),
         uncertainRights: rightsVerdicts.filter((verdict) => !verdict.certain).map((verdict) => `${verdict.artifactId}:${verdict.reasonCode}`),
