@@ -1,5 +1,6 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { DomainError, assertDomain } from './errors.ts'
+import { normalizeLibraryLocale } from './media-library.ts'
 import type { ImageAnalysis } from './image-analysis.ts'
 
 export interface OcrRegion { text: string; language: string; box: readonly [number, number, number, number]; confidence: number }
@@ -40,6 +41,8 @@ export interface ImageReuseSearchQuery {
   text: string
   usage: ImageUsage
   limit?: number
+  /** The locale the rights of the images are judged under; none stated is the undetermined locale. */
+  locale?: string
 }
 
 export interface ReusableImageCandidateInput {
@@ -96,13 +99,14 @@ function normalizeSearchText(value: string): string {
   return normalized
 }
 
-export function normalizeImageReuseSearchQuery(query: ImageReuseSearchQuery): Readonly<Required<ImageReuseSearchQuery>> {
+export function normalizeImageReuseSearchQuery(query: ImageReuseSearchQuery): Readonly<Required<Omit<ImageReuseSearchQuery, 'locale'>> & Pick<ImageReuseSearchQuery, 'locale'>> {
   const workspaceId = query.workspaceId.trim()
   assertDomain(REUSE_ID.test(workspaceId), 'INVALID_ARGUMENT', 'Image search workspaceId is invalid')
   assertDomain(['b-roll', 'insert', 'card'].includes(query.usage), 'INVALID_ARGUMENT', 'Image search usage is invalid')
   const limit = query.limit ?? 12
   assertDomain(Number.isSafeInteger(limit) && limit >= 1 && limit <= 50, 'INVALID_ARGUMENT', 'Image search limit must be between 1 and 50')
-  return Object.freeze({ workspaceId, text: normalizeSearchText(query.text), usage: query.usage, limit })
+  const locale = normalizeLibraryLocale(query.locale)
+  return Object.freeze({ workspaceId, text: normalizeSearchText(query.text), usage: query.usage, limit, ...(locale ? { locale } : {}) })
 }
 
 function searchTerms(text: string): readonly string[] {

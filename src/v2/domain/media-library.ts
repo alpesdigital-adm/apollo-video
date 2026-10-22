@@ -51,8 +51,28 @@ export interface MediaLibraryItem {
   createdAt: string
 }
 
+/**
+ * The locale a library read judges the rights of its items under (BCP 47). A library read has no project of its own: the consumer states the locale it
+ * will use the item in, and a read that states none is judged under the undetermined locale (a rights snapshot that restricts its locales does not
+ * allow it). Nothing is assumed in its place.
+ */
+export function normalizeLibraryLocale(locale: string | undefined, field = 'locale'): string | undefined {
+  if (locale === undefined) return undefined
+  assertDomain(typeof locale === 'string' && locale.trim().length > 0 && locale.length <= 35, 'INVALID_ARGUMENT', `${field} is invalid`)
+  try {
+    const canonical = Intl.getCanonicalLocales(locale.trim())[0]
+    assertDomain(canonical !== undefined, 'INVALID_ARGUMENT', `${field} is invalid`)
+    return canonical
+  } catch (error) {
+    if (error instanceof DomainError) throw error
+    throw new DomainError('INVALID_ARGUMENT', `${field} is not a BCP 47 language tag`)
+  }
+}
+
 export interface MediaLibraryQuery {
   workspaceId: string
+  /** The locale the rights of the items are judged under (see `normalizeLibraryLocale`). */
+  locale?: string
   kind?: LibraryKind
   person?: string
   topic?: string
@@ -90,6 +110,7 @@ export function normalizeMediaLibraryQuery(query: MediaLibraryQuery): Readonly<R
     ...(query.kind ? { kind: query.kind } : {}),
     ...(query.rightsStatus ? { rightsStatus: query.rightsStatus } : {}),
     ...(after ? { after } : {}),
+    ...(normalizeLibraryLocale(query.locale) ? { locale: normalizeLibraryLocale(query.locale)! } : {}),
     ...(normalizedSearchTerm(query.person, 'person') ? { person: normalizedSearchTerm(query.person, 'person') } : {}),
     ...(normalizedSearchTerm(query.topic, 'topic') ? { topic: normalizedSearchTerm(query.topic, 'topic') } : {}),
   })

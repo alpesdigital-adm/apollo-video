@@ -26,7 +26,6 @@ import { createMediaUploadSessionSignerFromEnvironment } from '../src/v2/infrast
 const DEFAULTS = Object.freeze({
   objective: 'discovery',
   format: '9:16',
-  locale: 'pt-BR',
   sourceMime: 'video/mp4',
   waitSeconds: 900,
 })
@@ -49,7 +48,9 @@ export function outputVariantRequestFor({ aspectRatio, locale }) {
   if (!canvas) throw new Error(`--format ${aspectRatio} has no output canvas; use one of ${Object.keys(CANVAS).join(', ')}`)
   const body = structuredClone(publicSchemaExamples(getPublicSchema('apollo://schemas/create-project-output-variant-request/v1'))[0])
   const id = `profile-${aspectRatio.replace(':', 'x')}`
-  body.output = { ...body.output, locale, aspectRatio, width: canvas.width, height: canvas.height, deliveryProfileId: id }
+  // The language is the one the caller states: without --locale the project and its output state none (it is detected from the speech).
+  const { locale: _exampleLocale, ...outputWithoutLocale } = body.output
+  body.output = { ...outputWithoutLocale, ...(locale ? { locale } : {}), aspectRatio, width: canvas.width, height: canvas.height, deliveryProfileId: id }
   body.profile = { ...body.profile, id,
     final: { ...body.profile.final, width: canvas.width, height: canvas.height },
     proxy: { ...body.profile.proxy, width: canvas.proxyWidth, height: canvas.proxyHeight },
@@ -109,7 +110,7 @@ export function readSeedArguments(values) {
     waitSeconds,
     objective: parsed.get('objective')?.trim() || DEFAULTS.objective,
     format: parsed.get('format')?.trim() || DEFAULTS.format,
-    locale: parsed.get('locale')?.trim() || DEFAULTS.locale,
+    ...(parsed.get('locale')?.trim() ? { locale: parsed.get('locale').trim() } : {}),
     ...(parsed.get('briefing')?.trim() ? { briefing: parsed.get('briefing').trim() } : {}),
   })
 }
@@ -196,7 +197,7 @@ export async function seedV2ProjectSource({
     workspaceId: input.workspaceId,
     name: input.projectName,
     objective: input.objective,
-    locale: input.locale,
+    ...(input.locale ? { locale: input.locale } : {}),
     ...(input.briefing ? { briefing: input.briefing } : {}),
     actor,
     idempotencyKey: `seed-project:${input.seedId}`,

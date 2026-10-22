@@ -17,12 +17,13 @@ export async function GET(request: NextRequest) {
     const actor = await authenticateExternalRequest(request)
     requireScope(actor, 'artifacts:read')
     const params = request.nextUrl.searchParams
-    assertAllowlistedPublicQuery(params, new Set(['query', 'usage', 'limit']))
+    assertAllowlistedPublicQuery(params, new Set(['query', 'usage', 'limit', 'locale']))
     const result = await searchReusableImagesService({ repository: createImageAnalysisRepository() })({
       workspaceId: actor.workspaceId,
       text: params.get('query') ?? '',
       usage: params.get('usage') as ImageUsage,
       ...(params.has('limit') ? { limit: Number(params.get('limit')) } : {}),
+      ...(params.has('locale') ? { locale: params.get('locale') ?? '' } : {}),
     })
     return NextResponse.json(presentSuccess(result), { headers: publicApiHeaders(requestId) })
   } catch (error) {

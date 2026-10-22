@@ -2713,7 +2713,7 @@
     {
       "uiAction": "src/components/MediaLibraryWorkspace.tsx:114",
       "capabilityId": "apollo.media.library.read",
-      "capabilityVersion": "2.0.0",
+      "capabilityVersion": "2.1.0",
       "endpoint": "GET /v1/media/library/{artifactId}",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2793,7 +2793,7 @@
     {
       "uiAction": "src/components/MediaLibraryWorkspace.tsx:251",
       "capabilityId": "apollo.media.library.preview.read",
-      "capabilityVersion": "1.0.0",
+      "capabilityVersion": "1.1.0",
       "endpoint": "GET /v1/media/library/{artifactId}/previews/{kind}",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2813,7 +2813,7 @@
     {
       "uiAction": "src/components/MediaLibraryWorkspace.tsx:73",
       "capabilityId": "apollo.media.library.list",
-      "capabilityVersion": "2.0.0",
+      "capabilityVersion": "2.1.0",
       "endpoint": "GET /v1/media/library",
       "applicationServices": [
         "admitGovernedCapabilityService",

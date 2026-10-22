@@ -68,6 +68,7 @@ function queryFingerprint(query: MediaLibraryQuery): string {
     kind: query.kind ?? null,
     person: query.person ?? null,
     topic: query.topic ?? null,
+    ...(query.locale ? { locale: query.locale } : {}),
     rightsStatus: query.rightsStatus ?? null,
   })
 }
@@ -239,8 +240,8 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
         }) as Promise<SegmentWithArtifact[]>,
       ])
       const candidates = [
-        ...assetRows.map((row) => ({ entity: 'asset' as const, id: row.artifactId, createdAt: row.createdAt, item: mapItem(row, now, 'pt-BR') })),
-        ...segmentRows.map((row) => ({ entity: 'segment' as const, id: row.id, createdAt: row.createdAt, item: mapSegmentItem(row, now, 'pt-BR') })),
+        ...assetRows.map((row) => ({ entity: 'asset' as const, id: row.artifactId, createdAt: row.createdAt, item: mapItem(row, now, query.locale ?? UNDETERMINED_LOCALE) })),
+        ...segmentRows.map((row) => ({ entity: 'segment' as const, id: row.id, createdAt: row.createdAt, item: mapSegmentItem(row, now, query.locale ?? UNDETERMINED_LOCALE) })),
       ].sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || cursorKey(right.entity, right.id).localeCompare(cursorKey(left.entity, left.id))).slice(0, 100)
       if (candidates.length === 0) break
       for (const candidate of candidates) {
@@ -258,7 +259,7 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
     })
   }
 
-  async findById(workspaceId: string, itemId: string, now: Date, locale = 'pt-BR') {
+  async findById(workspaceId: string, itemId: string, now: Date, locale: string = UNDETERMINED_LOCALE) {
     const [row, segment] = await Promise.all([
       this.client.v2MediaLibraryEntry.findFirst({ where: { workspaceId, artifactId: itemId, artifact: { automaticCatalogRecords: { none: { outputKind: 'deepfake-raw' } } } }, include }) as Promise<EntryWithArtifact | null>,
       this.client.v2MediaSegment.findFirst({ where: { workspaceId, id: itemId, artifact: { libraryEntry: { isNot: null } } }, include: segmentInclude }) as Promise<SegmentWithArtifact | null>,

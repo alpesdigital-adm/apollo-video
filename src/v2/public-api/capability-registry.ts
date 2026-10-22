@@ -1295,7 +1295,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     toolName: 'apollo.media.images.analysis.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
   },
   {
-    id: 'apollo.media.images.search', version: '1.0.0', title: 'Search reusable images by editorial purpose',
+    id: 'apollo.media.images.search', version: '1.1.0', title: 'Search reusable images by editorial purpose',
     description: 'Ranks rights-cleared immutable image artifacts for b-roll, insert or card use while preserving analysis and rights evidence.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['artifacts:read'],
     outputSchemaRef: 'apollo://schemas/image-reuse-search-result/v1', endpoint: { method: 'GET', path: '/v1/media/images/search' },
@@ -1304,6 +1304,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
       { name: 'query', required: true, description: 'Observed or inferred image terms.', schema: { type: 'string', minLength: 2, maxLength: 240 } },
       { name: 'usage', required: true, description: 'Editorial purpose preserved by ranking.', schema: { type: 'string', enum: ['b-roll', 'insert', 'card'] } },
       { name: 'limit', required: false, description: 'Maximum ranked candidates.', schema: { type: 'integer', minimum: 1, maximum: 50 } },
+      { name: 'locale', required: false, description: 'BCP 47 locale the rights are judged under; none stated is the undetermined locale, which a rights snapshot that restricts its locales does not allow.', schema: { type: 'string', minLength: 2, maxLength: 35 } },
     ],
   },
   {
@@ -1369,7 +1370,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.media.library.list',
-    version: '2.0.0',
+    version: '2.1.0',
     title: 'List workspace media library',
     description: 'Lists immutable V2 media artifacts and virtual MediaSegments in one cursor order, inheriting parent previews and rights without copying bytes.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['artifacts:read'],
@@ -1383,6 +1384,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
       { name: 'person', required: false, description: 'Exact normalized person filter.', schema: { type: 'string', minLength: 1, maxLength: 120 } },
       { name: 'topic', required: false, description: 'Case-insensitive topic filter.', schema: { type: 'string', minLength: 1, maxLength: 120 } },
       { name: 'rightsStatus', required: false, description: 'Current editorial reuse eligibility filter.', schema: { type: 'string', enum: ['eligible', 'review', 'restricted', 'expired'] } },
+      { name: 'locale', required: false, description: 'BCP 47 locale the rights are judged under; none stated is the undetermined locale, which a rights snapshot that restricts its locales does not allow.', schema: { type: 'string', minLength: 2, maxLength: 35 } },
     ],
   },
   {
@@ -1415,11 +1417,12 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'natural',
   },
   {
-    id: 'apollo.media.library.read', version: '2.0.0', title: 'Read media library item',
+    id: 'apollo.media.library.read', version: '2.1.0', title: 'Read media library item',
     description: 'Reads one canonical artifact or virtual MediaSegment with parent previews, technical state and current rights eligibility without copying bytes.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['artifacts:read'],
     outputSchemaRef: 'apollo://schemas/media-library-item/v2', endpoint: { method: 'GET', path: '/v1/media/library/{artifactId}' },
     toolName: 'apollo.media.library.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+    queryParameters: [{ name: 'locale', required: false, description: 'BCP 47 locale the rights are judged under; none stated is the undetermined locale, which a rights snapshot that restricts its locales does not allow.', schema: { type: 'string', minLength: 2, maxLength: 35 } }],
   },
   {
     id: 'apollo.projects.media-library.attach', version: '2.0.0', title: 'Attach media library item to project',
@@ -1528,17 +1531,18 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     requestBodyRequired: true,
   },
   {
-    id: 'apollo.media.library.preview.read', version: '1.0.0', title: 'Read authorized library preview',
+    id: 'apollo.media.library.preview.read', version: '1.1.0', title: 'Read authorized library preview',
     description: 'Streams immutable thumbnail or waveform bytes only after checking current source rights, workspace and manifest lineage.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['artifacts:read'],
     outputSchemaRef: 'apollo://schemas/binary-media-content/v1',
     endpoint: { method: 'GET', path: '/v1/media/library/{artifactId}/previews/{kind}' },
     toolName: 'apollo.media.library.preview.read', supportsDryRun: false, costClass: 'free', confirmation: 'none',
     successStatuses: [200], idempotency: 'not-applicable', responseMediaType: 'application/octet-stream',
+    queryParameters: [{ name: 'locale', required: false, description: 'BCP 47 locale the rights are judged under; none stated is the undetermined locale, which a rights snapshot that restricts its locales does not allow.', schema: { type: 'string', minLength: 2, maxLength: 35 } }],
   },
   {
     id: 'apollo.artifacts.content.read',
-    version: '1.0.0',
+    version: '1.1.0',
     title: 'Stream media artifact content',
     description: 'Streams authenticated workspace media with HTTP byte-range support for preview and external processing.',
     exposure: 'public',
@@ -1554,6 +1558,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     successStatuses: [200, 206],
     idempotency: 'not-applicable',
     responseMediaType: 'application/octet-stream',
+    queryParameters: [{ name: 'locale', required: false, description: 'BCP 47 locale the rights are judged under; none stated is the undetermined locale, which a rights snapshot that restricts its locales does not allow.', schema: { type: 'string', minLength: 2, maxLength: 35 } }],
   },
   {
     id: 'apollo.artifacts.color-probe.read',

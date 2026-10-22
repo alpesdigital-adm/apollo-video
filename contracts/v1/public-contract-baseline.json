@@ -124,7 +124,7 @@
       "responseMediaType": "application/json"
     },
     "apollo.artifacts.content.read": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
@@ -145,6 +145,18 @@
         206
       ],
       "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "locale",
+          "required": false,
+          "description": "BCP 47 locale the rights are judged under; none stated is the undetermined locale, which a rights snapshot that restricts its locales does not allow.",
+          "schema": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 35
+          }
+        }
+      ],
       "responseMediaType": "application/octet-stream"
     },
     "apollo.artifacts.download-grants.issue": {
@@ -2341,7 +2353,7 @@
       "responseMediaType": "application/json"
     },
     "apollo.media.images.search": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
@@ -2394,12 +2406,22 @@
             "minimum": 1,
             "maximum": 50
           }
+        },
+        {
+          "name": "locale",
+          "required": false,
+          "description": "BCP 47 locale the rights are judged under; none stated is the undetermined locale, which a rights snapshot that restricts its locales does not allow.",
+          "schema": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 35
+          }
         }
       ],
       "responseMediaType": "application/json"
     },
     "apollo.media.library.list": {
-      "version": "2.0.0",
+      "version": "2.1.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
@@ -2487,12 +2509,22 @@
               "expired"
             ]
           }
+        },
+        {
+          "name": "locale",
+          "required": false,
+          "description": "BCP 47 locale the rights are judged under; none stated is the undetermined locale, which a rights snapshot that restricts its locales does not allow.",
+          "schema": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 35
+          }
         }
       ],
       "responseMediaType": "application/json"
     },
     "apollo.media.library.preview.read": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
@@ -2512,10 +2544,22 @@
         200
       ],
       "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "locale",
+          "required": false,
+          "description": "BCP 47 locale the rights are judged under; none stated is the undetermined locale, which a rights snapshot that restricts its locales does not allow.",
+          "schema": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 35
+          }
+        }
+      ],
       "responseMediaType": "application/octet-stream"
     },
     "apollo.media.library.read": {
-      "version": "2.0.0",
+      "version": "2.1.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
@@ -2535,6 +2579,18 @@
         200
       ],
       "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "locale",
+          "required": false,
+          "description": "BCP 47 locale the rights are judged under; none stated is the undetermined locale, which a rights snapshot that restricts its locales does not allow.",
+          "schema": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 35
+          }
+        }
+      ],
       "responseMediaType": "application/json"
     },
     "apollo.media.segments.create": {
