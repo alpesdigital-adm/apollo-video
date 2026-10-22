@@ -1012,6 +1012,22 @@ cada vídeo. A semântica mudou com o crítico `apollo-director-critic/v3`; um r
 `v1`/`v2` nunca verificou o pedido do projeto e, por isso, não é admitido para exportação final
 (`admitDirectorQualityForFinal`): o Diretor roda de novo. O formato `director-quality-report/v4`
 e a política `confidence-band-policy/v2` não mudam.
+
+ADR-160 (pedido editorial). O Diretor `apollo-director-policy/v3` planeja a partir da resolução de
+políticas do pedido editorial do vídeo (`editorial-request/v1` → `editorial-policy-resolution/v1`) e o crítico
+`apollo-director-critic/v4` escreve `director-quality-report/v5`, lido pela capability
+`apollo.projects.director-runs.quality.read` 3.0.0 (schema `director-quality-report-read/v4`; os
+schemas `/v1`–`/v3` não mudam). No v5, `hardChecks` é uma lista
+`{ id, kind: request | invariant, passed, policyRef, evidence }` amarrada às políticas da resolução selada
+(`policyRef` = `policy:<chave>:<16 hex da resolução>`; `null` quando o check não é sobre uma política), e o
+relatório nomeia o pedido (`requestHash`) e a resolução (`policyResolutionHash`) contra os quais foi julgado.
+Relatórios v3 e v4 continuam legíveis (seus `hardChecks` fixos não mudam) e **nunca** são admitidos para
+exportação final. A admissão exige: relatório v5, crítico v4 ou posterior, todas as checks aprovadas,
+`requestHash` igual ao do Brief Snapshot da Versão exportada (recalculado na leitura) e
+`policyResolutionHash` igual ao do snapshot (`kind=policy-resolution`) que o DirectorRun selou
+(`V2DirectorRun.policySnapshotId`, `requestHash`; ambos nulos em runs anteriores, que não são admitidos).
+Um pedido com algo que o Apollo não executa, ou com pergunta aberta, interrompe o Diretor com
+`PRECONDITION_REQUIRED` antes de qualquer plano ser persistido: nada é ignorado em silêncio.
 As capabilities `apollo.projects.perception.read` e `.put` passam a 2.0.0,
 com respostas `perception-range-response/v2` e
 `perception-timeline-put-response/v2`. O `PUT` recebe somente observações

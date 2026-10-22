@@ -15469,6 +15469,29 @@ const directorQualityReadExamplesV3: readonly ExampleNode[] = (() => {
   }
   return Object.freeze([legacy!, current])
 })()
+// ADR-160: the same report read as the version that also carries `director-quality-report/v5` - the v3/v4 examples unchanged, and a v5 report
+// whose hard checks are the list tied to the sealed policy resolution.
+const directorQualityReadExamplesV4: readonly ExampleNode[] = (() => {
+  const [legacy, evidence] = structuredClone([...directorQualityReadExamplesV3]) as ExampleNode[]
+  const current = structuredClone(evidence!) as ExampleNode
+  const qualityReport = exampleNode(current, 'data', 'qualityReport')
+  exampleNode(qualityReport, 'qualitySnapshot').contentSchemaVersion = 5
+  const report = exampleNode(qualityReport, 'report')
+  report.schemaVersion = 'director-quality-report/v5'
+  report.requestHash = 'a'.repeat(64)
+  report.policyResolutionHash = 'b'.repeat(64)
+  report.criticVersion = 'apollo-director-critic/v4'
+  const ref = (key: string) => `policy:${key}:${'b'.repeat(16)}`
+  report.hardChecks = [
+    { id: 'requestHonored', kind: 'request', passed: true, policyRef: null, evidence: [`resolution:${'b'.repeat(64)}`, 'unsupported=0', 'open-questions=0'] },
+    { id: 'movementMatchesPolicy', kind: 'request', passed: true, policyRef: ref('movement'), evidence: ['policy-mode=none', 'effect-tracks=0', 'automatic-zoom=false'] },
+    { id: 'forbiddenSpeechAbsent', kind: 'request', passed: true, policyRef: ref('speechRemovals'), evidence: ['removal-rules=0', 'matches-in-captions=0'] },
+    { id: 'captionsBounded', kind: 'invariant', passed: true, policyRef: ref('captions'), evidence: ['cues=28', 'longest-cue-characters=30', 'policy-max-characters=32'] },
+    { id: 'timelineContinuous', kind: 'invariant', passed: true, policyRef: null, evidence: ['clips=3', 'duration-frames=2380'] },
+    { id: 'sourceRightsCertain', kind: 'invariant', passed: true, policyRef: null, evidence: ['rights-all-sources:certain=1/1'] },
+  ]
+  return Object.freeze([legacy!, evidence!, current])
+})()
 const MULTI_OUTPUT_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> = (() => {
   const annotationRequests = clonedExamples('apollo://schemas/create-review-annotation-request/v2')
   const reviews = clonedExamples('apollo://schemas/project-review/v3')
@@ -15502,6 +15525,7 @@ const MULTI_OUTPUT_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>>
     // W64: the version whose uncertainty `type` also names crop, caption and insert; same examples, one more accepted value.
     'apollo://schemas/project-workspace/v15': structuredClone(workspaces),
     'apollo://schemas/director-quality-report-read/v3': directorQualityReadExamplesV3,
+    'apollo://schemas/director-quality-report-read/v4': directorQualityReadExamplesV4,
   })
 })()
 

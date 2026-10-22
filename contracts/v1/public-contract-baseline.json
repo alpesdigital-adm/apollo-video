@@ -5168,14 +5168,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.director-runs.quality.read": {
-      "version": "2.1.0",
+      "version": "3.0.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "projects:read"
       ],
-      "outputSchemaRef": "apollo://schemas/director-quality-report-read/v3",
+      "outputSchemaRef": "apollo://schemas/director-quality-report-read/v4",
       "endpoint": {
         "method": "GET",
         "path": "/v1/projects/{projectId}/director-runs/{directorRunId}/quality-report"
@@ -53504,6 +53504,1180 @@
                           "properties": {
                             "perceptionEvidence": {}
                           }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/director-quality-report-read/v4": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "qualityReport"
+          ],
+          "properties": {
+            "qualityReport": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "directorRunId",
+                "projectId",
+                "objective",
+                "objectiveVersion",
+                "rubricRef",
+                "qualitySnapshot",
+                "report"
+              ],
+              "properties": {
+                "directorRunId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "objective": {
+                  "enum": [
+                    "discovery",
+                    "awareness",
+                    "warming",
+                    "lead-generation",
+                    "sale",
+                    "whatsapp",
+                    "booking",
+                    "download"
+                  ]
+                },
+                "objectiveVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "rubricRef": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9-]+/v[1-9][0-9]*$"
+                },
+                "qualitySnapshot": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "contentSchemaVersion",
+                    "contentHash"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "contentSchemaVersion": {
+                      "enum": [
+                        3,
+                        4,
+                        5
+                      ]
+                    },
+                    "contentHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "report": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "status",
+                    "faceSafety",
+                    "score",
+                    "strategic",
+                    "hardChecks",
+                    "issues",
+                    "criticVersion",
+                    "evaluatedAt"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "enum": [
+                        "director-quality-report/v3",
+                        "director-quality-report/v4",
+                        "director-quality-report/v5"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "status": {
+                      "enum": [
+                        "approved",
+                        "approved-with-warnings",
+                        "review-required",
+                        "blocked"
+                      ]
+                    },
+                    "faceSafety": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status",
+                        "reasonCode",
+                        "evidenceRefs"
+                      ],
+                      "properties": {
+                        "status": {
+                          "enum": [
+                            "unknown",
+                            "verified"
+                          ]
+                        },
+                        "reasonCode": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "evidenceRefs": {
+                          "type": "array",
+                          "maxItems": 128,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
+                      }
+                    },
+                    "score": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "strategic": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "rubric",
+                        "score",
+                        "passed",
+                        "gateResults",
+                        "gateFailures",
+                        "evidence",
+                        "evaluatedAt"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "const": "strategic-quality-report/v1"
+                        },
+                        "rubric": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "version",
+                            "objective",
+                            "purpose",
+                            "threshold",
+                            "requiredGates"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "version": {
+                              "const": 1
+                            },
+                            "objective": {
+                              "enum": [
+                                "discovery",
+                                "awareness",
+                                "warming",
+                                "lead-generation",
+                                "sale",
+                                "whatsapp",
+                                "booking",
+                                "download"
+                              ]
+                            },
+                            "purpose": {
+                              "const": "editorial-quality-proxy"
+                            },
+                            "threshold": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 100
+                            },
+                            "requiredGates": {
+                              "type": "array",
+                              "minItems": 3,
+                              "maxItems": 4,
+                              "uniqueItems": true,
+                              "items": {
+                                "enum": [
+                                  "narrative-integrity",
+                                  "legibility",
+                                  "rights-compliance",
+                                  "cta-required"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "score": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 100
+                        },
+                        "passed": {
+                          "type": "boolean"
+                        },
+                        "gateResults": {
+                          "type": "array",
+                          "minItems": 3,
+                          "maxItems": 4,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "passed",
+                              "evidence"
+                            ],
+                            "properties": {
+                              "id": {
+                                "enum": [
+                                  "narrative-integrity",
+                                  "legibility",
+                                  "rights-compliance",
+                                  "cta-required"
+                                ]
+                              },
+                              "passed": {
+                                "type": "boolean"
+                              },
+                              "evidence": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 20,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "gateFailures": {
+                          "type": "array",
+                          "maxItems": 4,
+                          "uniqueItems": true,
+                          "items": {
+                            "enum": [
+                              "narrative-integrity",
+                              "legibility",
+                              "rights-compliance",
+                              "cta-required"
+                            ]
+                          }
+                        },
+                        "evidence": {
+                          "type": "array",
+                          "minItems": 5,
+                          "maxItems": 10,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "criterionId",
+                              "score",
+                              "weight",
+                              "evidence"
+                            ],
+                            "properties": {
+                              "criterionId": {
+                                "enum": [
+                                  "hook-clarity",
+                                  "problem-recognition",
+                                  "trust-building",
+                                  "offer-clarity",
+                                  "proof-strength",
+                                  "cta-clarity",
+                                  "friction-reduction",
+                                  "narrative-integrity",
+                                  "legibility",
+                                  "rights-compliance"
+                                ]
+                              },
+                              "score": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "weight": {
+                                "type": "number",
+                                "exclusiveMinimum": 0,
+                                "maximum": 1
+                              },
+                              "evidence": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 20,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "evaluatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "hardChecks": {},
+                    "issues": {
+                      "type": "array",
+                      "maxItems": 500,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "code",
+                          "severity",
+                          "category",
+                          "message",
+                          "correctable"
+                        ],
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "severity": {
+                            "enum": [
+                              "hard",
+                              "warning"
+                            ]
+                          },
+                          "category": {
+                            "enum": [
+                              "technical",
+                              "policy",
+                              "integrity",
+                              "editorial"
+                            ]
+                          },
+                          "message": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000
+                          },
+                          "rangeMs": {
+                            "type": "array",
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "items": {
+                              "type": "number",
+                              "minimum": 0
+                            }
+                          },
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "correctable": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "criticVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "evaluatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "desiredActionRef": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "The canonical desired action every consumer of the run shares."
+                    },
+                    "perceptionEvidence": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "snapshot",
+                        "policy",
+                        "coverage",
+                        "modalities",
+                        "rights",
+                        "faceWindows",
+                        "decisions",
+                        "evidenceHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "const": "director-perception-evidence/v1"
+                        },
+                        "snapshot": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "snapshotHash",
+                            "projectVersionId",
+                            "timelineHash",
+                            "durationMs"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "snapshotHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "projectVersionId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "timelineHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "durationMs": {
+                              "type": "integer",
+                              "minimum": 1
+                            }
+                          }
+                        },
+                        "policy": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "bandPolicy",
+                            "rubric"
+                          ],
+                          "properties": {
+                            "bandPolicy": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "schemaVersion",
+                                "policyHash"
+                              ],
+                              "properties": {
+                                "schemaVersion": {
+                                  "const": "confidence-band-policy/v2"
+                                },
+                                "policyHash": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                }
+                              }
+                            },
+                            "rubric": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "schemaVersion",
+                                "rubricHash"
+                              ],
+                              "properties": {
+                                "schemaVersion": {
+                                  "const": "director-evidence-rubric/v1"
+                                },
+                                "rubricHash": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "coverage": {
+                          "type": "array",
+                          "minItems": 9,
+                          "maxItems": 9,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "kind",
+                              "state",
+                              "examinedMs",
+                              "durationMs",
+                              "reasonCode"
+                            ],
+                            "properties": {
+                              "kind": {
+                                "enum": [
+                                  "transcript-word",
+                                  "speaker",
+                                  "silence",
+                                  "face",
+                                  "object",
+                                  "shot",
+                                  "motion",
+                                  "ocr",
+                                  "image-insert"
+                                ]
+                              },
+                              "state": {
+                                "enum": [
+                                  "absent",
+                                  "partial",
+                                  "complete"
+                                ]
+                              },
+                              "examinedMs": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "durationMs": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "reasonCode": {
+                                "anyOf": [
+                                  {
+                                    "type": "null"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "pattern": "^[A-Z][A-Z0-9_]{2,63}$"
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "modalities": {
+                          "type": "array",
+                          "minItems": 9,
+                          "maxItems": 9,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "modality",
+                              "tier",
+                              "reasonCode",
+                              "rangeMs",
+                              "examinedMs",
+                              "denseMs",
+                              "pendingMs",
+                              "confidence",
+                              "confidenceBasis",
+                              "ceilingApplied",
+                              "envelopeIds",
+                              "envelopeCount",
+                              "observationIds",
+                              "observationCount",
+                              "observationIdsHash"
+                            ],
+                            "properties": {
+                              "modality": {
+                                "enum": [
+                                  "transcript-word",
+                                  "speaker",
+                                  "silence",
+                                  "face",
+                                  "object",
+                                  "shot",
+                                  "motion",
+                                  "ocr",
+                                  "image-insert",
+                                  "rights"
+                                ]
+                              },
+                              "tier": {
+                                "enum": [
+                                  "high",
+                                  "partial",
+                                  "absent"
+                                ]
+                              },
+                              "reasonCode": {
+                                "type": "string",
+                                "pattern": "^[A-Z][A-Z0-9_]{2,63}$"
+                              },
+                              "rangeMs": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "examinedMs": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "denseMs": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "pendingMs": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "confidence": {
+                                "anyOf": [
+                                  {
+                                    "type": "null"
+                                  },
+                                  {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  }
+                                ]
+                              },
+                              "confidenceBasis": {
+                                "enum": [
+                                  "producer-reported",
+                                  "deterministic-measurement",
+                                  "policy-prior",
+                                  "none"
+                                ]
+                              },
+                              "ceilingApplied": {
+                                "type": "boolean"
+                              },
+                              "envelopeIds": {
+                                "type": "array",
+                                "maxItems": 64,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                }
+                              },
+                              "envelopeCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "observationIds": {
+                                "type": "array",
+                                "maxItems": 64,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                }
+                              },
+                              "observationCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "observationIdsHash": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              }
+                            }
+                          }
+                        },
+                        "rights": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "certain",
+                            "sources"
+                          ],
+                          "properties": {
+                            "certain": {
+                              "type": "boolean"
+                            },
+                            "sources": {
+                              "type": "array",
+                              "maxItems": 64,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "artifactId",
+                                  "certain",
+                                  "reasonCode",
+                                  "snapshotId",
+                                  "snapshotHash"
+                                ],
+                                "properties": {
+                                  "artifactId": {
+                                    "type": "string",
+                                    "minLength": 3,
+                                    "maxLength": 128
+                                  },
+                                  "certain": {
+                                    "type": "boolean"
+                                  },
+                                  "reasonCode": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z][A-Z0-9_]{2,63}$"
+                                  },
+                                  "snapshotId": {
+                                    "anyOf": [
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 128
+                                      }
+                                    ]
+                                  },
+                                  "snapshotHash": {
+                                    "anyOf": [
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "faceWindows": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "status",
+                            "reasonCode",
+                            "requiredCount",
+                            "satisfiedCount",
+                            "requestedCount",
+                            "refusedCount",
+                            "deferredCount",
+                            "requestLimit",
+                            "entries",
+                            "entriesTruncated"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": "director-face-window-requests/v1"
+                            },
+                            "status": {
+                              "enum": [
+                                "planned",
+                                "not-configured",
+                                "timeline-unsupported"
+                              ]
+                            },
+                            "reasonCode": {
+                              "anyOf": [
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "string",
+                                  "pattern": "^[A-Z][A-Z0-9_]{2,63}$"
+                                }
+                              ]
+                            },
+                            "requiredCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "satisfiedCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "requestedCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "refusedCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "deferredCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "requestLimit": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "entriesTruncated": {
+                              "type": "boolean"
+                            },
+                            "entries": {
+                              "type": "array",
+                              "maxItems": 300,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "sourceArtifactId",
+                                  "startSourceFrame",
+                                  "endSourceFrame",
+                                  "state",
+                                  "operationId",
+                                  "idempotencyKey",
+                                  "replayed",
+                                  "reasonCode"
+                                ],
+                                "properties": {
+                                  "sourceArtifactId": {
+                                    "type": "string",
+                                    "minLength": 3,
+                                    "maxLength": 128
+                                  },
+                                  "startSourceFrame": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "endSourceFrame": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                  },
+                                  "state": {
+                                    "enum": [
+                                      "satisfied",
+                                      "requested",
+                                      "refused",
+                                      "deferred"
+                                    ]
+                                  },
+                                  "operationId": {
+                                    "anyOf": [
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 128
+                                      }
+                                    ]
+                                  },
+                                  "idempotencyKey": {
+                                    "anyOf": [
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 128
+                                      }
+                                    ]
+                                  },
+                                  "replayed": {
+                                    "anyOf": [
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      }
+                                    ]
+                                  },
+                                  "reasonCode": {
+                                    "anyOf": [
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "pattern": "^[A-Z][A-Z0-9_]{2,63}$"
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "decisions": {
+                          "type": "array",
+                          "maxItems": 64,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "decisionId",
+                              "decisionType",
+                              "tier",
+                              "band",
+                              "confidence",
+                              "evidenceHash",
+                              "reasonCodes"
+                            ],
+                            "properties": {
+                              "decisionId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "decisionType": {
+                                "enum": [
+                                  "crop",
+                                  "caption",
+                                  "insert"
+                                ]
+                              },
+                              "tier": {
+                                "enum": [
+                                  "high",
+                                  "partial",
+                                  "absent"
+                                ]
+                              },
+                              "band": {
+                                "enum": [
+                                  "auto-apply",
+                                  "review",
+                                  "block"
+                                ]
+                              },
+                              "confidence": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "evidenceHash": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "reasonCodes": {
+                                "type": "array",
+                                "maxItems": 16,
+                                "items": {
+                                  "type": "string",
+                                  "pattern": "^[A-Z][A-Z0-9_]{2,63}$"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "evidenceHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    "requestHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "policyResolutionHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "allOf": [
+                    {
+                      "if": {
+                        "type": "object",
+                        "properties": {
+                          "schemaVersion": {
+                            "const": "director-quality-report/v5"
+                          }
+                        },
+                        "required": [
+                          "schemaVersion"
+                        ]
+                      },
+                      "then": {
+                        "required": [
+                          "perceptionEvidence",
+                          "requestHash",
+                          "policyResolutionHash"
+                        ],
+                        "properties": {
+                          "hardChecks": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 32,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "kind",
+                                "passed",
+                                "policyRef",
+                                "evidence"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z][A-Za-z0-9]{2,63}$"
+                                },
+                                "kind": {
+                                  "enum": [
+                                    "request",
+                                    "invariant"
+                                  ]
+                                },
+                                "passed": {
+                                  "type": "boolean"
+                                },
+                                "policyRef": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^policy:[A-Za-z]+:[a-f0-9]{16}$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "evidence": {
+                                  "type": "array",
+                                  "minItems": 1,
+                                  "maxItems": 16,
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "perceptionEvidence": {},
+                          "requestHash": {},
+                          "policyResolutionHash": {}
+                        }
+                      },
+                      "else": {
+                        "properties": {
+                          "hardChecks": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "openingMotionProtected",
+                              "automaticZoomDisabled",
+                              "subtitlesFaceSafe",
+                              "subtitlesBounded",
+                              "forbiddenSpeechAbsent",
+                              "timelineContinuous"
+                            ],
+                            "properties": {
+                              "openingMotionProtected": {
+                                "type": "boolean"
+                              },
+                              "automaticZoomDisabled": {
+                                "type": "boolean"
+                              },
+                              "subtitlesFaceSafe": {
+                                "type": "boolean"
+                              },
+                              "subtitlesBounded": {
+                                "type": "boolean"
+                              },
+                              "forbiddenSpeechAbsent": {
+                                "type": "boolean"
+                              },
+                              "timelineContinuous": {
+                                "type": "boolean"
+                              }
+                            }
+                          }
+                        },
+                        "not": {
+                          "anyOf": [
+                            {
+                              "required": [
+                                "requestHash"
+                              ],
+                              "properties": {
+                                "requestHash": {}
+                              }
+                            },
+                            {
+                              "required": [
+                                "policyResolutionHash"
+                              ],
+                              "properties": {
+                                "policyResolutionHash": {}
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "if": {
+                        "type": "object",
+                        "properties": {
+                          "schemaVersion": {
+                            "const": "director-quality-report/v3"
+                          }
+                        },
+                        "required": [
+                          "schemaVersion"
+                        ]
+                      },
+                      "then": {
+                        "not": {
+                          "required": [
+                            "perceptionEvidence"
+                          ],
+                          "properties": {
+                            "perceptionEvidence": {}
+                          }
+                        }
+                      },
+                      "else": {
+                        "required": [
+                          "perceptionEvidence"
+                        ],
+                        "properties": {
+                          "perceptionEvidence": {}
                         }
                       }
                     }

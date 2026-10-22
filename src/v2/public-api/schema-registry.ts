@@ -869,6 +869,58 @@ const directorQualityReportReadSchemaV3 = {
     },
   },
 } as const
+// ADR-160. `director-quality-report/v5`: the report of a plan made from a sealed editorial request. Its hard checks are a list tied to the
+// policies of the sealed resolution (`policyRef`), and it names the request (`requestHash`) and the resolution (`policyResolutionHash`) it
+// was judged against. v3 and v4 stay readable (their fixed-name hard checks are unchanged) and are never admitted to a final export.
+const directorHardCheckListSchema = {
+  type: 'array', minItems: 1, maxItems: 32,
+  items: {
+    type: 'object', additionalProperties: false, required: ['id', 'kind', 'passed', 'policyRef', 'evidence'],
+    properties: {
+      id: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9]{2,63}$' },
+      kind: { enum: ['request', 'invariant'] },
+      passed: { type: 'boolean' },
+      policyRef: { anyOf: [{ type: 'string', pattern: '^policy:[A-Za-z]+:[a-f0-9]{16}$' }, { type: 'null' }] },
+      evidence: { type: 'array', minItems: 1, maxItems: 16, items: { type: 'string', minLength: 1, maxLength: 500 } },
+    },
+  },
+} as const
+const directorQualityReportReadSchemaV4 = {
+  ...directorQualityReportReadSchemaV3,
+  properties: {
+    ...directorQualityReportReadSchemaV3.properties,
+    qualitySnapshot: {
+      ...directorQualityReportReadSchema.properties.qualitySnapshot,
+      properties: { ...directorQualityReportReadSchema.properties.qualitySnapshot.properties, contentSchemaVersion: { enum: [3, 4, 5] } },
+    },
+    report: {
+      ...directorQualityReportReadSchema.properties.report,
+      properties: {
+        ...directorQualityReportReadSchemaV3.properties.report.properties,
+        schemaVersion: { enum: ['director-quality-report/v3', 'director-quality-report/v4', 'director-quality-report/v5'] },
+        // The shape of the hard checks depends on the report version: the object of v3/v4, the list of v5 (see allOf).
+        hardChecks: {},
+        requestHash: sha256Schema,
+        policyResolutionHash: sha256Schema,
+      },
+      allOf: [
+        {
+          if: { type: 'object', properties: { schemaVersion: { const: 'director-quality-report/v5' } }, required: ['schemaVersion'] },
+          then: { required: ['perceptionEvidence', 'requestHash', 'policyResolutionHash'], properties: { hardChecks: directorHardCheckListSchema, perceptionEvidence: {}, requestHash: {}, policyResolutionHash: {} } },
+          else: {
+            properties: { hardChecks: directorQualityReportReadSchema.properties.report.properties.hardChecks },
+            not: { anyOf: [{ required: ['requestHash'], properties: { requestHash: {} } }, { required: ['policyResolutionHash'], properties: { policyResolutionHash: {} } }] },
+          },
+        },
+        {
+          if: { type: 'object', properties: { schemaVersion: { const: 'director-quality-report/v3' } }, required: ['schemaVersion'] },
+          then: { not: { required: ['perceptionEvidence'], properties: { perceptionEvidence: {} } } },
+          else: { required: ['perceptionEvidence'], properties: { perceptionEvidence: {} } },
+        },
+      ],
+    },
+  },
+} as const
 const workspaceLutSchema = {
   type: 'object', additionalProperties: false, required: ['id', 'workspaceId', 'status', 'currentVersion'],
   properties: {
@@ -25829,6 +25881,12 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
     successSchema({
       type: 'object', additionalProperties: false, required: ['qualityReport'],
       properties: { qualityReport: directorQualityReportReadSchemaV3 },
+    }),
+  ),
+  defineSchema('director-quality-report-read', 4, 'Read Director quality bound to the editorial request and the sealed policy resolution it was judged against',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['qualityReport'],
+      properties: { qualityReport: directorQualityReportReadSchemaV4 },
     }),
   ),
   defineSchema('create-director-budget-request', 1, 'Create versioned limits for one Director run before paid work', {
