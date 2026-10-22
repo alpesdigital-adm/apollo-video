@@ -59,7 +59,7 @@ function directorQualityReport({ suffix, evaluatedAt }) {
     hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true, subtitlesFaceSafe: false, subtitlesBounded: true, forbiddenSpeechAbsent: true, timelineContinuous: true },
     issues: [{ code: WARNING_CODE, severity: 'warning', category: 'editorial',
       message: 'Face detector evidence is unavailable. Caption placement requires review before approval or final export.', correctable: true }],
-    criticVersion: 'project-director-critic/v2', evaluatedAt,
+    criticVersion: 'apollo-director-critic/v3', evaluatedAt,
   }
 }
 

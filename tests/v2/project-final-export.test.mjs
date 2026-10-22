@@ -45,7 +45,7 @@ test('final export rejects unknown, legacy and hash-altered face-safety claims',
   const quality = {
     schemaVersion: 'director-quality-report/v3', id: 'quality-controlled',
     desiredActionRef: { id: 'action-controlled' }, status: 'review-required', score: 1,
-    strategic, issues: [], criticVersion: 'project-director-critic/v2', evaluatedAt,
+    strategic, issues: [], criticVersion: 'apollo-director-critic/v3', evaluatedAt,
     faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
     hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true,
       subtitlesFaceSafe: false, subtitlesBounded: true, forbiddenSpeechAbsent: true,
@@ -1509,7 +1509,7 @@ function directorReport({ rights = true, ...overrides } = {}) {
     gates: { narrativeIntegrity: true, legibility: true, rights }, evaluatedAt })
   return { rubric, report: {
     schemaVersion: 'director-quality-report/v3', id: 'quality-controlled', desiredActionRef: { id: 'action-controlled' },
-    status: rights ? 'review-required' : 'blocked', score: strategic.score / 100, strategic, issues: [], criticVersion: 'project-director-critic/v2', evaluatedAt,
+    status: rights ? 'review-required' : 'blocked', score: strategic.score / 100, strategic, issues: [], criticVersion: 'apollo-director-critic/v3', evaluatedAt,
     faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
     hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true, subtitlesFaceSafe: false, subtitlesBounded: true,
       forbiddenSpeechAbsent: true, timelineContinuous: true },

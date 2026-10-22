@@ -85,9 +85,13 @@ const refuse = (reason: string): FinalQualityAdmission => Object.freeze({ admitt
  * The oldest Director critic whose hard checks mean what they mean today. `apollo-director-critic/v3` made `forbiddenSpeechAbsent` the
  * project's own request (the phrases its remove-spoken-content Commands asked to cut) instead of a fixed list: a report born under an
  * earlier Apollo critic never checked what its project asked, so its approval is not inherited - the Director runs again.
+ *
+ * The admission is an ALLOW-LIST: only a report that names `apollo-director-critic/v<N>`, with N a plain positive integer ordered
+ * numerically at or above this minimum, is admitted. A report naming any other critic - or none - is refused, because nothing says
+ * what its hard checks mean; a list of the superseded would let an unknown name through.
  */
 export const MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION = 3
-const APOLLO_DIRECTOR_CRITIC_VERSION = /^apollo-director-critic\/v(\d+)$/
+const APOLLO_DIRECTOR_CRITIC_VERSION = /^apollo-director-critic\/v([1-9]\d*)$/
 
 /**
  * (a) of the policy. The legacy basis (a Director that really verified face safety) is unchanged; the new one admits the
@@ -98,7 +102,10 @@ export function admitDirectorQualityForFinal(report: Readonly<Pick<DirectorQuali
   const { status, faceSafety, hardChecks } = report
   if (status === 'blocked') return refuse('Director quality status is blocked')
   const criticVersion = APOLLO_DIRECTOR_CRITIC_VERSION.exec(report.criticVersion ?? '')
-  if (criticVersion && Number(criticVersion[1]) < MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION) {
+  if (!criticVersion) {
+    return refuse(`Director critic ${JSON.stringify(report.criticVersion ?? null)} is not a critic the Apollo admits: only apollo-director-critic/v${MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION} or later is`)
+  }
+  if (Number(criticVersion[1]) < MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION) {
     return refuse(`Director critic ${report.criticVersion} is superseded: its hard checks did not evaluate the speech this project asked to remove`)
   }
   if (status === 'approved' || status === 'approved-with-warnings') {

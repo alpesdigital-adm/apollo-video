@@ -39,7 +39,7 @@ function plan({ source = LANDSCAPE, evidence = [], cues = [CUE_A, CUE_B], policy
 }
 const completed = (issues) => ({ measurement: 'completed', issues })
 const quality = (overrides = {}) => ({
-  schemaVersion: 'director-quality-report/v3', id: 'quality-1', status: 'review-required',
+  schemaVersion: 'director-quality-report/v3', id: 'quality-1', status: 'review-required', criticVersion: 'apollo-director-critic/v3',
   faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
   strategic: { passed: true, score: 91, gateFailures: [], rubric: { threshold: 70 } },
   hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true, subtitlesFaceSafe: false, subtitlesBounded: true, forbiddenSpeechAbsent: true, timelineContinuous: true },
@@ -98,6 +98,21 @@ test('a report from a superseded Apollo Director critic is not inherited: its fo
   }
   assert.deepEqual(admitDirectorQualityForFinal(quality({ criticVersion: 'apollo-director-critic/v3' })), { admitted: true, basis: 'per-cue-caption-certification' })
   assert.deepEqual(admitDirectorQualityForFinal(quality({ criticVersion: 'apollo-director-critic/v10' })), { admitted: true, basis: 'per-cue-caption-certification' })
+})
+
+test('only a critic the Apollo names is admitted: any other name, or none, is refused (an allow-list, not a list of the superseded)', () => {
+  for (const criticVersion of [
+    'project-director-critic/v2', 'critic-e2e-1.0.0', 'apollo-director-critic/v3-beta', 'apollo-director-critic/v03',
+    'apollo-director-critic/v', 'apollo-director-critic/v-3', 'apollo-director-critic/v3 ', 'x-apollo-director-critic/v3', '',
+  ]) {
+    const verdict = admitDirectorQualityForFinal(quality({ criticVersion }))
+    assert.equal(verdict.admitted, false, criticVersion)
+    assert.match(verdict.reason, /not a critic the Apollo admits/, criticVersion)
+  }
+  const { criticVersion: _omitted, ...withoutCritic } = quality()
+  const verdict = admitDirectorQualityForFinal(withoutCritic)
+  assert.equal(verdict.admitted, false)
+  assert.match(verdict.reason, /not a critic the Apollo admits/)
 })
 
 test('every burned cue is placed in a free-certified band and confirmed in pixels; the receipt names how each band was certified', () => {

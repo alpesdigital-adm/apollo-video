@@ -118,7 +118,7 @@ function matrixReviewRequiredQuality(id, desiredActionId, evaluatedAt,
     hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true,
       subtitlesFaceSafe: false, subtitlesBounded: true, forbiddenSpeechAbsent: true,
       timelineContinuous: true },
-    issues: [], criticVersion: 'matrix-controlled-critic-1.0.0', evaluatedAt,
+    issues: [], criticVersion: 'apollo-director-critic/v3', evaluatedAt,
   } }
 }
 

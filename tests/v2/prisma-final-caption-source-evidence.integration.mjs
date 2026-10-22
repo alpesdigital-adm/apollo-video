@@ -104,7 +104,7 @@ function qualityReportFor({ suffix, evaluatedAt, createQualityReport, resolveStr
       forbiddenSpeechAbsent: true, timelineContinuous: true },
     issues: [{ code: 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED', severity: 'warning', category: 'editorial',
       message: 'Face detector evidence is unavailable. Caption placement requires review before approval or final export.', correctable: true }],
-    criticVersion: 'project-director-critic/v2', evaluatedAt,
+    criticVersion: 'apollo-director-critic/v3', evaluatedAt,
   }
 }
 

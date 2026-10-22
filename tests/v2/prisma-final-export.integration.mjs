@@ -67,7 +67,7 @@ function reviewRequiredQualityReport({ suffix, evaluatedAt, createQualityReport,
       timelineContinuous: true },
     score: 1,
     issues: [],
-    criticVersion: 'project-director-critic/v2',
+    criticVersion: 'apollo-director-critic/v3',
     evaluatedAt,
   }
 }
