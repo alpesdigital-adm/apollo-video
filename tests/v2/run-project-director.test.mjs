@@ -1850,3 +1850,14 @@ test('W64 the result Version is materialized after the commit and never before i
   await assert.rejects(failing.service(request({ baseHash: 'c'.repeat(64), idempotency: { key: 'director-stale-materialize' } })), (error) => error.code === 'VERSION_CONFLICT')
   assert.equal(refused.length, 0)
 })
+
+test('a Director context that does not state the speech the project asked to remove is refused, never read as "nothing was asked"', async () => {
+  const { repository, service } = fixture()
+  const readContext = repository.readContext.bind(repository)
+  repository.readContext = async (input) => {
+    const { requestedSpeechRemovals: _omitted, ...context } = await readContext(input)
+    return context
+  }
+  await assert.rejects(service(request()), (error) => error.code === 'PERSISTENCE_CONFLICT' && /asked to remove/.test(error.message))
+  assert.equal(repository.lastBundle, undefined)
+})
