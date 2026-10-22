@@ -172,8 +172,9 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     const directed = await director(await headOf(), 'directed')
     const stored = await get()
     assert.equal(directed.run.requestHash, stored.payload.data.hashes.requestHash, 'the run seals the request the API shows')
-    assert.equal(directed.run.policyResolution.policies.cta.origin, 'request-briefing')
-    assert.equal(directed.run.policyResolution.policies.cta.value.required, false)
+    // The cta policy follows the desired action; the overlay is the policy the briefing's directive decides, and it names the briefing as its origin.
+    assert.equal(directed.run.policyResolution.policies.ctaOverlay.origin, 'request-briefing')
+    assert.equal(directed.run.policyResolution.policies.ctaOverlay.value.mode, 'none')
     assert.equal(stored.payload.data.state, 'interpreted')
     assert.equal(stored.payload.data.interpretation.directives[0].excerpt.text, 'epsilon')
     assert.equal(seeded.versions.base !== directed.version.id, true)
