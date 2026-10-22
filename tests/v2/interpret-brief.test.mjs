@@ -12,7 +12,7 @@ import { normalizeBriefingText } from '../../src/v2/domain/production-brief.ts'
 const model = (answer, extra = {}) => {
   const calls = []
   return {
-    provider: 'test-double', model: 'stub-1', calls,
+    provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', calls,
     async interpret(request) {
       calls.push(request)
       return { text: typeof answer === 'string' ? answer : JSON.stringify(answer), ...extra }

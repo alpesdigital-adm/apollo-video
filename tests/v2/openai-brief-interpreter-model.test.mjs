@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { interpretBriefService } from '../../src/v2/application/interpret-brief.ts'
-import { createBriefInterpreterModelFromEnvironment, OpenAiBriefInterpreterModel } from '../../src/v2/infrastructure/brief/openai-brief-interpreter-model.ts'
+import { createOpenAiApiBriefInterpreterModelFromEnvironment as createBriefInterpreterModelFromEnvironment, OpenAiBriefInterpreterModel } from '../../src/v2/infrastructure/brief/openai-brief-interpreter-model.ts'
 
 // A dummy credential of the right length: nothing here ever reaches a network.
 const KEY = 'test-credential-not-a-real-key'

@@ -61015,11 +61015,13 @@
                     "provider",
                     "model",
                     "resolvedModel",
+                    "providerVersion",
                     "promptVersion",
                     "promptHash",
                     "inputHash",
                     "responseHash",
                     "usage",
+                    "costBasis",
                     "costMinorUnits",
                     "signals",
                     "directivesMovedToUnsupported",
@@ -61049,6 +61051,24 @@
                         {
                           "type": "null"
                         }
+                      ]
+                    },
+                    "providerVersion": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "costBasis": {
+                      "enum": [
+                        "api-metered",
+                        "subscription"
                       ]
                     },
                     "promptVersion": {
@@ -62299,11 +62319,13 @@
                     "provider",
                     "model",
                     "resolvedModel",
+                    "providerVersion",
                     "promptVersion",
                     "promptHash",
                     "inputHash",
                     "responseHash",
                     "usage",
+                    "costBasis",
                     "costMinorUnits",
                     "signals",
                     "directivesMovedToUnsupported",
@@ -62333,6 +62355,24 @@
                         {
                           "type": "null"
                         }
+                      ]
+                    },
+                    "providerVersion": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "costBasis": {
+                      "enum": [
+                        "api-metered",
+                        "subscription"
                       ]
                     },
                     "promptVersion": {

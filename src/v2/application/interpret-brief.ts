@@ -109,6 +109,8 @@ export interface BriefInterpretationAudit {
   model: string
   /** The model identifier the provider says answered (a snapshot name), when it said one. */
   resolvedModel: string | null
+  /** The version of the program that answered (a CLI), when it said one. */
+  providerVersion: string | null
   promptVersion: string
   /** SHA-256 of the standing instruction and the response schema the model was given. */
   promptHash: string
@@ -117,7 +119,9 @@ export interface BriefInterpretationAudit {
   /** SHA-256 of the raw text the model answered. */
   responseHash: string
   usage: Readonly<{ inputTokens: number; outputTokens: number }> | null
-  /** Minor units, only when the deployment states a price; null means unknown (never zero by omission). */
+  /** `subscription`: paid by an account's plan, no per-call cost exists. `api-metered`: per token. */
+  costBasis: 'api-metered' | 'subscription'
+  /** Minor units, only when the deployment states a price; null means unknown or subscription (never zero by omission). */
   costMinorUnits: number | null
   /** Facts the guardrails noticed in the briefing (not verdicts), e.g. a phrase that tries to override the safety policy. */
   signals: readonly string[]
@@ -320,15 +324,15 @@ export function interpretBriefService(dependencies: InterpretBriefDependencies) 
       ...(briefOverridesSafetyPolicy(briefingText) ? ['safety-policy-override-phrase'] : []),
       ...((dependencies.guardrails ?? []).some((guardrail) => guardrail.trim().length > 0 && lowered.includes(guardrail.trim().toLowerCase())) ? ['guardrail-quoted'] : []),
     ]
-    const costMinorUnits = usage && model.pricing
+    const costMinorUnits = usage && model.pricing && model.costBasis === 'api-metered'
       ? Math.ceil((usage.inputTokens * model.pricing.inputMinorUnitsPerMillionTokens + usage.outputTokens * model.pricing.outputMinorUnitsPerMillionTokens) / 1_000_000)
       : null
     const audit: BriefInterpretationAudit = Object.freeze({
       schemaVersion: BRIEF_INTERPRETATION_AUDIT_SCHEMA,
-      provider: model.provider, model: model.model, resolvedModel: response.resolvedModel ?? null, promptVersion,
+      provider: model.provider, model: model.model, resolvedModel: response.resolvedModel ?? null, providerVersion: response.providerVersion ?? null, promptVersion,
       promptHash: BRIEF_INTERPRETER_PROMPT_HASH, inputHash: sha256Text(briefingText), responseHash: sha256Text(response.text),
       usage: usage ? Object.freeze({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }) : null,
-      costMinorUnits, signals: Object.freeze(signals),
+      costBasis: model.costBasis, costMinorUnits, signals: Object.freeze(signals),
       directivesMovedToUnsupported: checked.directivesMovedToUnsupported, directivesWithdrawnAsAmbiguous: checked.directivesWithdrawnAsAmbiguous,
     })
     return Object.freeze({ interpretation: checked.interpretation, audit })

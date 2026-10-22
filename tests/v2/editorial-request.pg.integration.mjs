@@ -3,13 +3,13 @@ import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
-import { startBriefInterpreterStandIn } from './helpers/brief-interpreter-stand-in.mjs'
+import { installFakeCodex } from './helpers/install-fake-codex.mjs'
 import { seedDirectedProject } from './helpers/dashboard-w34-35-fixtures.mjs'
 import { seedSealedProject, testActor } from './helpers/pg-output-world.mjs'
 
 /**
  * ADR-160 F6 against a real PostgreSQL, through the published routes: a project is created with a briefing, the briefing is read by the
- * interpreter (the real OpenAI adapter, pointed at a local stand-in that this suite scripts: no network, no credential, no real model),
+ * interpreter (the real Codex CLI adapter - the primary provider - running a stand-in executable that this suite scripts: no account, no network, no real model),
  * and the Director plans from what was read.
  *
  *   1. The briefing of the project is a request nobody has read: the read says so, and the Director refuses it with the published reason.
@@ -24,7 +24,19 @@ import { seedSealedProject, testActor } from './helpers/pg-output-world.mjs'
 const enabled = process.env.APOLLO_EDITORIAL_REQUEST_PG === '1'
 
 const BRIEFING = 'alpha beta gamma delta'
-const CONFIGURATION = ['APOLLO_V2_BRIEF_INTERPRETER_MODEL', 'OPENAI_API_KEY', 'APOLLO_V2_BRIEF_INTERPRETER_BASE_URL']
+const CONFIGURATION = ['APOLLO_V2_BRIEF_INTERPRETER_PROVIDER', 'APOLLO_V2_CODEX_BIN', 'APOLLO_V2_BRIEF_INTERPRETER_MODEL', 'OPENAI_API_KEY', 'APOLLO_V2_BRIEF_INTERPRETER_BASE_URL']
+
+/** The stand-in Codex, scripted per briefing: `script.set(briefing, answer)` changes what it answers; `calls` is what it was asked. */
+function scriptedCodex() {
+  const answers = {}
+  const fake = installFakeCodex({ answers })
+  return Object.freeze({
+    binary: fake.binary,
+    script: { set: (briefing, answer) => { answers[briefing] = answer; fake.configure({ answers }) } },
+    get calls() { return fake.executions() },
+    close: async () => fake.remove(),
+  })
+}
 
 async function callRoute(NextRequest, module, { method, path, params = {}, body, authorization, idempotencyKey }) {
   const headers = new Headers()
@@ -40,7 +52,7 @@ async function callRoute(NextRequest, module, { method, path, params = {}, body,
 test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Director plans from what was read', { skip: !enabled, timeout: 600_000 }, async () => {
   const saved = Object.fromEntries(CONFIGURATION.map((name) => [name, process.env[name]]))
   for (const name of CONFIGURATION) delete process.env[name]
-  const interpreter = await startBriefInterpreterStandIn({ fallback: undefined })
+  const interpreter = scriptedCodex()
   const run = randomUUID().replaceAll('-', '').slice(0, 10)
   const workspaceId = `f6req-${run}-ws`, clientId = `f6req-${run}-client`
   const seedActor = testActor({ workspaceId, clientId, credentialId: `${clientId}-cred`, environment: 'production', scopes: ['projects:write', 'projects:read', 'media:write'] })
@@ -100,9 +112,9 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     assert.deepEqual(unavailable.payload.error.details, { reason: 'brief-interpreter-unavailable' })
     assert.equal(await versionCount(), before)
 
+    process.env.APOLLO_V2_BRIEF_INTERPRETER_PROVIDER = 'codex-cli'
     process.env.APOLLO_V2_BRIEF_INTERPRETER_MODEL = 'stand-in-model'
-    process.env.OPENAI_API_KEY = 'stand-in-credential-not-a-real-key'
-    process.env.APOLLO_V2_BRIEF_INTERPRETER_BASE_URL = interpreter.url
+    process.env.APOLLO_V2_CODEX_BIN = interpreter.binary
 
     // 3a. A reading that cites words the briefing does not contain is refused whole; nothing is written.
     interpreter.script.set(BRIEFING, { directives: [{ kind: 'cta', value: 'none', param: null, quote: 'words that are nowhere in the briefing' }], unsupported: [], questions: [], coverage: [] })
@@ -120,12 +132,14 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     assert.equal(asked.payload.data.state, 'interpreted')
     assert.equal(asked.payload.data.blocksDirector, true)
     assert.deepEqual(asked.payload.data.openQuestions.map((question) => [question.id, question.excerpt]), [['q1', 'alpha']])
-    assert.equal(asked.payload.data.interpretationAudit.provider, 'openai')
-    assert.equal(asked.payload.data.interpretationAudit.resolvedModel, 'stand-in-resolved')
-    assert.deepEqual(asked.payload.data.interpretationAudit.usage, { inputTokens: 100, outputTokens: 20 })
+    assert.equal(asked.payload.data.interpretationAudit.provider, 'codex-cli')
+    assert.equal(asked.payload.data.interpretationAudit.providerVersion, 'codex-cli 0.0.0-fake')
+    assert.equal(asked.payload.data.interpretationAudit.costBasis, 'subscription')
+    assert.equal(asked.payload.data.interpretationAudit.costMinorUnits, null)
+    assert.deepEqual(asked.payload.data.interpretationAudit.usage, { inputTokens: 1200, outputTokens: 40 })
     assert.equal(asked.payload.data.impact.renderBlockedUntilDirectorRun, true)
-    assert.equal(interpreter.calls.length >= 1 && interpreter.calls.every((call) => call.authorized && call.path === '/v1/chat/completions'), true)
-    assert.ok(interpreter.calls.every((call) => call.body.messages[0].role === 'system' && !call.body.messages[0].content.includes(BRIEFING)), 'the briefing never reaches the standing instruction')
+    assert.equal(interpreter.calls.length >= 1 && interpreter.calls.every((call) => call.args.includes('read-only') && call.args.every((arg) => !arg.includes(BRIEFING))), true)
+    assert.ok(interpreter.calls.every((call) => !call.stdin.slice(0, call.stdin.indexOf('The briefing, as a JSON document')).includes(BRIEFING)), 'the briefing never reaches the standing instruction')
     const readAfter = await get()
     assert.equal(readAfter.payload.data.hashes.requestHash, asked.payload.data.hashes.requestHash)
     assert.equal(readAfter.payload.data.hashes.briefSnapshotId, asked.payload.data.hashes.briefSnapshotId)

@@ -10,6 +10,7 @@ import { DomainError } from '../../domain/errors.ts'
  * briefing, over `fetch` like the other OpenAI adapters of the repository (no SDK). The adapter carries a request and returns the raw text;
  * it knows nothing about directives. Every check of the answer is `interpret-brief.ts`'s.
  *
+ * The alternative provider (`APOLLO_V2_BRIEF_INTERPRETER_PROVIDER=openai-api`; the primary one is the Codex CLI, see codex-cli-brief-interpreter-model.ts).
  * Configuration is infrastructure, not an editorial decision, so it has NO default for the model or the key:
  *   APOLLO_V2_BRIEF_INTERPRETER_MODEL   the model name (required)
  *   OPENAI_API_KEY                      the credential (required; never logged, never stored, never put in an error)
@@ -88,6 +89,7 @@ async function boundedText(response: Response, limit: number): Promise<string> {
 export class OpenAiBriefInterpreterModel implements BriefInterpreterModel {
   readonly provider = OPENAI_BRIEF_INTERPRETER_PROVIDER
   readonly model: string
+  readonly costBasis = 'api-metered' as const
   readonly pricing?: BriefInterpreterModel['pricing']
   private readonly apiKey: string
   private readonly baseUrl: string
@@ -194,7 +196,7 @@ function price(value: string | undefined): number | undefined {
  * The interpreter this deployment configured, or `null` when it configured none (model or key absent). `null` is not an error here: it is
  * the state in which a briefing with text cannot be read, and the services that need it fail closed with PRECONDITION_REQUIRED.
  */
-export function createBriefInterpreterModelFromEnvironment(environment: NodeJS.ProcessEnv = process.env): OpenAiBriefInterpreterModel | null {
+export function createOpenAiApiBriefInterpreterModelFromEnvironment(environment: NodeJS.ProcessEnv = process.env): OpenAiBriefInterpreterModel | null {
   const model = environment.APOLLO_V2_BRIEF_INTERPRETER_MODEL?.trim()
   const apiKey = environment.OPENAI_API_KEY?.trim()
   if (!model || !apiKey) return null

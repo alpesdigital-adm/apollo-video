@@ -29,7 +29,7 @@ const actor = () => {
 }
 function stubModel(answer = { directives: [], unsupported: [], questions: [], coverage: [] }) {
   const calls = []
-  return { provider: 'test-double', model: 'stub-1', calls, async interpret(request) { calls.push(request); return { text: JSON.stringify(answer) } } }
+  return { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', calls, async interpret(request) { calls.push(request); return { text: JSON.stringify(answer) } } }
 }
 function memoryRepository() {
   const stored = new Map()

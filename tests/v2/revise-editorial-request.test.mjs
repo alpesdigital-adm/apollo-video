@@ -30,7 +30,7 @@ const empty = { directives: [], unsupported: [], questions: [], coverage: [] }
 
 function stubModel(answer) {
   const calls = []
-  return { provider: 'test-double', model: 'stub-1', calls, async interpret(request) { calls.push(request); return { text: JSON.stringify(typeof answer === 'function' ? answer(request) : answer) } } }
+  return { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', calls, async interpret(request) { calls.push(request); return { text: JSON.stringify(typeof answer === 'function' ? answer(request) : answer) } } }
 }
 
 function briefDocument({ briefing, editorialRequest } = {}) {

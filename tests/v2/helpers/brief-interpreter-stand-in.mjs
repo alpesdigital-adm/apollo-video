@@ -32,6 +32,7 @@ export async function startBriefInterpreterStandIn({ fallback = NOTHING_MAPPED }
   return Object.freeze({
     calls, script, url,
     environment: Object.freeze({
+      APOLLO_V2_BRIEF_INTERPRETER_PROVIDER: 'openai-api',
       APOLLO_V2_BRIEF_INTERPRETER_MODEL: 'stand-in-model',
       OPENAI_API_KEY: 'stand-in-credential-not-a-real-key',
       APOLLO_V2_BRIEF_INTERPRETER_BASE_URL: url,

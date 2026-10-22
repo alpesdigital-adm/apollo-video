@@ -1,5 +1,5 @@
 import { interpretBriefService, type InterpretBrief } from '../../application/interpret-brief.ts'
-import { createBriefInterpreterModelFromEnvironment } from './openai-brief-interpreter-model.ts'
+import { createBriefInterpreterModelFromEnvironment } from './brief-interpreter-factory.ts'
 
 /**
  * The briefing reader of this deployment: backed by the interpreter the environment configures, or by none. Without one, reading a

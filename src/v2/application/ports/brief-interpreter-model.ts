@@ -19,11 +19,18 @@ export interface BriefInterpreterResponse {
   usage?: Readonly<{ inputTokens: number; outputTokens: number }>
   /** The model identifier the provider says answered (a snapshot name), when it says one. */
   resolvedModel?: string
+  /** The version of the program that answered (a CLI), when it states one. */
+  providerVersion?: string
 }
 
 export interface BriefInterpreterModel {
   readonly provider: string
   readonly model: string
+  /**
+   * How the use of the model is paid: `api-metered` (per token, so a price may be stated) or `subscription` (an account's plan: there is no
+   * per-call cost to record, and the audit says so instead of writing zero).
+   */
+  readonly costBasis: 'api-metered' | 'subscription'
   /** Minor units of cost per million tokens, when the deployment states a price; absent means the cost is unknown, never zero. */
   readonly pricing?: Readonly<{ inputMinorUnitsPerMillionTokens: number; outputMinorUnitsPerMillionTokens: number }>
   interpret(request: Readonly<BriefInterpreterRequest>): Promise<Readonly<BriefInterpreterResponse>>
