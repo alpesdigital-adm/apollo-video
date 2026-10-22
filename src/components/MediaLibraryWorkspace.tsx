@@ -30,11 +30,14 @@ function byteSize(value: string) {
   return `${Math.max(1, Math.round(bytes / 1000))} KB`
 }
 
+/** The language the rights are judged under is the one the person states; none stated is read as undetermined by the API (it assumes no language). */
+function localeQuery(locale: string) { return locale.trim() ? `?locale=${encodeURIComponent(locale.trim())}` : '' }
+
 export default function MediaLibraryWorkspace() {
   const [items, setItems] = useState<LibraryItem[]>([])
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [projectId, setProjectId] = useState('')
-  const [filters, setFilters] = useState({ kind: '', person: '', topic: '', rightsStatus: '' })
+  const [filters, setFilters] = useState({ kind: '', person: '', topic: '', rightsStatus: '', locale: '' })
   const [applied, setApplied] = useState(filters)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -111,7 +114,7 @@ export default function MediaLibraryWorkspace() {
     const generation = ++details.current.generation
     setDetail(null); setDetailState('loading'); setMessage('')
     try {
-      const response = await fetch(`/v1/media/library/${encodeURIComponent(item.id)}`, { signal: controller.signal, cache: 'no-store' })
+      const response = await fetch(`/v1/media/library/${encodeURIComponent(item.id)}${localeQuery(applied.locale)}`, { signal: controller.signal, cache: 'no-store' })
       const payload = await response.json() as ApiEnvelope<LibraryItem>
       if (controller.signal.aborted || generation !== details.current.generation) return
       if (response.status === 401 || response.status === 403) clearPrivateState()
@@ -186,11 +189,12 @@ export default function MediaLibraryWorkspace() {
           </div>
         </header>
 
-        <form className="grid gap-3 border-b border-white/[0.08] py-5 md:grid-cols-2 xl:grid-cols-[170px_1fr_1fr_190px_auto]" onSubmit={applyFilters}>
+        <form className="grid gap-3 border-b border-white/[0.08] py-5 md:grid-cols-2 xl:grid-cols-[170px_1fr_1fr_190px_150px_auto]" onSubmit={applyFilters}>
           <select aria-label="Tipo" className="border border-white/[0.1] bg-[#0d0d0c] px-3 py-3 text-sm text-[#cfc8bc]" value={filters.kind} onChange={(e) => setFilters({ ...filters, kind: e.target.value })}><option value="">Todos os tipos</option><option value="video">Vídeo</option><option value="audio">Áudio</option><option value="image">Imagem</option><option value="segment">Segmento</option></select>
           <input aria-label="Pessoa" className="border border-white/[0.1] bg-[#0d0d0c] px-3 py-3 text-sm placeholder:text-[#625e57]" placeholder="Pessoa" value={filters.person} onChange={(e) => setFilters({ ...filters, person: e.target.value })} />
           <input aria-label="Tema" className="border border-white/[0.1] bg-[#0d0d0c] px-3 py-3 text-sm placeholder:text-[#625e57]" placeholder="Tema" value={filters.topic} onChange={(e) => setFilters({ ...filters, topic: e.target.value })} />
           <select aria-label="Direitos" className="border border-white/[0.1] bg-[#0d0d0c] px-3 py-3 text-sm text-[#cfc8bc]" value={filters.rightsStatus} onChange={(e) => setFilters({ ...filters, rightsStatus: e.target.value })}><option value="">Todos os direitos</option><option value="eligible">Liberado</option><option value="review">Revisar</option><option value="restricted">Restrito</option><option value="expired">Expirado</option></select>
+          <input aria-label="Idioma" className="border border-white/[0.1] bg-[#0d0d0c] px-3 py-3 text-sm placeholder:text-[#625e57]" maxLength={35} placeholder="Idioma dos direitos" value={filters.locale} onChange={(e) => setFilters({ ...filters, locale: e.target.value })} />
           <button className="bg-[#d0a43a] px-5 py-3 text-xs font-bold uppercase tracking-[0.14em] text-[#171208] transition hover:bg-[#e1bb5a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e1bb5a]">Filtrar</button>
         </form>
 
@@ -208,7 +212,7 @@ export default function MediaLibraryWorkspace() {
             <div><dt>Origem</dt><dd>{detail.origin.type} {detail.origin.parentArtifactId}</dd></div>
             {detail.source.semanticRange ? <div><dt>Intervalo no original</dt><dd>{detail.source.semanticRange.startMs}–{detail.source.semanticRange.endMs} ms · virtual · sem duplicar bytes</dd><dd className="break-all font-mono text-xs">{detail.source.segmentHash}</dd></div> : null}
           </dl>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">{(['thumbnail', 'waveform'] as const).map((kind) => <div key={kind}><p>{kind === 'thumbnail' ? 'Miniatura' : 'Forma de onda'}</p>{detail.preview[kind].status === 'available' && detail.rights.status === 'eligible' ? <LibraryPreview itemId={detail.id} kind={kind} onAuthorizationLost={clearPrivateState} /> : <p className="text-sm text-[#938d83]">Preview indisponível.</p>}</div>)}</div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">{(['thumbnail', 'waveform'] as const).map((kind) => <div key={kind}><p>{kind === 'thumbnail' ? 'Miniatura' : 'Forma de onda'}</p>{detail.preview[kind].status === 'available' && detail.rights.status === 'eligible' ? <LibraryPreview itemId={detail.id} kind={kind} locale={applied.locale} onAuthorizationLost={clearPrivateState} /> : <p className="text-sm text-[#938d83]">Preview indisponível.</p>}</div>)}</div>
           {detail.technical.mediaType === 'video' || detail.technical.mediaType === 'audio' ? <form className="mt-6 grid gap-3 sm:grid-cols-2" onSubmit={(event) => void createSegment(event)}>
             <h3 className="sm:col-span-2">{detail.source.type === 'segment' ? 'Criar segmento dentro deste intervalo' : 'Criar segmento virtual'}</h3>
             <label>Nome<input className="block w-full bg-black p-2" value={range.label} onChange={(event) => setRange({ ...range, label: event.target.value })} required maxLength={200} /></label>
@@ -242,13 +246,13 @@ export default function MediaLibraryWorkspace() {
   </main>
 }
 
-function LibraryPreview({ itemId, kind, onAuthorizationLost }: { itemId: string; kind: 'thumbnail' | 'waveform'; onAuthorizationLost: () => void }) {
+function LibraryPreview({ itemId, kind, locale, onAuthorizationLost }: { itemId: string; kind: 'thumbnail' | 'waveform'; locale: string; onAuthorizationLost: () => void }) {
   const [url, setUrl] = useState('')
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     const controller = new AbortController(); let objectUrl = ''
     setUrl(''); setFailed(false)
-    void fetch(`/v1/media/library/${encodeURIComponent(itemId)}/previews/${kind}`, { signal: controller.signal, cache: 'no-store' }).then(async (response) => {
+    void fetch(`/v1/media/library/${encodeURIComponent(itemId)}/previews/${kind}${localeQuery(locale)}`, { signal: controller.signal, cache: 'no-store' }).then(async (response) => {
       if (controller.signal.aborted) return
       if (response.status === 401 || response.status === 403) { onAuthorizationLost(); return }
       if (!response.ok) throw new Error('Preview unavailable')
@@ -257,7 +261,7 @@ function LibraryPreview({ itemId, kind, onAuthorizationLost }: { itemId: string;
       objectUrl = URL.createObjectURL(blob); setUrl(objectUrl)
     }).catch(() => { if (!controller.signal.aborted) setFailed(true) })
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
-  }, [itemId, kind, onAuthorizationLost])
+  }, [itemId, kind, locale, onAuthorizationLost])
   if (failed) return <p role="status">Preview indisponível.</p>
   if (!url) return <p role="status">Carregando preview…</p>
   // The object URL contains authenticated bytes; it is revoked on selection change/unmount.

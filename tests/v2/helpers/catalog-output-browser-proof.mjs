@@ -87,6 +87,7 @@ export async function proveCatalogOutputBrowser({ baseUrl, authorization, userna
       const card = page.locator(`article[data-library-id="${output.artifactId}"]`)
       await card.waitFor({ state: 'visible' })
       await page.getByLabel('Tipo', { exact: true }).selectOption('video')
+      await page.getByLabel('Idioma', { exact: true }).fill('pt-BR')
       await page.getByLabel('Direitos', { exact: true }).selectOption('eligible')
       assert.equal(await page.getByLabel('Tipo', { exact: true }).inputValue(), 'video')
       assert.equal(await page.getByLabel('Direitos', { exact: true }).inputValue(), 'eligible')
