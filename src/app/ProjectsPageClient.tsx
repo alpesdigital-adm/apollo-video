@@ -1041,7 +1041,7 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                   </div>
                   <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-[#aaa49a]" data-testid="production-brief-preview-summary">{productionBriefPreview.summary.text}</p>
                   <div className="mt-3 flex flex-wrap gap-1.5" data-testid="production-brief-preview-coverage">
-                    {Object.entries(productionBriefPreview.summary.coverage).map(([field, covered]) => (
+                    {productionBriefPreview.ownerInput && !productionBriefPreview.assumptions.length ? null : Object.entries(productionBriefPreview.summary.coverage).map(([field, covered]) => (
                       <span className={`rounded-md border px-2 py-1 text-[9px] ${covered ? 'border-[#5fbd7e]/25 text-[#74c98f]' : 'border-white/[0.07] text-[#716d65]'}`} key={field}>
                         {field === 'audience' ? 'Público' : field === 'offer' ? 'Oferta' : 'Tom'}: {covered ? 'informado' : 'ausente'}
                       </span>
@@ -1051,7 +1051,9 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                     <ul className="mt-3 space-y-1 text-[10px] text-[#8f897f]" data-testid="production-brief-preview-assumptions">
                       {productionBriefPreview.assumptions.map((assumption) => <li key={assumption}>• {PRODUCTION_BRIEF_ASSUMPTION_LABELS[assumption]}</li>)}
                     </ul>
-                  ) : <p className="mt-3 text-[10px] text-[#74c98f]" data-testid="production-brief-preview-assumptions">Sem lacunas básicas detectadas.</p>}
+                  ) : productionBriefPreview.ownerInput
+                    ? <p className="mt-3 text-[10px] text-[#8f897f]" data-testid="production-brief-preview-assumptions">O briefing ainda não foi lido pelo interpretador: o que ele cobre só é dito depois da leitura.</p>
+                    : <p className="mt-3 text-[10px] text-[#74c98f]" data-testid="production-brief-preview-assumptions">Sem lacunas básicas detectadas.</p>}
                 </section>
               </div>
 

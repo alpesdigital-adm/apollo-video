@@ -748,7 +748,10 @@ const W69_PINNED_TOOLCHAIN = 'W69 subtitle clock proof that needs an externally 
  * insertion above them, and a stale line number would make this fail for a
  * reason that has nothing to do with coverage.
  */
+const F6_EDITORIAL_REQUEST_PG = 'ADR-160 F6 PostgreSQL + public API proof of the editorial request (route handlers with bearer authentication, real repositories, the child-Command database guard, the real interpreter adapter against a local stand-in for the provider, the real Director); it needs a supervised disposable cluster with the revise_editorial_request_v1 migration applied; no hosted counterpart yet'
+
 const KNOWN_UNRUN_SUITES = [
+  { file: 'tests/v2/editorial-request.pg.integration.mjs', reason: F6_EDITORIAL_REQUEST_PG, citedBy: [] },
   { file: 'tests/v2/prisma-face-window.integration.mjs', reason: W62_SUPERVISED_PG, citedBy: ['docs/quality/w62-v9-runtime.md', 'docs/quality/w65-caption-placement-v3.md', 'docs/quality/w65b-source-keyed-face-evidence.md'] },
   { file: 'tests/v2/face-window-composition.integration.mjs', reason: W62_TSX_COMPOSITION, citedBy: ['docs/quality/w62-v9-runtime.md', 'docs/quality/w65b-source-keyed-face-evidence.md'] },
   { file: 'tests/v2/prisma-caption-placement.integration.mjs', reason: W65_SUPERVISED_PG, citedBy: ['docs/quality/w65-caption-placement-v3.md', 'docs/quality/w65b-source-keyed-face-evidence.md'] },

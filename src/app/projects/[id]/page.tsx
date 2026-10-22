@@ -3531,8 +3531,9 @@ export default function ProjectWorkspacePage() {
               <span className="text-[9px] text-[#5fbd7e]">{productionBrief?.ownerInput ? 'Owner autorizado' : 'Media-only'}</span>
             </div>
             <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-[#969188]" data-testid="production-brief-summary">{(productionBrief?.summary.text ?? briefText) || 'Briefing persistido indisponível.'}</p>
+            {/* A briefing with text that nobody has read says nothing about what it covers (ADR-160): no chip and no "no gaps" claim. */}
             <div className="mt-3 flex flex-wrap gap-1.5" data-testid="production-brief-coverage">
-              {Object.entries(productionBrief?.summary.coverage ?? {}).map(([field, covered]) => (
+              {productionBrief?.ownerInput && !productionBrief.assumptions.length && !Object.values(productionBrief.summary.coverage).some(Boolean) ? null : Object.entries(productionBrief?.summary.coverage ?? {}).map(([field, covered]) => (
                 <span className={`rounded-md border px-2 py-1 text-[9px] ${covered ? 'border-[#5fbd7e]/25 text-[#74c98f]' : 'border-white/[0.07] text-[#716d65]'}`} key={field}>
                   {field === 'audience' ? 'Público' : field === 'offer' ? 'Oferta' : 'Tom'}: {covered ? 'informado' : 'ausente'}
                 </span>
@@ -3542,7 +3543,9 @@ export default function ProjectWorkspacePage() {
               <ul className="mt-3 space-y-1 text-[10px] text-[#8f897f]" data-testid="production-brief-assumptions">
                 {productionBrief.assumptions.map((assumption) => <li key={assumption}>• {PRODUCTION_BRIEF_ASSUMPTION_LABELS[assumption]}</li>)}
               </ul>
-            ) : <p className="mt-3 text-[10px] text-[#74c98f]" data-testid="production-brief-assumptions">Sem lacunas básicas detectadas.</p>}
+            ) : productionBrief?.ownerInput && !Object.values(productionBrief.summary.coverage).some(Boolean)
+              ? <p className="mt-3 text-[10px] text-[#8f897f]" data-testid="production-brief-assumptions">O briefing ainda não foi lido pelo interpretador: o que ele cobre só é dito depois da leitura.</p>
+              : <p className="mt-3 text-[10px] text-[#74c98f]" data-testid="production-brief-assumptions">Sem lacunas básicas detectadas.</p>}
             <p className="mt-3 border-t border-white/[0.06] pt-3 text-[9px] text-[#68645d]">Nenhuma geração cara foi iniciada por esta leitura.</p>
           </div>
           <div className="mt-5 rounded-xl border border-[#d9a43a]/20 bg-[#d9a43a]/[0.035] p-4" data-testid="director-objective-governance">

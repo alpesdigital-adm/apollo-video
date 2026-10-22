@@ -1824,16 +1824,17 @@ ${editorialDiagnostic}`)
     const briefingCases = [
       {
         label: 'completo',
-        briefing: 'Público: gestores de produto. Oferta: guia prático. Tom: direto.',
-        coverage: { audience: true, offer: true, tone: true },
+        // Creation reads nothing: what a briefing covers is said after the interpreter has read it (revise-editorial-request).
+        briefing: 'alpha beta gamma',
+        coverage: { audience: false, offer: false, tone: false },
         assumptions: [],
         trustLabel: 'Owner autorizado',
       },
       {
-        label: 'parcial',
-        briefing: 'Público: equipes clínicas.',
-        coverage: { audience: true, offer: false, tone: false },
-        assumptions: ['offer-not-specified', 'tone-not-specified'],
+        label: 'curto',
+        briefing: 'alpha',
+        coverage: { audience: false, offer: false, tone: false },
+        assumptions: [],
         trustLabel: 'Owner autorizado',
       },
       {
