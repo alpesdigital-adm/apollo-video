@@ -1,4 +1,6 @@
 import { assertDirectorSnapshotContent, bindDirectorSnapshotIdentities } from '../../src/v2/application/director-snapshot-identity.ts'
+import { parseEditorialPolicyResolution, resolutionOwnsPolicyRef } from '../../src/v2/domain/editorial-policy-resolution.ts'
+import { deriveEditorialRequestFromBrief } from '../../src/v2/domain/editorial-request.ts'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
@@ -15,7 +17,7 @@ import { assertDirectorRunEvidenceConsistency } from '../../src/v2/domain/direct
 import { serverPerceptionSnapshotId } from '../../src/v2/domain/server-perception-snapshot.ts'
 import { childCommandOf } from '../../src/v2/domain/project-output-state-transition.ts'
 import { ingestedRecordings, ingestedWorld, recompiledChild, worldActor } from './helpers/output-world.mjs'
-import { admitDirectorQualityForFinal } from '../../src/v2/domain/final-caption-certification.ts'
+import { admitDirectorQualityForFinal, REQUIRED_HARD_CHECKS } from '../../src/v2/domain/final-caption-certification.ts'
 import { defineEditorialPhraseRules } from '../../src/v2/application/editorial-phrase-rules.ts'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
 import { createPerceptionProducerEnvelope } from '../../src/v2/domain/perception-producer-envelope.ts'
@@ -195,6 +197,7 @@ class InMemoryDirectorRepository {
       ? options.ownerText
       : 'Tom: direto, natural e sem efeitos gratuitos.'
     this.guardrails = options.guardrails ?? []
+    this.editorialRequest = options.editorialRequest
     this.ctaText = Object.hasOwn(options, 'ctaText')
       ? options.ctaText
       : ({
@@ -272,6 +275,7 @@ class InMemoryDirectorRepository {
             : {}),
         }),
         productionBrief: createProductionBrief({ ownerText: this.ownerText }),
+        ...(this.editorialRequest ? { editorialRequest: this.editorialRequest } : {}),
       },
       policies: { automaticZoom: false, faceProtection: true, guardrails: this.guardrails },
       editPlan: this.currentPlan(),
@@ -347,6 +351,11 @@ class InMemoryDirectorRepository {
   }
 }
 
+/** The verdict of one hard check of a v5 report by id (undefined: the report has no such check). */
+const hardCheck = (report, id) => report.hardChecks.find((check) => check.id === id)?.passed
+/** What final-export admission binds a run's report to when the brief still states the request the run sealed. */
+const bindingOf = (run) => ({ currentRequestHash: run.requestHash, sealedRequestHash: run.requestHash, sealedPolicyResolutionHash: run.policyResolution.policyResolutionHash })
+
 function fixture(options = {}) {
   const repository = new InMemoryDirectorRepository(options)
   const counters = new Map()
@@ -357,7 +366,9 @@ function fixture(options = {}) {
     createId: (kind) => {
       const next = (counters.get(kind) ?? 0) + 1
       counters.set(kind, next)
-      return `${kind}-${next}`
+      // The sealed output world below numbers its own snapshots `project-snapshot-N`: the Director's own ids live in another namespace, so a
+      // run never meets a world snapshot by counting.
+      return kind === 'project-snapshot' ? `${kind}-run-${next}` : `${kind}-${next}`
     },
     createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}`,
     compileBrief: createEvidenceBoundBriefCompiler(),
@@ -424,7 +435,7 @@ test('Director binds controlled OCR samples to snapshot v2 while face safety rem
     const result = await service(request())
     const snapshot = repository.lastBundle.snapshots.find((item) => item.kind === 'perception')
     assert.equal(snapshot.contentSchemaVersion, 2)
-    assert.equal(result.run.plannerVersion, 'apollo-director-policy/v2')
+    assert.equal(result.run.plannerVersion, 'apollo-director-policy/v3')
     assert.equal(result.run.perception.schemaVersion, 2)
     assert.equal(result.run.perception.inputVersionId, 'project-version-4')
     assert.equal(result.run.perception.ocrEvidence.envelopeId, envelope.id)
@@ -438,7 +449,7 @@ test('Director binds controlled OCR samples to snapshot v2 while face safety rem
     assert.equal(result.run.perception.summary.confidence, 0.82)
     assert.equal(result.run.qualityReport.status, 'review-required')
     assert.equal(result.run.qualityReport.faceSafety.status, 'unknown')
-    assert.equal(result.run.qualityReport.hardChecks.subtitlesFaceSafe, false)
+    assert.equal(hardCheck(result.run.qualityReport, 'subtitlesFaceSafe'), undefined, 'a v5 report keeps no face flag among its checks: the claim is faceSafety alone')
     assert.equal(result.run.qualityReport.issues.some((issue) =>
       issue.code === 'OCR_SOURCE_LOWER_REGION_REVIEW_REQUIRED'), !empty)
   }
@@ -485,8 +496,8 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.equal(result.run.objectiveVersion, 1)
   assert.equal(result.run.rubricRef, 'awareness-discovery/v1')
   assert.equal(result.command.payload.previousObjective, 'discovery')
-  assert.equal(result.command.payload.snapshotRefs.brief, 'project-snapshot-1')
-  assert.deepEqual(repository.lastBundle.snapshots.map((snapshot) => snapshot.kind), ['brief', 'perception', 'treatment', 'story', 'edit-plan', 'quality-report'])
+  assert.equal(result.command.payload.snapshotRefs.brief, 'project-snapshot-run-1')
+  assert.deepEqual(repository.lastBundle.snapshots.map((snapshot) => snapshot.kind), ['brief', 'perception', 'treatment', 'story', 'edit-plan', 'quality-report', 'policy-resolution'])
   const briefSnapshot = repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'brief')
   const persistedBrief = JSON.parse(briefSnapshot.contentJson)
   assert.equal(briefSnapshot.contentSchemaVersion, 3)
@@ -538,9 +549,9 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   )
   assert.equal(result.run.qualityReport.status, 'review-required')
   assert.deepEqual(result.run.qualityReport.faceSafety, { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] })
-  assert.equal(result.run.qualityReport.hardChecks.subtitlesFaceSafe, false)
+  assert.equal(hardCheck(result.run.qualityReport, 'subtitlesFaceSafe'), undefined)
   assert.ok(result.run.qualityReport.issues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED'))
-  assert.equal(result.run.qualityReport.schemaVersion, 'director-quality-report/v4')
+  assert.equal(result.run.qualityReport.schemaVersion, 'director-quality-report/v5')
   assert.equal(result.run.qualityReport.strategic.rubric.id, 'awareness-discovery')
   assert.equal(result.run.qualityReport.strategic.rubric.threshold, 68)
   assert.equal(result.run.qualityReport.strategic.rubric.purpose, 'editorial-quality-proxy')
@@ -548,8 +559,8 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.deepEqual(result.run.qualityReport.strategic.gateFailures, [])
   assert.equal(result.run.qualityReport.strategic.evidence.length, 6)
   assert.equal(result.run.qualityReport.score, result.run.qualityReport.strategic.score / 100)
-  assert.equal(Object.entries(result.run.qualityReport.hardChecks).filter(([key]) => key !== 'subtitlesFaceSafe').every(([, value]) => value), true)
-  assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'quality-report').contentSchemaVersion, 4)
+  assert.equal(result.run.qualityReport.hardChecks.every((check) => check.passed), true)
+  assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'quality-report').contentSchemaVersion, 5)
   assert.equal(repository.lastBundle.event.type, 'project.version.created')
   assert.deepEqual(result.impact.changeKinds, ['director-replan'])
   assert.deepEqual(result.impact.dependencyTypes, ['audio', 'content', 'policy', 'timing', 'visual'])
@@ -584,7 +595,7 @@ test('Director re-evaluates confirmed caption corrections without reusing the ol
   assert.notEqual(replanned.run.id, original.run.id)
   assert.equal(replanned.version.parentVersionId, original.version.id)
   assert.notEqual(replanned.run.qualityReport.id, original.run.qualityReport.id)
-  assert.equal(replanned.run.qualityReport.hardChecks.forbiddenSpeechAbsent, true)
+  assert.equal(hardCheck(replanned.run.qualityReport, 'forbiddenSpeechAbsent'), true)
   assert.equal(replanned.run.editPlan.reviewPatch.patchId, 'reviewed-patch-1')
 })
 
@@ -623,10 +634,10 @@ test('a video that says "dois dias" and "31 de janeiro" is not blocked when noth
   const captions = result.run.editPlan.subtitleTracks.flatMap((track) => track.cues).map((cue) => cue.text).join(' ')
   assert.match(captions, /31 de janeiro/)
   assert.match(captions, /dois dias/)
-  assert.equal(result.run.qualityReport.hardChecks.forbiddenSpeechAbsent, true)
+  assert.equal(hardCheck(result.run.qualityReport, 'forbiddenSpeechAbsent'), true)
   assert.notEqual(result.run.qualityReport.status, 'blocked')
-  assert.equal(admitDirectorQualityForFinal(result.run.qualityReport).admitted, true)
-  assert.equal(result.run.qualityReport.criticVersion, 'apollo-director-critic/v3')
+  assert.equal(admitDirectorQualityForFinal(result.run.qualityReport, bindingOf(result.run)).admitted, true)
+  assert.equal(result.run.qualityReport.criticVersion, 'apollo-director-critic/v4')
   assert.ok(repository.lastBundle)
 })
 
@@ -645,9 +656,9 @@ test('a request to remove a phrase that the captions still say blocks the Direct
   assert.equal(asked.repository.lastBundle, undefined)
   // The same words with no request, and the request over words that do not say it, both pass: the rule is the request, not the words.
   const unasked = fixture({ editPlan })
-  assert.equal((await unasked.service(request({ idempotency: { key: 'speech-no-request' } }))).run.qualityReport.hardChecks.forbiddenSpeechAbsent, true)
+  assert.equal((await unasked.service(request({ idempotency: { key: 'speech-no-request' } }))).run.qualityReport.hardChecks.find((check) => check.id === 'forbiddenSpeechAbsent').passed, true)
   const removed = fixture({ requestedSpeechRemovals })
-  assert.equal((await removed.service(request({ idempotency: { key: 'speech-request-honoured' } }))).run.qualityReport.hardChecks.forbiddenSpeechAbsent, true)
+  assert.equal((await removed.service(request({ idempotency: { key: 'speech-request-honoured' } }))).run.qualityReport.hardChecks.find((check) => check.id === 'forbiddenSpeechAbsent').passed, true)
 })
 
 test('Director blocks material brief conflicts before creating or persisting plans', async () => {
@@ -907,7 +918,9 @@ test('Director V2 persists an evidence-bound media-only treatment before proxy e
   assert.ok(result.run.treatmentPlan.claimPolicy.observedClaims.includes('Comunicar bem muda resultados.'))
   assert.deepEqual(result.run.treatmentPlan.claimPolicy.proposedClaims, [])
   assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'treatment').contentSchemaVersion, 3)
-  assert.match(result.run.decisions.find((decision) => decision.id === 'decision-motion-none').reason, /No owner brief/u)
+  const motion = result.run.decisions.find((decision) => decision.id === 'decision-motion-none').reason
+  assert.match(motion, /The request does not mention camera movement/u)
+  assert.doesNotMatch(motion, /owner|brief/iu, 'a request that said nothing is not attributed to anyone')
 })
 
 test('Director V2 still requests one full proxy without fabricating stale artifacts when the base has no completed outputs', async () => {
@@ -961,7 +974,7 @@ test('W66 multi-output: the Director impact document refuses a render of a stran
   const base = {
     commandId: 'command-director-two-outputs', baseVersionId: 'version-director-two-outputs-base', resultVersionId: 'version-director-two-outputs-result',
     sourceTranscriptId: 'transcript-director-two-outputs', sourceTranscriptHash: 'a'.repeat(64),
-    plannerVersion: 'apollo-director-policy/v2', criticVersion: 'apollo-director-critic/v3', affectedEndFrame: 300, renderEndFrame: 280,
+    plannerVersion: 'apollo-director-policy/v3', criticVersion: 'apollo-director-critic/v4', affectedEndFrame: 300, renderEndFrame: 280,
   }
   const reference = (variantId) => ({ artifactId: `artifact-${variantId}`, kind: 'proxy', sourceVersionId: base.baseVersionId, variantId })
   const ok = createDirectorRunImpact({ ...base, variantIds: ['variant-wide', 'variant-vertical'], outputReferences: [reference('variant-wide')] })
@@ -1635,10 +1648,10 @@ test('W64 with no perception at all the plan is review - never the old flag, nev
   const { repository, service } = fixture()
   const { run } = await service(request())
   const report = run.qualityReport
-  assert.equal(report.schemaVersion, 'director-quality-report/v4')
+  assert.equal(report.schemaVersion, 'director-quality-report/v5')
   assert.equal(report.status, 'review-required')
   assert.equal(report.faceSafety.status, 'unknown')
-  assert.equal(report.hardChecks.subtitlesFaceSafe, false, 'face safety is still claimed by nobody')
+  assert.equal(hardCheck(report, 'subtitlesFaceSafe'), undefined, 'face safety is claimed by nobody: no check of the list says it')
   // all six decisions were graded by policy v2 and say so; only crop, caption and insert stand on perception
   assert.ok(run.decisions.every((decision) => decision.bandPolicy.policyHash === CONFIDENCE_BAND_POLICY_V2_SHA256))
   assert.deepEqual(run.decisions.filter((decision) => decision.perceptionEvidence).map((decision) => [decision.id, decision.decisionType]).toSorted(),
@@ -1685,7 +1698,7 @@ test('W64 with no perception at all the plan is review - never the old flag, nev
     [[0, 115, 'deferred'], [145, 275, 'deferred'], [305, 420, 'deferred']])
   // the stored bytes read back through the strict parser, and a tampered tier does not
   const stored = repository.lastBundle.snapshots.find((item) => item.kind === 'quality-report')
-  const parse = (contentJson) => parseDirectorQualityReport({ contentJson, contentHash: stored.contentHash, contentSchemaVersion: 4, objective: run.objective, rubricRef: run.rubricRef })
+  const parse = (contentJson) => parseDirectorQualityReport({ contentJson, contentHash: stored.contentHash, contentSchemaVersion: 5, objective: run.objective, rubricRef: run.rubricRef })
   assert.equal(parse(stored.contentJson).perceptionEvidence.evidenceHash, report.perceptionEvidence.evidenceHash)
   const forged = JSON.parse(stored.contentJson)
   forged.perceptionEvidence.modalities.find((item) => item.modality === 'face').tier = 'high'
@@ -1849,4 +1862,107 @@ test('W64 the result Version is materialized after the commit and never before i
   const failing = fixture({ materializeSnapshot: async (input) => { refused.push(input) } })
   await assert.rejects(failing.service(request({ baseHash: 'c'.repeat(64), idempotency: { key: 'director-stale-materialize' } })), (error) => error.code === 'VERSION_CONFLICT')
   assert.equal(refused.length, 0)
+})
+
+// ---- ADR-160: the plan is made from the policy resolution of the editorial request, and says so.
+
+test('ADR-160 the run seals the request it answers and the policy resolution it was planned and judged against', async () => {
+  const { repository, service } = fixture()
+  const { run, command } = await service(request({ idempotency: { key: 'request-sealed' } }))
+  assert.match(run.requestHash, /^[a-f0-9]{64}$/)
+  assert.equal(run.policyResolution.requestHash, run.requestHash)
+  assert.equal(run.qualityReport.requestHash, run.requestHash)
+  assert.equal(run.qualityReport.policyResolutionHash, run.policyResolution.policyResolutionHash)
+  assert.equal(run.qualityReport.criticVersion, 'apollo-director-critic/v4')
+  // the sealed resolution is a snapshot of its own, named by the command and by the run
+  const sealed = repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'policy-resolution')
+  assert.equal(command.payload.snapshotRefs.policyResolution, sealed.id)
+  assert.equal(parseEditorialPolicyResolution(JSON.parse(sealed.contentJson)).policyResolutionHash, run.policyResolution.policyResolutionHash)
+  // the request is the one the brief states: the same reader the final-export admission uses
+  const brief = JSON.parse(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'brief').contentJson)
+  assert.equal(deriveEditorialRequestFromBrief(brief).requestHash, run.requestHash)
+  // every decision names the policy that sustains it, and the policy belongs to this resolution
+  for (const decision of run.decisions) {
+    assert.ok(decision.evidenceRefs.some((ref) => resolutionOwnsPolicyRef(run.policyResolution, ref)), `${decision.id} names no policy of the sealed resolution`)
+  }
+  // every hard check is tied to a policy of the resolution, or to none
+  for (const check of run.qualityReport.hardChecks) {
+    assert.ok(['request', 'invariant'].includes(check.kind))
+    assert.ok(check.policyRef === null || resolutionOwnsPolicyRef(run.policyResolution, check.policyRef), `${check.id} names a policy this resolution does not own`)
+    assert.ok(check.evidence.length > 0)
+  }
+  assert.deepEqual(run.qualityReport.hardChecks.map((check) => check.id),
+    ['requestHonored', 'movementMatchesPolicy', 'openingMatchesPolicy', 'forbiddenSpeechAbsent', 'captionsBounded', 'timelineContinuous', 'sourceRightsCertain'])
+})
+
+test('ADR-160 the reason of a decision is generated from the origin of its policy, never from a wish the request did not state', async () => {
+  // A briefing that talks about tone and nothing about movement: the old reason attributed "a direct, natural tone" to the owner for the
+  // absence of camera movement. The reason now says that the request is silent about movement.
+  const { run } = await fixture().service(request({ idempotency: { key: 'reason-from-origin' } }))
+  const motion = run.decisions.find((decision) => decision.id === 'decision-motion-none')
+  assert.equal(run.policyResolution.policies.movement.origin, 'silence-rule')
+  assert.equal(run.policyResolution.policies.movement.rule, 'minimal-intervention')
+  assert.equal(motion.reason, run.policyResolution.policies.movement.reason)
+  assert.match(motion.reason, /does not mention camera movement/)
+  for (const decision of run.decisions) {
+    assert.doesNotMatch(decision.reason, /owner requested|requested a direct|natural tone/i, `${decision.id} attributes to the owner what the request does not say`)
+  }
+  // When the request DOES say it, the reason says so and points at the field.
+  const asked = fixture({ editorialRequest: { directives: [{ id: 'movement-field', kind: 'movement', value: 'none' }] } })
+  const { run: answered } = await asked.service(request({ idempotency: { key: 'reason-from-field' } }))
+  const answeredMotion = answered.decisions.find((decision) => decision.id === 'decision-motion-none')
+  assert.equal(answered.policyResolution.policies.movement.origin, 'request-field')
+  assert.match(answeredMotion.reason, /Requested as a structured field of the editorial request \(movement none\)/)
+  assert.notEqual(answered.requestHash, run.requestHash)
+  assert.notEqual(answered.policyResolution.policyResolutionHash, run.policyResolution.policyResolutionHash)
+})
+
+test('ADR-160 different briefings over the same media give different requests and different resolutions; a silent project resolves every policy with origin and reason', async () => {
+  const hashes = new Set()
+  for (const ownerText of [undefined, 'alpha beta gamma', 'delta epsilon']) {
+    const { run } = await fixture({ ownerText }).service(request({ idempotency: { key: `briefing-${String(ownerText).length}` } }))
+    hashes.add(run.requestHash)
+    hashes.add(run.policyResolution.policyResolutionHash)
+    for (const [key, policy] of Object.entries(run.policyResolution.policies)) {
+      assert.ok(policy.origin && policy.rule && policy.reason.length > 20 && policy.evidenceRefs.length > 0, `${key} lacks origin, rule, reason or evidence`)
+    }
+  }
+  assert.equal(hashes.size, 6, 'three briefings, three requests and three resolutions')
+})
+
+test('ADR-160 a request the Apollo cannot execute stops the Director before any plan is persisted: it is never ignored', async () => {
+  const unsupported = fixture({ editorialRequest: { directives: [{ id: 'movement-field', kind: 'movement', value: 'zoom-in' }] } })
+  await assert.rejects(unsupported.service(request({ idempotency: { key: 'unsupported-movement' } })),
+    (error) => error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' && error.details.unsupported[0].value === 'movement zoom-in')
+  assert.equal(unsupported.repository.lastBundle, undefined)
+  const rotten = fixture({ editorialRequest: { directives: [{ id: 'movement-field', kind: 'tone', value: 'warm' }] } })
+  await assert.rejects(rotten.service(request({ idempotency: { key: 'unknown-directive' } })), (error) => error instanceof DomainError)
+  assert.equal(rotten.repository.lastBundle, undefined)
+})
+
+test('ADR-160 the final admission needs the v5 report, critic v4, every check, the request now in the brief and the sealed resolution', async () => {
+  const { run } = await fixture().service(request({ idempotency: { key: 'admission' } }))
+  const report = run.qualityReport
+  const bound = bindingOf(run)
+  assert.deepEqual(admitDirectorQualityForFinal(report, bound), { admitted: true, basis: 'per-cue-caption-certification' })
+  const refused = (value, binding, pattern) => {
+    const verdict = admitDirectorQualityForFinal(value, binding)
+    assert.equal(verdict.admitted, false)
+    assert.match(verdict.reason, pattern)
+  }
+  refused(report, undefined, /cannot be bound/)
+  refused(report, { ...bound, currentRequestHash: 'f'.repeat(64) }, /request changed/)
+  refused(report, { ...bound, sealedRequestHash: null }, /did not seal/)
+  refused(report, { ...bound, sealedPolicyResolutionHash: 'e'.repeat(64) }, /policy resolution sealed/)
+  refused(report, { ...bound, sealedPolicyResolutionHash: null }, /policy resolution sealed/)
+  refused({ ...report, criticVersion: 'apollo-director-critic/v3' }, bound, /superseded/)
+  refused({ ...report, criticVersion: 'whatever' }, bound, /superseded/)
+  refused({ ...report, schemaVersion: 'director-quality-report/v4' }, bound, /superseded/)
+  refused({ ...report, schemaVersion: 'director-quality-report/v3' }, bound, /superseded/)
+  refused({ ...report, hardChecks: report.hardChecks.map((check) => check.id === 'movementMatchesPolicy' ? { ...check, passed: false } : check) }, bound, /movementMatchesPolicy did not hold/)
+  refused({ ...report, hardChecks: report.hardChecks.filter((check) => check.id !== 'requestHonored') }, bound, /requestHonored is missing/)
+  refused({ ...report, hardChecks: [] }, bound, /no hard check list/)
+  refused({ ...report, requestHash: undefined }, bound, /does not name/)
+  refused({ ...report, status: 'blocked' }, bound, /blocked/)
+  assert.deepEqual([...REQUIRED_HARD_CHECKS], ['requestHonored', 'timelineContinuous', 'sourceRightsCertain'])
 })

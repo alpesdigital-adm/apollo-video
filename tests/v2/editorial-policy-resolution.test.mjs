@@ -219,11 +219,11 @@ test('a decision points at its policy by a reference only that resolution owns',
   const a = resolveEditorialPolicies(createEditorialRequest({}), media, {})
   const b = resolveEditorialPolicies(createEditorialRequest({ directives: [{ id: 'm', kind: 'movement', value: 'none' }] }), media, {})
   const ref = policyRef(a, 'movement')
-  assert.match(ref, /^policy:movement@[a-f0-9]{16}$/)
+  assert.match(ref, /^policy:movement:[a-f0-9]{16}$/)
   assert.deepEqual(parsePolicyRef(ref), { key: 'movement', hashPrefix: a.policyResolutionHash.slice(0, 16) })
   assert.equal(resolutionOwnsPolicyRef(a, ref), true)
   assert.equal(resolutionOwnsPolicyRef(b, ref), false)
-  assert.equal(parsePolicyRef('policy:nonsense@0000000000000000'), null)
+  assert.equal(parsePolicyRef('policy:nonsense:0000000000000000'), null)
 })
 
 test('the plan facts the gates judge: movement none and the carried opening window', () => {

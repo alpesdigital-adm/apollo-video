@@ -24,6 +24,7 @@ import { SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain
 import { parseFinalExportQuality, PrismaProjectFinalExportRepository } from '../../src/v2/infrastructure/prisma/project-final-export-repository.ts'
 import { requirePersistedOutputConsumptionV3 } from '../../src/v2/infrastructure/prisma/output-state-consumption.ts'
 import { alteredConsumption, fakeOutputWorld, withConsumption } from './helpers/output-consumption-fakes.mjs'
+import { controlledBriefJson, policySnapshotRow, sealedEditorialFixture } from './helpers/editorial-request-fixture.mjs'
 import { assertRenderedSubtitleCuesAreReviewed } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import {
   advancePublicOperationPhase,
@@ -79,18 +80,24 @@ test('final export rejects unknown, legacy and hash-altered face-safety claims',
   const observed = []
   // The approving proxy review is the one rendered for the exported output: the repository attributes a review through the sealed State.
   const approvalWorld = fakeOutputWorld({ workspaceId, projectId: 'project-controlled', versionId: 'result-version', entries: [{ variantId: 'variant-controlled', aspectRatio: '9:16' }] })
+  // A report that claims a verified face safety is admitted only when it is a v5 report bound to the request in the Version's brief.
+  const briefContentJson = controlledBriefJson()
+  const sealed = await sealedEditorialFixture({ briefContentJson, strategic, suffix: 'claims', evaluatedAt, workspaceId, projectId: 'project-controlled', projectVersionId: 'result-version' })
+  const verifiedV5 = { ...sealed.qualityReport, status: 'approved', faceSafety: { status: 'verified', reasonCode: 'DETECTOR_PASS', evidenceRefs: ['evidence-1'] } }
+  const policyRow = policySnapshotRow({ id: 'policy-snapshot', workspaceId, projectId: 'project-controlled', resolution: sealed.resolution, createdAt: new Date(evaluatedAt) })
   const repository = new PrismaProjectFinalExportRepository({
     $queryRawUnsafe: (...args) => approvalWorld.queryRawUnsafe(...args),
     v2Project: { async findFirst() { return {
-      locale: 'pt-BR', versions: [{ id: 'result-version' }],
+      locale: 'pt-BR', versions: [{ id: 'result-version', briefSnapshot: { contentJson: briefContentJson } }],
       proxyReviews: [{ id: 'proxy-review', reviewHash: 'a'.repeat(64), proxyArtifactId: 'proxy-artifact' }],
     } } },
     // The Director run is the Version's own (W70 readiness reads it through the run table, by the Version it produced).
     v2DirectorRun: { async findFirst() { return { id: 'director-run', baseVersionId: 'input-version',
       qualitySnapshotId: 'quality-snapshot', objective: 'discovery',
       rubricRef: `${rubric.id}/v${rubric.version}`,
-      qualitySnapshot: { schemaVersion: 3, contentJson: JSON.stringify(verified),
-        contentHash: calculateVersionHash(verified) } } } },
+      requestHash: sealed.request.requestHash, policySnapshotId: policyRow.id, policySnapshot: policyRow,
+      qualitySnapshot: { schemaVersion: 5, contentJson: JSON.stringify(verifiedV5),
+        contentHash: calculateVersionHash(verifiedV5) } } } },
   })
   repository.perceptionEvidence = { async read(input) { observed.push(input); return { modality: 'ocr' } } }
   const request = { workspaceId, projectId: 'project-controlled', projectVersionId: 'result-version',
@@ -1501,34 +1508,32 @@ test('W65b the certification policy is part of the pre-render identity: an opera
 })
 
 // ---- the admission of the Director report (the gate nothing could pass) ----
-function directorReport({ rights = true, ...overrides } = {}) {
+async function directorReport({ rights = true, ...overrides } = {}) {
   const rubric = resolveStrategicRubric('discovery')
   const evaluatedAt = '2026-10-08T00:00:00.000Z'
   const strategic = createQualityReport({ objective: 'discovery',
     evidence: rubric.criteria.map((criterion) => ({ criterionId: criterion.id, score: 100, evidence: [`controlled:${criterion.id}`] })),
     gates: { narrativeIntegrity: true, legibility: true, rights }, evaluatedAt })
-  return { rubric, report: {
-    schemaVersion: 'director-quality-report/v3', id: 'quality-controlled', desiredActionRef: { id: 'action-controlled' },
-    status: rights ? 'review-required' : 'blocked', score: strategic.score / 100, strategic, issues: [], criticVersion: 'project-director-critic/v2', evaluatedAt,
-    faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
-    hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true, subtitlesFaceSafe: false, subtitlesBounded: true,
-      forbiddenSpeechAbsent: true, timelineContinuous: true },
-    ...overrides,
-  } }
+  const briefContentJson = controlledBriefJson()
+  const sealed = await sealedEditorialFixture({ briefContentJson, strategic, suffix: 'controlled', evaluatedAt, workspaceId, projectId: 'project-controlled',
+    projectVersionId: 'result-version', status: rights ? 'review-required' : 'blocked' })
+  return { rubric, briefContentJson, sealed, report: { ...sealed.qualityReport, ...overrides } }
 }
-function approvalRepository(report, rubric) {
+function approvalRepository(report, rubric, { briefContentJson = controlledBriefJson(), sealed, snapshotSchemaVersion = 5 } = {}) {
+  const policyRow = sealed ? policySnapshotRow({ id: 'policy-snapshot', workspaceId, projectId: 'project-controlled', resolution: sealed.resolution, createdAt: new Date('2026-10-08T00:00:00.000Z') }) : null
   const observed = []
   // The merged repository attributes a legacy proxy review to the Version's only output through its sealed State.
   const world = fakeOutputWorld({ workspaceId, projectId: 'project-controlled', versionId: 'result-version', baseHash: 'b'.repeat(64) })
   const repository = new PrismaProjectFinalExportRepository({
     $queryRawUnsafe: (...args) => world.queryRawUnsafe(...args),
     v2Project: { async findFirst() { return {
-      locale: 'pt-BR', versions: [{ id: 'result-version' }],
+      locale: 'pt-BR', versions: [{ id: 'result-version', briefSnapshot: { contentJson: briefContentJson } }],
       proxyReviews: [{ id: 'proxy-review', reviewHash: 'a'.repeat(64), proxyArtifactId: 'proxy-artifact' }],
     } } },
     v2DirectorRun: { async findFirst() { return { id: 'director-run', baseVersionId: 'input-version', qualitySnapshotId: 'quality-snapshot', objective: 'discovery',
       rubricRef: `${rubric.id}/v${rubric.version}`,
-      qualitySnapshot: { schemaVersion: 3, contentJson: JSON.stringify(report), contentHash: calculateVersionHash(report) } } } },
+      requestHash: sealed?.request.requestHash ?? null, policySnapshotId: policyRow?.id ?? null, policySnapshot: policyRow,
+      qualitySnapshot: { schemaVersion: snapshotSchemaVersion, contentJson: JSON.stringify(report), contentHash: calculateVersionHash(report) } } } },
   })
   repository.perceptionEvidence = { async read(input) { observed.push(input); return null } }
   return { repository, observed, world, request: { workspaceId, projectId: 'project-controlled', projectVersionId: 'result-version',
@@ -1536,8 +1541,8 @@ function approvalRepository(report, rubric) {
 }
 
 test('W65b the gate admits the Director report as the Director really produces it: review-required with an unknown face claim', async () => {
-  const { rubric, report } = directorReport()
-  const { repository, observed, request } = approvalRepository(report, rubric)
+  const { rubric, report, sealed } = await directorReport()
+  const { repository, observed, request } = approvalRepository(report, rubric, { sealed })
   const approval = await repository.readApproval(request)
   assert.ok(approval, 'the report that was unreachable before is admitted')
   assert.equal(approval.qualityStatus, 'review-required')
@@ -1547,23 +1552,31 @@ test('W65b the gate admits the Director report as the Director really produces i
 })
 
 test('W65b the gate still refuses everything the Director report does not honestly hold', async () => {
-  const { rubric, report } = directorReport()
-  const refuse = async (overrides, label) => {
-    const { repository, request } = approvalRepository({ ...report, ...overrides }, rubric)
+  const { rubric, report, sealed, briefContentJson } = await directorReport()
+  const refuse = async (overrides, label, options = {}) => {
+    const { repository, request } = approvalRepository({ ...report, ...overrides }, rubric, { sealed, ...options })
     assert.equal(await repository.readApproval(request), null, label)
   }
-  await refuse({ hardChecks: { ...report.hardChecks, timelineContinuous: false } }, 'a hard check that failed')
-  await refuse({ hardChecks: { ...report.hardChecks, subtitlesBounded: false } }, 'subtitles not bounded')
+  await refuse({ hardChecks: report.hardChecks.map((check) => check.id === 'timelineContinuous' ? { ...check, passed: false } : check) }, 'a hard check that failed')
+  await refuse({ hardChecks: report.hardChecks.map((check) => check.id === 'captionsBounded' ? { ...check, passed: false } : check) }, 'captions not bounded')
+  // ADR-160: the report must answer the request the Version's brief states NOW, and the run must have sealed the resolution it names
+  await refuse({}, 'the brief states another request than the one the report answered', { briefContentJson: controlledBriefJson({ ownerText: 'a request the report never answered' }) })
+  await refuse({}, 'the run sealed no policy resolution', { sealed: undefined })
+  // a report born before the request-driven era is readable (its fixed-name hard checks are what it was born with) and never admitted
+  const legacyChecks = { openingMotionProtected: true, automaticZoomDisabled: true, subtitlesFaceSafe: false, subtitlesBounded: true, forbiddenSpeechAbsent: true, timelineContinuous: true }
+  await refuse({ schemaVersion: 'director-quality-report/v4', hardChecks: legacyChecks, requestHash: undefined, policyResolutionHash: undefined, criticVersion: 'apollo-director-critic/v3' },
+    'an older report is never admitted', { snapshotSchemaVersion: 4 })
+  await refuse({ criticVersion: 'apollo-director-critic/v3' }, 'an older critic is never admitted')
   await refuse({ issues: [{ code: 'STRATEGIC_RIGHTS_FAILED', severity: 'hard', category: 'policy', message: 'Rights failed.', correctable: true }] }, 'a hard issue')
   // a report whose strategic gate failed is `blocked` (the parser holds that invariant), and blocked is never admitted
-  const failed = directorReport({ rights: false })
+  const failed = await directorReport({ rights: false })
   assert.equal(failed.report.status, 'blocked')
-  const { repository: blockedRepository, request: blockedRequest } = approvalRepository(failed.report, failed.rubric)
+  const { repository: blockedRepository, request: blockedRequest } = approvalRepository(failed.report, failed.rubric, { sealed: failed.sealed })
   assert.equal(await blockedRepository.readApproval(blockedRequest), null, 'blocked')
   // ... and a review-required report whose strategic gate did NOT pass is not even a readable report
-  const forged = approvalRepository({ ...failed.report, status: 'review-required' }, failed.rubric)
+  const forged = approvalRepository({ ...failed.report, status: 'review-required' }, failed.rubric, { sealed: failed.sealed })
   await assert.rejects(forged.repository.readApproval(forged.request), (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT')
-  const wrongRun = approvalRepository(report, rubric)
+  const wrongRun = approvalRepository(report, rubric, { sealed })
   const stale = new PrismaProjectFinalExportRepository({ $queryRawUnsafe: (...args) => wrongRun.world.queryRawUnsafe(...args), v2Project: { async findFirst() { return { locale: 'pt-BR', versions: [], proxyReviews: [] } } } })
   assert.equal(await stale.readApproval(wrongRun.request), null, 'no matching version, run or ready-for-final proxy review')
 })

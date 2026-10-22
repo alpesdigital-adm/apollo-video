@@ -21,6 +21,7 @@ import {
   type DirectorRun,
   type RunDirectorCommandPayload,
   hasConsistentFaceSafetyClaim,
+  parseDirectorHardChecks,
   validateDirectedEditPlan,
   validateDirectorDecisions,
 } from '../../domain/director-run.ts'
@@ -49,6 +50,7 @@ import {
   resolveStrategicObjective,
 } from '../../domain/strategic-objective.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
+import { parseEditorialPolicyResolution, resolutionOwnsPolicyRef, type EditorialPolicyResolutionV1 } from '../../domain/editorial-policy-resolution.ts'
 import { collectRequestedSpeechRemovals, type SpeechRemovalLineageProject } from '../../application/requested-speech-removals.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { readEditorialSourceBindingV1 } from './output-version-materializer.ts'
@@ -74,6 +76,7 @@ const directorRunInclude = Prisma.validator<Prisma.V2DirectorRunInclude>()({
   storySnapshot: true,
   editPlanSnapshot: true,
   qualitySnapshot: true,
+  policySnapshot: true,
 })
 
 type StoredDirectorRun = Prisma.V2DirectorRunGetPayload<{ include: typeof directorRunInclude }>
@@ -259,11 +262,22 @@ export function parseDirectorQualityReport(input: {
   const record = parseRecord(input.contentJson, 'Director quality report')
   const objective = resolveStrategicObjective(input.objective)
   const strategic = parseStrategicQualityReport(record.strategic)
-  const hardChecks = record.hardChecks as Record<string, unknown> | undefined
-  const expectedHardChecks = [
+  // ADR-160. v5 carries its hard checks as a list tied to the sealed policy resolution; v3 and v4 keep the fixed-name object they were born with.
+  const v5 = record.schemaVersion === 'director-quality-report/v5'
+  const hardChecks = (v5 ? {} : record.hardChecks) as Record<string, unknown> | undefined
+  const expectedHardChecks = v5 ? [] : [
     'openingMotionProtected', 'automaticZoomDisabled', 'subtitlesFaceSafe',
     'subtitlesBounded', 'forbiddenSpeechAbsent', 'timelineContinuous',
   ]
+  if (v5) {
+    parseDirectorHardChecks(record.hardChecks)
+    if (typeof record.requestHash !== 'string' || !/^[a-f0-9]{64}$/.test(record.requestHash) ||
+        typeof record.policyResolutionHash !== 'string' || !/^[a-f0-9]{64}$/.test(record.policyResolutionHash)) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Director quality report does not name its editorial request and policy resolution')
+    }
+  } else if (record.requestHash !== undefined || record.policyResolutionHash !== undefined) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Director quality report names a request it predates')
+  }
   const issues = record.issues
   const issuesValid = Array.isArray(issues) && issues.length <= 500 && issues.every((candidate) => {
     if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) return false
@@ -284,10 +298,11 @@ export function parseDirectorQualityReport(input: {
   })
   // W64. v3 is the report born before the evidence rubric (read, never written); v4 carries the perception evidence section.
   const v4 = record.schemaVersion === 'director-quality-report/v4'
+  const hasEvidence = v4 || v5
   if (
-    input.contentSchemaVersion !== (v4 ? 4 : 3) ||
-    (!v4 && record.schemaVersion !== 'director-quality-report/v3') ||
-    (v4 ? record.perceptionEvidence === undefined : record.perceptionEvidence !== undefined) ||
+    input.contentSchemaVersion !== (v5 ? 5 : v4 ? 4 : 3) ||
+    (!hasEvidence && record.schemaVersion !== 'director-quality-report/v3') ||
+    (hasEvidence ? record.perceptionEvidence === undefined : record.perceptionEvidence !== undefined) ||
     typeof record.id !== 'string' ||
     !['approved', 'approved-with-warnings', 'review-required', 'blocked'].includes(String(record.status)) ||
     typeof record.score !== 'number' || !Number.isFinite(record.score) ||
@@ -308,7 +323,7 @@ export function parseDirectorQualityReport(input: {
   if (calculateCanonicalHash(report) !== input.contentHash) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Director quality report hash is inconsistent')
   }
-  if (v4) parseDirectorPerceptionEvidenceReport(record.perceptionEvidence)
+  if (hasEvidence) parseDirectorPerceptionEvidenceReport(record.perceptionEvidence)
   return report
 }
 
@@ -395,24 +410,41 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
     editPlan.projectVersionId !== version.id || editPlan.directorRunId !== row.id ||
     treatmentPlan.id !== editPlan.treatmentPlanId || storyPlan.id !== editPlan.storyPlanId ||
     treatmentPlan.objective !== objective.id || storyPlan.objective !== objective.id ||
-    !['director-quality-report/v3', 'director-quality-report/v4'].includes(qualityReport.schemaVersion) ||
+    !['director-quality-report/v3', 'director-quality-report/v4', 'director-quality-report/v5'].includes(qualityReport.schemaVersion) ||
     !qualityReport.strategic ||
     qualityReport.strategic.rubric.id + `/v${qualityReport.strategic.rubric.version}` !== row.rubricRef ||
     qualityReport.strategic.rubric.objective !== objective.id ||
     qualityReport.strategic.rubric.purpose !== 'editorial-quality-proxy' ||
     qualityReport.score !== qualityReport.strategic.score / 100 ||
     qualityReport.strategic.passed !== ['approved', 'approved-with-warnings', 'review-required'].includes(qualityReport.status) ||
-    row.qualitySnapshot.schemaVersion !== (qualityReport.schemaVersion === 'director-quality-report/v4' ? 4 : 3) ||
+    row.qualitySnapshot.schemaVersion !== (qualityReport.schemaVersion === 'director-quality-report/v5' ? 5 : qualityReport.schemaVersion === 'director-quality-report/v4' ? 4 : 3) ||
     qualityReport.status === 'blocked' || row.initiatedByType !== 'api-client'
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored DirectorRun references are inconsistent')
   // W64. A run graded by the evidence rubric: its report, its perception and its decisions must tell the same story.
-  if (qualityReport.schemaVersion === 'director-quality-report/v4') {
+  if (qualityReport.schemaVersion === 'director-quality-report/v4' || qualityReport.schemaVersion === 'director-quality-report/v5') {
     assertDirectorRunEvidenceConsistency({
       evidence: parseDirectorPerceptionEvidenceReport(qualityReport.perceptionEvidence), baseVersionId: row.baseVersionId,
       perception: perception as unknown as Parameters<typeof assertDirectorRunEvidenceConsistency>[0]['perception'], decisions,
     })
   } else if (decisions.some((decision) => decision.bandPolicy !== undefined || decision.perceptionEvidence !== undefined)) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'A run without perception evidence carries decisions graded by the evidence policy')
+  }
+  // ADR-160. A run that names a request owns the sealed resolution it was planned and judged against: the snapshot, the report, the run row and
+  // every decision must agree on it. A run born before it has neither column and carries no resolution (and is never admitted to a final).
+  let policyResolution: Readonly<EditorialPolicyResolutionV1> | undefined
+  if (row.policySnapshotId !== null || row.requestHash !== null || payload.snapshotRefs.policyResolution !== undefined || qualityReport.schemaVersion === 'director-quality-report/v5') {
+    if (row.policySnapshot === null || row.policySnapshotId === null || row.requestHash === null ||
+        payload.snapshotRefs.policyResolution !== row.policySnapshotId || qualityReport.schemaVersion !== 'director-quality-report/v5' ||
+        row.policySnapshot.kind !== 'policy-resolution' || row.policySnapshot.schemaVersion !== 1) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored DirectorRun editorial request bindings are inconsistent')
+    }
+    policyResolution = parseEditorialPolicyResolution(parseRecord(row.policySnapshot.contentJson, 'Director policy resolution'))
+    if (calculateCanonicalHash(JSON.parse(row.policySnapshot.contentJson)) !== row.policySnapshot.contentHash ||
+        policyResolution.requestHash !== row.requestHash || qualityReport.requestHash !== row.requestHash ||
+        qualityReport.policyResolutionHash !== policyResolution.policyResolutionHash || policyResolution.blocked ||
+        decisions.some((decision) => !decision.evidenceRefs.some((ref) => resolutionOwnsPolicyRef(policyResolution!, ref)))) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored DirectorRun is not bound to the policy resolution it was judged against')
+    }
   }
   const run: DirectorRun = Object.freeze({
     schemaVersion: 2 as const,
@@ -436,6 +468,7 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
     storyPlan: Object.freeze(storyPlan),
     editPlan: Object.freeze(editPlan),
     qualityReport: Object.freeze(qualityReport),
+    ...(policyResolution ? { requestHash: row.requestHash!, policyResolution } : {}),
     decisions,
     assumptions,
     initiatedBy: Object.freeze({ type: 'api-client' as const, id: row.initiatedById }),
@@ -586,8 +619,8 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
             latestDirectorRun.rubricRef !== `${storedObjective.rubricId}/v1` ||
             !Number.isSafeInteger(latestDirectorRun.objectiveVersion) ||
             latestDirectorRun.objectiveVersion < 1 ||
-            ![3, 4].includes(latestDirectorRun.qualitySnapshot.schemaVersion) ||
-            !['director-quality-report/v3', 'director-quality-report/v4'].includes(quality.schemaVersion) ||
+            ![3, 4, 5].includes(latestDirectorRun.qualitySnapshot.schemaVersion) ||
+            !['director-quality-report/v3', 'director-quality-report/v4', 'director-quality-report/v5'].includes(quality.schemaVersion) ||
             !quality.strategic ||
             quality.strategic.rubric.id + `/v${quality.strategic.rubric.version}` !== latestDirectorRun.rubricRef ||
             quality.strategic.rubric.objective !== storedObjective.id ||
@@ -1090,7 +1123,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     // rights snapshot the plan was judged on. A right that was revoked (or expired, or whose consent changed) between the claim and
     // here refuses the run for good; a right that was re-approved on a newer snapshot refuses it as retryable, so the next attempt
     // reads the new one. The producers' readers re-check rights only for the sources that have an envelope; this is for all of them.
-    if (bundle.run.qualityReport.schemaVersion === 'director-quality-report/v4') {
+    if (bundle.run.qualityReport.schemaVersion === 'director-quality-report/v4' || bundle.run.qualityReport.schemaVersion === 'director-quality-report/v5') {
       const judged = bundle.sourceEvidence.rights
       const artifacts = await transaction.v2MediaArtifact.findMany({
         where: { workspaceId: bundle.command.workspaceId, id: { in: judged.map((entry) => entry.artifactId) } },
@@ -1176,13 +1209,31 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception names a server snapshot the commit does not carry')
     }
     // W64. The evidence ids of a run graded by the rubric name a snapshot: that snapshot is the very row this commit writes.
-    if (bundle.run.qualityReport.schemaVersion === 'director-quality-report/v4') {
+    if (bundle.run.qualityReport.schemaVersion === 'director-quality-report/v4' || bundle.run.qualityReport.schemaVersion === 'director-quality-report/v5') {
       const evidenceSnapshot = bundle.run.qualityReport.perceptionEvidence.snapshot
       if (!bundle.serverPerception || evidenceSnapshot.snapshotHash !== bundle.serverPerception.snapshotHash ||
           evidenceSnapshot.id !== serverPerceptionSnapshotId(bundle.serverPerception.snapshotHash) ||
           bundle.run.decisions.some((decision) => decision.perceptionEvidence !== undefined &&
             decision.perceptionEvidence.snapshot.id !== evidenceSnapshot.id)) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'The evidence ids of the Director run name a snapshot this commit does not write')
+      }
+    }
+    // ADR-160. A run of the request-driven era writes the sealed resolution in this very commit, and the run, the report and the snapshot
+    // must name the same request and the same resolution; a run that predates it names neither.
+    {
+      const policyRefs = bundle.command.payload.snapshotRefs.policyResolution
+      if (bundle.run.qualityReport.schemaVersion === 'director-quality-report/v5') {
+        const sealed = bundle.snapshots.find((item) => item.id === policyRefs)
+        const resolution = bundle.run.policyResolution
+        if (!sealed || sealed.kind !== 'policy-resolution' || !resolution || resolution.blocked ||
+            bundle.run.requestHash !== resolution.requestHash || bundle.run.qualityReport.requestHash !== bundle.run.requestHash ||
+            bundle.run.qualityReport.policyResolutionHash !== resolution.policyResolutionHash ||
+            parseEditorialPolicyResolution(JSON.parse(sealed.contentJson)).policyResolutionHash !== resolution.policyResolutionHash ||
+            bundle.run.decisions.some((decision) => !decision.evidenceRefs.some((ref) => resolutionOwnsPolicyRef(resolution, ref)))) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'The Director run is not bound to the policy resolution this commit writes')
+        }
+      } else if (policyRefs !== undefined || bundle.run.requestHash !== undefined || bundle.run.policyResolution !== undefined) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'A Director run without a v5 quality report names an editorial request')
       }
     }
     const targetObjective = resolveStrategicObjective(bundle.command.payload.objective)
@@ -1294,6 +1345,9 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       storySnapshotId: refs.story,
       editPlanSnapshotId: refs.editPlan,
       qualitySnapshotId: refs.quality,
+      // ADR-160. Written together or not at all (the table says so too): a run that names its request names the resolution it sealed.
+      policySnapshotId: refs.policyResolution ?? null,
+      requestHash: bundle.run.requestHash ?? null,
       decisionsJson: stableSerialize(bundle.run.decisions),
       decisionLogJson: stableSerialize(decisionLog),
       decisionLogHash: decisionLog.logHash,

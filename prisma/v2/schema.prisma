@@ -932,6 +932,7 @@ model V2ProjectSnapshot {
   storyDirectorRuns       V2DirectorRun[]                 @relation("DirectorRunStorySnapshot")
   editPlanDirectorRuns    V2DirectorRun[]                 @relation("DirectorRunEditPlanSnapshot")
   qualityDirectorRuns     V2DirectorRun[]                 @relation("DirectorRunQualitySnapshot")
+  policyDirectorRuns      V2DirectorRun[]                 @relation("DirectorRunPolicySnapshot")
   treatmentPlanPolicies   V2TreatmentPlan[]               @relation("TreatmentPlanPolicySnapshot")
   proxyRenderOperations   V2ProjectProxyRenderOperation[] @relation("ProjectProxyEditPlanSnapshot")
   finalEditPlanOperations V2ProjectFinalExportOperation[] @relation("FinalExportEditPlanSnapshot")
@@ -1757,6 +1758,10 @@ model V2DirectorRun {
   createdAt            DateTime @default(now()) @db.Timestamptz(3)
   updatedAt            DateTime @updatedAt @db.Timestamptz(3)
   operationId          String?  @db.VarChar(128)
+  // ADR-160. The sealed editorial policy resolution the run was planned and judged against, and the hash of the editorial request it answers.
+  // Null on a run born before the request-driven editorial policy; such a run is never admitted to a final export.
+  policySnapshotId     String?  @db.VarChar(128)
+  requestHash          String?  @db.Char(64)
 
   workspace                V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project                  V2Project                       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
@@ -1768,6 +1773,7 @@ model V2DirectorRun {
   storySnapshot            V2ProjectSnapshot               @relation("DirectorRunStorySnapshot", fields: [storySnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   editPlanSnapshot         V2ProjectSnapshot               @relation("DirectorRunEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   qualitySnapshot          V2ProjectSnapshot               @relation("DirectorRunQualitySnapshot", fields: [qualitySnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  policySnapshot           V2ProjectSnapshot?              @relation("DirectorRunPolicySnapshot", fields: [policySnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   finalExportOperations    V2ProjectFinalExportOperation[]
   operation                V2ProjectDirectorOperation?     @relation("DirectorOperationRun", fields: [operationId, workspaceId], references: [operationId, workspaceId], onDelete: Restrict)
   supersedesRun            V2DirectorRun?                  @relation("DirectorRunSupersession", fields: [supersedesRunId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)

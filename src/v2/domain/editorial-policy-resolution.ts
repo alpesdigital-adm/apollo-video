@@ -404,10 +404,10 @@ export function resolveEditorialPolicies(
 
 /** The reference a Director decision carries to name the policy that sustains it. Short enough for an evidence ref. */
 export function policyRef(resolution: Readonly<Pick<EditorialPolicyResolutionV1, 'policyResolutionHash'>>, key: PolicyKey): string {
-  return `policy:${key}@${resolution.policyResolutionHash.slice(0, 16)}`
+  return `policy:${key}:${resolution.policyResolutionHash.slice(0, 16)}`
 }
 
-const POLICY_REF = /^policy:([A-Za-z]+)@([a-f0-9]{16})$/
+const POLICY_REF = /^policy:([A-Za-z]+):([a-f0-9]{16})$/
 export function parsePolicyRef(ref: string): Readonly<{ key: PolicyKey; hashPrefix: string }> | null {
   const match = POLICY_REF.exec(ref)
   return match && (POLICY_KEYS as readonly string[]).includes(match[1]!) ? Object.freeze({ key: match[1] as PolicyKey, hashPrefix: match[2]! }) : null
@@ -450,6 +450,34 @@ export function compositionLayoutUnderPolicy(policy: EditorialPolicies['layout']
 export function captionTrackId(policy: EditorialPolicies['language']): string {
   const language = policy.value.captionLanguage
   return `track-captions-${language === null ? 'unspecified' : language.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+}
+
+/** The act, role and intent of one story block. */
+export interface StoryBlockShape {
+  actId: 'opening' | 'development' | 'resolution'
+  role: 'hook' | 'cta' | 'context' | 'argument'
+  intent: string
+}
+
+/**
+ * The block of a story plan under the structure policy. The only structure this planner version can express is the carried one - the
+ * roles follow the position of the clip (rule `carried-planner-value`, ADR-160 F5 derives them from the request). A call to action
+ * block exists only where the CTA policy requires one and the speech shows it.
+ */
+export function storyBlockUnderPolicy(policy: EditorialPolicies['structure'], input: Readonly<{ index: number; count: number; isCta: boolean; actionKind: string }>): StoryBlockShape {
+  assertDomain(policy.status === 'applied' && policy.value.roles === 'by-position', 'PRECONDITION_REQUIRED', 'The structure policy is not one this planner version can execute')
+  const { index, count, isCta, actionKind } = input
+  return Object.freeze({
+    actId: index === 0 ? 'opening' as const : isCta ? 'resolution' as const : 'development' as const,
+    role: index === 0 ? 'hook' as const : isCta ? 'cta' as const : index === count - 1 ? 'context' as const : 'argument' as const,
+    intent: index === 0
+      ? 'establish-speaker-and-premise'
+      : isCta
+        ? `perform-${actionKind}`
+        : index === count - 1
+          ? 'close-with-next-understanding'
+          : 'develop-value-and-proof-context',
+  })
 }
 
 /** The plan facts the movement and opening policies are judged on. */

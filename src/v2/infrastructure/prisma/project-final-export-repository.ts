@@ -9,6 +9,8 @@ import type {
 import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { admitDirectorQualityForFinal } from '../../domain/final-caption-certification.ts'
+import { parseEditorialPolicyResolution } from '../../domain/editorial-policy-resolution.ts'
+import { deriveEditorialRequestFromBrief } from '../../domain/editorial-request.ts'
 import { projectStatusTransitionPath } from '../../domain/project.ts'
 import { readOutputFormatPreset } from '../../domain/output-format-registry.ts'
 import { outputVariantsOf } from '../../domain/output-consumption.ts'
@@ -95,7 +97,8 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
         versions: {
           where: { id: input.projectVersionId, baseHash: input.projectVersionHash },
           take: 1,
-          select: { id: true },
+          // ADR-160. The brief of the Version being exported: the request it states now is the request a Director report must have answered.
+          select: { id: true, briefSnapshot: { select: { contentJson: true } } },
         },
         proxyReviews: {
           where: {
@@ -149,7 +152,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
         ...(input.qualitySnapshotId ? { qualitySnapshotId: input.qualitySnapshotId } : {}),
       },
       orderBy: { createdAt: 'desc' },
-      include: { qualitySnapshot: true },
+      include: { qualitySnapshot: true, policySnapshot: true },
     })
     const proxyReview = project.proxyReviews[0]
     if (!directorRun || !proxyReview) return null
@@ -164,7 +167,22 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     // the final burns: `per-cue-caption-certification` admits the report the Director really produces when the unknown face claim
     // is its ONLY reservation, and the worker then certifies every burned cue and omits the rest. A report that DOES claim a
     // verified face safety keeps the original requirement: every evidence ref must be a face perception envelope of the run.
-    const admission = admitDirectorQualityForFinal(quality)
+    // ADR-160. Nothing is inherited from a report that did not judge this request: the admission binds the report to the request the brief
+    // states now (recomputed here) and to the resolution the Director run sealed (read back and verified here).
+    let currentRequestHash: string
+    try {
+      currentRequestHash = deriveEditorialRequestFromBrief(JSON.parse(version.briefSnapshot.contentJson) as Record<string, unknown>).requestHash
+    } catch { return null }
+    let sealedPolicyResolutionHash: string | null = null
+    if (directorRun.policySnapshot) {
+      if (directorRun.policySnapshot.kind !== 'policy-resolution' || directorRun.policySnapshot.schemaVersion !== 1) return null
+      const resolution = parseEditorialPolicyResolution(JSON.parse(directorRun.policySnapshot.contentJson))
+      if (resolution.requestHash !== directorRun.requestHash) return null
+      sealedPolicyResolutionHash = resolution.policyResolutionHash
+    }
+    const admission = admitDirectorQualityForFinal(quality, {
+      currentRequestHash, sealedRequestHash: directorRun.requestHash, sealedPolicyResolutionHash,
+    })
     if (!admission.admitted) return null
     if (admission.basis === 'verified-face-safety') {
       for (const reference of quality.faceSafety.evidenceRefs) {
