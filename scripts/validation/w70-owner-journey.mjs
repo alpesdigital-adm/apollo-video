@@ -298,10 +298,17 @@ async function runLocked(config, { secrets, logPath }) {
       const path = substitutePath(request.path, { resolver, responses })
       const body = request.body === undefined ? undefined : substitute(request.body, { resolver, responses })
       const ifMatch = request.ifMatch === undefined ? undefined : substitute(request.ifMatch, { resolver, responses })
-      const response = await call({
+      const before = (await head()).versionId
+      let response = await call({
         method: request.method, path, body, headers: ifMatch ? { 'if-match': String(ifMatch) } : {},
-        key: request.method === 'POST' ? keyFor(scope, index, path, body) : undefined, expect: request.expect ?? [200, 201, 202], label: `${label}[${index}]`,
+        key: request.method === 'POST' ? keyFor(scope, index, path, body) : undefined, expect: request.expect ?? [200, 201, 202], allowError: true, label: `${label}[${index}]`,
       })
+      if (!response.ok) {
+        // A Command the Commands route committed and then could not ask the proxy of (several outputs) is applied; anything else is a failure.
+        const committed = await committedDespiteProxyRefusal(response, before)
+        if (!committed) throw new JourneyError('UNEXPECTED_RESPONSE', `${request.method} ${path} answered ${response.status}${response.error ? ` ${response.error.code}: ${response.error.message}` : ''}${response.error?.details?.reason ? ` (${response.error.details.reason})` : ''}`, { status: response.status, error: response.error })
+        response = { ...response, data: { version: { id: committed.versionId, baseHash: committed.baseHash } } }
+      }
       responses.push({ status: response.status, headers: response.headers, data: response.data })
       track(response.data, `${label}[${index}]`)
       await log('request-applied', { label, index, method: request.method, path, status: response.status })
@@ -340,6 +347,88 @@ async function runLocked(config, { secrets, logPath }) {
     await writeEvidence(join('interpretation', `after-revision-${attempt}.json`), after)
   }
 
+  /** The colour pipeline every video source needs before it renders (identity: the technical conversion only, nothing creative); one per project. */
+  async function compileColorPipeline() {
+    const probeResponse = await call({ path: `/v1/artifacts/${encodeURIComponent(state.master.artifactId)}/color-probe`, label: 'color-probe' })
+    const probe = probeResponse.data.probe
+    if (probe?.detection?.state !== 'ready') throw new JourneyError('COLOR_PROBE', `the source colour probe is ${probe?.detection?.state}: the pipeline would be a guess`, { probe })
+    const metadata = probe.detection.metadata
+    const stage = (id, kind, enabled, provider, parameters) => ({ id, kind, version: 'v1', enabled, output: metadata, implementation: { provider, version: 'v1', parameters, parametersHash: sha256Hex(JSON.stringify(parameters)) } })
+    const compiled = await call({
+      method: 'POST', path: `${projectPath()}/color-pipeline-compilations`, key: keyFor('color', state.master.artifactId, probe.manifestId), expect: [200, 201], label: 'color-pipeline',
+      body: {
+        sourceArtifactId: state.master.artifactId, sourceManifestId: probe.manifestId, outputMetadata: metadata,
+        stages: [stage('technical-rec709', 'technical', true, 'ffmpeg-zscale', { mode: 'identity' }), stage('match-source', 'match', false, 'apollo-match', { mode: 'bypass' }),
+          stage('creative-none', 'creative-lut', false, 'apollo-lut', { mode: 'none' }), stage('output-rec709', 'output', true, 'ffmpeg-zscale', { dither: true })],
+      },
+    })
+    state.master.manifestId = probe.manifestId
+    state.colorCompilationId = compiled.data?.compilation?.id
+  }
+
+  /** The owner's statement of the rights to the source (PUT rights), from decisions/source-rights[-n].json. */
+  async function stateRights(context) {
+    state.rightsDecisions ??= []
+    const attempt = state.rightsDecisions.length + 1
+    const decision = await awaitDecision('source-rights', attempt, context)
+    const path = `/v1/artifacts/${encodeURIComponent(state.master.artifactId)}/rights`
+    const current = await call({ path, label: 'rights-read-for-put' })
+    await call({ method: 'PUT', path, headers: { 'if-match': current.headers.etag ?? '' }, body: decision.body, expect: [200], label: `rights-put#${attempt}` })
+    state.rightsDecisions.push({ attempt, decision: decision.name, decisionSha256: decision.sha256, reason: decision.reason })
+    await log('rights-stated', { attempt, decision: decision.name })
+  }
+
+  /**
+   * A Command that commits and then asks for the proxy of "the" output (the Commands route does this for run-director and
+   * remove-spoken-content) is refused with `output-variant-required` when the project has several outputs: the Command is already
+   * committed. The driver recognises exactly that answer, proves the commit by the head Version having moved, and asks for the proxy of
+   * each output itself (proxy-renders names the variant). Any other answer, or an unmoved head, is a failure.
+   */
+  async function committedDespiteProxyRefusal(response, previousVersionId) {
+    if (response.error?.code !== 'PRECONDITION_REQUIRED' || response.error?.details?.reason !== 'output-variant-required') return null
+    const after = await head()
+    if (after.versionId === previousVersionId) return null
+    await log('warning', { message: 'the Command committed; its own proxy request was refused for a project with several outputs (output-variant-required): proxies are requested per output', versionId: after.versionId })
+    return after
+  }
+
+  /**
+   * A project whose finals are delivered is `completed`, and a completed project accepts no further proxy render (it can only be archived).
+   * The owner's correction therefore goes on a copy-on-write duplicate of the delivered Version: the same source bytes, a project of its own.
+   */
+  async function duplicateForCorrection(current) {
+    const original = state.project
+    const duplicateRequest = {
+      method: 'POST', path: `${projectPath()}/duplicates`, key: keyFor('duplicate', current.versionId), expect: [200, 201], allowError: true,
+      body: { expectedVersionId: current.versionId, expectedVersionHash: current.baseHash, name: `${original.name}-correction`.slice(0, 120) }, label: 'duplicate-for-correction',
+    }
+    let duplicated = await call(duplicateRequest)
+    if (!duplicated.ok && duplicated.error?.code === 'ASSET_RIGHTS_BLOCKED') {
+      // The copy shares the project's media by reference, and the proxies and finals the project produced carry no rights of their own.
+      const lacking = (current.workspace.media ?? []).filter((item) => item.rightsStatus !== 'approved')
+      await log('rights-blocked', { message: 'the duplication was refused for the rights of derived media: the owner states them', artifacts: lacking.map((item) => `${item.role}:${item.artifactId}`).join(',') })
+      const decision = await awaitDecision('derived-rights', 1, { artifacts: lacking.map((item) => ({ role: item.role, artifactId: item.artifactId })) })
+      for (const item of lacking) {
+        const path = `/v1/artifacts/${encodeURIComponent(item.artifactId)}/rights`
+        const read = await call({ path, label: `rights-read:${item.role}` })
+        await call({ method: 'PUT', path, headers: { 'if-match': read.headers.etag ?? '' }, body: decision.body, expect: [200], label: `rights-put:${item.role}` })
+      }
+      state.derivedRights = { decision: decision.name, decisionSha256: decision.sha256, artifacts: lacking.map((item) => item.artifactId) }
+      duplicated = await call(duplicateRequest)
+    }
+    if (!duplicated.ok) throw new JourneyError('UNEXPECTED_RESPONSE', `duplicating the delivered project answered ${duplicated.status} ${duplicated.error?.code}: ${duplicated.error?.message}`, { status: duplicated.status, error: duplicated.error })
+    state.originalProject = original
+    state.project = { id: duplicated.data.project.id, name: duplicated.data.project.name, duplicatedFromProjectId: original.id, forkedFromVersionId: duplicated.data.version?.forkedFromVersionId }
+    const workspace = await readProject(true, 'duplicate')
+    for (const output of workspace.outputs ?? []) {
+      if (state.variants[output.aspectRatio]) state.variants[output.aspectRatio] = { ...state.variants[output.aspectRatio], id: output.variantId, previousId: state.variants[output.aspectRatio].id }
+    }
+    if ((workspace.transcripts ?? []).length > 0) state.transcript = { ...state.transcript, id: [...workspace.transcripts].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0].id }
+    await log('duplicated-for-correction', { projectId: state.project.id, from: original.id, reason: 'the delivered project is completed and accepts no further proxy render' })
+    await compileColorPipeline()
+    state.pendingOperations = []
+  }
+
   /** Runs the Director; while it refuses for a reason a person can fix, waits for the revision decision and tries again. */
   async function directDirector(label) {
     for (let guard = 0; guard < config['max-revisions'] + 2; guard += 1) {
@@ -367,6 +456,24 @@ async function runLocked(config, { secrets, logPath }) {
         return entry
       }
       const reason = response.error?.details?.reason
+      const committed = await committedDespiteProxyRefusal(response, current.versionId)
+      if (committed) {
+        const run = committed.workspace.directorRuns.find((item) => item.resultVersionId === committed.versionId)
+        if (!run) throw new JourneyError('UNEXPECTED_RESPONSE', 'the Director Command committed but the project lists no DirectorRun for the new head Version')
+        const qualityResponse = await call({ path: `${projectPath()}/director-runs/${encodeURIComponent(run.id)}/quality-report`, allowError: true, label: `quality-report:${label}` })
+        const report = qualityResponse.ok ? (findKey(qualityResponse.data, 'hardChecks') ? qualityResponse.data.qualityReport?.report ?? qualityResponse.data.qualityReport : undefined) : undefined
+        const entry = {
+          label, id: run.id, status: run.status, commandId: committed.workspace.commands.find((item) => item.resultVersionId === committed.versionId)?.id, baseVersionId: run.baseVersionId, resultVersionId: run.resultVersionId,
+          plannerVersion: run.plannerVersion, criticVersion: run.criticVersion, qualitySnapshotId: run.qualitySnapshotId, qualityReportId: report?.id, qualityStatus: run.qualityStatus, score: run.qualityScore,
+          requestHash: report?.requestHash, policyResolutionHash: report?.policyResolutionHash,
+          hardChecks: (report?.hardChecks ?? []).map((check) => ({ id: check.id, kind: check.kind, passed: check.passed })), issueCount: (report?.issues ?? []).length,
+          decisionCount: run.decisionCount, assumptionCount: run.assumptionCount, embeddedProxyRequest: 'refused-output-variant-required',
+        }
+        state.directorRuns.push(entry)
+        await writeEvidence(join('director', `${label}-${run.id}.json`), { entry, workspaceRun: run, qualityReport: report })
+        await log('director-planned', { label, directorRunId: entry.id, qualityStatus: entry.qualityStatus, failedChecks: entry.hardChecks.filter((check) => !check.passed).map((check) => check.id).join(',') || 'none', via: 'workspace-read' })
+        return entry
+      }
       if (response.error?.code === 'PRECONDITION_REQUIRED' && DECISION_REASONS.has(reason)) {
         const view = await readRequestView(`blocked:${label}`)
         const summary = summarizeRequestView(view)
@@ -576,37 +683,36 @@ async function runLocked(config, { secrets, logPath }) {
     await writeEvidence(join('transcription', 'transcript.json'), { ...state.transcript, text: transcript.text })
     await log('transcribed', { transcriptId: transcript.id, language: transcript.language, origin: state.transcript.languageOrigin, provider: transcript.provider, model: transcript.model, words: transcript.wordCount })
 
-    // ---- the rights of the source (the owner's statement)
+    // ---- the rights of the source: the upload recorded the owner's confirmation; whether that is enough is judged by the consumers (an export
+    // that is refused for rights waits for decisions/source-rights.json), and a snapshot that is not approved waits for it here.
     const rights = await call({ path: `/v1/artifacts/${encodeURIComponent(state.master.artifactId)}/rights`, label: 'rights-read' })
-    const rightsStatus = findKey(rights.data, 'status')
-    await log('rights', { status: rightsStatus })
-    if (rightsStatus !== 'approved') {
-      const decision = await awaitDecision('source-rights', 1, { rightsStatus })
-      await call({ method: 'PUT', path: `/v1/artifacts/${encodeURIComponent(state.master.artifactId)}/rights`, headers: { 'if-match': rights.headers.etag ?? '' }, body: decision.body, expect: [200], label: 'rights-put' })
-    }
+    const rightsStatus = rights.data?.rights?.status ?? findKey(rights.data, 'status')
+    await log('rights', { status: rightsStatus, allowedUses: (rights.data?.rights?.allowedUses ?? []).join(',') })
+    if (rightsStatus !== 'approved') await stateRights({ rightsStatus })
 
-    // ---- the colour pipeline every video source needs before it renders (identity: the technical conversion only, nothing creative)
-    const probeResponse = await call({ path: `/v1/artifacts/${encodeURIComponent(state.master.artifactId)}/color-probe`, label: 'color-probe' })
-    const probe = probeResponse.data.probe
-    if (probe?.detection?.state !== 'ready') throw new JourneyError('COLOR_PROBE', `the source colour probe is ${probe?.detection?.state}: the pipeline would be a guess`, { probe })
-    const metadata = probe.detection.metadata
-    const stage = (id, kind, enabled, provider, parameters) => ({ id, kind, version: 'v1', enabled, output: metadata, implementation: { provider, version: 'v1', parameters, parametersHash: sha256Hex(JSON.stringify(parameters)) } })
-    const compiled = await call({
-      method: 'POST', path: `${projectPath()}/color-pipeline-compilations`, key: keyFor('color', state.master.artifactId, probe.manifestId), expect: [200, 201], label: 'color-pipeline',
-      body: {
-        sourceArtifactId: state.master.artifactId, sourceManifestId: probe.manifestId, outputMetadata: metadata,
-        stages: [stage('technical-rec709', 'technical', true, 'ffmpeg-zscale', { mode: 'identity' }), stage('match-source', 'match', false, 'apollo-match', { mode: 'bypass' }),
-          stage('creative-none', 'creative-lut', false, 'apollo-lut', { mode: 'none' }), stage('output-rec709', 'output', true, 'ffmpeg-zscale', { dither: true })],
-      },
-    })
-    state.master.manifestId = probe.manifestId
-    state.colorCompilationId = compiled.data?.compilation?.id
+    await compileColorPipeline()
 
     // ---- requests the operator asked for before the Director (captions, LUT, ...)
+    let lutChosen = false
     if (config.setup) {
       const requests = parseRequests('--setup', JSON.parse(await readFile(config.setup, 'utf8')))
       await applyRequests({ label: 'setup', requests, scope: 'setup' })
       await settlePending('setup')
+      lutChosen = requests.some((request) => /\/lut-selection(\?|$)/.test(request.path))
+    }
+    // A render needs an explicit LUT selection on the Version. Nobody asked for a look, so the minimal-intervention answer is recorded as
+    // such (mode none: the source colours are left alone); a --setup request to /lut-selection replaces it.
+    if (!lutChosen) {
+      const current = await head()
+      const lut = await call({
+        method: 'POST', path: `${projectPath()}/lut-selection`, key: keyFor('lut-none', current.versionId), expect: [200, 201], allowError: true, label: 'lut-selection-none',
+        body: { baseVersionId: current.versionId, baseHash: current.baseHash, selection: { mode: 'none' }, reason: `w70 journey ${runId}: no LUT was requested` },
+      })
+      if (!lut.ok && !(await committedDespiteProxyRefusal(lut, current.versionId))) {
+        throw new JourneyError('UNEXPECTED_RESPONSE', `lut-selection answered ${lut.status} ${lut.error?.code}: ${lut.error?.message}${lut.error?.details?.reason ? ` (${lut.error.details.reason})` : ''}`, { status: lut.status, error: lut.error })
+      }
+      track(lut.data, 'lut-selection')
+      await log('lut-selection', { mode: 'none', origin: 'minimal-intervention: no look was requested' })
     }
   }
 
@@ -622,19 +728,27 @@ async function runLocked(config, { secrets, logPath }) {
       return
     }
     state.cuts = { decision: decision.name, decisionSha256: decision.sha256, commands: [] }
-    for (const key of decision.variants) {
-      const current = await head()
-      const body = {
-        type: 'remove-spoken-content', baseVersionId: current.versionId, baseHash: current.baseHash, sourceTranscriptId: state.transcript.id, variantId: state.variants[key].id,
-        rules: decision.rules, ...(decision.exclusionOverrides ? { exclusionOverrides: decision.exclusionOverrides } : {}), ...(decision.reason ? { reason: decision.reason } : {}),
-      }
-      const response = await call({ method: 'POST', path: `${projectPath()}/commands`, key: keyFor('cut', key, current.versionId, decision.sha256), body, expect: [200, 201], label: `remove-spoken-content:${key}` })
-      track(response.data, `cut:${key}`)
-      const editorial = response.data.editorial
-      if (!editorial || (editorial.exclusions ?? []).length === 0) throw new JourneyError('CUT_EMPTY', `remove-spoken-content for ${key} removed nothing: the phrases were not found in the transcript`, { editorial })
-      state.cuts.commands.push({ key, commandId: response.data.command.id, versionId: response.data.version.id, exclusions: editorial.exclusions, retainedSourceRanges: editorial.retainedSourceRanges, outputDurationFrames: editorial.outputDurationFrames, fps: editorial.fps })
-      await log('cut-applied', { key, commandId: response.data.command.id, exclusions: editorial.exclusions.length, outputDurationFrames: editorial.outputDurationFrames })
+    // One Command: the cut is made on the project's single EditPlan, which every output re-materialises from; `variantId` names the output it goes through.
+    const key = decision.variant
+    const current = await head()
+    const body = {
+      type: 'remove-spoken-content', baseVersionId: current.versionId, baseHash: current.baseHash, sourceTranscriptId: state.transcript.id, variantId: state.variants[key].id,
+      rules: decision.rules, ...(decision.exclusionOverrides ? { exclusionOverrides: decision.exclusionOverrides } : {}), ...(decision.reason ? { reason: decision.reason } : {}),
     }
+    const response = await call({ method: 'POST', path: `${projectPath()}/commands`, key: keyFor('cut', key, current.versionId, decision.sha256), body, expect: [200, 201], allowError: true, label: `remove-spoken-content:${key}` })
+    if (!response.ok) {
+      const committed = await committedDespiteProxyRefusal(response, current.versionId)
+      if (!committed) throw new JourneyError('UNEXPECTED_RESPONSE', `remove-spoken-content answered ${response.status} ${response.error?.code}: ${response.error?.message}${response.error?.details?.reason ? ` (${response.error.details.reason})` : ''}`, { status: response.status, error: response.error })
+      const command = committed.workspace.commands.find((item) => item.resultVersionId === committed.versionId)
+      state.cuts.commands.push({ key, commandId: command?.id, versionId: committed.versionId, exclusions: null, note: 'the response with the removed ranges was not returned (proxy request refused after the commit); the cut is verified by the forbiddenSpeechAbsent check of the next Director run' })
+      await log('cut-applied', { key, commandId: command?.id, exclusions: 'not-returned' })
+      return
+    }
+    track(response.data, `cut:${key}`)
+    const editorial = response.data.editorial
+    if (!editorial || (editorial.exclusions ?? []).length === 0) throw new JourneyError('CUT_EMPTY', 'remove-spoken-content removed nothing: the phrases were not found in the transcript', { editorial })
+    state.cuts.commands.push({ key, commandId: response.data.command.id, versionId: response.data.version.id, exclusions: editorial.exclusions, retainedSourceRanges: editorial.retainedSourceRanges, outputDurationFrames: editorial.outputDurationFrames, fps: editorial.fps })
+    await log('cut-applied', { key, commandId: response.data.command.id, exclusions: editorial.exclusions.length, outputDurationFrames: editorial.outputDurationFrames })
   }
 
   async function p5DirectorReview() {
@@ -700,10 +814,17 @@ async function runLocked(config, { secrets, logPath }) {
     const operations = {}
     for (const key of keys) {
       const variantId = state.variants[key].id
-      const exported = await call({
+      const exportRequest = {
         method: 'POST', path: `${projectPath()}/exports`, key: keyFor('export', key, current.versionId, round), expect: [200, 201, 202], label: `export:${key}`,
         body: { projectVersionId: current.versionId, projectVersionHash: current.baseHash, format: key, variantId, approval: { approved: true, ...(approvals[key]?.note ? { note: approvals[key].note } : {}) } },
-      })
+      }
+      let exported = await call({ ...exportRequest, allowError: true })
+      if (!exported.ok && exported.error?.code === 'ASSET_RIGHTS_BLOCKED') {
+        await log('rights-blocked', { key, message: 'the export was refused for the rights of the source: the owner states them' })
+        await stateRights({ blockedBy: 'export', key })
+        exported = await call({ ...exportRequest, allowError: true })
+      }
+      if (!exported.ok) throw new JourneyError('UNEXPECTED_RESPONSE', `export of ${key} answered ${exported.status} ${exported.error?.code}: ${exported.error?.message}${exported.error?.details?.reason ? ` (${exported.error.details.reason})` : ''}`, { status: exported.status, error: exported.error })
       operations[key] = exported.data.operation.id
       await log('final-requested', { key, operationId: operations[key], round })
     }
@@ -739,7 +860,7 @@ async function runLocked(config, { secrets, logPath }) {
   function manifest(version, extra = {}) {
     return {
       schemaVersion: `w70-journey-manifest/${version}`, runId, generatedAt: iso(),
-      project: state.project, creationVersion: state.creationVersion, briefing: state.briefing, outputs: state.variants,
+      project: state.project, originalProject: state.originalProject, creationVersion: state.creationVersion, briefing: state.briefing, outputs: state.variants,
       master: state.master, transcript: state.transcript, interpretation: state.interpretation, revisions: state.revisions, cuts: state.cuts,
       directorRuns: state.directorRuns, commands: state.commands, operations: state.operations, reviewRounds: state.reviewRounds, approvals: state.approvals,
       finals: state.finals, timings: state.timings, ...extra,
@@ -767,6 +888,8 @@ async function runLocked(config, { secrets, logPath }) {
   async function p7OwnerCorrection() {
     const decision = await awaitDecision('owner-correction', 1, { finals: state.finals.map((item) => ({ key: item.key, sha256: item.sha256 })) })
     state.ownerCorrection = { decision: decision.name, decisionSha256: decision.sha256, reason: decision.reason, outputs: Object.keys(decision.outputs), runDirector: decision.runDirector }
+    const delivered = await head()
+    if (delivered.workspace.project.status === 'completed' && !state.originalProject) await duplicateForCorrection(delivered)
     if (decision.requests.length > 0) await applyRequests({ label: 'owner-correction', requests: decision.requests, scope: `owner-correction-${decision.sha256}` })
     if (decision.runDirector) await directDirector('owner-correction')
     const keys = Object.keys(decision.outputs)

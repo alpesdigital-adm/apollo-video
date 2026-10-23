@@ -4,7 +4,8 @@
 //
 //   cd <checkout>; APOLLO_S2D_CHECKOUT=<checkout> node <harness>/run-local-pg-s2d.mjs w70-rehearsal [--build] --plan <plan.json> --
 //   plan.json: [{ "name": "journey", "appName": "apollo-video-e2e-w70-rehearsal", "urlParams": { "connection_limit": 4 },
-//                 "args": ["tests/v2/w70-owner-journey-rehearsal.mjs"], "timeoutMs": 2400000 }]
+//                 "args": ["node_modules/tsx/dist/cli.mjs", "tests/v2/w70-owner-journey-rehearsal.mjs"], "timeoutMs": 2400000 }]
+// (tsx, like the production workers: the product's TypeScript uses syntax that Node's strip-only mode refuses)
 //
 // What is real: the server (`next start`), the PostgreSQL schema, the public /v1 API, the ingest/proxy/final workers, FFmpeg/FFprobe, the
 // brief-interpreter adapter (against the repository's local stand-in of the provider). What is stood in, and why: the speech provider
@@ -61,7 +62,8 @@ const WORDS = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 
 const briefingFirst = 'Rehearsal briefing over synthetic media. Zoom in slowly at the start. Remove the part about the placeholder topic.'
 const briefingSecond = 'Rehearsal briefing over synthetic media. Remove the part about the placeholder topic.'
 await writeFile(join(inputs, 'briefing.txt'), briefingFirst)
-await writeFile(join(inputs, 'output-spec.json'), JSON.stringify({ '9:16': { width: 360, height: 640, fps: 30, safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 } } }))
+// The final export delivers the product's format preset geometry (a custom width/height in the variant is not what comes out: the journey's inspection catches that), so the rehearsal asks for none.
+await writeFile(join(inputs, 'output-spec.json'), JSON.stringify({ '9:16': { subtitles: { mode: 'none' } } }))
 
 const factory = await import('../../src/v2/infrastructure/repository-factory.ts')
 const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
@@ -71,9 +73,9 @@ const { FOUNDATION_CAPABILITIES } = await import('../../src/v2/public-api/capabi
 const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
 
 const standIn = await startBriefInterpreterStandIn()
-const excerpt = (text, part) => ({ start: text.indexOf(part), end: text.indexOf(part) + part.length, text: part })
+// The model answers with the words it quotes; the Apollo finds them in the briefing and computes the offsets itself.
 standIn.script.set(briefingFirst, {
-  directives: [{ id: 'directive-movement', kind: 'movement', value: 'zoom-in', excerpt: excerpt(briefingFirst, 'Zoom in slowly at the start') }],
+  directives: [{ kind: 'movement', value: 'zoom-in', param: null, quote: 'Zoom in slowly at the start' }],
   unsupported: [], questions: [], coverage: [],
 })
 
@@ -91,7 +93,7 @@ const environment = {
   APOLLO_V2_ARTIFACT_ROOT: artifactRoot, APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local', APOLLO_V2_RENDER_WORK_ROOT: join(scratch, 'work'),
   APOLLO_MEDIA_UPLOAD_BASE_URL: `${baseUrl}/`, APOLLO_MEDIA_UPLOAD_SIGNING_SECRET: `rehearsal-upload-${suffix}-with-at-least-32-bytes`,
   APOLLO_MEDIA_DOWNLOAD_BASE_URL: `${baseUrl}/`, APOLLO_MEDIA_DOWNLOAD_SIGNING_SECRET: `rehearsal-download-${suffix}-with-at-least-32-bytes`,
-  GROQ_API_KEY: `synthetic-groq-key-${suffix}-not-a-real-credential`,
+  GROQ_API_KEY: `synthetic-groq-key-${suffix}-not-a-real-credential`, GROQ_TRANSCRIBE_MODEL: 'whisper-large-v3-turbo', GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR: '4',
 }
 let serverLogs = ''
 const server = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '-p', String(port)], { cwd, env: environment, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
@@ -137,7 +139,8 @@ const requestsForCorrection = [{ method: 'POST', path: '/v1/projects/{{projectId
 const decisionContent = {
   'revise-editorial-request.json': { reason: 'The renderer executes no movement: the zoom is taken out of the request (rehearsal).', briefing: briefingSecond },
   'source-rights.json': { reason: 'rehearsal', body: { status: 'approved', allowedUses: ['editorial-reuse', 'rendering', 'editing', 'distribution', 'transcription'], prohibitedUses: [], consent: { status: 'not-required', allowedUses: [] }, sourceNote: 'synthetic rehearsal master' } },
-  'remove-spoken-content.json': { variants: ['9:16', '16:9'], rules, reason: 'Remove the placeholder topic (rehearsal).' },
+  'derived-rights.json': { reason: 'rehearsal: the owner states the rights of the proxies and finals', body: { status: 'approved', allowedUses: ['editorial-reuse', 'rendering', 'editing', 'distribution', 'transcription'], prohibitedUses: [], consent: { status: 'not-required', allowedUses: [] }, sourceNote: 'derived from the synthetic rehearsal master' } },
+  'remove-spoken-content.json': { variant: '9:16', rules, reason: 'Remove the placeholder topic (rehearsal).' },
   'proxy-review.json': { outputs: { '9:16': { decision: 'approve', acknowledgeWarnings: true, note: 'approved in the rehearsal' }, '16:9': { decision: 'approve', acknowledgeWarnings: true } } },
   'owner-correction.json': { reason: 'The owner asks for a new pass of the Director (rehearsal).', requests: requestsForCorrection, outputs: { '9:16': { approve: true, acknowledgeWarnings: true, note: 'owner correction approved in the rehearsal' } } },
   'owner-acceptance.json': { accepted: true, by: 'rehearsal owner', note: 'accepted in the rehearsal' },
@@ -168,7 +171,7 @@ const human = (async () => {
 })()
 
 const runJourney = async (label, extra, { timeoutMs }) => {
-  const child = spawn(process.execPath, ['scripts/validation/w70-owner-journey.mjs',
+  const child = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'scripts/validation/w70-owner-journey.mjs',
     '--briefing', join(inputs, 'briefing.txt'), '--objective', 'awareness', '--outputs', '9:16,16:9', '--output-spec', join(inputs, 'output-spec.json'),
     '--master', masterPath, '--master-sha256', masterSha, '--master-size', String(masterBytes.length), '--rights-confirmed',
     '--evidence', evidence, '--decisions', decisions, '--poll-ms', '300', '--operation-poll-ms', '500', '--ffmpeg', ffmpeg, '--ffprobe', ffprobe, ...extra],
@@ -218,6 +221,14 @@ try {
   result.speechCalls = speechCalls
   result.interpreterCalls = standIn.calls.map((call) => ({ authorized: call.authorized, briefingSha256: hash(call.briefing) }))
   result.workerLog = workerLog.slice(-60)
+  // Diagnostic only: the rights each artifact of the workspace carries (a refusal for rights does not say which artifact or why).
+  try {
+    const { PrismaClient } = await import('../../generated/prisma-v2/index.js')
+    const prisma = new PrismaClient()
+    const artifacts = await prisma.v2MediaArtifact.findMany({ where: { workspaceId }, include: { currentRightsSnapshot: true } })
+    result.rightsDiagnostic = artifacts.map((artifact) => ({ id: artifact.id, mediaType: artifact.mediaType, kind: artifact.kind ?? null, snapshot: artifact.currentRightsSnapshot ? { status: artifact.currentRightsSnapshot.status, allowedUses: artifact.currentRightsSnapshot.allowedUsesJson ?? artifact.currentRightsSnapshot.allowedUses, locales: artifact.currentRightsSnapshot.allowedLocalesJson ?? null } : null }))
+    await prisma.$disconnect()
+  } catch (error) { result.rightsDiagnostic = String(error?.message ?? error).slice(0, 300) }
   result.serverLogTail = serverLogs.replaceAll(issued.token, '[REDACTED]').slice(-6000)
   await writeFile(join(rehearsal, 'workers.json'), JSON.stringify(workerLog, null, 2)).catch(() => undefined)
   await save()

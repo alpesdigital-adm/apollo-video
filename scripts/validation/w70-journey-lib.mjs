@@ -289,16 +289,17 @@ export const DECISION_PARSERS = Object.freeze({
     if (body.briefing !== undefined && body.briefing !== null && !nonEmptyString(body.briefing)) throw new JourneyError('INVALID_DECISION', `decision "${name}": briefing must be text or null`)
     return Object.freeze({ reason, body: Object.freeze(body) })
   },
-  /** remove-spoken-content: `{ skip: true, reason }` or the rules (phrases and alternatives) for the named outputs. */
+  /** remove-spoken-content: `{ skip: true, reason }` or the rules (phrases and alternatives), requested through the named output. */
   'remove-spoken-content': (record, name, context) => {
     if (record.skip !== undefined) {
       rejectUnknown(name, record, ['skip', 'reason'])
       if (record.skip !== true) throw new JourneyError('INVALID_DECISION', `decision "${name}": skip, when present, must be true`)
       return Object.freeze({ skip: true, reason: requireReason(name, record) })
     }
-    rejectUnknown(name, record, ['variants', 'rules', 'exclusionOverrides', 'reason'])
-    if (!Array.isArray(record.variants) || record.variants.length === 0 || !record.variants.every((key) => context.outputKeys.includes(key)) || new Set(record.variants).size !== record.variants.length) {
-      throw new JourneyError('INVALID_DECISION', `decision "${name}": "variants" must list outputs of the journey (${context.outputKeys.join(', ')}) once each`)
+    rejectUnknown(name, record, ['variant', 'rules', 'exclusionOverrides', 'reason'])
+    // The cut is one Command on the project's single EditPlan (every output re-materialises from it); `variant` names the output it is requested through.
+    if (typeof record.variant !== 'string' || !context.outputKeys.includes(record.variant)) {
+      throw new JourneyError('INVALID_DECISION', `decision "${name}": "variant" must name one output of the journey (${context.outputKeys.join(', ')})`)
     }
     if (!Array.isArray(record.rules) || record.rules.length === 0) throw new JourneyError('INVALID_DECISION', `decision "${name}": "rules" must be a non-empty list`)
     for (const [index, rule] of record.rules.entries()) {
@@ -309,7 +310,7 @@ export const DECISION_PARSERS = Object.freeze({
     }
     if (record.exclusionOverrides !== undefined && !Array.isArray(record.exclusionOverrides)) throw new JourneyError('INVALID_DECISION', `decision "${name}": exclusionOverrides must be a list`)
     return Object.freeze({
-      variants: Object.freeze([...record.variants]), rules: record.rules,
+      variant: record.variant, rules: record.rules,
       ...(record.exclusionOverrides ? { exclusionOverrides: record.exclusionOverrides } : {}),
       ...(nonEmptyString(record.reason) ? { reason: record.reason.trim() } : {}),
     })
@@ -320,6 +321,8 @@ export const DECISION_PARSERS = Object.freeze({
     if (!isRecord(record.body) || !nonEmptyString(record.body.status)) throw new JourneyError('INVALID_DECISION', `decision "${name}": "body" must be the rights document (it needs a status)`)
     return Object.freeze({ body: record.body, reason: requireReason(name, record) })
   },
+  /** derived-rights: the same rights document, stated by the owner for the project's own derived media (proxies and finals) that carry none. */
+  'derived-rights': (record, name) => DECISION_PARSERS['source-rights'](record, name),
   /** proxy-review: for every output, approve (with the warnings acknowledged when the review asks) or correct with requests. */
   'proxy-review': (record, name, context) => {
     rejectUnknown(name, record, ['outputs', 'reason'])

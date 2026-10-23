@@ -121,20 +121,20 @@ test('revise-editorial-request applies exactly the fields the file carries, with
   assert.throws(() => parseDecision('revise-editorial-request', '[]', context), /JSON object/)
 })
 
-test('remove-spoken-content is either a recorded skip or rules for named outputs', () => {
+test('remove-spoken-content is either a recorded skip or rules requested through one output', () => {
   assert.deepEqual({ ...decide('remove-spoken-content', { skip: true, reason: 'nothing to remove' }) }, { skip: true, reason: 'nothing to remove' })
   const rules = [{ id: 'rule-1', label: 'label placeholder', alternatives: ['phrase placeholder'] }]
-  const decision = decide('remove-spoken-content', { variants: ['16:9'], rules, reason: 'r' })
-  assert.deepEqual([...decision.variants], ['16:9'])
+  const decision = decide('remove-spoken-content', { variant: '16:9', rules, reason: 'r' })
+  assert.equal(decision.variant, '16:9')
   assert.equal(decision.rules.length, 1)
   refused('remove-spoken-content', { skip: true }, /reason/)
   refused('remove-spoken-content', { skip: false, reason: 'r' }, /must be true/)
-  refused('remove-spoken-content', { rules }, /variants/)
-  refused('remove-spoken-content', { variants: ['1:1'], rules }, /variants/)
-  refused('remove-spoken-content', { variants: ['16:9', '16:9'], rules }, /once each/)
-  refused('remove-spoken-content', { variants: ['16:9'], rules: [] }, /non-empty/)
-  refused('remove-spoken-content', { variants: ['16:9'], rules: [{ id: 'x', label: 'y', alternatives: [] }] }, /alternatives/)
-  refused('remove-spoken-content', { variants: ['16:9'], rules: [{ id: 'x', label: 'y', alternatives: ['z'], extra: 1 }] }, /unknown fields/)
+  refused('remove-spoken-content', { rules }, /"variant"/)
+  refused('remove-spoken-content', { variant: '1:1', rules }, /"variant"/)
+  refused('remove-spoken-content', { variants: ['16:9'], rules }, /unknown fields/)
+  refused('remove-spoken-content', { variant: '16:9', rules: [] }, /non-empty/)
+  refused('remove-spoken-content', { variant: '16:9', rules: [{ id: 'x', label: 'y', alternatives: [] }] }, /alternatives/)
+  refused('remove-spoken-content', { variant: '16:9', rules: [{ id: 'x', label: 'y', alternatives: ['z'], extra: 1 }] }, /unknown fields/)
 })
 
 test('requests of a decision stay inside /v1/ and use only POST or PUT', () => {
