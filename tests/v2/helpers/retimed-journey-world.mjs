@@ -12,6 +12,9 @@ import { createSourceTranscriptArtifactInvalidations } from '../../../src/v2/dom
 import { createEvidenceBoundBriefCompiler } from '../../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { ingestedWorld, recompiledChild, worldActor } from './output-world.mjs'
 import { twoOutputIngestedWorld } from './m1b-two-output-world.mjs'
+import { readByInterpreter } from './editorial-request-fixture.mjs'
+
+const BRIEFING = 'Tom: direto, natural e sem efeitos gratuitos.'
 
 /**
  * The physical retiming journeys (transcript-rate, wave9, wave10) start from a sealed ProjectVersion3/State3, the same way
@@ -111,7 +114,9 @@ export class SealedDirectorRepository {
       brief: {
         objective: 'discovery',
         desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
-        productionBrief: createProductionBrief({ ownerText: 'Tom: direto, natural e sem efeitos gratuitos.' }),
+        productionBrief: createProductionBrief({ ownerText: BRIEFING }),
+        // A briefing with text is refused by the Director until an interpreter has read it (ADR-160): this world's was read and held nothing to map.
+        editorialRequest: readByInterpreter(BRIEFING),
       },
       // No remove-spoken-content request in this world: stated, never left to the port's default.
       requestedSpeechRemovals: [],
