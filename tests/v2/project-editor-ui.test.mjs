@@ -241,7 +241,7 @@ test('T-FR-134 project editor searches moments and creates an evidence-bound con
   assert.match(projectEditorSource, /objective: contiguousObjective/)
   assert.match(
     projectEditorSource,
-    /targetDurationMs,\s+toleranceMs,\s+fps: contiguousFps/,
+    /targetDurationMs,\s+toleranceMs,\s+fps: fpsValue/,
   )
   assert.match(
     projectEditorSource,

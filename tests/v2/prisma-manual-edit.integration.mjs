@@ -1850,17 +1850,17 @@ ${editorialDiagnostic}`)
     const briefingCases = [
       {
         label: 'completo',
-        // Creation reads nothing: what a briefing covers is said after the interpreter has read it (revise-editorial-request).
+        // Creation reads the briefing (the server has the provider stand-in, which maps nothing): what a briefing covers is what the reading found.
         briefing: 'alpha beta gamma',
         coverage: { audience: false, offer: false, tone: false },
-        assumptions: [],
+        assumptions: ['audience-not-specified', 'offer-not-specified', 'tone-not-specified'],
         trustLabel: 'Owner autorizado',
       },
       {
         label: 'curto',
         briefing: 'alpha',
         coverage: { audience: false, offer: false, tone: false },
-        assumptions: [],
+        assumptions: ['audience-not-specified', 'offer-not-specified', 'tone-not-specified'],
         trustLabel: 'Owner autorizado',
       },
       {

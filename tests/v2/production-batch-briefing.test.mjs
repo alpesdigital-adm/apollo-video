@@ -154,9 +154,9 @@ test('the request of a batch is read through its own capability: briefing, readi
   // The contract: a query with an immutable ref, an example of placeholders, and a response schema that accepts what is published.
   const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.batches.editorial-request.read')
   assert.equal(capability.endpoint.path, '/v1/batches/{batchId}/editorial-request')
-  assert.equal(capability.outputSchemaRef, 'apollo://schemas/batch-editorial-request-response/v1')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/batch-editorial-request-response/v2')
   assert.equal(capability.toolName, 'apollo.batches.editorial-request.read')
-  const schema = getPublicSchema('apollo://schemas/batch-editorial-request-response/v1')
+  const schema = getPublicSchema('apollo://schemas/batch-editorial-request-response/v2')
   const ajv = new Ajv2020({ strict: false, allErrors: true })
   addFormats(ajv)
   const validate = ajv.compile(schema.schema)
