@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "face-parity-receipt/v1",
+  "id": "w62-v9-linux-parity/v1",
+  "producerId": "omz-face-detection-0204-v9",
+  "platform": "linux",
+  "criterion": {
+    "id": "detections-identical-max-delta-1e-6",
+    "definition": "On the 60 development images, the detections with score >= 0.5 of the Linux runtime are identical to those of the Windows V9 runtime in count and order per image, and no box coordinate or score differs by more than 1e-6. Raw output tensors are NOT required to be byte-identical.",
+    "scoreFloor": 0.5,
+    "maxAbsDelta": 1e-6,
+    "supersedes": "The original W62 deployment-gate text (tensors compared byte for byte). That stricter test was not met and was not waived silently: the owner accepted this criterion instead.",
+    "tensorsByteIdenticalRequired": false
+  },
+  "acceptance": {
+    "by": "owner",
+    "on": "2026-10-22",
+    "basis": "This measurement: V9 61/61 and retail 52/52 detections identical, maximum box/score delta 3.6e-7 (Intel) and 8.9e-7 (AMD EPYC).",
+    "brainMemory": 3803,
+    "claims": "Parity of the detector output only. It is not a qualification, does not change faceSafety (unknown) and does not replace the real-video measurement of the W70 journey."
+  },
+  "pins": {
+    "note": "The receipt is valid only for exactly these bytes. A different value in any field refuses the platform again (fail-closed).",
+    "pythonExecutableSha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f",
+    "runtimeManifestSha256": "5d5fbba5262fcbd90921e05ba604e0ad2f580610eca81851879b7ff551b936a8",
+    "workerBridgeSha256": "36be4b382b6604244c50aec3bb1d11bb312d6c7faad8fc4799ed9b451c7682e3",
+    "measuredOracleBridgeSha256": "0f6e599ad7a3ecbcc52a1c1016fcde9734b26874d6daa938a368365bf32627bb",
+    "modelXmlSha256": "33394c03a4c88cbcd2537c5d232c149b69f2a7ad406d85d2323d7303f17d7ee3",
+    "modelBinSha256": "0bbc0e08b297ce385b67ad742fd7612947e855c8f50c625b94835f883a6e4102",
+    "modelLicenseSha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "retailModelXmlSha256": "90922d199016d18128bdaba488bdb1628fce50efcc81155ede7949cbba3dd979",
+    "retailModelBinSha256": "89349ce12dd21c5263fb302cd3ffd4b73c35ea12ed98aff863d03a2cf3a32464",
+    "pythonVersion": "3.12",
+    "pythonVersionExact": "3.12.3",
+    "openvinoVersion": "2026.4.0-22959-99c81491cc3-releases/2026/4",
+    "openvinoPackageVersion": "2026.4.0",
+    "opencvVersion": "4.13.0",
+    "numpyVersion": "2.5.1"
+  },
+  "bridgeNote": "The measurement executed the pixel-oracle bridge (measuredOracleBridgeSha256), which compiles and feeds V9 exactly as the worker bridge does (BGR, direct INTER_LINEAR resize to 448x448, NCHW float32, CPU, 2 threads, 1 stream, LATENCY, f32). The registry pins the worker bridge (workerBridgeSha256), the file that runs in production. The worker bridge was NOT executed on Linux in this measurement. Supplementary check, Windows only, one run: worker bridge versus oracle bridge on the same 60 images gave V9 raw tensors byte-identical in 60/60.",
+  "inputs": {
+    "set": "development (openimages-w61-v5-manifest.json)",
+    "images": 60,
+    "inputsManifestSha256": "176e35a2d686adfd2752a770f17fa7f77e44de1a712c6917b8b44ed8a3b92435",
+    "mediaInRepository": false
+  },
+  "platformsMeasured": [
+    {
+      "id": "windows-py314",
+      "role": "reference",
+      "python": "3.14",
+      "outputSha256": "da8a6a68d39e0d7cf91b31c10c0f79cd2698bbd9fbb5c7a41d8e928dee6e4505"
+    },
+    {
+      "id": "linux-x64-intel",
+      "role": "measured",
+      "host": "Ubuntu 24.04.5, DigitalOcean s-8vcpu-16gb-intel, nyc3",
+      "python": "3.12.3",
+      "outputSha256": "82023657f7876936db84218b619cecb8fa373ff199377e4c066a2f9e4fa5f852"
+    },
+    {
+      "id": "linux-x64-amd-epyc-9555p",
+      "role": "measured",
+      "host": "DigitalOcean g5-4vcpu-16gb-80gb, ric1",
+      "python": "3.12.3",
+      "outputSha256": "dee6ad111abab02c821f71e0477b4fa675973f29031c22775d56c355d0449cbf"
+    }
+  ],
+  "results": {
+    "linux-x64-intel": {
+      "v9": { "detectionsAtOrAbove0.5": { "reference": 61, "measured": 61, "identical": true }, "maxAbsDeltaBoxOrScore": 3.5762786865234375e-7, "rawTensorByteIdentical": "1/60" },
+      "retail0004": { "detectionsAtOrAbove0.5": { "reference": 52, "measured": 52, "identical": true }, "maxAbsDeltaBoxOrScore": 0, "rawTensorByteIdentical": "53/60" }
+    },
+    "linux-x64-amd-epyc-9555p": {
+      "v9": { "detectionsAtOrAbove0.5": { "reference": 61, "measured": 61, "identical": true }, "maxAbsDeltaBoxOrScore": 8.940696716308594e-7, "rawTensorByteIdentical": "1/60" },
+      "retail0004": { "detectionsAtOrAbove0.5": { "reference": 52, "measured": 52, "identical": true }, "maxAbsDeltaBoxOrScore": 0, "rawTensorByteIdentical": "53/60" }
+    },
+    "intelVersusEpyc": { "v9MaxAbsDeltaBoxOrScore": 8.344650268554688e-7, "retailRawTensorByteIdentical": "60/60", "v9RawTensorByteIdentical": "1/60" },
+    "framesWithStatusOk": { "windows": 60, "linuxIntel": 60, "linuxEpyc": 60 },
+    "boxCountMismatches": 0,
+    "reading": "Numerical noise of the CPU kernels (last bit of float32), not a different decision: the same faces with the same boxes, within 1e-6. Whether another CPU family keeps the same property is not measured."
+  },
+  "evidence": {
+    "location": "C:/Users/leand/Documents/Apollo/w61-70-20261008/do-test-env/v9-linux-parity-20261022/ (owner machine; not in the repository)",
+    "comparisonJsonSha256": "0bd4261294eefe00837ecfb9bd796b55044bac3c9bca361821e668f23f2fd5db",
+    "comparisonSecondLinuxHostJsonSha256": "d718d67446875c15d7e27d45d3cd073ddb8af4cef228cad3c4f3d77f2cffebcc",
+    "environmentJsonSha256": "6b765510964e25c334c980f12be420a166ada8061f6b64dc56e77cb7e6edf8f3",
+    "inputsManifestJsonSha256": "176e35a2d686adfd2752a770f17fa7f77e44de1a712c6917b8b44ed8a3b92435",
+    "runnerSha256": "a9165260c2fff3bbd4999ead6836bd0d8778d8b097c06fcf78a42445b74a6ee7",
+    "runner": "run-oracle-parity.mjs (repository OpenvinoPixelOracle, unmodified, batches of 30, no pairs)"
+  }
+}

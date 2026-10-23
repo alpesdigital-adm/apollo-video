@@ -22,3 +22,6 @@
 # Preserve the exact upstream byte in this vendored file; the upstream SHA-256
 # manifest test covers it. All other code keeps the default whitespace rules.
 tools/vendor/eslint-plugin-next/dist/utils/node-attributes.js whitespace=-blank-at-eol
+
+# Hash-pinned by the producer registry: a CRLF checkout would change the bytes and break the pin.
+docs/quality/w62-v9-linux-parity-receipt.json text eol=lf

@@ -5619,7 +5619,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   {
     id: 'apollo.projects.face-window-operations.create',
     version: '1.0.0', title: 'Queue owner-accepted face evidence for one window',
-    description: 'Queues one bounded timeline window (at most 300 frames, at most 60 sampled frames) of one current rights-approved single-clip source for the owner-accepted OpenVINO face-detection-0204 detector (V9). Cadence and thresholds are server-owned. The result is foreground-face and speaker-candidate evidence under an owner decision, not a qualification: faceSafety stays unknown, no identity is established, and a runtime without a passed parity receipt (Linux, today) is not authenticated.',
+    description: 'Queues one bounded timeline window (at most 300 frames, at most 60 sampled frames) of one current rights-approved single-clip source for the owner-accepted OpenVINO face-detection-0204 detector (V9). Cadence and thresholds are server-owned. The result is foreground-face and speaker-candidate evidence under an owner decision, not a qualification: faceSafety stays unknown, no identity is established, and a runtime without a passed parity receipt (Linux only on the exact interpreter, runtime manifest and bridge bytes its receipt names) is not authenticated.',
     exposure: 'public', operationKind: 'command', authMode: 'required',
     requiredScopes: ['projects:write'],
     inputSchemaRef: 'apollo://schemas/face-window-run-request/v1',
@@ -5644,7 +5644,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   {
     id: 'apollo.projects.face-source-windows.create',
     version: '1.0.0', title: 'Queue owner-accepted face evidence for a window of a source',
-    description: 'Queues one bounded window (at most 300 frames, at most 60 sampled frames) of the source artifact\'s OWN frames, for a source the project plays and has attached, for the owner-accepted OpenVINO face-detection-0204 detector (V9). The evidence belongs to the immutable source bytes, so it is reusable by every edit and Version that plays that source: each use re-projects it through that edit\'s clips and re-checks rights at that time. Cadence and thresholds are server-owned and follow the source\'s integer frame rate. The result is foreground-face and speaker-candidate evidence under an owner decision, not a qualification: faceSafety stays unknown, no identity is established, and a runtime without a passed parity receipt (Linux, today) is not authenticated.',
+    description: 'Queues one bounded window (at most 300 frames, at most 60 sampled frames) of the source artifact\'s OWN frames, for a source the project plays and has attached, for the owner-accepted OpenVINO face-detection-0204 detector (V9). The evidence belongs to the immutable source bytes, so it is reusable by every edit and Version that plays that source: each use re-projects it through that edit\'s clips and re-checks rights at that time. Cadence and thresholds are server-owned and follow the source\'s integer frame rate. The result is foreground-face and speaker-candidate evidence under an owner decision, not a qualification: faceSafety stays unknown, no identity is established, and a runtime without a passed parity receipt (Linux only on the exact interpreter, runtime manifest and bridge bytes its receipt names) is not authenticated.',
     exposure: 'public', operationKind: 'command', authMode: 'required',
     requiredScopes: ['projects:write'],
     inputSchemaRef: 'apollo://schemas/face-source-window-run-request/v1',
