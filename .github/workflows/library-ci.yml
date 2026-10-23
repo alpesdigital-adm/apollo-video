@@ -50,6 +50,7 @@ jobs:
           cache: npm
       - name: Install real OCR, media probe and PostgreSQL tools
         run: |
+          bash scripts/validation/use-canonical-apt-mirror.sh
           sudo apt-get update -qq
           sudo apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-por postgresql-client ffmpeg
           tesseract --list-langs
