@@ -10,13 +10,13 @@ import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { assertIsolatedDatabase } from './helpers/capture-journey.mjs'
-import { installFakeCodex } from './helpers/install-fake-codex.mjs'
+import { startBriefInterpreterStandIn } from './helpers/brief-interpreter-stand-in.mjs'
 
 /**
  * ADR-160 F7/F8, in a real browser against the production build. The two screens that take the request of a video ask for a briefing and pre-fill
  * nothing: no objective, no language, no format, no recipe, no formats on the batch, no cost; the guidance is topics only. After the project is saved,
  * the Apollo shows how it read the briefing, and a question left open says the Director is blocked until it is answered. The interpreter is the
- * deterministic Codex stand-in (never the real Codex). Screenshots go to APOLLO_E2E_SCREENSHOT_DIR when it is set.
+ * local stand-in of the provider (never the real Codex). Screenshots go to APOLLO_E2E_SCREENSHOT_DIR when it is set.
  */
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -63,8 +63,10 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
   const root = await mkdtemp(join(tmpdir(), 'apollo-briefing-screens-'))
   const shots = process.env.APOLLO_E2E_SCREENSHOT_DIR
   if (shots) mkdirSync(shots, { recursive: true })
-  const fake = installFakeCodex({
-    answers: {
+  // The provider of the interpreter is a local stand-in (the real OpenAI adapter, no network, no credential, no Codex).
+  const fake = await startBriefInterpreterStandIn()
+  const answers = {
+    ...{
       [PROJECT_BRIEFING]: {
         directives: [{ kind: 'layout', value: 'source-native', param: null, quote: 'pedido' }],
         unsupported: [],
@@ -78,7 +80,8 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
         coverage: [{ topic: 'audience', quote: 'teste' }],
       },
     },
-  })
+  }
+  for (const [briefing, answer] of Object.entries(answers)) fake.script.set(briefing, answer)
   let fixture, browser, server, page
   const exchanges = []
   let serverLogs = ''
@@ -125,11 +128,8 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
         APOLLO_UI_API_CLIENT_ID: fixture.issued.client.id,
         APOLLO_V2_ARTIFACT_ROOT: root,
         APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
-        // The briefing is read by the stand-in executable: a deterministic file, never the real Codex.
-        APOLLO_V2_BRIEF_INTERPRETER_PROVIDER: 'codex-cli',
-        APOLLO_V2_CODEX_BIN: fake.binary,
-        APOLLO_V2_CODEX_HOME: fake.codexHome,
-        APOLLO_V2_BRIEF_INTERPRETER_MODEL: 'stand-in-model',
+        // The briefing is read through the local stand-in of the provider, never the real Codex or a real account.
+        ...fake.environment,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
@@ -213,7 +213,7 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     assert.equal(await freshBlock.getAttribute('data-blocks-director'), 'true')
     assert.match(await freshBlock.textContent(), /O Diretor está bloqueado: o Apollo ainda não leu o seu briefing/)
     assert.match(await dialog.getByTestId('editorial-request-briefing').textContent(), /um briefing de uma linha/)
-    assert.equal(fake.executions().length, 0, 'nothing was read yet')
+    assert.equal(fake.calls.length, 0, 'nothing was read yet')
     await shot('03-projeto-criado-briefing-ainda-nao-lido.png')
     const projects = await (await fetch(`${baseUrl}/v1/projects?text=${encodeURIComponent('Projeto do teste de tela')}`, { headers: { authorization } })).json()
     const created = projects.data.projects.find((project) => project.name === 'Projeto do teste de tela')
@@ -238,7 +238,7 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     assert.match(await block.textContent(), /O Diretor está bloqueado até você responder a pergunta/)
     assert.match(await requestPanel.getByTestId('editorial-request-directives').textContent(), /Enquadramento: formato da gravação/)
     assert.match(await requestPanel.getByTestId('editorial-request-directives').textContent(), /Trecho do briefing: “pedido”/)
-    assert.equal(fake.executions().length, 1, 'the briefing was read once')
+    assert.equal(fake.calls.length, 1, 'the briefing was read once')
     await requestPanel.getByTestId('editorial-request-questions').scrollIntoViewIfNeeded()
     await shot('05-projeto-leitura-com-pergunta.png')
     const before = await (await fetch(`${baseUrl}/v1/projects/${world.projectId}/editorial-request`, { headers: { authorization } })).json()
@@ -254,7 +254,7 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     const after = await (await fetch(`${baseUrl}/v1/projects/${world.projectId}/editorial-request`, { headers: { authorization } })).json()
     assert.equal(after.data.blocksDirector, false)
     assert.equal(after.data.interpretation.questions[0].answer, 'Manter o enquadramento da gravação.')
-    assert.equal(fake.executions().length, 1, 'answering never reads the briefing again')
+    assert.equal(fake.calls.length, 1, 'answering never reads the briefing again')
 
     // ---- 2. Lotes: nothing is pre-filled either ----
     await page.goto(`${baseUrl}/batches`)
@@ -317,13 +317,13 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     if (shots) {
       const visible = await page?.locator('body').innerText().catch(() => '(page text unavailable)')
       await page?.screenshot({ path: join(shots, 'failure.png') }).catch(() => undefined)
-      writeFileSync(join(shots, 'failure.txt'), ['page text', String(visible).slice(0, 3000), 'interpreter calls ' + fake.executions().length, 'exchanges', ...exchanges.slice(-30), 'server log tail', serverLogs.slice(-3000), 'error', String(error?.stack ?? error)].join(String.fromCharCode(10)))
+      writeFileSync(join(shots, 'failure.txt'), ['page text', String(visible).slice(0, 3000), 'interpreter calls ' + fake.calls.length, 'exchanges', ...exchanges.slice(-30), 'server log tail', serverLogs.slice(-3000), 'error', String(error?.stack ?? error)].join(String.fromCharCode(10)))
     }
     throw error
   } finally {
     if (browser) await browser.close()
     await stop(server)
-    fake.remove()
+    await fake.close()
     await rm(root, { recursive: true, force: true })
     await prisma.$disconnect()
   }
