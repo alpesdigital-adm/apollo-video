@@ -12,8 +12,10 @@ import { SUBTITLE_PRESET_LABELS, classifyCommandFailure, type CommandFailure } f
 export interface ViewExcerpt { start: number; end: number; text: string }
 export interface ViewDirective { id: string; kind: string; value: string; param?: string | number; excerpt?: ViewExcerpt }
 export interface ViewUnsupported { id: string; source: 'interpretation' | 'directive'; reason: 'outside-vocabulary' | 'not-executable'; summary: string; excerpt: string | null }
-export interface ViewQuestion { id: string; question: string; excerpt: string | null }
-export interface ViewInterpretationQuestion { id: string; question: string; status: 'open' | 'answered'; answer?: string; excerpt?: ViewExcerpt }
+/** One closed answer of a question: choosing it is the owner's answer, and it becomes the directive of the same revision. */
+export interface ViewChoice { id: string; label: string; directive: Pick<ViewDirective, 'kind' | 'value' | 'param'> }
+export interface ViewQuestion { id: string; question: string; excerpt: string | null; choices?: readonly ViewChoice[] }
+export interface ViewInterpretationQuestion { id: string; question: string; status: 'open' | 'answered'; answer?: string; excerpt?: ViewExcerpt; choices?: readonly ViewChoice[] }
 export interface ViewCoverageItem { topic: 'audience' | 'offer' | 'tone'; excerpt: ViewExcerpt }
 
 export interface EditorialRequestData {
@@ -106,12 +108,24 @@ export function describeRequestBlock(data: Readonly<EditorialRequestData>): Requ
   return { kind: 'free', message: 'Briefing lido. Nenhuma pergunta aberta: o Diretor está liberado.' }
 }
 
-/** The answers the owner filled in, as the body of `revise-editorial-request`: blank answers are not sent. */
-export function buildAnswersBody(drafts: Readonly<Record<string, string>>, openQuestionIds: readonly string[]): { answers: { questionId: string; answer: string }[] } | null {
-  const answers = openQuestionIds
-    .map((questionId) => ({ questionId, answer: (drafts[questionId] ?? '').replace(/\s+/gu, ' ').trim() }))
-    .filter((item) => item.answer.length > 0)
+/**
+ * The answers the owner gave, as the body of `revise-editorial-request`. A question with closed answers is answered by choosing one (`choiceId`, and the
+ * draft holds the choice); any other question is answered in the owner's words. An answer left blank, or a choice that is not one of the offered, is not sent.
+ */
+export function buildAnswersBody(drafts: Readonly<Record<string, string>>, openQuestions: readonly Pick<ViewQuestion, 'id' | 'choices'>[]): { answers: ({ questionId: string; answer: string } | { questionId: string; choiceId: string })[] } | null {
+  type Answer = { questionId: string; answer: string } | { questionId: string; choiceId: string }
+  const answers = openQuestions.flatMap((question): Answer[] => {
+    const draft = (drafts[question.id] ?? '').replace(/\s+/gu, ' ').trim()
+    if (draft.length === 0) return []
+    if (question.choices) return question.choices.some((choice) => choice.id === draft) ? [{ questionId: question.id, choiceId: draft }] : []
+    return [{ questionId: question.id, answer: draft }]
+  })
   return answers.length > 0 ? { answers } : null
+}
+
+/** The words of a closed answer, in plain Portuguese: what the choice makes the Apollo do. */
+export function describeChoice(choice: Readonly<ViewChoice>): string {
+  return describeDirective(choice.directive).text
 }
 
 export const ANSWER_MAX_LENGTH = 500
@@ -119,6 +133,12 @@ export const ANSWER_MAX_LENGTH = 500
 /** What a failed read or revision of the request tells the owner. */
 export function describeRequestFailure(status: number, payload: { error?: { code?: string; message?: string; requestId?: string; details?: { reason?: string } } } | null): CommandFailure {
   const reason = payload?.error?.details?.reason ?? null
+  if (payload?.error?.code === 'PRECONDITION_REQUIRED' && reason === 'editorial-request-needs-output') {
+    return {
+      kind: 'refused', status, code: 'PRECONDITION_REQUIRED', requestId: payload?.error?.requestId ?? null,
+      message: 'Este projeto ainda não tem um vídeo e uma saída. Só então o pedido pode ser respondido ou mudado. O que o Apollo entendeu já está salvo.',
+    }
+  }
   if (payload?.error?.code === 'PRECONDITION_REQUIRED' && reason === 'brief-interpreter-unavailable') {
     return {
       kind: 'unavailable', status, code: 'PRECONDITION_REQUIRED', requestId: payload?.error?.requestId ?? null,

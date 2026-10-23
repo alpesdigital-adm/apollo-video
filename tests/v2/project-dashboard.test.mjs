@@ -26,7 +26,7 @@ test('T-FR-012 project creation asks for the briefing, guides it by topics, and 
   assert.match(dashboardSource, /normalizeBriefingInput\(briefing\)/)
   assert.match(dashboardSource, /BRIEFING_REQUIRED_MESSAGE/)
   // What the Apollo understood is read from the API after the project is saved, never guessed from the text in the browser.
-  assert.match(dashboardSource, /<EditorialRequestPanel projectId=\{createdProject\.id\} readWhenUnread \/>/)
+  assert.match(dashboardSource, /<EditorialRequestPanel answersNeedOutput projectId=\{createdProject\.id\} \/>/)
   assert.doesNotMatch(dashboardSource, /createProductionBrief/)
   assert.doesNotMatch(dashboardSource, /production-brief-preview/)
 })

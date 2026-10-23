@@ -8750,7 +8750,7 @@ const editorialRequestReviseRequestSchemaV2 = {
       type: 'object', additionalProperties: false, required: ['questionId'],
       description: 'The owner answers a question in words (answer) or chooses one of its closed answers (choiceId): exactly one of the two.',
       properties: { questionId: editorialDirectiveIdSchema, answer: { type: 'string', minLength: 1, maxLength: 500 }, choiceId: editorialDirectiveIdSchema },
-      oneOf: [{ required: ['answer'] }, { required: ['choiceId'] }],
+      oneOf: [{ required: ['answer'], properties: { answer: {} } }, { required: ['choiceId'], properties: { choiceId: {} } }],
     } },
   },
 }

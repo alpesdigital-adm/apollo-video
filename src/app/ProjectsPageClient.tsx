@@ -972,7 +972,7 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                 </div>
               </div>
               <div className="px-5 py-6 sm:px-7">
-                <EditorialRequestPanel projectId={createdProject.id} readWhenUnread />
+                <EditorialRequestPanel answersNeedOutput projectId={createdProject.id} />
               </div>
               <div className="flex flex-col-reverse items-stretch justify-end gap-3 border-t border-white/[0.07] px-5 py-4 sm:flex-row sm:items-center sm:px-7">
                 <button className="h-11 min-w-40 rounded-xl bg-[#e0af37] px-5 text-sm font-bold text-[#171207] transition hover:bg-[#edc34f]" onClick={() => router.push(`/projects/${encodeURIComponent(createdProject.id)}`)} type="button">Abrir o projeto</button>
@@ -995,6 +995,19 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                   <span className="text-xs font-semibold text-[#c8c2b8]">Nome da produção</span>
                   <input autoFocus className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" maxLength={120} onChange={(event) => setName(event.target.value)} required value={name} />
                 </label>
+
+                <div>
+                  <label className="block" htmlFor="project-briefing">
+                    <span className="text-xs font-semibold text-[#c8c2b8]">{BRIEFING_FIELD_LABEL}</span>
+                    <span className="ml-2 text-[10px] text-[#d9a43a]">obrigatório</span>
+                  </label>
+                  <textarea aria-describedby={`project-briefing-guidance${briefingError ? ' project-briefing-error' : ''}`} aria-invalid={briefingError ? true : undefined} aria-required="true" className="mt-2 min-h-48 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 text-sm leading-6 text-[#f2eee7] outline-hidden transition focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" id="project-briefing" maxLength={BRIEFING_MAX_LENGTH} onChange={(event) => { setBriefing(event.target.value); if (briefingError) setBriefingError(null) }} value={briefing} />
+                  <span className="mt-1.5 flex justify-between gap-3 text-[10px] text-[#625f59]">
+                    <span>Qualquer texto serve, até uma linha. Depois de salvar, o Apollo mostra como entendeu.</span>
+                    <span>{briefing.length}/{BRIEFING_MAX_LENGTH.toLocaleString('pt-BR')}</span>
+                  </span>
+                  {briefingError ? <p className="mt-2 text-xs text-[#e0a0a0]" id="project-briefing-error" role="alert">{briefingError}</p> : null}
+                </div>
 
                 <fieldset aria-required="true">
                   <legend className="text-xs font-semibold text-[#c8c2b8]">O que este vídeo precisa provocar? <span className="ml-1 text-[10px] font-normal text-[#77736c]">escolha um</span></legend>
@@ -1047,18 +1060,6 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                   </label>
                 </div>
 
-                <div>
-                  <label className="block" htmlFor="project-briefing">
-                    <span className="text-xs font-semibold text-[#c8c2b8]">{BRIEFING_FIELD_LABEL}</span>
-                    <span className="ml-2 text-[10px] text-[#d9a43a]">obrigatório</span>
-                  </label>
-                  <textarea aria-describedby={`project-briefing-guidance${briefingError ? ' project-briefing-error' : ''}`} aria-invalid={briefingError ? true : undefined} aria-required="true" className="mt-2 min-h-32 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 text-sm leading-6 text-[#f2eee7] outline-hidden transition focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" id="project-briefing" maxLength={BRIEFING_MAX_LENGTH} onChange={(event) => { setBriefing(event.target.value); if (briefingError) setBriefingError(null) }} value={briefing} />
-                  <span className="mt-1.5 flex justify-between gap-3 text-[10px] text-[#625f59]">
-                    <span>Qualquer texto serve, até uma linha. Depois de salvar, o Apollo mostra como entendeu.</span>
-                    <span>{briefing.length}/{BRIEFING_MAX_LENGTH.toLocaleString('pt-BR')}</span>
-                  </span>
-                  {briefingError ? <p className="mt-2 text-xs text-[#e0a0a0]" id="project-briefing-error" role="alert">{briefingError}</p> : null}
-                </div>
               </div>
 
               <aside className="border-t border-white/[0.07] bg-[#0a0a0a] px-5 py-6 sm:px-7 lg:border-l lg:border-t-0">

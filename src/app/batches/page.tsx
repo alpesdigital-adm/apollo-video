@@ -4615,10 +4615,9 @@ export default function BatchesPage() {
                     <span className="text-xs font-semibold text-[#c8c2b8]">{BRIEFING_FIELD_LABEL} do lote</span>
                     <span className="ml-2 text-[10px] text-[#d9a43a]">obrigatório</span>
                   </label>
-                  <textarea aria-describedby={`batch-briefing-guidance${briefingError ? ' batch-briefing-error' : ''}`} aria-invalid={briefingError ? true : undefined} aria-required="true" className="mt-2 min-h-28 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 py-3 text-sm leading-6 text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" id="batch-briefing" maxLength={BRIEFING_MAX_LENGTH} onChange={(event) => { setBriefing(event.target.value); if (briefingError) setBriefingError(null); idempotencyKey.current = null }} value={briefing} />
+                  <textarea aria-describedby={`batch-briefing-guidance${briefingError ? ' batch-briefing-error' : ''}`} aria-invalid={briefingError ? true : undefined} aria-required="true" className="mt-2 min-h-44 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 py-3 text-sm leading-6 text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" id="batch-briefing" maxLength={BRIEFING_MAX_LENGTH} onChange={(event) => { setBriefing(event.target.value); if (briefingError) setBriefingError(null); idempotencyKey.current = null }} value={briefing} />
                   <p className="mt-1.5 text-[10px] text-[#625f59]">Vale para o lote todo. Qualquer texto serve, até uma linha; depois de criado, o lote mostra como o Apollo entendeu.</p>
                   {briefingError ? <p className="mt-1.5 text-xs text-[#e0a0a0]" id="batch-briefing-error" role="alert">{briefingError}</p> : null}
-                  <BriefingGuidance className="mt-3" id="batch-briefing-guidance" />
                 </div>
 
                 <fieldset>
@@ -4695,6 +4694,7 @@ export default function BatchesPage() {
               </div>
 
               <aside className="border-t border-white/[0.07] bg-[#0a0a0a] px-5 py-6 sm:px-7 lg:border-l lg:border-t-0">
+                <BriefingGuidance className="mb-6" id="batch-briefing-guidance" />
                 <div className="flex items-end justify-between gap-4">
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9a762c]">Seleção explícita</p>

@@ -94,9 +94,14 @@ test('the request screen says what blocks the Director, in the order the owner f
 })
 
 test('answers are sent only for open questions the owner actually answered', () => {
-  assert.equal(buildAnswersBody({}, ['q1']), null)
-  assert.equal(buildAnswersBody({ q1: '   ' }, ['q1']), null)
-  assert.deepEqual(buildAnswersBody({ q1: '  uma   resposta ', q9: 'não é pergunta aberta' }, ['q1', 'q2']), { answers: [{ questionId: 'q1', answer: 'uma resposta' }] })
+  assert.equal(buildAnswersBody({}, [{ id: 'q1' }]), null)
+  assert.equal(buildAnswersBody({ q1: '   ' }, [{ id: 'q1' }]), null)
+  assert.deepEqual(buildAnswersBody({ q1: '  uma   resposta ', q9: 'não é pergunta aberta' }, [{ id: 'q1' }, { id: 'q2' }]), { answers: [{ questionId: 'q1', answer: 'uma resposta' }] })
+  // A closed question is answered by choosing one of its choices, never by words; a choice that was not offered is not sent.
+  const closed = { id: 'q3', choices: [{ id: 'c1', label: 'a', directive: { kind: 'layout', value: 'source-native' } }, { id: 'c2', label: 'b', directive: { kind: 'layout', value: 'fit-with-backdrop' } }] }
+  assert.deepEqual(buildAnswersBody({ q3: 'c2', q1: 'x' }, [closed, { id: 'q1' }]), { answers: [{ questionId: 'q3', choiceId: 'c2' }, { questionId: 'q1', answer: 'x' }] })
+  assert.equal(buildAnswersBody({ q3: 'texto livre' }, [closed]), null)
+  assert.equal(buildAnswersBody({ q3: 'c9' }, [closed]), null)
 })
 
 test('a directive is shown in plain words with its parameter, never with a value the request did not carry', () => {
@@ -202,4 +207,32 @@ test('a briefing that cannot be read yet says why in plain words and keeps the t
   assert.match(refused.message, /O texto ficou salvo/)
   // A real version conflict keeps its own message.
   assert.notEqual(describeRequestFailure(409, { error: { code: 'VERSION_CONFLICT' } }).message, refused.message)
+})
+
+test('the briefing is the first field after the name, in the project form and in the batch form, with the guidance beside it', () => {
+  const project = source('src/app/ProjectsPageClient.tsx')
+  const form = project.slice(project.indexOf('Nome da produção'))
+  assert.ok(form.indexOf('id="project-briefing"') < form.indexOf('O que este vídeo precisa provocar?'), 'the briefing comes before the objective')
+  assert.ok(form.indexOf('id="project-briefing"') < form.indexOf('desired-action-fields'), 'and before the call to action')
+  assert.ok(project.indexOf('<BriefingGuidance id="project-briefing-guidance"') > project.indexOf('<aside'), 'the guidance sits in the side column')
+  const batch = source('src/app/batches/page.tsx')
+  const composer = batch.slice(batch.indexOf('Planejar novo lote'))
+  assert.ok(composer.indexOf('id="batch-briefing"') < composer.indexOf('Materiais autorizados'), 'the batch briefing comes before the materials')
+  assert.ok(composer.indexOf('<BriefingGuidance') > composer.indexOf('<aside'), 'the guidance sits in the side column')
+})
+
+test('a closed question is shown as radio choices (accessible), an open one as a labelled text field, and an answer needs an output to be sent', () => {
+  const panel = source('src/components/EditorialRequestPanel.tsx')
+  assert.match(panel, /<fieldset[^>]*data-testid=\{`question-choices-\$\{question\.id\}`\}/)
+  assert.match(panel, /<legend/)
+  assert.match(panel, /type="radio"/)
+  assert.match(panel, /role="radiogroup"/)
+  assert.match(panel, /htmlFor=\{`answer-\$\{question\.id\}`\}/)
+  assert.match(panel, /answersNeedOutput/)
+})
+
+test('a project with no output says why its questions cannot be answered yet, with the published reason', () => {
+  const refused = describeRequestFailure(428, { error: { code: 'PRECONDITION_REQUIRED', details: { reason: 'editorial-request-needs-output' } } })
+  assert.match(refused.message, /ainda não tem um vídeo e uma saída/)
+  assert.match(refused.message, /já está salvo/)
 })

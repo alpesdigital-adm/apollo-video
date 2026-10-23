@@ -3,7 +3,7 @@ import { createProject } from '../domain/project.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createProductionBrief, normalizeBriefingText } from '../domain/production-brief.ts'
 import { coveredTopicsOf, type BriefInterpretationAudit, type InterpretBrief } from './interpret-brief.ts'
-import type { BriefInterpretationV1 } from '../domain/editorial-request.ts'
+import { parseBriefInterpretation, type BriefInterpretationV1 } from '../domain/editorial-request.ts'
 import { createProjectCreationOutputCommandV2, normalizeProjectCreationIntentV2 } from '../domain/project-creation-command.ts'
 import { createOutputVariantCommand } from '../domain/output-variant-command.ts'
 import { createOutputSpecRevisionBody, type OutputSpecRevisionBody } from '../domain/output-spec-revision.ts'
@@ -111,7 +111,8 @@ export function createProjectService(dependencies: ClockAndIds & {
     if (briefingText !== null && dependencies.interpretBrief) {
       try {
         const read = await dependencies.interpretBrief({ briefing: briefingText })
-        reading = { interpretation: read.interpretation, audit: read.audit }
+        // The reading is sealed only if it is of THIS text (hash and every citation checked again); any other reading is no reading.
+        reading = { interpretation: parseBriefInterpretation(JSON.parse(JSON.stringify(read.interpretation)), briefingText), audit: read.audit }
       } catch (error) {
         // Only a refusal of the reading (a DomainError: unavailable, invalid answer) keeps the project unread; anything else is a defect.
         if (!(error instanceof DomainError)) throw error

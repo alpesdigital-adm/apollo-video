@@ -5698,6 +5698,22 @@ const currentEditorialRequestExample = {
   blocksDirector: editorialRequestViewExample.blocksDirector,
   hashes: editorialRequestViewExample.hashes,
 }
+// v2: a question with closed answers offers them as choices (the placeholders are neutral; the choices are the directives of the closed vocabulary).
+const editorialRequestChoicesExample = [
+  { id: 'c1', label: '<primeira opção>', directive: { id: 'c1', kind: 'layout', value: 'source-native' } },
+  { id: 'c2', label: '<segunda opção>', directive: { id: 'c2', kind: 'layout', value: 'fit-with-backdrop' } },
+]
+const editorialRequestInterpretationExampleV2 = createBriefInterpretation({
+  briefingText: editorialRequestBriefingExample,
+  interpreter: { provider: '<provedor>', model: '<modelo>', promptVersion: 'brief-interpreter/v1' },
+  directives: [],
+  questions: [{
+    id: 'q1', status: 'open', question: '<pergunta de resposta fechada>',
+    excerpt: { start: 0, end: editorialRequestBriefingExample.length, text: editorialRequestBriefingExample },
+    choices: editorialRequestChoicesExample as never,
+  }],
+})
+const editorialRequestOpenQuestionsExampleV2 = [{ id: 'q1', question: '<pergunta de resposta fechada>', excerpt: editorialRequestBriefingExample, choices: editorialRequestChoicesExample }]
 const batchEditorialRequestExample = {
   batch: { id: 'production-batch-example-1', projectId: 'project-example-1', name: '<nome do lote>' },
   state: 'interpreted',
@@ -14677,6 +14693,23 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       reason: '<motivo da revisão>',
     }],
     'apollo://schemas/editorial-request-response/v1': [{ data: currentEditorialRequestExample, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/editorial-request-response/v2': [{
+      data: { ...currentEditorialRequestExample, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2, blocksDirector: true },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/editorial-request-revise-request/v2': [
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), briefing: editorialRequestBriefingExample, reason: '<motivo da revisão>' },
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), answers: [{ questionId: 'q1', choiceId: 'c1' }] },
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), answers: [{ questionId: 'q2', answer: '<resposta do dono>' }] },
+    ],
+    'apollo://schemas/editorial-request-revised/v2': [{
+      data: { ...editorialRequestRevisedExample, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2, blocksDirector: true },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/batch-editorial-request-response/v2': [{
+      data: { ...batchEditorialRequestExample, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2 },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/batch-editorial-request-response/v1': [{ data: batchEditorialRequestExample, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/editorial-request-revised/v1': [{ data: editorialRequestRevisedExample, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/project-proxy-review-response/v1': [

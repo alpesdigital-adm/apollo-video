@@ -1367,11 +1367,12 @@ export default function ProjectWorkspacePage() {
     useState<string | null>(null)
   const [contiguousObjective, setContiguousObjective] =
     useState<(typeof CONTIGUOUS_OBJECTIVES)[number][0] | ''>('')
+  // Nothing is pre-filled: the length, the tolerance and the frame rate of the extraction are the owner's (empty until stated).
   const [contiguousDurationSeconds, setContiguousDurationSeconds] =
-    useState(120)
+    useState('')
   const [contiguousToleranceSeconds, setContiguousToleranceSeconds] =
-    useState(15)
-  const [contiguousFps, setContiguousFps] = useState(30)
+    useState('')
+  const [contiguousFps, setContiguousFps] = useState('')
   const [contiguousSearching, setContiguousSearching] =
     useState(false)
   const [contiguousCreating, setContiguousCreating] =
@@ -2239,10 +2240,15 @@ export default function ProjectWorkspacePage() {
       setContiguousError('Escolha o objetivo da extração. O Apollo não escolhe por você.')
       return
     }
+    if (contiguousDurationSeconds.trim() === '' || contiguousToleranceSeconds.trim() === '' || contiguousFps === '') {
+      setContiguousError('Informe a duração, a tolerância e os quadros por segundo da extração. O Apollo não sugere valores.')
+      return
+    }
     const targetDurationMs =
-      Math.round(contiguousDurationSeconds * 1_000)
+      Math.round(Number(contiguousDurationSeconds) * 1_000)
     const toleranceMs =
-      Math.round(contiguousToleranceSeconds * 1_000)
+      Math.round(Number(contiguousToleranceSeconds) * 1_000)
+    const fpsValue = Number(contiguousFps)
     if (
       !Number.isSafeInteger(targetDurationMs) ||
       targetDurationMs < 1_000 ||
@@ -2250,9 +2256,9 @@ export default function ProjectWorkspacePage() {
       !Number.isSafeInteger(toleranceMs) ||
       toleranceMs < 0 ||
       toleranceMs > targetDurationMs ||
-      !Number.isSafeInteger(contiguousFps) ||
-      contiguousFps < 1 ||
-      contiguousFps > 120
+      !Number.isSafeInteger(fpsValue) ||
+      fpsValue < 1 ||
+      fpsValue > 120
     ) {
       setContiguousError(
         'Revise duração, tolerância e quadros por segundo.',
@@ -2264,7 +2270,7 @@ export default function ProjectWorkspacePage() {
       topic: selectedContiguousMoment.moment.topic.normalized,
       targetDurationMs,
       toleranceMs,
-      fps: contiguousFps,
+      fps: fpsValue,
     }
     const fingerprint = JSON.stringify(body)
     if (
@@ -4718,7 +4724,7 @@ export default function ProjectWorkspacePage() {
                       min="1"
                       onChange={(event) => {
                         setContiguousDurationSeconds(
-                          Number(event.target.value),
+                          event.target.value,
                         )
                         setContiguousExtraction(null)
                         contiguousExtractionKey.current = null
@@ -4735,11 +4741,11 @@ export default function ProjectWorkspacePage() {
                     <input
                       className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 font-mono text-[10px] text-[#bdb6ac] outline-hidden focus:border-[#d9aa3d]/45"
                       data-testid="contiguous-tolerance"
-                      max={Math.max(0, contiguousDurationSeconds)}
+                      max={Math.max(0, Number(contiguousDurationSeconds))}
                       min="0"
                       onChange={(event) => {
                         setContiguousToleranceSeconds(
-                          Number(event.target.value),
+                          event.target.value,
                         )
                         setContiguousExtraction(null)
                         contiguousExtractionKey.current = null
@@ -4756,12 +4762,13 @@ export default function ProjectWorkspacePage() {
                     <select
                       className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 text-[10px] text-[#bdb6ac] outline-hidden focus:border-[#d9aa3d]/45"
                       onChange={(event) => {
-                        setContiguousFps(Number(event.target.value))
+                        setContiguousFps(event.target.value)
                         setContiguousExtraction(null)
                         contiguousExtractionKey.current = null
                       }}
                       value={contiguousFps}
                     >
+                      <option className="bg-[#111]" disabled value="">Escolha</option>
                       {[24, 25, 30, 60].map((fps) => (
                         <option className="bg-[#111]" key={fps} value={fps}>
                           {fps} fps

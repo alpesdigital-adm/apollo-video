@@ -322,3 +322,26 @@ test('the questions the resolution asks (the language, where the call to action 
   const language = await service(repository(), null)(request(parent, actor, { directives: [{ id: 'l1', kind: 'caption-language', value: 'set', param: 'en-US' }] }, { idempotencyKey: 'editorial-request-revision-3' }))
   assert.equal(requestOfObjective(language, 'sale').directives[0].param, 'en-US')
 })
+
+test('a closed answer is chosen: the choice is the owner\'s answer and the directive of the same revision, and the Director is released', async () => {
+  const { parent, actor } = await world()
+  const asking = stubModel({ ...empty, directives: [
+    { kind: 'layout', value: 'source-native', param: null, quote: 'alpha' }, { kind: 'layout', value: 'fit-with-backdrop', param: null, quote: 'beta' },
+  ] })
+  const read = await service(memoryRepository(parent), asking)(request(parent, actor, { briefing: BRIEFING }))
+  const view = (result) => describeEditorialRequest({ objective: 'discovery', briefSnapshot: { id: result.briefSnapshot.id, contentHash: result.briefSnapshot.contentHash, content: JSON.parse(result.briefSnapshot.contentJson) } })
+  const [question] = view(read).openQuestions
+  assert.deepEqual(question.choices.map((choice) => choice.id), ['c1', 'c2'])
+  assert.equal(view(read).blocksDirector, true)
+  const repository = () => memoryRepository(parent, { content: JSON.parse(read.briefSnapshot.contentJson) })
+  const second = stubModel(empty)
+  const chosen = await service(repository(), second)(request(parent, actor, { answers: [{ questionId: 'q1', choiceId: 'c2' }] }))
+  assert.equal(second.calls.length, 0, 'choosing never reads the briefing again')
+  assert.equal(view(chosen).blocksDirector, false)
+  const seen = requestOf(chosen)
+  assert.deepEqual(seen.directives.map((directive) => [directive.id, directive.kind, directive.value]), [['answer-q1', 'layout', 'fit-with-backdrop']])
+  assert.equal(seen.interpretation.questions[0].status, 'answered')
+  assert.deepEqual(chosen.command.payload.change.answeredQuestionIds, ['q1'])
+  // A word answer to a closed question is refused.
+  await assert.rejects(service(repository(), second)(request(parent, actor, { answers: [{ questionId: 'q1', answer: 'texto livre' }] })), (error) => error.code === 'INVALID_ARGUMENT')
+})

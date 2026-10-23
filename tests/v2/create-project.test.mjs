@@ -3,6 +3,8 @@ import test from 'node:test'
 
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { createProjectService } from '../../src/v2/application/create-project.ts'
+import { interpretBriefService } from '../../src/v2/application/interpret-brief.ts'
+import { deriveEditorialRequestFromBrief } from '../../src/v2/domain/editorial-request.ts'
 import { applyEditorialCutCommandService } from '../../src/v2/application/apply-editorial-cut-command.ts'
 import { duplicateProjectService } from '../../src/v2/application/duplicate-project.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
@@ -136,7 +138,7 @@ class InMemoryProjectDuplicationRepository {
   }
 }
 
-function createFixture() {
+function createFixture(extraDependencies = {}) {
   const workspace = createWorkspace({
     id: 'workspace-1',
     slug: 'alpes-digital',
@@ -148,6 +150,7 @@ function createFixture() {
   const counters = new Map()
   let eventCounter = 0
   const service = createProjectService({
+    ...extraDependencies,
     repository,
     clock: () => new Date('2026-07-12T13:01:00.000Z'),
     createId: (kind) => {
@@ -683,4 +686,40 @@ test('a language the request states is kept, canonicalized, and none is invented
   const absent = await createFixture().service(request())
   assert.equal(absent.bundle.command.payload.callerIntent.locale, null)
   assert.equal('locale' in absent.projectAtCreation, false)
+})
+
+test('ADR-160: the briefing is read when the project is created, the reading is sealed with the exact text, and a failed reading keeps it unread', async () => {
+  const BRIEFING = 'alpha beta gamma delta'
+  const answer = { directives: [{ kind: 'layout', value: 'source-native', param: null, quote: 'beta' }], unsupported: [], questions: [{ question: 'Which one?', quote: 'alpha' }], coverage: [{ topic: 'tone', quote: 'gamma' }] }
+  const model = (text) => ({ provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', async interpret() { return { text } } })
+  const brief = (fixture) => JSON.parse(fixture.repository.lastBundle.snapshots[0].contentJson)
+
+  const read = createFixture({ interpretBrief: interpretBriefService({ model: model(JSON.stringify(answer)) }) })
+  const created = await read.service(request({ briefing: BRIEFING }))
+  const content = brief(read)
+  const seen = deriveEditorialRequestFromBrief({ ...content, objective: content.objective })
+  assert.equal(seen.interpretation.directives[0].excerpt.text, 'beta')
+  assert.equal(seen.interpretation.questions[0].status, 'open')
+  assert.equal(content.editorialRequest.interpretationAudit.provider, 'test-double')
+  assert.deepEqual(content.productionBrief.summary.coverage, { audience: false, offer: false, tone: true }, 'the coverage is the reading, never a word list')
+  assert.equal(created.replayed, false)
+
+  // No interpreter: the briefing is kept as written and unread. A refused reading (the model cites words that are not in the briefing) is the same.
+  for (const interpretBrief of [undefined, interpretBriefService({ model: null }), interpretBriefService({ model: model(JSON.stringify({ ...answer, questions: [{ question: 'x', quote: 'words that are nowhere' }] })) })]) {
+    const unread = createFixture(interpretBrief ? { interpretBrief } : {})
+    await unread.service(request({ briefing: BRIEFING }))
+    const unreadContent = brief(unread)
+    assert.equal(unreadContent.editorialRequest, undefined)
+    assert.equal(deriveEditorialRequestFromBrief({ ...unreadContent, objective: unreadContent.objective }).interpretation, undefined)
+    assert.equal(deriveEditorialRequestFromBrief({ ...unreadContent, objective: unreadContent.objective }).briefing.text, BRIEFING)
+  }
+  // No briefing, no reading, no call.
+  let calls = 0
+  const none = createFixture({ interpretBrief: async () => { calls += 1; throw new Error('must not be called') } })
+  await none.service(request({ briefing: undefined }))
+  assert.equal(calls, 0)
+  // A reading of other words than the briefing the project states is never sealed: the briefing stays unread.
+  const forged = createFixture({ interpretBrief: async () => ({ ...(await interpretBriefService({ model: model(JSON.stringify(answer)) })({ briefing: 'other words altogether' })) }) })
+  await forged.service(request({ briefing: BRIEFING }))
+  assert.equal(brief(forged).editorialRequest, undefined)
 })
