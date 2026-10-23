@@ -38,10 +38,11 @@ async function emptyPerceptionEvidence({ workspaceId, projectId, projectVersionI
  * @param {string} input.briefContentJson  the contentJson of the Brief Snapshot of the Version the run directs (its request is derived from it)
  * @param {object} input.strategic         the strategic quality report (createQualityReport)
  * @param {Record<string, boolean>} [input.checks]  overrides by hard check id (a check that did not hold)
+ * @param {object|object[]} [input.outputs]  the outputs the resolution is made for ({ variantId, spec, subtitleMode }): with a burn-in output it seals the caption geometry the final is measured against
  */
-export async function sealedEditorialFixture({ briefContentJson, strategic, suffix, evaluatedAt, workspaceId, projectId, projectVersionId, status = 'review-required', checks = {}, removalRuleIds = [], issues = [] }) {
+export async function sealedEditorialFixture({ briefContentJson, strategic, suffix, evaluatedAt, workspaceId, projectId, projectVersionId, status = 'review-required', checks = {}, removalRuleIds = [], issues = [], outputs = {} }) {
   const request = deriveEditorialRequestFromBrief(JSON.parse(briefContentJson), removalRuleIds)
-  const resolution = resolveEditorialPolicies(request, { transcriptLanguage: 'xx-YY', hasSelectedInsert: false }, {})
+  const resolution = resolveEditorialPolicies(request, { transcriptLanguage: 'xx-YY', hasSelectedInsert: false }, outputs)
   const perceptionEvidence = await emptyPerceptionEvidence({ workspaceId, projectId, projectVersionId })
   const passes = (id) => checks[id] ?? true
   const check = (id, kind, key) => ({ id, kind, passed: passes(id), policyRef: key ? policyRef(resolution, key) : null, evidence: [`${id}=fixture`] })

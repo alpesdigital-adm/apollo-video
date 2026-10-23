@@ -2,6 +2,7 @@ import { layoutBurnedCaption, type CaptionGeometry } from './caption-burn-layout
 import { captionFontPx } from './caption-text-layout.ts'
 import type { OutputSpec } from './output-spec.ts'
 import { deriveSubtitleRegion } from './subtitle-region.ts'
+import { resolveSubtitleOverridesForRender, type SubtitleOverrideRenderCue, type SubtitleSegmentOverride } from './subtitle-segment-override.ts'
 import { readSubtitlePreset, resolveSubtitleMvpFormat, resolveSubtitleRenderMetrics, type SubtitlePresetId } from './subtitle-system.ts'
 
 /**
@@ -61,4 +62,34 @@ export function captionCuesThatDoNotFit(
     if (geometry) refused.push(Object.freeze({ cueId: cue.id, variantId: geometry.variantId }))
   }
   return Object.freeze(refused)
+}
+
+/**
+ * The geometries the captions of ONE output are measured against, from the deliveries a policy resolution sealed. The output's own
+ * burn-in geometry; none when the resolution sealed it as sidecar or none (nothing is drawn there). An output the resolution does not
+ * name - or names without a stated mode - cannot be measured on its own, so it is measured against every burn-in output (fail closed).
+ */
+export function captionFitGeometriesOfOutput(
+  deliveries: readonly Readonly<{ variantId: string; mode: CaptionDeliveryMode | 'unspecified'; fit: Readonly<CaptionFitGeometry> | null }>[],
+  variantId: string,
+): readonly Readonly<CaptionFitGeometry>[] {
+  const own = deliveries.find((delivery) => delivery.variantId === variantId)
+  if (own && own.mode !== 'unspecified') return Object.freeze(own.fit ? [own.fit] : [])
+  return Object.freeze(deliveries.flatMap((delivery) => delivery.fit ? [delivery.fit] : []))
+}
+
+/**
+ * The cues a final would BURN (the plan's cues with this output's exceptions applied; a hidden cue says nothing) that no longer fit the
+ * measured band. The Director measured the captions of its own plan; a text exception made afterwards can lengthen a segment beyond what
+ * the output draws, so the measurement is repeated on what is actually drawn. Returns the cue ids with the output that refuses them.
+ */
+export function drawnCaptionCuesThatDoNotFit(input: Readonly<{
+  cues: readonly Readonly<SubtitleOverrideRenderCue>[]
+  overrides: readonly Readonly<SubtitleSegmentOverride>[]
+  variantId: string
+  geometries: readonly Readonly<CaptionFitGeometry>[]
+}>): readonly Readonly<{ cueId: string; variantId: string }>[] {
+  if (input.geometries.length === 0) return Object.freeze([])
+  const drawn = resolveSubtitleOverridesForRender({ cues: input.cues, overrides: input.overrides, variantId: input.variantId }).cues
+  return captionCuesThatDoNotFit(drawn.map((cue) => ({ id: cue.id, text: cue.text })), input.geometries)
 }

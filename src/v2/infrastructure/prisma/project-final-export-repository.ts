@@ -10,6 +10,7 @@ import type {
 import type { ProjectProxyRenderSource } from '../../application/ports/project-proxy-render-repository.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { captionFitGeometriesOfOutput, drawnCaptionCuesThatDoNotFit } from '../../domain/caption-fit.ts'
 import { admitDirectorQualityForFinal } from '../../domain/final-caption-certification.ts'
 import { parseEditorialPolicyResolution, POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION } from '../../domain/editorial-policy-resolution.ts'
 import { deriveEditorialRequestFromBrief } from '../../domain/editorial-request.ts'
@@ -255,6 +256,47 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     }
   }
 
+  /**
+   * Admission of the final, last gate, for the width of the output. The Director certified that every cue of its plan fits the band
+   * measured on each output that burns captions (`captionsFitMeasured`, against the geometry its policy resolution sealed). A text
+   * exception inherited by this Version can lengthen a segment beyond that band without the Director ever measuring it. So the cues the
+   * final would burn (the plan's cues with this output's exceptions applied) are measured again against the geometry sealed in the
+   * resolution of the Director run the final stands on. One that no longer fits refuses the final, fail closed; an output the resolution
+   * sealed as sidecar or without captions has nothing to measure.
+   */
+  private async assertCaptionsFitMeasuredOutput(
+    input: Readonly<{ workspaceId: string; projectId: string; projectVersionId: string }>,
+    source: Readonly<ProjectProxyRenderSource>,
+    directorRunId: string,
+  ): Promise<void> {
+    const run = await this.client.v2DirectorRun.findFirst({
+      where: { id: directorRunId, workspaceId: input.workspaceId, projectId: input.projectId },
+      include: { policySnapshot: true },
+    })
+    // The admission bound the report to a sealed resolution; one that cannot be read back here leaves nothing to measure against.
+    if (!run?.policySnapshot || run.policySnapshot.kind !== 'policy-resolution' || run.policySnapshot.schemaVersion !== POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'The policy resolution the final stands on cannot be read to measure its captions', {
+        reason: 'caption-fit-resolution-missing', versionId: input.projectVersionId, directorRunId,
+      })
+    }
+    const variantId = sourceOutputVariantId(source)
+    const resolution = parseEditorialPolicyResolution(JSON.parse(run.policySnapshot.contentJson))
+    const geometries = captionFitGeometriesOfOutput(resolution.policies.captions.value.deliveries, variantId)
+    const refused = drawnCaptionCuesThatDoNotFit({
+      cues: (source.editPlan.subtitleTracks as readonly Readonly<{ cues: readonly Readonly<{ id: string; startFrame: number; endFrame: number; text: string }>[] }>[])
+        .flatMap((track) => track.cues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame, text: cue.text }))),
+      overrides: source.subtitleOverrides ?? [],
+      variantId,
+      geometries,
+    })
+    if (refused.length > 0) {
+      throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED',
+        'A caption of this final no longer fits the width measured for its output; the exception that lengthened it must be changed first', {
+          reason: 'caption-text-does-not-fit-measured-output', versionId: input.projectVersionId, variantId, cueIds: refused.map((item) => item.cueId),
+        })
+    }
+  }
+
   async readApprovedCurrentSource(input: {
     workspaceId: string
     projectId: string
@@ -271,6 +313,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: true })
     if (!approval || !reframeMatchesApproval(source, approval) || !subtitleOverridesMatchApproval(source, approval)) return null
     await this.assertCaptionsHonourRequestedSpeechRemovals(input, source)
+    await this.assertCaptionsFitMeasuredOutput(input, source, approval.directorRunId)
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
   }
 
@@ -318,6 +361,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: false })
     if (!approval || !reframeMatchesApproval(source, approval) || !subtitleOverridesMatchApproval(source, approval)) return null
     await this.assertCaptionsHonourRequestedSpeechRemovals(input, source)
+    await this.assertCaptionsFitMeasuredOutput(input, source, approval.directorRunId)
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
   }
 

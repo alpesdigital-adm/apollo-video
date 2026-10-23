@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { captionCuesThatDoNotFit, captionTextFitsEveryOutput } from '../../src/v2/domain/caption-fit.ts'
+import { captionCuesThatDoNotFit, captionFitGeometriesOfOutput, captionTextFitsEveryOutput, drawnCaptionCuesThatDoNotFit } from '../../src/v2/domain/caption-fit.ts'
+import { createSubtitleSegmentOverride } from '../../src/v2/domain/subtitle-segment-override.ts'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
 import { EDITORIAL_POLICY_RULES, resolveEditorialPolicies } from '../../src/v2/domain/editorial-policy-resolution.ts'
 import { createEditorialRequest } from '../../src/v2/domain/editorial-request.ts'
@@ -81,6 +82,53 @@ test('captionCuesThatDoNotFit measures against every burn-in output', () => {
   assert.ok(captionTextFitsEveryOutput('alpha', geometries))
   assert.equal(captionTextFitsEveryOutput('w'.repeat(400), geometries), false)
   assert.equal(captionTextFitsEveryOutput('alpha', []), true, 'with no burn-in output there is nothing to measure against')
+})
+
+// ADR-160 F6. The final measures again what it burns: a text exception inherited by a Version can lengthen a caption beyond the band the
+// Director measured. Synthetic cues only.
+const BURN_VARIANT = 'v-portrait'
+const textException = (segmentId, range, text, variantId = BURN_VARIANT) => createSubtitleSegmentOverride({
+  id: `override-${segmentId}-${variantId}`, workspaceId: 'workspace-x', projectId: 'project-x', baseVersionId: 'version-base', resultVersionId: `version-${segmentId}`,
+  commandId: `command-${segmentId}`, variantId, segmentId, range, action: 'set', dimensions: [{ kind: 'text', text }], protected: false, previousOverrideId: null,
+  createdAt: '2026-10-20T10:00:00.000Z',
+})
+const FINAL_CUES = [
+  { id: 'cue-a', startFrame: 20, endFrame: 50, text: 'alpha beta' },
+  { id: 'cue-b', startFrame: 100, endFrame: 130, text: 'gamma delta' },
+]
+const sealedDeliveries = () => resolveEditorialPolicies(createEditorialRequest({}), media, [
+  { variantId: BURN_VARIANT, spec: spec9x16, subtitleMode: 'burn-in' },
+  { variantId: 'v-landscape', spec: spec16x9, subtitleMode: 'burn-in' },
+  { variantId: 'v-sidecar', spec: spec16x9, subtitleMode: 'sidecar' },
+]).policies.captions.value.deliveries
+
+test('the geometry a final is measured against is the own output; a sidecar output has none; an output the resolution does not name is measured against every burn-in output', () => {
+  const deliveries = sealedDeliveries()
+  const own = captionFitGeometriesOfOutput(deliveries, BURN_VARIANT)
+  assert.deepEqual(own.map((geometry) => geometry.variantId), [BURN_VARIANT])
+  assert.equal(own[0].aspectRatio, '9:16')
+  assert.deepEqual(captionFitGeometriesOfOutput(deliveries, 'v-sidecar'), [], 'a sidecar output draws nothing: there is nothing to measure')
+  assert.deepEqual(captionFitGeometriesOfOutput(deliveries, 'v-never-sealed').map((geometry) => geometry.variantId).sort(), ['v-landscape', BURN_VARIANT].sort(),
+    'an output the resolution does not name is measured against every burn-in output, fail closed')
+  assert.deepEqual(captionFitGeometriesOfOutput([], 'v-anything'), [], 'a resolution with no delivery has nothing to measure against')
+  assert.deepEqual(captionFitGeometriesOfOutput([{ variantId: 'v-open', mode: 'unspecified', fit: null }, ...deliveries], 'v-open').length, 2,
+    'a delivery whose mode was not stated cannot be trusted to draw nothing')
+})
+
+test('a text exception that makes a caption stop fitting the measured band is found; one that fits, an exception of another output, and a hidden one are not', () => {
+  const geometries = captionFitGeometriesOfOutput(sealedDeliveries(), BURN_VARIANT)
+  const tooLong = textException('cue-b', { startFrame: 100, endFrame: 130 }, 'palavra '.repeat(24).trim())
+  assert.deepEqual(drawnCaptionCuesThatDoNotFit({ cues: FINAL_CUES, overrides: [], variantId: BURN_VARIANT, geometries }), [], 'the cues of the plan fit (the Director measured them)')
+  assert.deepEqual(drawnCaptionCuesThatDoNotFit({ cues: FINAL_CUES, overrides: [tooLong], variantId: BURN_VARIANT, geometries }),
+    [{ cueId: 'cue-b', variantId: BURN_VARIANT }])
+  const shorter = textException('cue-b', { startFrame: 100, endFrame: 130 }, 'outra fala')
+  assert.deepEqual(drawnCaptionCuesThatDoNotFit({ cues: FINAL_CUES, overrides: [shorter], variantId: BURN_VARIANT, geometries }), [])
+  // an exception of another output does not reach this one
+  assert.deepEqual(drawnCaptionCuesThatDoNotFit({ cues: FINAL_CUES, overrides: [textException('cue-b', { startFrame: 100, endFrame: 130 }, 'palavra '.repeat(24).trim(), 'v-landscape')], variantId: BURN_VARIANT, geometries }), [])
+  // a range the plan no longer has is a recorded no-op, never a guess
+  assert.deepEqual(drawnCaptionCuesThatDoNotFit({ cues: FINAL_CUES, overrides: [textException('cue-b', { startFrame: 101, endFrame: 130 }, 'palavra '.repeat(24).trim())], variantId: BURN_VARIANT, geometries }), [])
+  // no burn-in geometry: nothing is drawn, so nothing is refused
+  assert.deepEqual(drawnCaptionCuesThatDoNotFit({ cues: FINAL_CUES, overrides: [tooLong], variantId: BURN_VARIANT, geometries: [] }), [])
 })
 
 test('the spoken call to action is judged in the language of the speech; a language without a lexicon is a question, never a guess', () => {
