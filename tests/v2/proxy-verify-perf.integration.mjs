@@ -121,12 +121,11 @@ function countingProcessor() {
   return { calls, process: async (input) => { const result = await real.process(input); calls.push({ sourcePath: input.sourcePath, outputPath: input.outputPath, sha256: result.sha256 }); return result } }
 }
 
-async function normalizationWorld(name) {
+async function normalizationWorld(name, processor = countingProcessor()) {
   const bands = await presetBands('9:16', SOURCE)
   const face = faceRectOf({ XMin: 0.46, YMin: 0.34, XMax: 0.56, YMax: 0.5 })
   const spec = outputSpecOf({ imageId: 'synthetic', format: '9:16', variant: 'combined', face, source: SOURCE, bands })
   const planned = await planOutput(spec, bands)
-  const processor = countingProcessor()
   const real = new FfmpegEditorialProxyRenderer({ workRoot: join(root, name), ffmpegPath, colorProcessor: processor })
   const scoped = (scope) => ({ render: (input) => real.render({ ...input, ...(scope ? { normalizationScopeId: scope } : {}) }), cleanup: (id) => real.cleanup(id) })
   const render = (renderer, kind) => renderOutput({ renderer, spec, planned, sourcePath, kind })
@@ -180,3 +179,39 @@ async function planOutputIdOf() {
   const bands = await presetBands('9:16', SOURCE)
   return outputSpecOf({ imageId: 'synthetic', format: '9:16', variant: 'combined', face: faceRectOf({ XMin: 0.46, YMin: 0.34, XMax: 0.56, YMax: 0.5 }), source: SOURCE, bands }).id
 }
+
+test('normalization: a cancelled or failed attempt leaves no entry behind, and the retry of the same operation normalizes again with a new file', { timeout: 10 * 60_000 }, async () => {
+  const real = countingProcessor()
+  let failNext = true
+  const calls = []
+  const processor = {
+    calls,
+    process: async (input) => {
+      if (failNext) {
+        failNext = false
+        calls.push({ outcome: 'aborted' })
+        // what a cancelled render leaves behind: a partial output and a rejection
+        await (await import('node:fs/promises')).writeFile(input.outputPath, Buffer.from('partial'))
+        throw Object.assign(new Error('Color pipeline render was cancelled'), { code: 'RENDER_EXECUTION_FAILED' })
+      }
+      const result = await real.process(input)
+      calls.push({ outcome: 'normalized', sha256: result.sha256 })
+      return result
+    },
+  }
+  const world = await normalizationWorld('work-cancel', processor)
+  const renderer = world.scoped('operation-cancelled')
+  await assert.rejects(() => world.render(renderer, 'delivered'), /cancelled/)
+  // the worker's finally: cleanup of the operation, then the retry attempt of the SAME operation id, same scope id
+  await renderer.cleanup(`${await planOutputIdOf()}-delivered`)
+  const retried = await world.render(renderer, 'delivered')
+  const control = await world.render(renderer, 'overlays-off')
+  assert.deepEqual(calls.map((call) => call.outcome), ['aborted', 'normalized'], 'the failed attempt cached nothing; the retry normalized once and its control reused it')
+  assert.ok(retried.sha256 && control.sha256)
+  // a failure WITHOUT the cleanup (a crash that never reached the finally) leaves no usable entry either
+  failNext = true
+  const other = world.scoped('operation-crashed')
+  await assert.rejects(() => world.render(other, 'cta-off'), /cancelled/)
+  await world.render(other, 'cta-off')
+  assert.deepEqual(calls.map((call) => call.outcome), ['aborted', 'normalized', 'aborted', 'normalized'])
+})
