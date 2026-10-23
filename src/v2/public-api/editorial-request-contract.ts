@@ -81,7 +81,7 @@ export function presentCurrentEditorialRequest(value: Readonly<CurrentValue>) {
 export function presentEditorialRequestRevisionResult(value: Readonly<EditorialRequestRevisionResult>) {
   const content = JSON.parse(value.briefSnapshot.contentJson) as Record<string, unknown>
   const view = describeEditorialRequest({
-    objective: String(content.objective),
+    ...(typeof content.objective === 'string' ? { objective: content.objective } : {}),
     briefSnapshot: { id: value.briefSnapshot.id, contentHash: value.briefSnapshot.contentHash, content },
   })
   return Object.freeze({

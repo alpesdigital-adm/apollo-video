@@ -31,7 +31,8 @@ export interface EditorialRequestRevisionPayloadV1 {
 export interface EditorialRequestContext {
   /** The sealed output bundle of the current head: the exact parent the Command's Version is born from. */
   parent: OperationalOutputParentV3
-  project: Readonly<{ objective: string }>
+  /** The objective is absent when the project was created with none (ADR-160). */
+  project: Readonly<{ objective?: string }>
   currentBriefSnapshot: Readonly<{ id: string; contentSchemaVersion: number; contentHash: string; content: Readonly<Record<string, unknown>> }>
   currentDurationFrames: number
   /** The renders of the head Version, each attributed to its own output. */
@@ -50,7 +51,7 @@ export interface EditorialRequestRevisionResult {
 export interface CurrentEditorialRequest {
   version: Readonly<ProjectVersionV2 | ProjectVersionV3>
   briefSnapshot: Readonly<{ id: string; contentSchemaVersion: number; contentHash: string; content: Readonly<Record<string, unknown>> }>
-  objective: string
+  objective?: string
 }
 
 export interface EditorialRequestRevisionCommit {

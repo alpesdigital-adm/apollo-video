@@ -49,7 +49,7 @@ function memoryRepository(parent, options = {}) {
     async findIdempotent({ idempotencyKey }) { return replays.get(idempotencyKey) ?? null },
     async readContext() {
       return Object.freeze({
-        parent, project: { objective: 'discovery' },
+        parent, project: options.project ?? { objective: 'discovery' },
         currentBriefSnapshot: Object.freeze({ id: parent.version.snapshotRefs.brief, contentSchemaVersion: 1, contentHash: 'c'.repeat(64), content }),
         currentDurationFrames: JSON.parse(operationalBundlePlanV3(parent).contentJson).durationFrames,
         outputReferences: options.outputReferences ?? [],
@@ -378,4 +378,21 @@ test('ADR-160: the directive a choice made does not survive the rewrite of the b
   // Removing the briefing drops them too.
   const cleared = await service(repository(chosenContent), stubModel(empty))(request(parent, actor, { briefing: null }, { idempotencyKey: 'editorial-request-revision-4' }))
   assert.deepEqual(requestOf(cleared).directives, [])
+})
+
+test('ADR-160: a project created with no objective states its request, is read and revised, and invents neither an objective nor a desired action', async () => {
+  const { parent, actor } = await world()
+  const content = { schemaVersion: 1, objective: null, desiredAction: null, productionBrief: createProductionBrief({ ownerText: BRIEFING }), createdAt: '2026-10-22T12:00:00.000Z' }
+  const repository = () => memoryRepository(parent, { content, project: {} })
+  const read = await service(repository(), stubModel(empty))(request(parent, actor, { briefing: BRIEFING }))
+  const brief = JSON.parse(read.briefSnapshot.contentJson)
+  assert.equal(brief.objective, null)
+  assert.equal(brief.desiredAction, null, 'no objective, no desired action')
+  const seen = deriveEditorialRequestFromBrief({ ...brief })
+  assert.equal(seen.objective, undefined)
+  assert.equal(seen.desiredAction, undefined)
+  assert.equal(seen.briefing.text, BRIEFING)
+  assert.equal(describeEditorialRequest({ briefSnapshot: { id: read.briefSnapshot.id, contentHash: read.briefSnapshot.contentHash, content: brief } }).blocksDirector, false)
+  // A desired action belongs to an objective: it is refused here, not made up.
+  await assert.rejects(service(repository(), stubModel(empty))(request(parent, actor, { desiredAction: { verbalCta: 'um texto' } }, { idempotencyKey: 'editorial-request-revision-9' })), (error) => error.code === 'INVALID_ARGUMENT')
 })

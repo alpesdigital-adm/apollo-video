@@ -137,7 +137,7 @@ export function reviseEditorialRequestService(dependencies: {
 
     const currentBrief = context.currentBriefSnapshot.content
     const objective = context.project.objective
-    const currentRequest = deriveEditorialRequestFromBrief({ ...currentBrief, objective })
+    const currentRequest = deriveEditorialRequestFromBrief({ ...currentBrief, ...(objective !== undefined ? { objective } : {}) })
     const currentStructured = structuredOf(currentBrief)
     const currentText = currentRequest.briefing?.text
     const nextText = bodyBriefing === undefined ? currentText : bodyBriefing === null ? undefined : bodyBriefing
@@ -181,14 +181,16 @@ export function reviseEditorialRequestService(dependencies: {
     const directives = [...baseDirectives.filter((directive) => !chosen.some((item) => item.id === directive.id)), ...chosen]
     const variantOverrides = bodyOverrides ?? (isRecord(currentStructured.variantOverrides)
       ? (currentStructured.variantOverrides as Record<string, readonly EditorialDirective[]>) : {})
-    const currentDesiredAction = parseDesiredAction(currentBrief.desiredAction, objective as StrategicObjectiveId)
+    // A project with no objective has no desired action (the kind of action is the objective's): one in the body is refused, and none is invented.
+    assertDomain(objective !== undefined || bodyDesiredAction === undefined, 'INVALID_ARGUMENT', 'A desired action belongs to an objective, and this project has none')
+    const currentDesiredAction = objective === undefined ? undefined : parseDesiredAction(currentBrief.desiredAction, objective as StrategicObjectiveId)
     const desiredAction = bodyDesiredAction !== undefined
       ? createDesiredAction({ objective: objective as StrategicObjectiveId, desiredAction: bodyDesiredAction })
       : currentDesiredAction
     // The request the Version will carry. The constructor repeats every check (vocabulary, citations, the interpretation of THIS text).
     const nextRequest = createEditorialRequest({
       ...(nextText !== undefined ? { briefing: nextText } : {}),
-      objective: objective as StrategicObjectiveId, desiredAction, directives, variantOverrides,
+      ...(objective !== undefined ? { objective: objective as StrategicObjectiveId } : {}), ...(desiredAction !== undefined ? { desiredAction } : {}), directives, variantOverrides,
       ...(interpretation ? { interpretation } : {}),
     })
     const unchanged = nextRequest.requestHash === currentRequest.requestHash && !interpreted &&
@@ -215,7 +217,7 @@ export function reviseEditorialRequestService(dependencies: {
     const briefDocument = Object.freeze({
       ...rest,
       schemaVersion: Number(currentBrief.schemaVersion) === 3 ? 1 : Number(currentBrief.schemaVersion),
-      desiredAction,
+      desiredAction: desiredAction ?? null,
       productionBrief,
       editorialRequest: Object.freeze({
         ...(directives.length > 0 ? { directives } : {}),
@@ -226,7 +228,7 @@ export function reviseEditorialRequestService(dependencies: {
       }),
     }) as Record<string, unknown>
     const briefSnapshot = snapshotOf(workspaceId, projectId, snapshotId, briefDocument, createdAt)
-    assertDomain(deriveEditorialRequestFromBrief({ ...briefDocument, objective }).requestHash === nextRequest.requestHash,
+    assertDomain(deriveEditorialRequestFromBrief({ ...briefDocument, ...(objective !== undefined ? { objective } : {}) }).requestHash === nextRequest.requestHash,
       'PERSISTENCE_CONFLICT', 'The Brief Snapshot of the revision does not state the request it was made from')
 
     const impact = createEditorialRequestRevisionImpact({
@@ -329,10 +331,10 @@ export function describeRequestReading(request: Readonly<EditorialRequestV1>, au
 }
 
 export function describeEditorialRequest(input: Readonly<{
-  objective: string
+  objective?: string
   briefSnapshot: Readonly<{ id: string; contentHash: string; content: Readonly<Record<string, unknown>> }>
 }>): Readonly<EditorialRequestView> {
-  const request = deriveEditorialRequestFromBrief({ ...input.briefSnapshot.content, objective: input.objective })
+  const request = deriveEditorialRequestFromBrief({ ...input.briefSnapshot.content, ...(input.objective !== undefined ? { objective: input.objective } : {}) })
   const reading = describeRequestReading(request, structuredOf(input.briefSnapshot.content).interpretationAudit)
   return Object.freeze({
     ...reading,

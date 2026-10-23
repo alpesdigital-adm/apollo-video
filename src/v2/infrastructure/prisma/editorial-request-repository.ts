@@ -68,20 +68,19 @@ function hydrateBriefSnapshot(row: BriefRow) {
   })
 }
 
-function objectiveOf(project: { objective: string | null }, content: Readonly<Record<string, unknown>>): string {
-  const objective = project.objective ?? (typeof content.objective === 'string' ? content.objective : null)
-  if (!objective) throw new DomainError('PERSISTENCE_CONFLICT', 'Project has no objective to state its editorial request under')
-  return objective
+/** The objective the request is stated under, or none: a project created with no objective has none, and the Apollo presumes none. */
+function objectiveOf(project: { objective: string | null }, content: Readonly<Record<string, unknown>>): string | undefined {
+  return project.objective ?? (typeof content.objective === 'string' ? content.objective : undefined)
 }
 
-function hydrateStoredCommand(row: StoredCommand, objective: string, replayed: boolean): Readonly<EditorialRequestRevisionResult> {
+function hydrateStoredCommand(row: StoredCommand, objective: string | undefined, replayed: boolean): Readonly<EditorialRequestRevisionResult> {
   const authenticationAudit = hydrateEditCommandExternalActorAudit(row)
   if (row.type !== 'revise-editorial-request' || !row.resultVersion) throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial request revision result is missing')
   const payload = parseRecord(row.payloadJson, 'editorial request revision payload') as unknown as EditorialRequestRevisionPayloadV1
   const impact = parseEditorialRequestRevisionImpact(payload.impact)
   const stored = hydrateBriefSnapshot(row.resultVersion.briefSnapshot)
   // The Command names the request the Brief Snapshot of its Version states: both are recomputed from the document, not trusted from the payload.
-  const request = deriveEditorialRequestFromBrief({ ...stored.content, objective })
+  const request = deriveEditorialRequestFromBrief({ ...stored.content, ...(objective !== undefined ? { objective } : {}) })
   if (
     payload.schemaVersion !== 1 ||
     payload.nextRequiredCapability !== 'apollo.projects.commands.apply:run-director' ||
@@ -129,7 +128,7 @@ export class PrismaEditorialRequestRepository implements EditorialRequestReposit
     this.client = client
   }
 
-  private async objectiveOfProject(workspaceId: string, projectId: string, content: Readonly<Record<string, unknown>>): Promise<string> {
+  private async objectiveOfProject(workspaceId: string, projectId: string, content: Readonly<Record<string, unknown>>): Promise<string | undefined> {
     const project = await this.client.v2Project.findFirst({ where: { id: projectId, workspaceId }, select: { objective: true } })
     if (!project) throw new DomainError('PROJECT_NOT_FOUND', 'Project was not found')
     return objectiveOf(project, content)
@@ -185,7 +184,7 @@ export class PrismaEditorialRequestRepository implements EditorialRequestReposit
     if (parent.version.snapshotRefs.brief !== brief.snapshot.id) throw new DomainError('PERSISTENCE_CONFLICT', 'Project brief snapshot differs from the sealed head')
     return Object.freeze({
       parent,
-      project: Object.freeze({ objective: objectiveOf(project, brief.content) }),
+      project: Object.freeze({ ...(objectiveOf(project, brief.content) !== undefined ? { objective: objectiveOf(project, brief.content)! } : {}) }),
       currentBriefSnapshot: Object.freeze({ id: brief.snapshot.id, contentSchemaVersion: brief.snapshot.contentSchemaVersion, contentHash: brief.snapshot.contentHash, content: brief.content }),
       currentDurationFrames,
       outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: currentVersionId, proxies: proxyOutputs, finals: finalOutputs }),
@@ -202,7 +201,7 @@ export class PrismaEditorialRequestRepository implements EditorialRequestReposit
     return Object.freeze({
       version: hydrateProjectVersionRow(project.currentVersion),
       briefSnapshot: Object.freeze({ id: brief.snapshot.id, contentSchemaVersion: brief.snapshot.contentSchemaVersion, contentHash: brief.snapshot.contentHash, content: brief.content }),
-      objective: objectiveOf(project, brief.content),
+      ...(objectiveOf(project, brief.content) !== undefined ? { objective: objectiveOf(project, brief.content)! } : {}),
     })
   }
 
