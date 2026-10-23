@@ -524,7 +524,7 @@ import { FfmpegMp4PixelCritic } from './media/ffmpeg-mp4-pixel-critic.ts'
 import { OpenvinoPixelOracle } from './perception/openvino-pixel-oracle.ts'
 import type { Mp4PixelCritic } from '../application/ports/mp4-pixel-critic.ts'
 import { mp4ExportAcknowledgementFromEnvironment, type Mp4ExportAcknowledgement } from '../domain/mp4-export-gate.ts'
-import { faceWorkerPlatformAccepted } from '../domain/face-producer-registry.ts'
+import { faceWorkerPinReasons, faceWorkerPlatformAccepted } from '../domain/face-producer-registry.ts'
 import { YunetCpuFaceDetector } from './perception/yunet-cpu-face-detector.ts'
 import { TelemetryPublicOperationRepository } from './telemetry-public-operation-repository.ts'
 import { CompositeOperationTelemetry, StructuredConsoleOperationTelemetry } from './structured-console-operation-telemetry.ts'
@@ -2195,7 +2195,8 @@ export function createFaceProducerWorker(
  * EditPlan) or `source` (W65b, windows keyed by the source artifact's own frames, reusable by every edit of it). Both run the SAME
  * analyzer, so the analyzer is composed once, here, and a refusal is the same for both. It fails closed before it can claim anything:
  * on a platform the producer registry has no parity receipt for, without every pinned input, or with a runtime package root whose
- * files differ from the pinned manifest. Linux is refused until its parity run has passed (see the W62 deployment gate).
+ * files differ from the pinned manifest. Linux runs only with the exact interpreter, runtime manifest and bridge its parity receipt
+ * names (criterion `detections-identical-max-delta-1e-6`, owner-accepted 22/10/2026, ADR-160); any other bytes are refused.
  */
 export async function createFaceWindowWorker(
   environment: NodeJS.ProcessEnv = process.env,
@@ -2205,6 +2206,15 @@ export async function createFaceWindowWorker(
 ) {
   if (!faceWorkerPlatformAccepted(platform)) {
     throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `Face V9 detector has no passed parity receipt for platform ${platform}`)
+  }
+  // A receipt is valid only for the exact interpreter, runtime manifest and bridge bytes it names (win32's own receipt pins none).
+  const pinReasons = faceWorkerPinReasons(platform, {
+    pythonExecutableSha256: environment.APOLLO_V2_FACE_V9_PYTHON_SHA256?.trim() ?? '',
+    runtimeManifestSha256: environment.APOLLO_V2_FACE_V9_RUNTIME_MANIFEST_SHA256?.trim() ?? '',
+    bridgeSha256: environment.APOLLO_V2_FACE_V9_BRIDGE_SHA256?.trim() ?? '',
+  })
+  if (pinReasons.length > 0) {
+    throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `Face V9 detector inputs differ from the parity receipt for platform ${platform}: ${pinReasons.join(', ')}`)
   }
   const required = (key: string) => {
     const value = environment[key]?.trim()
