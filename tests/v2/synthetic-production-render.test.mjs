@@ -26,6 +26,10 @@ import { assertCurrentSyntheticRenderAuthority } from '../../src/v2/infrastructu
 import { createQueuedPublicOperation } from '../../src/v2/domain/public-operation.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { createProtectedPayloadCipherFromEnvironment } from '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
+import { configureIdempotencyWinnerWait } from '../../src/v2/infrastructure/prisma/idempotency-record-persistence.ts'
+
+// The exhaustion tests below count attempts: keep the lost-race budget at three attempts and never sleep (this file's process only).
+configureIdempotencyWinnerWait({ delaysMs: [0, 0], async sleep() {} })
 
 const hash = (character) => character.repeat(64)
 
@@ -342,7 +346,7 @@ function renderWorkerFixture() {
   return { plan, spec, context, claimed, runtimeIdentity }
 }
 
-test('public operation persistence resolves the protected payload cipher only for synthetic renders', async () => {
+test('public operation persistence resolves the protected payload cipher only for synthetic renders (zero-wait schedule: three attempts)', async () => {
   let cipherResolutionCount = 0
   const missingCipher = () => {
     cipherResolutionCount += 1

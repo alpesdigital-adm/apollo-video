@@ -27,6 +27,7 @@ import {
   projectAnalysisExecutionData,
 } from './project-analysis-execution.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type DatabaseClient = PrismaClient | Prisma.TransactionClient
 type RunWithEvaluations =
@@ -732,15 +733,18 @@ implements ContiguousEvaluationRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.persistInternal(run, fence, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotent({
-          workspaceId: run.workspaceId,
-          projectId: run.projectId,
-          sourceIndexRunId: run.sourceIndexRunId,
-          createdByClientId: run.createdBy.id,
-          actorContextHash: run.authenticationAudit.contextHash,
-          idempotencyKey: run.idempotencyKey,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({
+            workspaceId: run.workspaceId,
+            projectId: run.projectId,
+            sourceIndexRunId: run.sourceIndexRunId,
+            createdByClientId: run.createdBy.id,
+            actorContextHash: run.authenticationAudit.contextHash,
+            idempotencyKey: run.idempotencyKey,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== run.requestFingerprint) {
             throw new DomainError(

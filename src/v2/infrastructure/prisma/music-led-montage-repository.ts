@@ -26,6 +26,7 @@ import {
   batchActorAuditData,
   hydrateBatchActorAudit,
 } from "./batch-actor-audit.ts";
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 function hydrateAnalysis(row: {
   analysisJson: string;
@@ -672,13 +673,16 @@ export class PrismaMusicMontageRunRepository implements MusicMontageRunRepositor
         "code" in error &&
         (error.code === "P2002" || error.code === "P2034")
       ) {
-        const replay = await this.findRequestReplay({
-          workspaceId: run.workspaceId,
-          actorClientId: input.actorClientId,
-          actorContextHash: input.authenticationAudit.contextHash,
-          idempotencyKey: input.idempotencyKey,
-          requestFingerprint: input.requestFingerprint,
-        });
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findRequestReplay({
+            workspaceId: run.workspaceId,
+            actorClientId: input.actorClientId,
+            actorContextHash: input.authenticationAudit.contextHash,
+            idempotencyKey: input.idempotencyKey,
+            requestFingerprint: input.requestFingerprint,
+          }),
+        );
         if (replay) return Object.freeze({ run: replay, replayed: true });
         throw new DomainError(
           "PERSISTENCE_CONFLICT",

@@ -34,6 +34,20 @@ export const PROXY_OUTPUT_SPECS = Object.freeze(Object.fromEntries(
   }),
 ) as Record<typeof OUTPUT_ASPECT_RATIOS[number], Readonly<{ width: number; height: number; codec: 'h264'; container: 'mp4'; quality: 'review' }>>)
 
+export const PROXY_REVIEW_SCHEMA_VERSION = 'proxy-review/v1' as const
+
+/**
+ * The thresholds `evaluateRenderedProxy` judges a rendered proxy under (the status rule - any hard issue blocks, an unacknowledged warning
+ * needs acknowledgement - is pinned by `PROXY_REVIEW_SCHEMA_VERSION`). The evaluation reads these values and the proxy render content
+ * address is derived from this same object, so a changed threshold is another address, never a carried verdict.
+ */
+export const PROXY_REVIEW_POLICY = Object.freeze({
+  /** The rendered duration may differ from the compiled timeline by at least this much ... */
+  durationToleranceMinMs: 100,
+  /** ... or by this many frames at the probed frame rate, whichever is larger. */
+  durationToleranceFrames: 3,
+})
+
 export type ProxyOutputFormat = keyof typeof PROXY_OUTPUT_SPECS
 export type ProxyReviewStatus = 'blocked' | 'warning-ack-required' | 'ready-for-final'
 
@@ -78,7 +92,7 @@ export interface ProxyFormatQualityVerdict {
 }
 
 export interface ProxyReview {
-  schemaVersion: 'proxy-review/v1'
+  schemaVersion: typeof PROXY_REVIEW_SCHEMA_VERSION
   projectVersionId: string
   proxyArtifactId: string
   proxyManifestId: string
@@ -266,7 +280,7 @@ export function evaluateRenderedProxy(input: {
     })
   }
   const renderedDurationMs = Math.round(input.probe.duration * 1_000)
-  const toleranceMs = Math.max(100, Math.ceil(3 / Math.max(1, input.probe.fps) * 1_000))
+  const toleranceMs = Math.max(PROXY_REVIEW_POLICY.durationToleranceMinMs, Math.ceil(PROXY_REVIEW_POLICY.durationToleranceFrames / Math.max(1, input.probe.fps) * 1_000))
   if (Math.abs(renderedDurationMs - input.expectedDurationMs) > toleranceMs) {
     addTechnical({
       code: 'PROXY_DURATION_MISMATCH', severity: 'hard', category: 'technical',
@@ -327,7 +341,7 @@ export function evaluateRenderedProxy(input: {
       ? 'warning-ack-required'
       : 'ready-for-final'
   const reviewWithoutHash: Omit<ProxyReview, 'reviewHash'> = Object.freeze({
-    schemaVersion: 'proxy-review/v1',
+    schemaVersion: PROXY_REVIEW_SCHEMA_VERSION,
     projectVersionId: input.projectVersionId,
     proxyArtifactId: input.proxyArtifactId,
     proxyManifestId: input.proxyManifestId,

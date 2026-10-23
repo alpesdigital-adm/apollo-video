@@ -9,6 +9,18 @@ import type { RenderElementMap } from './review-system.ts'
 import type { SubtitleAnchorPlan } from './subtitle-anchor-plan.ts'
 import type { VariantReframeIssueV1 } from './variant-reframe-plan.ts'
 
+/** The report schema the critic emits and `selectExportableVariants` accepts. */
+export const FORMAT_QUALITY_REPORT_SCHEMA_VERSION = 'format-quality-report/v3' as const
+
+/**
+ * The numeric policy `critiqueOutputFormat` judges under (the safe area comes from the output preset, pinned by the registry hash). The
+ * critic reads these values, and the proxy render content address is derived from this same object: a changed threshold is another address.
+ */
+export const FORMAT_QUALITY_POLICY = Object.freeze({
+  defaultDensityLimit: 0.72,
+  densityLimitRange: Object.freeze({ min: 0.25, max: 1 }),
+})
+
 export const FORMAT_QUALITY_CODES = [
   'OUTPUT_CLIPPING', 'OUTPUT_SAFE_AREA', 'SUBJECT_NOT_VISIBLE',
   'SUBTITLE_SUBJECT_COLLISION', 'OUTPUT_DENSITY_EXCESS',
@@ -72,7 +84,7 @@ export interface FormatQualityIssueV2 {
  * null when no such critic ran. v2 reports did not carry it and are not accepted by `selectExportableVariants`.
  */
 export interface FormatQualityReportV3 {
-  schemaVersion: 'format-quality-report/v3'
+  schemaVersion: typeof FORMAT_QUALITY_REPORT_SCHEMA_VERSION
   mp4Evidence: Readonly<Mp4EvidenceSealV1> | null
   outputSpecId: string
   format: OutputAspectRatio
@@ -176,8 +188,8 @@ export function critiqueOutputFormat(input: Readonly<{
   assertDomain(input.map.fps > 0 && Number.isFinite(input.map.fps) && input.map.durationFrames > 0, 'INVALID_RENDER_INPUT', 'Format critic timeline is invalid')
   const preset = readOutputFormatPreset(input.format)
   assertDomain(input.outputSpecId === preset.spec.id, 'INVALID_OUTPUT_SPEC', 'Format critic outputSpecId does not match the canonical registry preset')
-  const densityLimit = input.densityLimit ?? 0.72
-  assertDomain(Number.isFinite(densityLimit) && densityLimit >= 0.25 && densityLimit <= 1, 'INVALID_ARGUMENT', 'Format density limit is invalid')
+  const densityLimit = input.densityLimit ?? FORMAT_QUALITY_POLICY.defaultDensityLimit
+  assertDomain(Number.isFinite(densityLimit) && densityLimit >= FORMAT_QUALITY_POLICY.densityLimitRange.min && densityLimit <= FORMAT_QUALITY_POLICY.densityLimitRange.max, 'INVALID_ARGUMENT', 'Format density limit is invalid')
   const subjects = (input.subjects ?? []).map((subject) => {
     assertDomain(ID.test(subject.id) && Number.isSafeInteger(subject.startFrame) && Number.isSafeInteger(subject.endFrame) && subject.startFrame >= 0 && subject.endFrame > subject.startFrame && subject.endFrame <= input.map.durationFrames && validBounds(subject.bounds), 'INVALID_RENDER_INPUT', 'Format subject evidence is invalid')
     return Object.freeze({ ...subject, bounds: Object.freeze({ ...subject.bounds }) })
@@ -299,7 +311,7 @@ export function critiqueOutputFormat(input: Readonly<{
   const canonicalIssues = Object.freeze(grouped.toSorted((left, right) => left.evidenceRange.startFrame - right.evidenceRange.startFrame || left.code.localeCompare(right.code) || left.elementIds.join(':').localeCompare(right.elementIds.join(':'))))
   const status = canonicalIssues.some((issue) => issue.severity === 'hard') ? 'blocked' as const : canonicalIssues.length ? 'warning' as const : 'passed' as const
   const body = Object.freeze({
-    schemaVersion: 'format-quality-report/v3' as const, mp4Evidence, outputSpecId: input.outputSpecId, format: input.format, proxyHash: input.proxyHash,
+    schemaVersion: FORMAT_QUALITY_REPORT_SCHEMA_VERSION, mp4Evidence, outputSpecId: input.outputSpecId, format: input.format, proxyHash: input.proxyHash,
     renderElementMapHash: calculateCanonicalHash(input.map), outputPresetHash: preset.presetHash,
     placementPlanHash, reframePlanHash, status, exportAllowed: status !== 'blocked',
     explanation: explain(input.outputSpecId, input.format, status, canonicalIssues, input.map.durationFrames), issues: canonicalIssues,
@@ -338,7 +350,7 @@ export function selectExportableVariants(reports: readonly Readonly<FormatQualit
     // placement plans or two trajectories is not evidence about any single variant.
     assertDomain(report.issues.every((issue) => issue.placementPlanHash === report.placementPlanHash && issue.reframePlanHash === report.reframePlanHash), 'INVALID_RENDER_INPUT', 'Format quality issue is not bound to the geometry of its own render')
     // A report that carries the seal of the MP4 critic cannot allow an export the seal's own verdict forbids.
-    assertDomain(report.schemaVersion === 'format-quality-report/v3', 'INVALID_RENDER_INPUT', 'Format quality report schema is unsupported')
+    assertDomain(report.schemaVersion === FORMAT_QUALITY_REPORT_SCHEMA_VERSION, 'INVALID_RENDER_INPUT', 'Format quality report schema is unsupported')
     assertDomain(report.mp4Evidence === null || (mp4EvidenceSealMismatches(report.mp4Evidence, { artifactSha256: report.proxyHash, outputSpecId: report.outputSpecId }).length === 0 && !(report.mp4Evidence.verdict === 'blocked' && report.exportAllowed)), 'INVALID_RENDER_INPUT', 'Format quality report disagrees with its MP4 evidence')
   }
   assertDomain(new Set(ordered.map((report) => report.outputSpecId)).size === ordered.length, 'INVALID_ARGUMENT', 'Format quality reports must be unique per output')

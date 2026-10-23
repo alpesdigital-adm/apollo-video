@@ -24,6 +24,7 @@ import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
 import { persistManyOperationStatusEvents } from './public-operation-repository.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
+import { pauseBeforeLostRaceRetry } from './idempotency-record-persistence.ts'
 
 type StoredCommand = {
   id: string
@@ -383,7 +384,7 @@ export class PrismaApiAccessControlRepository implements ApiAccessControlReposit
         })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      if (isConcurrentWrite(error) && attempt < 3) return this.apply(command, audit, attempt + 1)
+      if (isConcurrentWrite(error) && await pauseBeforeLostRaceRetry(attempt)) return this.apply(command, audit, attempt + 1)
       if (isConcurrentWrite(error)) throw new DomainError('PERSISTENCE_CONFLICT', 'API access command conflicted with another write')
       throw error
     }

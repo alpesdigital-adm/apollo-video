@@ -99,13 +99,44 @@ test('W70 the colour grade is in the address by what it does, and in the input h
   assert.notEqual(input({ colorGrade: grade({ lutSelection: { ...lutNone, id: 'lut-selection-2', selectionHash: h('7') } }) }), input({ colorGrade: grade() }))
 })
 
-test('W70 the review policies are pinned in the address', async () => {
-  const { PROXY_REVIEW_POLICY_IDENTITY, PROXY_REVIEW_POLICY_SHA256 } = await import('../../src/v2/application/project-render-sources.ts')
+test('W70 the review policies are pinned in the address, derived from the live objects and constants', async () => {
+  const sources = await import('../../src/v2/application/project-render-sources.ts')
+  const { PROXY_REVIEW_POLICY_IDENTITY, PROXY_REVIEW_POLICY_SHA256, PROXY_REVIEW_POLICY_PARTS, calculateProxyReviewPolicySha256 } = sources
   const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
+  const { PROXY_REVIEW_POLICY, PROXY_REVIEW_SCHEMA_VERSION } = await import('../../src/v2/application/render-workflow.ts')
+  const { FORMAT_QUALITY_POLICY, FORMAT_QUALITY_REPORT_SCHEMA_VERSION } = await import('../../src/v2/domain/format-quality-critic.ts')
   assert.equal(PROXY_REVIEW_POLICY_SHA256, calculateCanonicalHash(PROXY_REVIEW_POLICY_IDENTITY))
+  assert.equal(PROXY_REVIEW_POLICY_SHA256, calculateProxyReviewPolicySha256())
   assert.deepEqual(Object.keys(PROXY_REVIEW_POLICY_IDENTITY).sort(), ['anchorPolicies', 'captionPixel', 'captionTextLayout', 'colorCritic', 'faceEvidencePolicySha256',
-    'formatQualityCodes', 'formatQualityReport', 'mp4PixelCriticPolicySha256', 'proxyReview'])
+    'formatQuality', 'mp4PixelCriticPolicySha256', 'outputFormatRegistryHash', 'proxyReview'])
   assert.equal(PROXY_REVIEW_POLICY_IDENTITY.captionPixel.bandTolerancePx, 6)
+  // the schema versions are the real constants, not copies
+  assert.equal(PROXY_REVIEW_POLICY_IDENTITY.proxyReview.schemaVersion, PROXY_REVIEW_SCHEMA_VERSION)
+  assert.equal(PROXY_REVIEW_POLICY_IDENTITY.formatQuality.schemaVersion, FORMAT_QUALITY_REPORT_SCHEMA_VERSION)
+  assert.equal(PROXY_REVIEW_POLICY_IDENTITY.proxyReview.policy, calculateCanonicalHash(PROXY_REVIEW_POLICY))
+  assert.equal(PROXY_REVIEW_POLICY_IDENTITY.formatQuality.policy, calculateCanonicalHash(FORMAT_QUALITY_POLICY))
+
+  // a changed threshold (no schema bump) is another policy digest and another content address
+  const base = address('version-2')
+  const changed = {
+    'the proxy duration tolerance (ms)': { proxyReviewPolicy: { ...PROXY_REVIEW_POLICY, durationToleranceMinMs: PROXY_REVIEW_POLICY.durationToleranceMinMs + 1 } },
+    'the proxy duration tolerance (frames)': { proxyReviewPolicy: { ...PROXY_REVIEW_POLICY, durationToleranceFrames: PROXY_REVIEW_POLICY.durationToleranceFrames + 1 } },
+    'the format critic density limit': { formatQualityPolicy: { ...FORMAT_QUALITY_POLICY, defaultDensityLimit: 0.5 } },
+    'the format critic density range': { formatQualityPolicy: { ...FORMAT_QUALITY_POLICY, densityLimitRange: { min: 0.3, max: 1 } } },
+    'the caption band tolerance': { captionBandTolerancePx: PROXY_REVIEW_POLICY_PARTS.captionBandTolerancePx + 1 },
+    'the colour critic policy': { colorCriticPolicy: { ...PROXY_REVIEW_POLICY_PARTS.colorCriticPolicy, unrelatedProbeThreshold: 1 } },
+    'the final caption anchor policy': { finalCaptionAnchorPolicy: { onNoSafeRegion: 'other' } },
+    'the output registry': { outputFormatRegistryHash: h('9') },
+    'the review schema version': { proxyReviewSchemaVersion: 'proxy-review/v2' },
+  }
+  const seen = new Set([PROXY_REVIEW_POLICY_SHA256])
+  for (const [name, patch] of Object.entries(changed)) {
+    const digest = calculateProxyReviewPolicySha256({ ...PROXY_REVIEW_POLICY_PARTS, ...patch })
+    assert.notEqual(digest, PROXY_REVIEW_POLICY_SHA256, `${name} moves the policy digest`)
+    assert.equal(seen.has(digest), false, `${name} is its own digest`)
+    seen.add(digest)
+    assert.notEqual(projectProxyRenderContentHash({ source: source('version-2'), colorPipelineBindings: bindings, reviewPolicySha256: digest }), base, `${name} moves the content address`)
+  }
 })
 
 test('a source that was not read through the sealed consumption verdict has no address', () => {

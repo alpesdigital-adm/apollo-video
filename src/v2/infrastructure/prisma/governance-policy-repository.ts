@@ -24,6 +24,7 @@ import {
   type GovernancePolicyCommand,
 } from '../../domain/governance-policy-command.ts'
 import { hydrateGovernancePolicy } from './governance-admission-repository.ts'
+import { pauseBeforeLostRaceRetry } from './idempotency-record-persistence.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 
@@ -439,7 +440,7 @@ implements GovernancePolicyRepository {
           requestFingerprint: command.requestFingerprint,
         })
         if (replay) return replay
-        if (attempt < 3) return this.applySet(input, attempt + 1)
+        if (await pauseBeforeLostRaceRetry(attempt)) return this.applySet(input, attempt + 1)
         throw new DomainError(
           'PERSISTENCE_CONFLICT',
           'governance policy command collided with concurrent persistence',
@@ -502,7 +503,7 @@ implements GovernancePolicyRepository {
           requestFingerprint: command.requestFingerprint,
         })
         if (replay) return replay
-        if (attempt < 3) return this.applyDelete(input, attempt + 1)
+        if (await pauseBeforeLostRaceRetry(attempt)) return this.applyDelete(input, attempt + 1)
         throw new DomainError(
           'PERSISTENCE_CONFLICT',
           'governance policy deletion collided with concurrent persistence',
