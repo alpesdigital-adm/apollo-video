@@ -103,4 +103,3 @@ A migration é aditiva e a reversão é manual, na ordem abaixo (não há `down`
 - **Erros na criação.** Todos os campos inválidos aparecem de uma vez, cada um junto do seu campo (`aria-invalid`, `role=alert`), o foco vai para o primeiro inválido e nenhuma mensagem genérica os substitui. O aviso antigo do objetivo obrigatório saiu.
 - **Respostas não sobrevivem à reescrita.** Uma diretiva `answer-qN` é a resposta do dono a uma pergunta da leitura de AQUELE texto: ao mudar o briefing (ou apagá-lo) ela cai, mesmo que o chamador a liste de novo; uma mudança que não toca o briefing a mantém. Vale para o projeto e para o lote.
 - **Ler e mudar o briefing sem saída.** Num projeto sem vídeo e sem saída (logo após criar), "Ler o briefing agora" e "Mudar o briefing" ficam desabilitados com a explicação (o Command filho precisa de uma Version com saída); o texto fica salvo como está.
-

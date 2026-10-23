@@ -49,7 +49,7 @@ ALTER TABLE "production_batch_request_revisions"
   REFERENCES "production_batches"("id", "workspaceId")
   ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "production_batch_request_revisions"
-  ADD CONSTRAINT "production_batch_request_revisions_actorClientId_workspaceId_fkey"
+  ADD CONSTRAINT "production_batch_request_revisions_actorClientId_workspace_fkey"
   FOREIGN KEY ("actorClientId", "workspaceId")
   REFERENCES "api_clients"("id", "workspaceId")
   ON DELETE RESTRICT ON UPDATE CASCADE;
