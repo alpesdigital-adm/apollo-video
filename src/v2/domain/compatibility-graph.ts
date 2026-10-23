@@ -9,12 +9,41 @@ import {
   type TakeRecord,
 } from './take-library.ts'
 
+/**
+ * ADR-160 F8. v2 is what is created: a context the requester did not state is `unspecified`, the check that needs it is `not-evaluable`,
+ * and the soft dimension that needs it is left out of the weighted score (the weights of the others are renormalized). v1 graphs, made when
+ * every context was required, stay readable and keep their sealed bodies.
+ */
 export const COMPATIBILITY_GRAPH_SCHEMA_VERSION =
-  'compatibility-graph/v1' as const
+  'compatibility-graph/v2' as const
 export const COMPATIBILITY_RULE_VERSION =
-  'compatibility-rules/v1' as const
+  'compatibility-rules/v2' as const
 export const COMPATIBILITY_SOFT_SCORE_VERSION =
+  'compatibility-soft-score/v2' as const
+export const COMPATIBILITY_GRAPH_SCHEMA_VERSION_V1 =
+  'compatibility-graph/v1' as const
+export const COMPATIBILITY_RULE_VERSION_V1 =
+  'compatibility-rules/v1' as const
+export const COMPATIBILITY_SOFT_SCORE_VERSION_V1 =
   'compatibility-soft-score/v1' as const
+
+/** The value of a context the requester did not state (identifiers and tags), and the undetermined locale. Never a guess. */
+export const UNSPECIFIED_CONTEXT = 'unspecified' as const
+export const UNSPECIFIED_LOCALE = 'und' as const
+/** The context fields that can be left unstated, in the order they are listed on a node. */
+export const COMPATIBILITY_CONTEXT_FIELDS = [
+  'audienceTags',
+  'desiredAction',
+  'energy',
+  'experiment',
+  'locale',
+  'narrativeTags',
+  'offerId',
+  'personaId',
+  'tone',
+  'visual',
+] as const
+export type CompatibilityContextField = (typeof COMPATIBILITY_CONTEXT_FIELDS)[number]
 
 export const COMPATIBILITY_ROLES = [
   'hook',
@@ -61,22 +90,26 @@ export interface CompatibilityClaim {
   value: string
 }
 
+/**
+ * What the requester stated about a take's context. Every semantic field is optional: an absent one is `unspecified`
+ * (ADR-160 F8), never a default. An empty tag list is absent too.
+ */
 export interface CompatibilityNodeContextInput {
   takeId: string
   expectedTakeHash: string
-  offerId: string
-  audienceTags: readonly string[]
+  offerId?: string
+  audienceTags?: readonly string[]
   claims: readonly Readonly<CompatibilityClaim>[]
-  personaId: string
-  locale: string
+  personaId?: string
+  locale?: string
   desiredAction?: string
   continuityProvides: readonly string[]
   continuityRequires: readonly string[]
-  narrativeTags: readonly string[]
-  tone: number
-  energy: number
-  visual: number
-  experiment: number
+  narrativeTags?: readonly string[]
+  tone?: number
+  energy?: number
+  visual?: number
+  experiment?: number
   evidenceRefs: readonly string[]
 }
 
@@ -100,11 +133,14 @@ export interface CompatibilityNode {
   continuityProvides: readonly string[]
   continuityRequires: readonly string[]
   narrativeTags: readonly string[]
-  tone: number
-  energy: number
-  visual: number
-  experiment: number
+  /** null = the requester did not state it (v2): the dimension it feeds is not evaluated. */
+  tone: number | null
+  energy: number | null
+  visual: number | null
+  experiment: number | null
   evidenceRefs: readonly string[]
+  /** v2: the context fields the requester did not state. Their values above are the sentinels, and the checks they feed are not evaluable. */
+  unspecified?: readonly CompatibilityContextField[]
   contextHash: string
   nodeHash: string
 }
@@ -119,7 +155,8 @@ export interface CompatibilityHardFailure {
 
 export interface CompatibilitySoftScore {
   dimension: CompatibilitySoftDimension
-  score: number
+  /** null = not evaluable (v2): a context it needs was not stated; weight is then 0 and it is left out of the weighted score. */
+  score: number | null
   weight: number
   reasonCode: string
   evidenceRefs: readonly string[]
@@ -133,9 +170,15 @@ export interface CompatibilityEdgeEvidence {
   toSourceHash: string
   fromContextHash: string
   toContextHash: string
-  ruleVersion: typeof COMPATIBILITY_RULE_VERSION
-  softScoreVersion: typeof COMPATIBILITY_SOFT_SCORE_VERSION
+  ruleVersion: typeof COMPATIBILITY_RULE_VERSION | typeof COMPATIBILITY_RULE_VERSION_V1
+  softScoreVersion: typeof COMPATIBILITY_SOFT_SCORE_VERSION | typeof COMPATIBILITY_SOFT_SCORE_VERSION_V1
   evidenceHash: string
+}
+
+/** v2. A hard check that could not be made because a context it needs was not stated on one of the two takes. */
+export interface CompatibilityNotEvaluableCheck {
+  check: CompatibilityHardReasonCode
+  fields: readonly CompatibilityContextField[]
 }
 
 export interface CompatibilityEdge {
@@ -149,6 +192,8 @@ export interface CompatibilityEdge {
   softScores: readonly Readonly<CompatibilitySoftScore>[]
   softScore: number
   reasonCodes: readonly string[]
+  /** v2: the checks that were not evaluable, and the fields that were missing for each. */
+  notEvaluable?: readonly Readonly<CompatibilityNotEvaluableCheck>[]
   evidence: Readonly<CompatibilityEdgeEvidence>
   edgeHash: string
 }
@@ -161,6 +206,8 @@ export interface CompatibilityGraphSummary {
   blockedCount: number
   hardFailureCount: number
   averageSoftScore: number
+  /** v2: how many edges have at least one check or dimension that was not evaluable. */
+  notEvaluableEdgeCount?: number
 }
 
 export interface CompatibilityGraphRun {
@@ -170,9 +217,9 @@ export interface CompatibilityGraphRun {
   batchId: string
   takeLibraryId: string
   takeLibraryRunHash: string
-  schemaVersion: typeof COMPATIBILITY_GRAPH_SCHEMA_VERSION
-  ruleVersion: typeof COMPATIBILITY_RULE_VERSION
-  softScoreVersion: typeof COMPATIBILITY_SOFT_SCORE_VERSION
+  schemaVersion: typeof COMPATIBILITY_GRAPH_SCHEMA_VERSION | typeof COMPATIBILITY_GRAPH_SCHEMA_VERSION_V1
+  ruleVersion: typeof COMPATIBILITY_RULE_VERSION | typeof COMPATIBILITY_RULE_VERSION_V1
+  softScoreVersion: typeof COMPATIBILITY_SOFT_SCORE_VERSION | typeof COMPATIBILITY_SOFT_SCORE_VERSION_V1
   acceptThreshold: number
   reviewThreshold: number
   nodes: readonly Readonly<CompatibilityNode>[]
@@ -354,7 +401,7 @@ function relation(
   return COMPATIBILITY_RELATIONS.includes(key) ? key : null
 }
 
-function contextBody(value: CompatibilityNode) {
+function contextBody(value: CompatibilityNode, v2: boolean) {
   return {
     offerId: value.offerId,
     audienceTags: value.audienceTags,
@@ -372,10 +419,11 @@ function contextBody(value: CompatibilityNode) {
     visual: value.visual,
     experiment: value.experiment,
     evidenceRefs: value.evidenceRefs,
+    ...(v2 ? { unspecified: value.unspecified ?? [] } : {}),
   }
 }
 
-function nodeBody(value: CompatibilityNode) {
+function nodeBody(value: CompatibilityNode, v2: boolean) {
   return {
     id: value.id,
     takeId: value.takeId,
@@ -389,7 +437,7 @@ function nodeBody(value: CompatibilityNode) {
     sourceHash: value.sourceHash,
     sourceRangeMs: value.sourceRangeMs,
     durationMs: value.durationMs,
-    ...contextBody(value),
+    ...contextBody(value, v2),
     contextHash: value.contextHash,
   }
 }
@@ -411,12 +459,43 @@ function compatibilityNode(
     'PRECONDITION_REQUIRED',
     `Take ${take.id} is not eligible for compatibility`,
   )
-  const locale = boundedText(input.locale, 'context.locale', 2, 16)
-  assertDomain(
-    LOCALE.test(locale),
-    'INVALID_ARGUMENT',
-    'context.locale is invalid',
-  )
+  const unspecified: CompatibilityContextField[] = []
+  const given = (value: unknown, field: CompatibilityContextField): boolean => {
+    const given = value !== undefined && value !== null &&
+      !(Array.isArray(value) && value.length === 0)
+    if (!given) unspecified.push(field)
+    return given
+  }
+  const offerId = given(input.offerId, 'offerId')
+    ? identity(input.offerId, 'context.offerId')
+    : UNSPECIFIED_CONTEXT
+  const audienceTags = given(input.audienceTags, 'audienceTags')
+    ? sortedUniqueTokens(input.audienceTags, 'context.audienceTags', 1)
+    : Object.freeze([UNSPECIFIED_CONTEXT])
+  const personaId = given(input.personaId, 'personaId')
+    ? identity(input.personaId, 'context.personaId')
+    : UNSPECIFIED_CONTEXT
+  let locale: string = UNSPECIFIED_LOCALE
+  if (given(input.locale, 'locale')) {
+    locale = boundedText(input.locale, 'context.locale', 2, 16)
+    assertDomain(
+      LOCALE.test(locale),
+      'INVALID_ARGUMENT',
+      'context.locale is invalid',
+    )
+  }
+  const desiredAction = given(input.desiredAction, 'desiredAction')
+    ? identity(input.desiredAction, 'context.desiredAction')
+    : undefined
+  const narrativeTags = given(input.narrativeTags, 'narrativeTags')
+    ? sortedUniqueTokens(input.narrativeTags, 'context.narrativeTags', 1)
+    : Object.freeze([UNSPECIFIED_CONTEXT])
+  const tone = given(input.tone, 'tone') ? unit(input.tone, 'context.tone') : null
+  const energy = given(input.energy, 'energy') ? unit(input.energy, 'context.energy') : null
+  const visual = given(input.visual, 'visual') ? unit(input.visual, 'context.visual') : null
+  const experiment = given(input.experiment, 'experiment')
+    ? unit(input.experiment, 'context.experiment')
+    : null
   const prepared = {
     id: `compat-node-${calculateCanonicalHash({
       graphId,
@@ -437,23 +516,12 @@ function compatibilityNode(
       take.sourceRangeMs[1],
     ]) as readonly [number, number],
     durationMs: take.sourceRangeMs[1] - take.sourceRangeMs[0],
-    offerId: identity(input.offerId, 'context.offerId'),
-    audienceTags: sortedUniqueTokens(
-      input.audienceTags,
-      'context.audienceTags',
-      1,
-    ),
+    offerId,
+    audienceTags,
     claims: claims(input.claims, 'context.claims'),
-    personaId: identity(input.personaId, 'context.personaId'),
+    personaId,
     locale,
-    ...(input.desiredAction
-      ? {
-          desiredAction: identity(
-            input.desiredAction,
-            'context.desiredAction',
-          ),
-        }
-      : {}),
+    ...(desiredAction ? { desiredAction } : {}),
     continuityProvides: sortedUniqueTokens(
       input.continuityProvides,
       'context.continuityProvides',
@@ -462,46 +530,28 @@ function compatibilityNode(
       input.continuityRequires,
       'context.continuityRequires',
     ),
-    narrativeTags: sortedUniqueTokens(
-      input.narrativeTags,
-      'context.narrativeTags',
-      1,
-    ),
-    tone: unit(input.tone, 'context.tone'),
-    energy: unit(input.energy, 'context.energy'),
-    visual: unit(input.visual, 'context.visual'),
-    experiment: unit(input.experiment, 'context.experiment'),
+    narrativeTags,
+    tone,
+    energy,
+    visual,
+    experiment,
     evidenceRefs: sortedUniqueTokens(
       input.evidenceRefs,
       'context.evidenceRefs',
       1,
     ),
+    unspecified: Object.freeze(unspecified.toSorted()),
   }
-  const contextHash = calculateCanonicalHash({
-    offerId: prepared.offerId,
-    audienceTags: prepared.audienceTags,
-    claims: prepared.claims,
-    personaId: prepared.personaId,
-    locale: prepared.locale,
-    ...(prepared.desiredAction
-      ? { desiredAction: prepared.desiredAction }
-      : {}),
-    continuityProvides: prepared.continuityProvides,
-    continuityRequires: prepared.continuityRequires,
-    narrativeTags: prepared.narrativeTags,
-    tone: prepared.tone,
-    energy: prepared.energy,
-    visual: prepared.visual,
-    experiment: prepared.experiment,
-    evidenceRefs: prepared.evidenceRefs,
-  })
+  const contextHash = calculateCanonicalHash(
+    contextBody(prepared as unknown as CompatibilityNode, true),
+  )
   const body = {
     ...prepared,
     contextHash,
-  } as CompatibilityNode
+  } as unknown as CompatibilityNode
   return Object.freeze({
     ...body,
-    nodeHash: calculateCanonicalHash(nodeBody(body)),
+    nodeHash: calculateCanonicalHash(nodeBody(body, true)),
   })
 }
 
@@ -551,16 +601,20 @@ function durationSimilarity(left: number, right: number): number {
 
 function softScore(
   dimension: CompatibilitySoftDimension,
-  score: number,
+  score: number | null,
   from: CompatibilityNode,
   to: CompatibilityNode,
 ): Readonly<CompatibilitySoftScore> {
-  const normalized = Number(Math.max(0, Math.min(1, score)).toFixed(6))
+  const evaluable = score !== null
   const body = {
     dimension,
-    score: normalized,
-    weight: SOFT_WEIGHTS[dimension],
-    reasonCode: `${dimension.toUpperCase()}_CONTINUITY`,
+    score: evaluable
+      ? Number(Math.max(0, Math.min(1, score)).toFixed(6))
+      : null,
+    weight: evaluable ? SOFT_WEIGHTS[dimension] : 0,
+    reasonCode: evaluable
+      ? `${dimension.toUpperCase()}_CONTINUITY`
+      : `${dimension.toUpperCase()}_NOT_EVALUABLE`,
     evidenceRefs: Object.freeze([
       from.contextHash,
       to.contextHash,
@@ -594,13 +648,34 @@ function edgeEvidence(
   })
 }
 
+function stated(
+  field: CompatibilityContextField,
+  from: CompatibilityNode,
+  to: CompatibilityNode,
+): boolean {
+  return !(from.unspecified ?? []).includes(field) &&
+    !(to.unspecified ?? []).includes(field)
+}
+
 function failures(
   from: CompatibilityNode,
   to: CompatibilityNode,
-): readonly Readonly<CompatibilityHardFailure>[] {
+): {
+  hardFailures: readonly Readonly<CompatibilityHardFailure>[]
+  notEvaluable: readonly Readonly<CompatibilityNotEvaluableCheck>[]
+} {
   const result: CompatibilityHardFailure[] = []
+  const notEvaluable: CompatibilityNotEvaluableCheck[] = []
+  const check = (
+    code: CompatibilityHardReasonCode,
+    field: CompatibilityContextField,
+  ): boolean => {
+    if (stated(field, from, to)) return true
+    notEvaluable.push({ check: code, fields: [field] })
+    return false
+  }
   const refs = [from.contextHash, to.contextHash]
-  if (from.offerId !== to.offerId) {
+  if (check('OFFER_MISMATCH', 'offerId') && from.offerId !== to.offerId) {
     result.push(hardFailure(
       'OFFER_MISMATCH',
       'offerId',
@@ -608,7 +683,10 @@ function failures(
       refs,
     ))
   }
-  if (overlap(from.audienceTags, to.audienceTags).length === 0) {
+  if (
+    check('AUDIENCE_CONFLICT', 'audienceTags') &&
+    overlap(from.audienceTags, to.audienceTags).length === 0
+  ) {
     result.push(hardFailure(
       'AUDIENCE_CONFLICT',
       'audienceTags',
@@ -629,7 +707,7 @@ function failures(
       refs,
     ))
   }
-  if (from.personaId !== to.personaId) {
+  if (check('PERSONA_MISMATCH', 'personaId') && from.personaId !== to.personaId) {
     result.push(hardFailure(
       'PERSONA_MISMATCH',
       'personaId',
@@ -637,7 +715,7 @@ function failures(
       refs,
     ))
   }
-  if (from.locale !== to.locale) {
+  if (check('LOCALE_MISMATCH', 'locale') && from.locale !== to.locale) {
     result.push(hardFailure(
       'LOCALE_MISMATCH',
       'locale',
@@ -647,8 +725,7 @@ function failures(
   }
   if (
     to.role === 'cta' &&
-    from.desiredAction &&
-    to.desiredAction &&
+    check('CTA_ACTION_MISMATCH', 'desiredAction') &&
     from.desiredAction !== to.desiredAction
   ) {
     result.push(hardFailure(
@@ -669,10 +746,13 @@ function failures(
       refs,
     ))
   }
-  return Object.freeze(result)
+  return {
+    hardFailures: Object.freeze(result),
+    notEvaluable: Object.freeze(notEvaluable),
+  }
 }
 
-function edgeBody(value: CompatibilityEdge) {
+function edgeBody(value: CompatibilityEdge, v2: boolean) {
   return {
     id: value.id,
     fromNodeId: value.fromNodeId,
@@ -684,6 +764,7 @@ function edgeBody(value: CompatibilityEdge) {
     softScores: value.softScores,
     softScore: value.softScore,
     reasonCodes: value.reasonCodes,
+    ...(v2 ? { notEvaluable: value.notEvaluable ?? [] } : {}),
     evidence: value.evidence,
   }
 }
@@ -695,34 +776,60 @@ function compatibilityEdge(
   acceptThreshold: number,
   reviewThreshold: number,
 ): Readonly<CompatibilityEdge> {
-  const hardFailures = failures(from, to)
+  const { hardFailures, notEvaluable } = failures(from, to)
+  const dimension = (
+    field: CompatibilityContextField,
+    value: (() => number),
+  ): number | null => stated(field, from, to) ? value() : null
   const softScores = Object.freeze([
     softScore(
       'narrative',
-      jaccard(from.narrativeTags, to.narrativeTags),
+      dimension('narrativeTags', () =>
+        jaccard(from.narrativeTags, to.narrativeTags)),
       from,
       to,
     ),
-    softScore('tone', similarity(from.tone, to.tone), from, to),
-    softScore('energy', similarity(from.energy, to.energy), from, to),
+    softScore(
+      'tone',
+      dimension('tone', () => similarity(from.tone!, to.tone!)),
+      from,
+      to,
+    ),
+    softScore(
+      'energy',
+      dimension('energy', () => similarity(from.energy!, to.energy!)),
+      from,
+      to,
+    ),
     softScore(
       'duration',
       durationSimilarity(from.durationMs, to.durationMs),
       from,
       to,
     ),
-    softScore('visual', similarity(from.visual, to.visual), from, to),
+    softScore(
+      'visual',
+      dimension('visual', () => similarity(from.visual!, to.visual!)),
+      from,
+      to,
+    ),
     softScore(
       'experiment',
-      similarity(from.experiment, to.experiment),
+      dimension('experiment', () =>
+        similarity(from.experiment!, to.experiment!)),
       from,
       to,
     ),
   ])
+  // Only what was evaluated is scored: the weights of the dimensions left out are not spread by guessing, the others are renormalized.
+  const evaluatedWeight = softScores.reduce((sum, score) =>
+    sum + score.weight, 0)
   const weighted = Number((
     softScores.reduce((sum, score) =>
-      sum + score.score * score.weight, 0) * 100
+      sum + (score.score ?? 0) * score.weight, 0) / evaluatedWeight * 100
   ).toFixed(3))
+  const contextNotEvaluable = notEvaluable.length > 0 ||
+    softScores.some((score) => score.score === null)
   const decision: CompatibilityEdgeDecision = hardFailures.length > 0
     ? 'blocked'
     : weighted >= acceptThreshold
@@ -741,6 +848,7 @@ function compatibilityEdge(
               : 'LOW_SOFT_SCORE',
         ]
       : []),
+    ...(contextNotEvaluable ? ['CONTEXT_NOT_EVALUABLE'] : []),
   ].toSorted())
   const evidence = edgeEvidence(from, to)
   const id = `compat-edge-${calculateCanonicalHash({
@@ -759,17 +867,19 @@ function compatibilityEdge(
     softScores,
     softScore: weighted,
     reasonCodes,
+    notEvaluable,
     evidence,
   } as CompatibilityEdge
   return Object.freeze({
     ...body,
-    edgeHash: calculateCanonicalHash(edgeBody(body)),
+    edgeHash: calculateCanonicalHash(edgeBody(body, true)),
   })
 }
 
 function graphSummary(
   nodes: readonly CompatibilityNode[],
   edges: readonly CompatibilityEdge[],
+  v2: boolean,
 ): Readonly<CompatibilityGraphSummary> {
   return Object.freeze({
     nodeCount: nodes.length,
@@ -788,6 +898,13 @@ function graphSummary(
           edges.reduce((sum, edge) => sum + edge.softScore, 0) /
           edges.length
         ).toFixed(3)),
+    ...(v2
+      ? {
+          notEvaluableEdgeCount: edges.filter((edge) =>
+            (edge.notEvaluable?.length ?? 0) > 0 ||
+            edge.softScores.some((score) => score.score === null)).length,
+        }
+      : {}),
   })
 }
 
@@ -928,7 +1045,7 @@ export function createCompatibilityGraph(
     reviewThreshold,
     nodes,
     edges: frozenEdges,
-    summary: graphSummary(nodes, frozenEdges),
+    summary: graphSummary(nodes, frozenEdges, true),
     createdByClientId: identity(
       input.createdByClientId,
       'createdByClientId',
@@ -940,10 +1057,21 @@ export function createCompatibilityGraph(
 export function hydrateCompatibilityGraph(
   value: Readonly<CompatibilityGraphRun>,
 ): Readonly<CompatibilityGraphRun> {
+  const v2 = value?.schemaVersion === COMPATIBILITY_GRAPH_SCHEMA_VERSION
   assertDomain(
-    value?.schemaVersion === COMPATIBILITY_GRAPH_SCHEMA_VERSION &&
-    value.ruleVersion === COMPATIBILITY_RULE_VERSION &&
-    value.softScoreVersion === COMPATIBILITY_SOFT_SCORE_VERSION &&
+    (
+      v2 &&
+      value.ruleVersion === COMPATIBILITY_RULE_VERSION &&
+      value.softScoreVersion === COMPATIBILITY_SOFT_SCORE_VERSION
+    ) || (
+      value?.schemaVersion === COMPATIBILITY_GRAPH_SCHEMA_VERSION_V1 &&
+      value.ruleVersion === COMPATIBILITY_RULE_VERSION_V1 &&
+      value.softScoreVersion === COMPATIBILITY_SOFT_SCORE_VERSION_V1
+    ),
+    'INVALID_ARGUMENT',
+    'Compatibility graph has an invalid envelope',
+  )
+  assertDomain(
     HASH.test(value.takeLibraryRunHash ?? '') &&
     Array.isArray(value.nodes) &&
     value.nodes.length >= 2 &&
@@ -974,11 +1102,31 @@ export function hydrateCompatibilityGraph(
       HASH.test(node.sourceHash) &&
       HASH.test(node.contextHash) &&
       HASH.test(node.nodeHash) &&
-      node.contextHash === calculateCanonicalHash(contextBody(node)) &&
-      node.nodeHash === calculateCanonicalHash(nodeBody(node)),
+      node.contextHash === calculateCanonicalHash(contextBody(node, v2)) &&
+      node.nodeHash === calculateCanonicalHash(nodeBody(node, v2)),
       'INVALID_ARGUMENT',
       `Compatibility node ${node.id} failed integrity validation`,
     )
+    if (v2) {
+      // A context the requester did not state carries its sentinel and nothing else.
+      const listed = node.unspecified ?? []
+      assertDomain(
+        listed.every((field: CompatibilityContextField) => COMPATIBILITY_CONTEXT_FIELDS.includes(field)) &&
+        new Set(listed).size === listed.length &&
+        (node.offerId === UNSPECIFIED_CONTEXT) === listed.includes('offerId') &&
+        (node.personaId === UNSPECIFIED_CONTEXT) === listed.includes('personaId') &&
+        (node.locale === UNSPECIFIED_LOCALE) === listed.includes('locale') &&
+        (node.desiredAction === undefined) === listed.includes('desiredAction') &&
+        (node.tone === null) === listed.includes('tone') &&
+        (node.energy === null) === listed.includes('energy') &&
+        (node.visual === null) === listed.includes('visual') &&
+        (node.experiment === null) === listed.includes('experiment') &&
+        node.audienceTags.includes(UNSPECIFIED_CONTEXT) === listed.includes('audienceTags') &&
+        node.narrativeTags.includes(UNSPECIFIED_CONTEXT) === listed.includes('narrativeTags'),
+        'INVALID_ARGUMENT',
+        `Compatibility node ${node.id} lists unspecified fields that do not match its context`,
+      )
+    }
     nodeById.set(node.id, node)
   }
   const edgeIds = new Set<string>()
@@ -1002,10 +1150,18 @@ export function hydrateCompatibilityGraph(
           evidenceRefs: failure.evidenceRefs,
         })) &&
       edge.softScores.length === COMPATIBILITY_SOFT_DIMENSIONS.length &&
+      (!v2 || Array.isArray(edge.notEvaluable)) &&
+      (edge.notEvaluable ?? []).every((
+        item: Readonly<CompatibilityNotEvaluableCheck>,
+      ) =>
+        COMPATIBILITY_HARD_REASON_CODES.includes(item.check) &&
+        item.fields.every((field: CompatibilityContextField) =>
+          COMPATIBILITY_CONTEXT_FIELDS.includes(field))) &&
       edge.softScores.every((
         score: Readonly<CompatibilitySoftScore>,
       ) =>
         COMPATIBILITY_SOFT_DIMENSIONS.includes(score.dimension) &&
+        (v2 || score.score !== null) &&
         score.scoreHash === calculateCanonicalHash({
           dimension: score.dimension,
           score: score.score,
@@ -1023,7 +1179,7 @@ export function hydrateCompatibilityGraph(
         ruleVersion: edge.evidence.ruleVersion,
         softScoreVersion: edge.evidence.softScoreVersion,
       }) &&
-      edge.edgeHash === calculateCanonicalHash(edgeBody(edge)),
+      edge.edgeHash === calculateCanonicalHash(edgeBody(edge, v2)),
       'INVALID_ARGUMENT',
       `Compatibility edge ${edge.id} failed integrity validation`,
     )
@@ -1031,7 +1187,7 @@ export function hydrateCompatibilityGraph(
   }
   assertDomain(
     stableSerialize(value.summary) === stableSerialize(
-      graphSummary(value.nodes, value.edges),
+      graphSummary(value.nodes, value.edges, v2),
     ) &&
     value.runHash === calculateCanonicalHash(runBody(value)),
     'INVALID_ARGUMENT',
@@ -1057,6 +1213,9 @@ export function hydrateCompatibilityGraph(
         ]),
         narrativeTags: Object.freeze([...node.narrativeTags]),
         evidenceRefs: Object.freeze([...node.evidenceRefs]),
+        ...(node.unspecified
+          ? { unspecified: Object.freeze([...node.unspecified]) }
+          : {}),
       }))),
     edges: Object.freeze(value.edges.map((edge) =>
       Object.freeze({
@@ -1076,6 +1235,17 @@ export function hydrateCompatibilityGraph(
             evidenceRefs: Object.freeze([...score.evidenceRefs]),
           }))),
         reasonCodes: Object.freeze([...edge.reasonCodes]),
+        ...(edge.notEvaluable
+          ? {
+              notEvaluable: Object.freeze(edge.notEvaluable.map((
+                item: Readonly<CompatibilityNotEvaluableCheck>,
+              ) =>
+                Object.freeze({
+                  ...item,
+                  fields: Object.freeze([...item.fields]),
+                }))),
+            }
+          : {}),
         evidence: Object.freeze({ ...edge.evidence }),
       }))),
     summary: Object.freeze({ ...value.summary }),

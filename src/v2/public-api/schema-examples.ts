@@ -4242,6 +4242,63 @@ const compatibilityGraphRunExample = {
   createdAt,
   runHash: 'c'.repeat(64),
 }
+// ADR-160 F8 (compatibility graph v2). The requester states only what the batch briefing said (here the offer and the audience); every other
+// semantic field is unspecified, the checks that need it are not evaluable, and the dimensions that need it are left out of the score.
+const compatibilityContextsExampleV2 = compatibilityContextsExample.map((context) => ({
+  takeId: context.takeId,
+  expectedTakeHash: context.expectedTakeHash,
+  offerId: 'offer-apollo-example',
+  audienceTags: ['audience-placeholder'],
+  claims: [],
+  continuityProvides: context.continuityProvides,
+  continuityRequires: context.continuityRequires,
+  evidenceRefs: context.evidenceRefs,
+}))
+const compatibilityUnspecifiedFieldsExample = ['desiredAction', 'energy', 'experiment', 'locale', 'narrativeTags', 'personaId', 'tone', 'visual']
+const compatibilityNodesExampleV2 = compatibilityNodesExample.map(({ desiredAction: _stated, ...node }) => ({
+  ...node,
+  audienceTags: ['audience-placeholder'],
+  claims: [],
+  personaId: 'unspecified',
+  locale: 'und',
+  narrativeTags: ['unspecified'],
+  tone: null,
+  energy: null,
+  visual: null,
+  experiment: null,
+  unspecified: compatibilityUnspecifiedFieldsExample,
+}))
+const compatibilityGraphRunExampleV2 = {
+  ...compatibilityGraphRunExample,
+  schemaVersion: 'compatibility-graph/v2',
+  ruleVersion: 'compatibility-rules/v2',
+  softScoreVersion: 'compatibility-soft-score/v2',
+  nodes: compatibilityNodesExampleV2,
+  edges: compatibilityGraphRunExample.edges.map((edge, edgeIndex) => ({
+    ...edge,
+    decision: 'blocked',
+    eligible: false,
+    softScores: edge.softScores.map((score) => score.dimension === 'duration'
+      ? score
+      : { ...score, score: null, weight: 0, reasonCode: `${String(score.dimension).toUpperCase()}_NOT_EVALUABLE` }),
+    softScore: 49.231,
+    reasonCodes: ['CONTEXT_NOT_EVALUABLE', 'LOW_SOFT_SCORE'],
+    notEvaluable: [
+      { check: 'PERSONA_MISMATCH', fields: ['personaId'] },
+      { check: 'LOCALE_MISMATCH', fields: ['locale'] },
+      ...(edge.relation.endsWith('cta') ? [{ check: 'CTA_ACTION_MISMATCH', fields: ['desiredAction'] }] : []),
+    ],
+    evidence: { ...edge.evidence, ruleVersion: 'compatibility-rules/v2', softScoreVersion: 'compatibility-soft-score/v2' },
+    edgeHash: String(edgeIndex + 7).repeat(64),
+  })),
+  summary: {
+    ...compatibilityGraphRunExample.summary,
+    acceptedCount: 0,
+    blockedCount: 2,
+    averageSoftScore: 49.231,
+    notEvaluableEdgeCount: 2,
+  },
+}
 const variantRecipeSourceSegmentsExample =
   compatibilityNodesExample.map((node, index) => ({
     id: `variant-source-segment-${index + 1}`,
@@ -5640,6 +5697,19 @@ const currentEditorialRequestExample = {
   openQuestions: editorialRequestViewExample.openQuestions,
   blocksDirector: editorialRequestViewExample.blocksDirector,
   hashes: editorialRequestViewExample.hashes,
+}
+const batchEditorialRequestExample = {
+  batch: { id: 'production-batch-example-1', projectId: 'project-example-1', name: '<nome do lote>' },
+  state: 'interpreted',
+  request: currentEditorialRequestExample.request,
+  interpretation: editorialRequestViewExample.interpretation,
+  interpretationAudit: editorialRequestViewExample.interpretationAudit,
+  unsupported: editorialRequestViewExample.unsupported,
+  openQuestions: editorialRequestViewExample.openQuestions,
+  hashes: {
+    requestHash: editorialRequestViewExample.hashes.requestHash, briefingSha256: editorialRequestViewExample.hashes.briefingSha256,
+    interpretationHash: editorialRequestViewExample.hashes.interpretationHash,
+  },
 }
 const editorialRequestRevisedExample = {
   command: {
@@ -13123,6 +13193,22 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         reviewThreshold: 60,
       },
     ],
+    'apollo://schemas/create-compatibility-graph-request/v2': [
+      {
+        takeLibraryId: takeLibraryRunExample.id,
+        expectedTakeLibraryRunHash: takeLibraryRunExample.runHash,
+        contexts: compatibilityContextsExampleV2,
+      },
+    ],
+    'apollo://schemas/compatibility-graph-mutated/v2': [
+      { data: { graph: compatibilityGraphRunExampleV2, replayed: false }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/compatibility-graph-read/v2': [
+      { data: { graph: compatibilityGraphRunExampleV2 }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/compatibility-graph-page/v2': [
+      { data: { graphs: [compatibilityGraphRunExampleV2], nextCursor: compatibilityGraphRunExampleV2.id }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/compatibility-graph-mutated/v1': [
       {
         data: {
@@ -14591,6 +14677,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       reason: '<motivo da revisão>',
     }],
     'apollo://schemas/editorial-request-response/v1': [{ data: currentEditorialRequestExample, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/batch-editorial-request-response/v1': [{ data: batchEditorialRequestExample, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/editorial-request-revised/v1': [{ data: editorialRequestRevisedExample, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/project-proxy-review-response/v1': [
       {

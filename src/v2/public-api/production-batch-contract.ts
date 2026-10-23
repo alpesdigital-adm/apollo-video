@@ -429,3 +429,35 @@ export function presentProductionBatchPage(input: {
     ...(input.nextCursor ? { nextCursor: input.nextCursor } : {}),
   })
 }
+
+/** The request stored with a batch, as it is published by `apollo.batches.editorial-request.read`. */
+export function presentProductionBatchEditorialRequest(view: Readonly<{
+  batch: Readonly<{ id: string; projectId: string; name: string }>
+  state: 'no-request' | 'interpreted'
+  request: Readonly<{ schemaVersion: string; briefing?: Readonly<{ text: string; sha256: string }>; objective?: unknown; desiredAction?: unknown; directives: readonly unknown[]; variantOverrides: Readonly<Record<string, readonly unknown[]>>; requestHash: string }> | null
+  interpretation: unknown
+  interpretationAudit: unknown
+  unsupported: readonly unknown[]
+  openQuestions: readonly unknown[]
+  hashes: unknown
+}>) {
+  const { request } = view
+  return Object.freeze({
+    batch: view.batch,
+    state: view.state,
+    request: request === null ? null : Object.freeze({
+      schemaVersion: request.schemaVersion,
+      ...(request.briefing ? { briefing: { text: request.briefing.text, sha256: request.briefing.sha256 } } : {}),
+      ...(request.objective ? { objective: request.objective } : {}),
+      ...(request.desiredAction ? { desiredAction: request.desiredAction } : {}),
+      directives: request.directives,
+      variantOverrides: request.variantOverrides,
+      requestHash: request.requestHash,
+    }),
+    interpretation: view.interpretation,
+    interpretationAudit: view.interpretationAudit,
+    unsupported: view.unsupported,
+    openQuestions: view.openQuestions,
+    hashes: view.hashes,
+  })
+}

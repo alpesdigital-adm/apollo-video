@@ -10,6 +10,7 @@ import { createEditorialRequest } from '../domain/editorial-request.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { normalizeBriefingText } from '../domain/production-brief.ts'
 import type { InterpretBrief } from './interpret-brief.ts'
+import { describeRequestReading } from './revise-editorial-request.ts'
 import {
   batchProgress,
   cancelProductionBatch,
@@ -288,6 +289,41 @@ export function readProductionBatchService(dependencies: {
       )
     }
     return batch
+  }
+}
+
+/**
+ * ADR-160 F8. The editorial request of one batch: the briefing as written and how it was read. The batch document does not carry it (it is an
+ * input of the batch, not part of its public state), so this is the one read of it. A batch created before the request existed has none.
+ */
+export function readProductionBatchEditorialRequestService(dependencies: {
+  repository: ProductionBatchRepository
+}) {
+  return async function execute(request: {
+    workspaceId: string
+    batchId: string
+  }) {
+    const batch = await readProductionBatchService(dependencies)(request)
+    const stored = batch.editorialRequest
+    const identityOfBatch = Object.freeze({ id: batch.id, projectId: batch.projectId, name: batch.name })
+    if (!stored) {
+      return Object.freeze({ batch: identityOfBatch, state: 'no-request' as const, request: null, interpretation: null, interpretationAudit: null, unsupported: Object.freeze([]), openQuestions: Object.freeze([]), hashes: null })
+    }
+    const reading = describeRequestReading(stored.request, stored.interpretationAudit)
+    return Object.freeze({
+      batch: identityOfBatch,
+      state: 'interpreted' as const,
+      request: stored.request,
+      interpretation: reading.interpretation,
+      interpretationAudit: reading.interpretationAudit,
+      unsupported: reading.unsupported,
+      openQuestions: reading.openQuestions,
+      hashes: Object.freeze({
+        requestHash: stored.request.requestHash,
+        briefingSha256: stored.request.briefing?.sha256 ?? null,
+        interpretationHash: reading.interpretation?.interpretationHash ?? null,
+      }),
+    })
   }
 }
 

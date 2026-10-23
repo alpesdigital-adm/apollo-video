@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import Ajv2020 from 'ajv/dist/2020.js'
+import addFormats from 'ajv-formats'
 
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { interpretBriefService } from '../../src/v2/application/interpret-brief.ts'
@@ -7,7 +9,7 @@ import { createProductionBatchService } from '../../src/v2/application/productio
 import { createEditorialRequest } from '../../src/v2/domain/editorial-request.ts'
 import { createProductionBatch, hydrateProductionBatch } from '../../src/v2/domain/production-batch.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
-import { parseCreateProductionBatchBody, presentProductionBatchV2 } from '../../src/v2/public-api/production-batch-contract.ts'
+import { parseCreateProductionBatchBody, presentProductionBatchEditorialRequest, presentProductionBatchV2 } from '../../src/v2/public-api/production-batch-contract.ts'
 import { publicSchemaExamples } from '../../src/v2/public-api/schema-examples.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
@@ -125,4 +127,41 @@ test('the published batch does not carry its stored request, and the contract as
     assert.throws(() => parseCreateProductionBatchBody(body({ briefing: 3 })), (error) => error.code === 'INVALID_ARGUMENT')
     assert.equal(parseCreateProductionBatchBody(body({ briefing: 'any text at all' })).briefing, 'any text at all')
   })
+})
+
+test('the request of a batch is read through its own capability: briefing, reading, unsupported items and questions, and a batch without a request says so', async () => {
+  const model = stubModel({
+    directives: [{ kind: 'movement', value: 'zoom-in', quote: 'pedido' }], unsupported: [], questions: [{ question: 'Qual é o idioma?', quote: 'pedido' }], coverage: [{ topic: 'audience', quote: 'pedido' }],
+  })
+  const { batch } = await service(memoryRepository(), model)(request())
+  const { readProductionBatchEditorialRequestService } = await import('../../src/v2/application/production-batches.ts')
+  const read = await readProductionBatchEditorialRequestService({ repository: { async read() { return batch } } })({ workspaceId: 'workspace-fixture', batchId: batch.id })
+  assert.equal(read.state, 'interpreted')
+  assert.equal(read.request.briefing.text, BRIEFING)
+  assert.equal(read.interpretation.coverage[0].topic, 'audience')
+  assert.ok(read.unsupported.length >= 1, 'a movement the renderer does not execute is reported, never dropped')
+  assert.equal(read.openQuestions.length, 1)
+  assert.equal(read.hashes.requestHash, batch.editorialRequest.request.requestHash)
+  const published = presentProductionBatchEditorialRequest(read)
+  assert.equal(published.request.briefing.text, BRIEFING)
+  assert.equal(published.batch.id, batch.id)
+  const old = createProductionBatch({ id: 'batch-old', workspaceId: 'workspace-fixture', projectId: 'project-fixture', name: 'Lote antigo', objective: 'content-distribution',
+    sourceGroups: batch.sourceGroups, recipes: batch.recipes, variants: batch.variants, budget: batch.budget,
+    itemDefinitions: [{ id: 'item-old', key: 'item-a', sourceGroupId: 'group-a', recipeId: 'recipe-a', variantId: 'variant-a' }], createdBy: batch.createdBy, createdAt: batch.createdAt })
+  const none = await readProductionBatchEditorialRequestService({ repository: { async read() { return old } } })({ workspaceId: 'workspace-fixture', batchId: old.id })
+  assert.equal(none.state, 'no-request')
+  assert.equal(none.request, null)
+  // The contract: a query with an immutable ref, an example of placeholders, and a response schema that accepts what is published.
+  const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.batches.editorial-request.read')
+  assert.equal(capability.endpoint.path, '/v1/batches/{batchId}/editorial-request')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/batch-editorial-request-response/v1')
+  assert.equal(capability.toolName, 'apollo.batches.editorial-request.read')
+  const schema = getPublicSchema('apollo://schemas/batch-editorial-request-response/v1')
+  const ajv = new Ajv2020({ strict: false, allErrors: true })
+  addFormats(ajv)
+  const validate = ajv.compile(schema.schema)
+  for (const value of [{ data: published, meta: { apiVersion: 'v1' } }, { data: presentProductionBatchEditorialRequest(none), meta: { apiVersion: 'v1' } }]) {
+    assert.equal(validate(JSON.parse(JSON.stringify(value))), true, JSON.stringify(validate.errors)?.slice(0, 600))
+  }
+  for (const example of publicSchemaExamples(schema)) assert.equal(validate(example), true, JSON.stringify(validate.errors)?.slice(0, 600))
 })

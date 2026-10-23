@@ -283,13 +283,11 @@ export interface EditorialRequestView {
   hashes: Readonly<{ requestHash: string; briefingSha256: string | null; interpretationHash: string | null; briefSnapshotId: string; briefSnapshotHash: string }>
 }
 
-export function describeEditorialRequest(input: Readonly<{
-  objective: string
-  briefSnapshot: Readonly<{ id: string; contentHash: string; content: Readonly<Record<string, unknown>> }>
-}>): Readonly<EditorialRequestView> {
-  const request = deriveEditorialRequestFromBrief({ ...input.briefSnapshot.content, objective: input.objective })
+/** What a reader sees of a request and the way its briefing was read; the same view for a project's Brief Snapshot and for the request stored with a batch. */
+export type EditorialRequestReading = Omit<EditorialRequestView, 'hashes'>
+
+export function describeRequestReading(request: Readonly<EditorialRequestV1>, audit: unknown): Readonly<EditorialRequestReading> {
   const interpretation = request.interpretation ?? null
-  const audit = structuredOf(input.briefSnapshot.content).interpretationAudit
   const directives = [
     ...request.directives.map((directive) => ({ directive, source: 'request-field' as const })),
     ...Object.values(request.variantOverrides).flat().map((directive) => ({ directive, source: 'request-field' as const })),
@@ -311,8 +309,19 @@ export function describeEditorialRequest(input: Readonly<{
     request, interpretation, interpretationAudit: (isRecord(audit) ? audit : null) as Readonly<BriefInterpretationAudit> | null, state,
     unsupported: Object.freeze(unsupported), openQuestions: Object.freeze(openQuestions),
     blocksDirector: state === 'awaiting-interpretation' || unsupported.length > 0 || openQuestions.length > 0,
+  })
+}
+
+export function describeEditorialRequest(input: Readonly<{
+  objective: string
+  briefSnapshot: Readonly<{ id: string; contentHash: string; content: Readonly<Record<string, unknown>> }>
+}>): Readonly<EditorialRequestView> {
+  const request = deriveEditorialRequestFromBrief({ ...input.briefSnapshot.content, objective: input.objective })
+  const reading = describeRequestReading(request, structuredOf(input.briefSnapshot.content).interpretationAudit)
+  return Object.freeze({
+    ...reading,
     hashes: Object.freeze({
-      requestHash: request.requestHash, briefingSha256: request.briefing?.sha256 ?? null, interpretationHash: interpretation?.interpretationHash ?? null,
+      requestHash: request.requestHash, briefingSha256: request.briefing?.sha256 ?? null, interpretationHash: reading.interpretation?.interpretationHash ?? null,
       briefSnapshotId: input.briefSnapshot.id, briefSnapshotHash: input.briefSnapshot.contentHash,
     }),
   })

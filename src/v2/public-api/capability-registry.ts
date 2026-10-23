@@ -4671,6 +4671,13 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     idempotency: 'not-applicable',
   },
   {
+    id: 'apollo.batches.editorial-request.read', version: '1.0.0', title: 'Read the editorial request of a production batch',
+    description: 'Reads the editorial request stored with one production batch: the briefing of the whole batch as written, how it was read (directives with the exact words they stand on, what is unsupported, what is still a question), the audit of that reading and the hashes that bind it. A batch made before the request existed answers no-request. The batch document itself does not carry the request.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/batch-editorial-request-response/v1', endpoint: { method: 'GET', path: '/v1/batches/{batchId}/editorial-request' }, toolName: 'apollo.batches.editorial-request.read',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
     id: 'apollo.batches.script-alignments.list',
     version: '1.0.0',
     title: 'List script alignments',
@@ -4889,14 +4896,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.batches.compatibility-graphs.list',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'List compatibility graphs',
     description: 'Returns immutable compatibility graphs for one production batch, including eligible nodes, hard failures, six-dimension soft scores, decisions and canonical evidence.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'required',
     requiredScopes: ['projects:read'],
-    outputSchemaRef: 'apollo://schemas/compatibility-graph-page/v1',
+    outputSchemaRef: 'apollo://schemas/compatibility-graph-page/v2',
     endpoint: {
       method: 'GET',
       path: '/v1/batches/{batchId}/compatibility-graphs',
@@ -4929,7 +4936,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.batches.compatibility-graphs.create',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Create compatibility graph',
     description: 'Builds one immutable graph from an exact take-library hash, allowing only eligible hook, body, proof and CTA takes and persisting hard incompatibilities, six soft scores, reason codes and evidence for every supported edge.',
     exposure: 'public',
@@ -4937,9 +4944,9 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     authMode: 'required',
     requiredScopes: ['projects:write'],
     inputSchemaRef:
-      'apollo://schemas/create-compatibility-graph-request/v1',
+      'apollo://schemas/create-compatibility-graph-request/v2',
     outputSchemaRef:
-      'apollo://schemas/compatibility-graph-mutated/v1',
+      'apollo://schemas/compatibility-graph-mutated/v2',
     endpoint: {
       method: 'POST',
       path: '/v1/batches/{batchId}/compatibility-graphs',
@@ -4954,14 +4961,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.batches.compatibility-graphs.read',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Read compatibility graph',
     description: 'Reads one exact compatibility graph with source-bound nodes, accepted, blocked and borderline edges, hard failures, soft scores, reason codes and evidence.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'required',
     requiredScopes: ['projects:read'],
-    outputSchemaRef: 'apollo://schemas/compatibility-graph-read/v1',
+    outputSchemaRef: 'apollo://schemas/compatibility-graph-read/v2',
     endpoint: {
       method: 'GET',
       path:

@@ -15,6 +15,7 @@ import {
 } from '../domain/sync-marker-detection.ts'
 import { MARKER_KINDS, MARKER_POSITIONS } from '../domain/sync-marker.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
+import { COMPATIBILITY_CONTEXT_FIELDS, COMPATIBILITY_HARD_REASON_CODES } from '../domain/compatibility-graph.ts'
 import { FACE0204_OUTPUT_BYTES, FACE0204_OUTPUT_POLICY_ID, FACE0204_OUTPUT_POLICY_SHA256, FACE0204_OUTPUT_SLOTS } from '../domain/face-detector-output.ts'
 import { FACE_EVIDENCE_POLICY, FACE_EVIDENCE_POLICY_SHA256, FACE_V9_OWNER_ACCEPTANCE_SHA256 } from '../domain/face-evidence-policy.ts'
 import { ACCEPTED_FACE_PRODUCERS } from '../domain/face-producer-registry.ts'
@@ -4749,6 +4750,134 @@ const compatibilityGraphRunSchema = {
     runHash: sha256Schema,
   },
 }
+const createCompatibilityGraphRequestSchemaV1 = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'takeLibraryId',
+    'expectedTakeLibraryRunHash',
+    'contexts',
+  ],
+  properties: {
+    takeLibraryId: idSchema,
+    expectedTakeLibraryRunHash: sha256Schema,
+    contexts: {
+      type: 'array',
+      minItems: 2,
+      maxItems: 2000,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'takeId',
+          'expectedTakeHash',
+          'offerId',
+          'audienceTags',
+          'claims',
+          'personaId',
+          'locale',
+          'continuityProvides',
+          'continuityRequires',
+          'narrativeTags',
+          'tone',
+          'energy',
+          'visual',
+          'experiment',
+          'evidenceRefs',
+        ],
+        properties: {
+          takeId: idSchema,
+          expectedTakeHash: sha256Schema,
+          ...compatibilityContextProperties,
+        },
+      },
+    },
+    acceptThreshold: {
+      type: 'number',
+      minimum: 0,
+      maximum: 100,
+      default: 70,
+    },
+    reviewThreshold: {
+      type: 'number',
+      minimum: 0,
+      maximum: 100,
+      default: 60,
+    },
+  },
+}
+// ---- ADR-160 F8. Compatibility graph v2: a context the requester did not state is `unspecified`, the check that needs it is `not-evaluable`.
+// Every shape below is a superset of the v1 shape, so a graph sealed under v1 is still a valid answer of the v2 refs.
+const compatibilityContextFieldSchema = { enum: [...COMPATIBILITY_CONTEXT_FIELDS] }
+const compatibilityNullableUnitSchema = { anyOf: [{ type: 'number', minimum: 0, maximum: 1 }, { type: 'null' }] }
+const compatibilityNodeSchemaV2 = {
+  ...compatibilityNodeSchema,
+  properties: {
+    ...compatibilityNodeSchema.properties,
+    tone: compatibilityNullableUnitSchema,
+    energy: compatibilityNullableUnitSchema,
+    visual: compatibilityNullableUnitSchema,
+    experiment: compatibilityNullableUnitSchema,
+    unspecified: {
+      type: 'array', maxItems: COMPATIBILITY_CONTEXT_FIELDS.length, uniqueItems: true, items: compatibilityContextFieldSchema,
+      description: 'The context fields the requester did not state. Their values above are the sentinels (unspecified, the undetermined locale, null) and the checks and dimensions that need them are not evaluated.',
+    },
+  },
+}
+const compatibilitySoftScoreSchemaV2 = {
+  ...compatibilitySoftScoreSchema,
+  properties: {
+    ...compatibilitySoftScoreSchema.properties,
+    score: { anyOf: [{ type: 'number', minimum: 0, maximum: 1 }, { type: 'null' }], description: 'null = not evaluable: a context it needs was not stated; weight is then 0 and it is left out of the weighted score.' },
+    weight: { type: 'number', minimum: 0, maximum: 1 },
+  },
+}
+const compatibilityEdgeEvidenceSchemaV2 = {
+  ...compatibilityEdgeEvidenceSchema,
+  properties: {
+    ...compatibilityEdgeEvidenceSchema.properties,
+    ruleVersion: { enum: ['compatibility-rules/v1', 'compatibility-rules/v2'] },
+    softScoreVersion: { enum: ['compatibility-soft-score/v1', 'compatibility-soft-score/v2'] },
+  },
+}
+const compatibilityEdgeSchemaV2 = {
+  ...compatibilityEdgeSchema,
+  properties: {
+    ...compatibilityEdgeSchema.properties,
+    softScores: { type: 'array', minItems: 6, maxItems: 6, items: compatibilitySoftScoreSchemaV2 },
+    reasonCodes: { type: 'array', minItems: 1, maxItems: 9, uniqueItems: true, items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,79}$' } },
+    notEvaluable: {
+      type: 'array', maxItems: COMPATIBILITY_HARD_REASON_CODES.length,
+      description: 'The hard checks that could not be made because a context they need was not stated on one of the two takes.',
+      items: {
+        type: 'object', additionalProperties: false, required: ['check', 'fields'],
+        properties: {
+          check: { enum: [...COMPATIBILITY_HARD_REASON_CODES] },
+          fields: { type: 'array', minItems: 1, maxItems: COMPATIBILITY_CONTEXT_FIELDS.length, uniqueItems: true, items: compatibilityContextFieldSchema },
+        },
+      },
+    },
+    evidence: compatibilityEdgeEvidenceSchemaV2,
+  },
+}
+const compatibilityGraphRunSchemaV2 = {
+  ...compatibilityGraphRunSchema,
+  properties: {
+    ...compatibilityGraphRunSchema.properties,
+    schemaVersion: { enum: ['compatibility-graph/v1', 'compatibility-graph/v2'] },
+    ruleVersion: { enum: ['compatibility-rules/v1', 'compatibility-rules/v2'] },
+    softScoreVersion: { enum: ['compatibility-soft-score/v1', 'compatibility-soft-score/v2'] },
+    nodes: { type: 'array', minItems: 2, maxItems: 2000, items: compatibilityNodeSchemaV2 },
+    edges: { type: 'array', minItems: 1, maxItems: 4000000, items: compatibilityEdgeSchemaV2 },
+    summary: {
+      ...compatibilityGraphRunSchema.properties.summary,
+      properties: {
+        ...compatibilityGraphRunSchema.properties.summary.properties,
+        notEvaluableEdgeCount: { type: 'integer', minimum: 0, maximum: 4000000 },
+      },
+    },
+  },
+}
 const variantRecipeRangeMsSchema = {
   type: 'array',
   minItems: 2,
@@ -8500,6 +8629,25 @@ const currentEditorialRequestSchema = {
       type: 'object', additionalProperties: false, required: ['requestHash', 'briefingSha256', 'interpretationHash', 'briefSnapshotId', 'briefSnapshotHash'],
       properties: { requestHash: sha256Schema, briefingSha256: { anyOf: [sha256Schema, { type: 'null' }] }, interpretationHash: { anyOf: [sha256Schema, { type: 'null' }] }, briefSnapshotId: idSchema, briefSnapshotHash: sha256Schema },
     },
+  },
+}
+// ---- ADR-160 F8. The editorial request stored with a production batch: the briefing of the whole batch and how it was read. A batch made before
+// the request existed answers 'no-request'. A batch has no Director to block and no Command to revise it: to change the request, make another batch.
+const batchEditorialRequestSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['batch', 'state', 'request', 'interpretation', 'interpretationAudit', 'unsupported', 'openQuestions', 'hashes'],
+  properties: {
+    batch: { type: 'object', additionalProperties: false, required: ['id', 'projectId', 'name'], properties: { id: idSchema, projectId: idSchema, name: { type: 'string', minLength: 1, maxLength: 200 } } },
+    state: { enum: ['no-request', 'interpreted'] },
+    request: { anyOf: [{ type: 'null' }, currentEditorialRequestSchema.properties.request] },
+    interpretation: currentEditorialRequestSchema.properties.interpretation,
+    interpretationAudit: currentEditorialRequestSchema.properties.interpretationAudit,
+    unsupported: currentEditorialRequestSchema.properties.unsupported,
+    openQuestions: currentEditorialRequestSchema.properties.openQuestions,
+    hashes: { anyOf: [{ type: 'null' }, {
+      type: 'object', additionalProperties: false, required: ['requestHash', 'briefingSha256', 'interpretationHash'],
+      properties: { requestHash: sha256Schema, briefingSha256: { anyOf: [sha256Schema, { type: 'null' }] }, interpretationHash: { anyOf: [sha256Schema, { type: 'null' }] } },
+    }] },
   },
 }
 const editorialRequestRevisionImpactSchema = {
@@ -24604,62 +24752,44 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
       },
     }),
   ),
-  defineSchema('create-compatibility-graph-request', 1, 'Build an immutable compatibility graph from one exact take library and source-bound semantic contexts', {
-    type: 'object',
-    additionalProperties: false,
-    required: [
-      'takeLibraryId',
-      'expectedTakeLibraryRunHash',
-      'contexts',
-    ],
-    properties: {
-      takeLibraryId: idSchema,
-      expectedTakeLibraryRunHash: sha256Schema,
-      contexts: {
-        type: 'array',
-        minItems: 2,
-        maxItems: 2000,
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: [
-            'takeId',
-            'expectedTakeHash',
-            'offerId',
-            'audienceTags',
-            'claims',
-            'personaId',
-            'locale',
-            'continuityProvides',
-            'continuityRequires',
-            'narrativeTags',
-            'tone',
-            'energy',
-            'visual',
-            'experiment',
-            'evidenceRefs',
-          ],
-          properties: {
-            takeId: idSchema,
-            expectedTakeHash: sha256Schema,
-            ...compatibilityContextProperties,
+  defineSchema('create-compatibility-graph-request', 1, 'Build an immutable compatibility graph from one exact take library and source-bound semantic contexts', createCompatibilityGraphRequestSchemaV1),
+  defineSchema('create-compatibility-graph-request', 2, 'Build an immutable compatibility graph from one exact take library and the contexts the requester states; a context that is not stated is unspecified and the check that needs it is not evaluable', (() => {
+    const v1 = createCompatibilityGraphRequestSchemaV1
+    const item = v1.properties.contexts.items
+    return {
+      ...v1,
+      properties: {
+        ...v1.properties,
+        contexts: {
+          ...v1.properties.contexts,
+          items: {
+            ...item,
+            required: ['takeId', 'expectedTakeHash', 'claims', 'continuityProvides', 'continuityRequires', 'evidenceRefs'],
+            properties: {
+              ...item.properties,
+              audienceTags: { ...item.properties.audienceTags, minItems: 0 },
+              narrativeTags: { ...item.properties.narrativeTags, minItems: 0 },
+            },
           },
         },
       },
-      acceptThreshold: {
-        type: 'number',
-        minimum: 0,
-        maximum: 100,
-        default: 70,
-      },
-      reviewThreshold: {
-        type: 'number',
-        minimum: 0,
-        maximum: 100,
-        default: 60,
-      },
-    },
-  }),
+    }
+  })()),
+  defineSchema('compatibility-graph-mutated', 2, 'Created immutable compatibility graph with idempotency evidence; contexts the requester did not state are unspecified',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['graph', 'replayed'],
+      properties: { graph: compatibilityGraphRunSchemaV2, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('compatibility-graph-read', 2, 'Read one exact compatibility graph run; contexts the requester did not state are unspecified',
+    successSchema({ type: 'object', additionalProperties: false, required: ['graph'], properties: { graph: compatibilityGraphRunSchemaV2 } }),
+  ),
+  defineSchema('compatibility-graph-page', 2, 'Cursor page of compatibility graph runs for one production batch',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['graphs'],
+      properties: { graphs: { type: 'array', maxItems: 100, items: compatibilityGraphRunSchemaV2 }, nextCursor: idSchema },
+    }),
+  ),
   defineSchema('compatibility-graph-mutated', 1, 'Created immutable compatibility graph with idempotency evidence',
     successSchema({
       type: 'object',
@@ -27052,6 +27182,7 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
   }),
   defineSchema('project-policy-overrides-response', 1, 'Current version-bound project policy values, overrides and resolved origins', successSchema(currentProjectPolicyOverridesSchema)),
   defineSchema('project-policy-overrides-applied', 1, 'Applied project policy EditCommand, immutable Policy Snapshot and deferred render impact', successSchema(projectPolicyOverridesResultSchema)),
+  defineSchema('batch-editorial-request-response', 1, 'The editorial request of one production batch: the briefing as written and how it was read, with what is unsupported and what is still a question', successSchema(batchEditorialRequestSchema)),
   defineSchema('editorial-request-revision-impact', 1, 'Content-addressed deferred impact of a revised editorial request', editorialRequestRevisionImpactSchema),
   defineSchema('editorial-request-revise-request', 1, 'Replace the parts of the editorial request of a video that the body names, through an immutable EditCommand that reads the briefing', editorialRequestReviseRequestSchema),
   defineSchema('editorial-request-response', 1, 'The editorial request of the current Version: what was asked, how the briefing was read, what is unsupported and what is still a question', successSchema(currentEditorialRequestSchema)),
