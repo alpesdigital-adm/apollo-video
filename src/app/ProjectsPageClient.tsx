@@ -224,6 +224,8 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
   const [locale, setLocale] = useState('')
   const [briefing, setBriefing] = useState('')
   const [briefingError, setBriefingError] = useState<string | null>(null)
+  const [nameError, setNameError] = useState<string | null>(null)
+  const [destinationError, setDestinationError] = useState<string | null>(null)
   const [createdProject, setCreatedProject] = useState<{ id: string; name: string } | null>(null)
   const [destination, setDestination] = useState('')
   const [verbalCta, setVerbalCta] = useState('')
@@ -411,6 +413,8 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
     setLocale('')
     setBriefing('')
     setBriefingError(null)
+    setNameError(null)
+    setDestinationError(null)
     setCreatedProject(null)
     setDestination('')
     setVerbalCta('')
@@ -428,21 +432,19 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
     const normalizedDisclosures = disclosures.split('\n')
       .map((item) => item.trim()).filter(Boolean)
     const normalizedBriefing = normalizeBriefingInput(briefing)
-    if (normalizedName.length < 2) {
-      setNotice('Dê um nome com pelo menos 2 caracteres para a produção.')
-      return
-    }
-    if (objective === null) {
-      setNotice('Escolha o que este vídeo precisa provocar. O Apollo não escolhe por você.')
-      return
-    }
-    if (normalizedBriefing === null) {
-      setBriefingError(BRIEFING_REQUIRED_MESSAGE)
-      return
-    }
-    setBriefingError(null)
-    if (DESTINATION_REQUIRED.has(objective) && !normalizedDestination) {
-      setNotice('Informe o destino da ação para este objetivo de conversão.')
+    // Every field that is wrong is told at once, and the first one gets the focus. The objective is optional: nothing here asks for it.
+    const nextNameError = normalizedName.length < 2 ? 'Dê um nome com pelo menos 2 caracteres para a produção.' : null
+    const nextBriefingError = normalizedBriefing === null ? BRIEFING_REQUIRED_MESSAGE : null
+    const nextDestinationError = objective !== null && DESTINATION_REQUIRED.has(objective) && !normalizedDestination
+      ? 'Informe o destino da ação para este objetivo de conversão.'
+      : null
+    setNameError(nextNameError)
+    setBriefingError(nextBriefingError)
+    setDestinationError(nextDestinationError)
+    if (nextNameError || nextBriefingError || nextDestinationError || normalizedBriefing === null) {
+      setNotice(null)
+      const firstInvalid = nextNameError ? 'project-name' : nextBriefingError ? 'project-briefing' : 'project-destination'
+      document.getElementById(firstInvalid)?.focus()
       return
     }
     setCreating(true)
@@ -458,7 +460,7 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
         },
         body: JSON.stringify({
           name: normalizedName,
-          objective,
+          ...(objective ? { objective } : {}),
           ...(locale ? { locale } : {}),
           briefing: normalizedBriefing,
           ...(
@@ -466,7 +468,7 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
             normalizedVisualCta || normalizedDisclosures.length
               ? { desiredAction: {
                   ...(normalizedDestination ? { destination: {
-                    type: DESTINATION_TYPE_BY_OBJECTIVE[objective] ??
+                    type: (objective ? DESTINATION_TYPE_BY_OBJECTIVE[objective] : undefined) ??
                       (normalizedDestination.startsWith('@') ? 'handle' : 'url'),
                     value: normalizedDestination,
                   } } : {}),
@@ -984,7 +986,7 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
               <div>
                 <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b89034]"><span className="h-px w-6 bg-[#b89034]" /> Direção inicial</div>
                 <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[#f4f0e8]" id="new-project-title">Criar nova produção</h2>
-                <p className="mt-1 text-sm text-[#77736c]">Estas decisões entram na versão 1 e orientam todo o trabalho do Diretor. Só vale o que você escrever aqui.</p>
+                <p className="mt-1 text-sm text-[#77736c]">O Apollo guarda o que você escrever aqui e usa como direção em todo o trabalho do Diretor. Só vale o que for escrito.</p>
               </div>
               <button aria-label="Fechar" className="grid h-9 w-9 place-items-center rounded-lg border border-white/[0.07] text-lg text-[#77736c] transition hover:bg-white/[0.04] hover:text-white" disabled={creating} onClick={() => setComposerOpen(false)} type="button">×</button>
             </div>
@@ -993,7 +995,8 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
               <div className="space-y-7 px-5 py-6 sm:px-7">
                 <label className="block">
                   <span className="text-xs font-semibold text-[#c8c2b8]">Nome da produção</span>
-                  <input autoFocus className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" maxLength={120} onChange={(event) => setName(event.target.value)} required value={name} />
+                  <input aria-describedby={nameError ? 'project-name-error' : undefined} aria-invalid={nameError ? true : undefined} autoFocus className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" id="project-name" maxLength={120} onChange={(event) => { setName(event.target.value); if (nameError) setNameError(null) }} required value={name} />
+                  {nameError ? <span className="mt-2 block text-xs text-[#e0a0a0]" id="project-name-error" role="alert">{nameError}</span> : null}
                 </label>
 
                 <div>
@@ -1009,8 +1012,9 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                   {briefingError ? <p className="mt-2 text-xs text-[#e0a0a0]" id="project-briefing-error" role="alert">{briefingError}</p> : null}
                 </div>
 
-                <fieldset aria-required="true">
-                  <legend className="text-xs font-semibold text-[#c8c2b8]">O que este vídeo precisa provocar? <span className="ml-1 text-[10px] font-normal text-[#77736c]">escolha um</span></legend>
+                <fieldset aria-describedby="project-objective-help">
+                  <legend className="text-xs font-semibold text-[#c8c2b8]">O que este vídeo precisa provocar? <span className="ml-1 text-[10px] font-normal text-[#77736c]">opcional, escolha um</span></legend>
+                  <p className="mt-1 text-[11px] leading-4 text-[#8f897f]" id="project-objective-help">Se não escolher, o Apollo não presume um objetivo. Para desfazer a escolha, toque de novo no objetivo escolhido.</p>
                   <div className="mt-3 space-y-4">
                     {OBJECTIVE_GROUPS.map((group) => (
                       <div key={group.label}>
@@ -1020,7 +1024,7 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                             const item = STRATEGIC_OBJECTIVES.find((candidate) => candidate.id === id)!
                             const selected = objective === id
                             return (
-                              <button aria-pressed={selected} className={`rounded-xl border px-3.5 py-3 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f5d77f] ${selected ? 'border-[#d5a535]/55 bg-[#d5a535]/[0.09]' : 'border-white/[0.07] bg-[#090909] hover:border-white/[0.15]'}`} key={id} onClick={() => { setObjective(id); setDestination(''); setVerbalCta(''); setVisualCta(''); setDisclosures('') }} type="button">
+                              <button aria-pressed={selected} className={`rounded-xl border px-3.5 py-3 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f5d77f] ${selected ? 'border-[#d5a535]/55 bg-[#d5a535]/[0.09]' : 'border-white/[0.07] bg-[#090909] hover:border-white/[0.15]'}`} key={id} onClick={() => { setObjective(selected ? null : id); setDestination(''); setDestinationError(null); setVerbalCta(''); setVisualCta(''); setDisclosures('') }} type="button">
                                 <span className={`block text-sm font-medium ${selected ? 'text-[#edc45d]' : 'text-[#c5c0b7]'}`}>{item.label}</span>
                                 <span className="mt-1 block text-[11px] leading-4 text-[#69665f]">{item.description}</span>
                               </button>
@@ -1030,14 +1034,15 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                       </div>
                     ))}
                   </div>
-                  {objective === null ? <p className="mt-3 text-[11px] text-[#8f897f]">Nenhum objetivo escolhido ainda.</p> : null}
+                  {objective === null ? <p className="mt-3 text-[11px] text-[#8f897f]" data-testid="project-objective-none">Nenhum objetivo escolhido: o Apollo não presume um.</p> : null}
                 </fieldset>
 
                 {requiresDestination && selectedObjective ? (
                   <label className="block">
                     <span className="text-xs font-semibold text-[#c8c2b8]">Destino da ação</span>
                     <span className="ml-2 text-[10px] text-[#77736c]">obrigatório para {selectedObjective.label.toLocaleLowerCase('pt-BR')}</span>
-                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition placeholder:text-[#55524d] focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" maxLength={2048} onChange={(event) => setDestination(event.target.value)} placeholder={objective === 'whatsapp' ? '+5511999999999 ou https://wa.me/...' : objective === 'booking' ? 'https://agenda.example/...' : objective === 'download' ? 'https://arquivos.example/material.pdf' : 'https://seu-dominio.com/...'} required value={destination} />
+                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition placeholder:text-[#55524d] focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" aria-describedby={destinationError ? 'project-destination-error' : undefined} aria-invalid={destinationError ? true : undefined} id="project-destination" maxLength={2048} onChange={(event) => { setDestination(event.target.value); if (destinationError) setDestinationError(null) }} placeholder={objective === 'whatsapp' ? '+5511999999999 ou https://wa.me/...' : objective === 'booking' ? 'https://agenda.example/...' : objective === 'download' ? 'https://arquivos.example/material.pdf' : 'https://seu-dominio.com/...'} required value={destination} />
+                    {destinationError ? <span className="mt-2 block text-xs text-[#e0a0a0]" id="project-destination-error" role="alert">{destinationError}</span> : null}
                     {['lead-generation', 'sale'].includes(objective) ? <span className="mt-1.5 block text-[10px] text-[#68645d]">Para links externos, use HTTPS.</span> : null}
                   </label>
                 ) : null}
@@ -1080,10 +1085,10 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                 <div className="mt-6 rounded-xl border border-white/[0.07] bg-white/[0.025] p-3.5">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#77736c]">O que será salvo agora</p>
                   <ul className="mt-3 space-y-2 text-[11px] leading-4 text-[#918c83]">
-                    <li className="flex gap-2"><span className="text-[#c99e39]">✓</span> Objetivo e ação desejada</li>
+                    <li className="flex gap-2"><span className="text-[#c99e39]">✓</span> O objetivo, só se você escolher, e a ação desejada</li>
                     <li className="flex gap-2"><span className="text-[#c99e39]">✓</span> O texto exato do seu briefing</li>
                     <li className="flex gap-2"><span className="text-[#c99e39]">✓</span> O idioma, só se você informar</li>
-                    <li className="flex gap-2"><span className="text-[#c99e39]">✓</span> Versão inicial imutável e auditável</li>
+                    <li className="flex gap-2"><span className="text-[#c99e39]">✓</span> Um registro do que você pediu, que não muda depois</li>
                   </ul>
                   <p className="mt-3 text-[10px] leading-4 text-[#68645d]">O formato do vídeo não é escolhido aqui: cada saída do projeto tem o seu.</p>
                 </div>

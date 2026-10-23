@@ -14,6 +14,7 @@ import {
   type EditorialRequestV1,
 } from '../domain/editorial-request.ts'
 import { createEditorialRequestRevisionImpact, createEditorialRequestRevisionInvalidations } from '../domain/editorial-request-revision-impact.ts'
+import { notExecutableSummary } from '../domain/editorial-request-texts.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import type { StrategicObjectiveId } from '../domain/strategic-objective.ts'
 import { normalizeBriefingText, parseProductionBrief, createProductionBrief } from '../domain/production-brief.ts'
@@ -306,7 +307,7 @@ export function describeRequestReading(request: Readonly<EditorialRequestV1>, au
     })),
     ...directives.filter(({ directive }) => !EDITORIAL_EXECUTABLE_VALUES[directive.kind].includes(directive.value)).map(({ directive }) => Object.freeze({
       id: directive.id, source: 'directive' as const, reason: 'not-executable' as const,
-      summary: `${directive.kind}: ${directive.value}`, excerpt: ('excerpt' in directive ? (directive as { excerpt: { text: string } }).excerpt.text : null) as string | null,
+      summary: notExecutableSummary(directive.kind, directive.value, directive.param), excerpt: ('excerpt' in directive ? (directive as { excerpt: { text: string } }).excerpt.text : null) as string | null,
     })),
   ]
   const openQuestions = (interpretation?.questions ?? []).filter((question) => question.status === 'open')

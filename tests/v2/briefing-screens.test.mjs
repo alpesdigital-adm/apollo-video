@@ -25,6 +25,16 @@ import {
   resolveContextStatements,
 } from '../../src/v2/ui/compatibility-context.ts'
 import {
+  CAPTION_STYLE_LABELS,
+  DIRECTIVE_KIND_LABELS,
+  DIRECTIVE_VALUE_LABELS,
+  ambiguousDirectiveQuestion,
+  keepAndAvoidQuestion,
+  notExecutableSummary,
+  outsideVocabularySummary,
+} from '../../src/v2/domain/editorial-request-texts.ts'
+import { EDITORIAL_DIRECTIVE_VOCABULARY, EDITORIAL_EXECUTABLE_VALUES } from '../../src/v2/domain/editorial-request.ts'
+import {
   buildAnswersBody,
   describeDirective,
   describeRequestBlock,
@@ -109,8 +119,8 @@ test('answers are sent only for open questions the owner actually answered', () 
 })
 
 test('a directive is shown in plain words with its parameter, never with a value the request did not carry', () => {
-  assert.deepEqual(describeDirective({ kind: 'opening', value: 'protect-seconds', param: 3 }), { label: 'Abertura', text: 'proteger os primeiros segundos (3 s)' })
-  assert.deepEqual(describeDirective({ kind: 'movement', value: 'none' }), { label: 'Movimento de câmera', text: 'sem movimento' })
+  assert.deepEqual(describeDirective({ kind: 'opening', value: 'protect-seconds', param: 3 }), { label: 'Abertura', text: 'Proteger os primeiros segundos (3 s)' })
+  assert.deepEqual(describeDirective({ kind: 'movement', value: 'none' }), { label: 'Movimento de câmera', text: 'Sem movimento de câmera' })
   assert.deepEqual(describeDirective({ kind: 'caption-language', value: 'set', param: 'xx-YY' }), { label: 'Idioma das legendas', text: 'xx-YY' })
   assert.deepEqual(describeDirective({ kind: 'avoid', value: 'subject', param: 'tema do pedido' }), { label: 'Evitar', text: 'tema do pedido' })
   assert.equal(describeDirective({ kind: 'unknown-kind', value: 'v' }).label, 'unknown-kind')
@@ -277,4 +287,36 @@ test('a project with no output says why its questions cannot be answered yet, wi
   const refused = describeRequestFailure(428, { error: { code: 'PRECONDITION_REQUIRED', details: { reason: 'editorial-request-needs-output' } } })
   assert.match(refused.message, /ainda não tem um vídeo e uma saída/)
   assert.match(refused.message, /já está salvo/)
+})
+
+test('ADR-160: no question, choice or unsupported item the Apollo writes carries a code of its vocabulary or a sentence in English', () => {
+  const kinds = Object.keys(DIRECTIVE_KIND_LABELS)
+  for (const kind of Object.keys(EDITORIAL_DIRECTIVE_VOCABULARY)) assert.ok(kinds.includes(kind), `the catalog has no words for the kind ${kind}`)
+  for (const [kind, entry] of Object.entries(EDITORIAL_DIRECTIVE_VOCABULARY)) {
+    if (kind === 'keep' || kind === 'avoid' || kind === 'caption-language') continue
+    for (const value of entry.values) {
+      const text = kind === 'caption-style' ? CAPTION_STYLE_LABELS[value] : DIRECTIVE_VALUE_LABELS[kind]?.[value]
+      assert.ok(text, `the catalog has no words for ${kind} ${value}`)
+      assert.doesNotMatch(text, /[a-z]+-[a-z]+/u, `a code leaks into the words of ${kind} ${value}: ${text}`)
+      // What the Apollo does not execute yet says so; what it executes does not claim otherwise.
+      const executable = EDITORIAL_EXECUTABLE_VALUES[kind].includes(value)
+      if (kind !== 'caption-style') assert.equal(/ainda não/u.test(text), !executable, `${kind} ${value}: ${text}`)
+    }
+  }
+  assert.equal(DIRECTIVE_VALUE_LABELS.movement['zoom-in'], 'Zoom (o Apollo ainda não aplica zoom)')
+  assert.equal(DIRECTIVE_VALUE_LABELS.layout['fit-with-backdrop'], 'Encaixar a imagem inteira com fundo')
+  assert.equal(DIRECTIVE_VALUE_LABELS.layout['source-native'], 'Manter o enquadramento da gravação')
+  for (const sentence of [
+    ambiguousDirectiveQuestion('layout', ['Manter o enquadramento da gravação', 'Encaixar a imagem inteira com fundo']),
+    keepAndAvoidQuestion('tema do pedido'), outsideVocabularySummary('movement'), outsideVocabularySummary('unknown-kind'), notExecutableSummary('movement', 'zoom-in'),
+  ]) {
+    assert.doesNotMatch(sentence, /\b(?:layout|movement|source-native|fit-with-backdrop|zoom-in|vocabulary|Which|briefing asks)\b/u, sentence)
+    assert.match(sentence, /[áàãâéêíóôõúç]|o Apollo|O briefing/u, sentence)
+  }
+  assert.equal(notExecutableSummary('movement', 'zoom-in'), 'Movimento de câmera: Zoom (o Apollo ainda não aplica zoom)')
+})
+
+test('the screens and the services that talk to the owner carry none of the jargon the review named', () => {
+  const project = source('src/app/ProjectsPageClient.tsx')
+  for (const jargon of ['Versão inicial imutável e auditável', 'entram na versão 1']) assert.equal(project.includes(jargon), false, jargon)
 })

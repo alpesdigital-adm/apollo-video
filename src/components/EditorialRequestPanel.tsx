@@ -149,14 +149,18 @@ export default function EditorialRequestPanel({
 
       {error ? <p className="rounded-xl border border-[#c76c6c]/25 bg-[#c76c6c]/[0.07] px-4 py-3 text-xs leading-5 text-[#e0a0a0]" data-testid="editorial-request-error" role="alert">{error}</p> : null}
 
+      {answersNeedOutput ? (
+        <p className="text-[11px] leading-5 text-[#8f897f]" data-testid="editorial-request-needs-output-note">Este projeto ainda não tem um vídeo e uma saída. Por isso o briefing não pode ser lido de novo nem mudado por aqui: isso se faz na página do projeto, depois que ele tiver um vídeo. O texto que você escreveu está salvo como está.</p>
+      ) : null}
+
       {block.kind === 'unread' && busy !== 'reading' ? (
-        <button className="h-10 rounded-xl bg-[#e0af37] px-4 text-xs font-bold text-[#171207] transition hover:bg-[#edc34f] disabled:opacity-45" disabled={busy !== null || !current.request.briefing} onClick={() => void revise(current, { briefing: briefingText }, 'reading')} type="button">Ler o briefing agora</button>
+        <button className="h-10 rounded-xl bg-[#e0af37] px-4 text-xs font-bold text-[#171207] transition hover:bg-[#edc34f] disabled:opacity-45" disabled={busy !== null || !current.request.briefing || answersNeedOutput} onClick={() => void revise(current, { briefing: briefingText }, 'reading')} type="button">Ler o briefing agora</button>
       ) : null}
 
       <div>
         <div className="flex items-center justify-between gap-3">
           <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#77736c]">Seu briefing</p>
-          {!editing ? <button className="text-[11px] text-[#d9ad44] underline-offset-2 hover:underline disabled:opacity-45" disabled={busy !== null} onClick={() => { setDraft(briefingText ?? ''); setDraftError(null); setEditing(true) }} type="button">{briefingText ? 'Mudar o briefing' : 'Escrever o briefing'}</button> : null}
+          {!editing ? <button className="text-[11px] text-[#d9ad44] underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-45" disabled={busy !== null || answersNeedOutput} onClick={() => { setDraft(briefingText ?? ''); setDraftError(null); setEditing(true) }} type="button">{briefingText ? 'Mudar o briefing' : 'Escrever o briefing'}</button> : null}
         </div>
         {editing ? (
           <form

@@ -7,7 +7,8 @@
  * suggests a value: it only reports what the request said and what is missing.
  */
 
-import { SUBTITLE_PRESET_LABELS, classifyCommandFailure, type CommandFailure } from './issue-override-view.ts'
+import { classifyCommandFailure, type CommandFailure } from './issue-override-view.ts'
+import { describeDirectiveWords } from '../domain/editorial-request-texts.ts'
 
 export interface ViewExcerpt { start: number; end: number; text: string }
 export interface ViewDirective { id: string; kind: string; value: string; param?: string | number; excerpt?: ViewExcerpt }
@@ -31,42 +32,9 @@ export interface EditorialRequestData {
   blocksDirector: boolean
 }
 
-const KIND_LABELS: Readonly<Record<string, string>> = Object.freeze({
-  movement: 'Movimento de câmera',
-  opening: 'Abertura',
-  structure: 'Ordem do vídeo',
-  cta: 'Chamada para ação',
-  layout: 'Enquadramento',
-  'caption-language': 'Idioma das legendas',
-  'caption-style': 'Estilo das legendas',
-  keep: 'Manter',
-  avoid: 'Evitar',
-})
-
-const VALUE_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({
-  movement: { none: 'sem movimento', 'punch-in': 'aproximação brusca', 'zoom-in': 'zoom de aproximação', 'zoom-out': 'zoom de afastamento', pan: 'panorâmica', tilt: 'inclinação', parallax: 'paralaxe' },
-  opening: { none: 'sem trecho de abertura protegido', 'protect-first-sentence': 'proteger a primeira frase', 'protect-seconds': 'proteger os primeiros segundos' },
-  structure: { 'source-order': 'manter a ordem da gravação', 'hook-first': 'começar pelo gancho' },
-  cta: {
-    none: 'sem chamada', 'verbal-only': 'só falada', 'overlay-closing': 'escrita no fechamento', 'overlay-at-spoken-cta': 'escrita junto da fala',
-    'overlay-whole-video': 'escrita no vídeo todo', 'overlay-from-seconds': 'escrita a partir de um segundo',
-  },
-  layout: { 'source-native': 'formato da gravação', 'fit-with-backdrop': 'vídeo inteiro sobre um fundo', 'fill-crop': 'preencher a tela cortando' },
-})
-
-/** The plain words for one directive, with its parameter: "Abertura: proteger os primeiros 3 segundos". */
+/** The plain words for one directive, with its parameter: "Abertura: Proteger os primeiros segundos (3 s)". The words are the catalog of ADR-160 (one table). */
 export function describeDirective(directive: Readonly<Pick<ViewDirective, 'kind' | 'value' | 'param'>>): { label: string; text: string } {
-  const label = KIND_LABELS[directive.kind] ?? directive.kind
-  const param = directive.param
-  let text: string
-  if (directive.kind === 'caption-language') text = String(param ?? '')
-  else if (directive.kind === 'caption-style') text = SUBTITLE_PRESET_LABELS[directive.value] ?? directive.value
-  else if (directive.kind === 'keep' || directive.kind === 'avoid') text = String(param ?? '')
-  else {
-    const base = VALUE_LABELS[directive.kind]?.[directive.value] ?? directive.value
-    text = typeof param === 'number' ? `${base} (${param} s)` : base
-  }
-  return { label, text }
+  return describeDirectiveWords(directive.kind, directive.value, directive.param)
 }
 
 export const COVERAGE_LABELS: Readonly<Record<ViewCoverageItem['topic'], string>> = Object.freeze({ audience: 'Público', offer: 'Oferta', tone: 'Tom' })

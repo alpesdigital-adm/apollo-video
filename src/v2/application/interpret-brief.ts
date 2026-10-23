@@ -17,6 +17,7 @@ import {
   type UnsupportedBriefItem,
 } from '../domain/editorial-request.ts'
 import { BRIEF_INTERPRETER_UNAVAILABLE_REASON } from '../domain/editorial-request.ts'
+import { ambiguousDirectiveQuestion, describeDirectiveWords, keepAndAvoidQuestion, outsideVocabularySummary } from '../domain/editorial-request-texts.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { normalizeBriefingText } from '../domain/production-brief.ts'
 import { briefOverridesSafetyPolicy } from './brief-lexicon.ts'
@@ -206,8 +207,9 @@ function folded(value: string): string {
   return value.normalize('NFD').replace(/[̀-ͯ]/gu, '').toLowerCase().replace(/\s+/gu, ' ').trim()
 }
 
-function describeDirective(kind: string, value: unknown, param: unknown): string {
-  return [kind, typeof value === 'string' ? value : '?', param === null || param === undefined ? '' : `(${String(param)})`].filter(Boolean).join(' ')
+/** The words the owner reads for a directive (the catalog of ADR-160); the codes stay in the directive itself. */
+function describeDirective(kind: string, value: string, param: unknown): string {
+  return describeDirectiveWords(kind, value, param === null || param === undefined ? undefined : (param as string | number)).text
 }
 
 /** The model's answer, checked against the briefing and the closed vocabulary. Throws when the answer cannot be read at all. */
@@ -257,7 +259,7 @@ export function interpretationFromModelText(input: Readonly<{
       movedToUnsupported += 1
       unsupported.push(Object.freeze({
         id: nextId('u', unsupported), excerpt, reason: 'outside-vocabulary' as const,
-        summary: shortText(`The briefing asks for something the vocabulary does not hold: ${describeDirective(String(kind), value, param)}`, 'directives.summary'),
+        summary: shortText(outsideVocabularySummary(String(kind)), 'directives.summary'),
       }))
     }
   })
@@ -279,7 +281,7 @@ export function interpretationFromModelText(input: Readonly<{
             withdrawn += 2
             questions.push(Object.freeze({
               id: nextId('q', questions), status: 'open' as const, excerpt: directive.excerpt,
-              question: shortText(`The briefing asks both to keep and to avoid "${String(directive.param)}". Which one is meant?`, 'questions.question'),
+              question: shortText(keepAndAvoidQuestion(String(directive.param)), 'questions.question'),
             }))
           }
           continue
@@ -302,7 +304,7 @@ export function interpretationFromModelText(input: Readonly<{
         : undefined
       questions.push(Object.freeze({
         id: nextId('q', questions), status: 'open' as const, excerpt: distinct[0]!.excerpt,
-        question: shortText(`The briefing says more than one thing about "${kind}" (${distinct.map((directive) => describeDirective(kind, directive.value, directive.param)).join(' / ')}). Which one is meant?`, 'questions.question'),
+        question: shortText(ambiguousDirectiveQuestion(kind, distinct.map((directive) => describeDirective(kind, directive.value, directive.param))), 'questions.question'),
         ...(choices !== undefined ? { choices } : {}),
       }))
     }

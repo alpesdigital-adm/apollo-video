@@ -3484,7 +3484,7 @@ export default function BatchesPage() {
                     <div>
                       <p className="text-[10px] uppercase tracking-[0.2em] text-[#66625b]">Telemetry</p>
                       <h3 className="mt-3 text-lg font-semibold text-[#d8d2c8]">Selecione um lote</h3>
-                      <p className="mt-2 max-w-sm text-sm leading-6 text-[#716d66]">Aqui aparecem os itens, as quatro etapas, falhas, artifacts e tentativas reais.</p>
+                      <p className="mt-2 max-w-sm text-sm leading-6 text-[#716d66]">Aqui aparecem os itens, as quatro etapas, as falhas, os arquivos gerados e as tentativas reais.</p>
                     </div>
                   </div>
                 ) : (
@@ -3948,7 +3948,7 @@ export default function BatchesPage() {
                                     >
                                       {activeCompatibilityGraphs.map((graph) => (
                                         <option key={graph.id} value={graph.id}>
-                                          {graph.summary.edgeCount} edges · {elapsed(graph.createdAt)}
+                                          {graph.summary.edgeCount} ligações · {elapsed(graph.createdAt)}
                                         </option>
                                       ))}
                                     </select>
@@ -4263,13 +4263,13 @@ export default function BatchesPage() {
                                 <div className="min-w-0">
                                   <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-[#829bd2]">
                                     <span className="grid h-5 w-5 place-items-center rounded-full border border-[#7792d2]/35 font-mono text-[7px]">P</span>
-                                    Portfolio slate
+                                    Portfólio de variantes
                                   </div>
                                   <h4 className="mt-2 text-base font-semibold tracking-[-0.02em] text-[#ede7dd]">
                                     Quantas variantes vale a pena produzir?
                                   </h4>
                                   <p className="mt-1 max-w-2xl text-[10px] leading-4 text-[#746f67]">
-                                    O preflight conta todas as possibilidades, elimina incompatibilidades e monta um top-N diverso dentro da qualidade, cobertura e orçamento. Nenhum render começa aqui.
+                                    O cálculo prévio conta todas as possibilidades, elimina as combinações incompatíveis e monta uma seleção variada dentro da qualidade, da cobertura e do orçamento. Nenhum vídeo é gerado aqui.
                                   </p>
                                   {activeCompatibilityGraph && activeCompatibilityGraph.summary.acceptedCount === 0 && activeCompatibilityGraph.summary.borderlineCount > 0 ? (
                                     <p className="mt-1 max-w-2xl text-[10px] leading-4 text-[#c79b42]" data-testid="portfolio-needs-owner-links" role="status">
@@ -4646,7 +4646,7 @@ export default function BatchesPage() {
                   <div className="flex items-end justify-between gap-4">
                     <div>
                       <legend className="text-xs font-semibold text-[#c8c2b8]">Materiais autorizados</legend>
-                      <p className="mt-1 text-[10px] leading-4 text-[#6f6b64]">Somente artifacts disponíveis e com direitos aprovados podem entrar no lote.</p>
+                      <p className="mt-1 text-[10px] leading-4 text-[#6f6b64]">Somente gravações disponíveis e com direitos aprovados podem entrar no lote.</p>
                     </div>
                     <span className="font-mono text-[10px] text-[#9d9486]">{sourceIds.size} selecionado{sourceIds.size === 1 ? '' : 's'}</span>
                   </div>
