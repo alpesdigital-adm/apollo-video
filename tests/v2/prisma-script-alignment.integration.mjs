@@ -178,7 +178,7 @@ test('T-FR-081 imports, aligns and reviews grouped recordings through PostgreSQL
         workspaceId,
         name: 'Campanha de descoberta',
         status: 'draft',
-        objective: 'content-distribution',
+        objective: 'discovery',
         format: '9:16',
         locale: 'pt-BR',
         createdByType: 'api-client',
@@ -393,7 +393,7 @@ test('T-FR-081 imports, aligns and reviews grouped recordings through PostgreSQL
         projectId,
         briefing: '<texto do pedido>',
         name: 'Variações de descoberta',
-        objective: 'content-distribution',
+        objective: 'discovery',
         sourceGroups: [
           {
             id: 'source-group-hooks',

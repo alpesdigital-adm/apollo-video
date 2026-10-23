@@ -16,7 +16,7 @@ import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 // The briefings are synthetic placeholders: the content of a batch belongs to its request, never to the product.
 const BRIEFING = '<texto do pedido>'
 const body = (extra = {}) => ({
-  projectId: 'project-fixture', name: 'Lote de teste', objective: 'content-distribution',
+  projectId: 'project-fixture', name: 'Lote de teste', objective: 'discovery',
   sourceGroups: [{ id: 'group-a', name: 'Grupo A', sourceArtifactIds: ['artifact-a'] }],
   recipes: [{ id: 'recipe-a', name: 'Receita A', sourceGroupIds: ['group-a'] }],
   variants: [{ id: 'variant-a', name: 'Variante A', outputSpecId: 'spec-a', locale: 'pt-BR' }],
@@ -102,7 +102,7 @@ test('the request is sealed with the batch: it hydrates, and a changed request o
   rehashed.editorialRequest.request.requestHash = 'f'.repeat(64)
   assert.throws(() => hydrateProductionBatch(rehashed), (error) => error.code === 'PERSISTENCE_CONFLICT')
   // A batch created before the request existed has none, and hashes exactly as it did.
-  const input = { id: 'batch-old', workspaceId: 'workspace-fixture', projectId: 'project-fixture', name: 'Lote antigo', objective: 'content-distribution',
+  const input = { id: 'batch-old', workspaceId: 'workspace-fixture', projectId: 'project-fixture', name: 'Lote antigo', objective: 'discovery',
     sourceGroups: batch.sourceGroups, recipes: batch.recipes, variants: batch.variants, budget: batch.budget,
     itemDefinitions: [{ id: 'item-old', key: 'item-a', sourceGroupId: 'group-a', recipeId: 'recipe-a', variantId: 'variant-a' }],
     createdBy: batch.createdBy, createdAt: batch.createdAt }
@@ -147,7 +147,7 @@ test('the request of a batch is read through its own capability: briefing, readi
   const published = presentProductionBatchEditorialRequest(read)
   assert.equal(published.request.briefing.text, BRIEFING)
   assert.equal(published.batch.id, batch.id)
-  const old = createProductionBatch({ id: 'batch-old', workspaceId: 'workspace-fixture', projectId: 'project-fixture', name: 'Lote antigo', objective: 'content-distribution',
+  const old = createProductionBatch({ id: 'batch-old', workspaceId: 'workspace-fixture', projectId: 'project-fixture', name: 'Lote antigo', objective: 'discovery',
     sourceGroups: batch.sourceGroups, recipes: batch.recipes, variants: batch.variants, budget: batch.budget,
     itemDefinitions: [{ id: 'item-old', key: 'item-a', sourceGroupId: 'group-a', recipeId: 'recipe-a', variantId: 'variant-a' }], createdBy: batch.createdBy, createdAt: batch.createdAt })
   const none = await readProductionBatchEditorialRequestService({ repository: { async read() { return old }, async readCurrentEditorialRequest() { return null } } })({ workspaceId: 'workspace-fixture', batchId: old.id })
@@ -176,7 +176,7 @@ test('ADR-160: a batch may be created with no objective; the Apollo presumes non
   assert.equal('objective' in created.batch, false)
   assert.notEqual(created.batch.definitionHash, withObjective.batch.definitionHash)
   assert.equal(hydrateProductionBatch(JSON.parse(JSON.stringify(created.batch))).definitionHash, created.batch.definitionHash)
-  assert.equal(parseCreateProductionBatchBody(body({ briefing: BRIEFING })).objective, 'content-distribution')
+  assert.equal(parseCreateProductionBatchBody(body({ briefing: BRIEFING })).objective, 'discovery')
   assert.equal('objective' in parseCreateProductionBatchBody((() => { const { objective: _o, ...rest } = body({ briefing: BRIEFING }); void _o; return rest })()), false)
 })
 
@@ -187,4 +187,30 @@ test('ADR-160: a step that judges against an objective takes it from the batch, 
   assert.equal(objectiveOf(undefined, 'sale'), 'sale')
   assert.throws(() => objectiveOf('lead-generation', 'sale'), (error) => error.code === 'INVALID_ARGUMENT')
   assert.throws(() => objectiveOf(undefined, undefined), (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'objective-required')
+})
+
+test('ADR-160: the objective of a batch is one of the strategic objectives, never free text; an unknown id is refused before the briefing is read', async () => {
+  const model = stubModel()
+  const { objective: _o, ...fields } = parseCreateProductionBatchBody(body({ briefing: BRIEFING }))
+  void _o
+  await assert.rejects(service(memoryRepository(), model)({ workspaceId: 'workspace-fixture', ...fields, objective: 'content-distribution', actor: actor(), idempotencyKey: 'batch-unknown-objective' }),
+    (error) => error.code === 'INVALID_ARGUMENT' && error.details.objective === 'content-distribution')
+  assert.equal(model.calls.length, 0, 'nothing was paid for')
+  assert.throws(() => createProductionBatch({ id: 'batch-x', workspaceId: 'workspace-fixture', projectId: 'project-fixture', name: 'x', objective: 'schedule', sourceGroups: [], recipes: [], variants: [], budget: { currency: 'USD', maxCostMinorUnits: 1, reservedCostMinorUnits: 0 }, itemDefinitions: [], createdBy: { type: 'api-client', id: 'client-fixture' }, createdAt: '2026-10-22T12:00:00.000Z' }), (error) => error.code === 'INVALID_ARGUMENT')
+  const catalog = ['discovery', 'awareness', 'warming', 'lead-generation', 'sale', 'whatsapp', 'booking', 'download']
+  for (const id of catalog) assert.equal(parseCreateProductionBatchBody(body({ briefing: BRIEFING, objective: id })).objective, id)
+})
+
+test('ADR-160: the audit of a reading is checked against the briefing it audits when a batch is made, and when a stored request is read back', async () => {
+  const real = await interpretBriefService({ model: stubModel() })({ briefing: BRIEFING })
+  const forged = { ...real.audit, inputHash: 'c'.repeat(64) }
+  const forgedService = createProductionBatchService({
+    repository: memoryRepository(), interpretBrief: async () => ({ interpretation: real.interpretation, audit: forged }), clock: () => new Date('2026-10-22T12:00:00.000Z'),
+    createBatchId: () => 'production-batch-forged', createItemId: () => 'production-batch-item-forged',
+  })
+  await assert.rejects(forgedService(request({ idempotencyKey: 'batch-forged-audit' })), (error) => error.code === 'INVALID_ARGUMENT')
+  const { sealedBatchEditorialRequest } = await import('../../src/v2/domain/production-batch.ts')
+  const request0 = createEditorialRequest({ briefing: BRIEFING, interpretation: real.interpretation })
+  assert.ok(sealedBatchEditorialRequest({ request: request0, interpretationAudit: JSON.parse(JSON.stringify(real.audit)) }))
+  assert.throws(() => sealedBatchEditorialRequest({ request: request0, interpretationAudit: { ...real.audit, model: 'another' } }), (error) => error.code === 'INVALID_ARGUMENT')
 })

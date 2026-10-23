@@ -160,7 +160,7 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
         workspaceId,
         name: 'Campanha de descoberta',
         status: 'draft',
-        objective: 'content-distribution',
+        objective: 'discovery',
         format: '9:16',
         locale: 'pt-BR',
         createdByType: 'api-client',
@@ -288,7 +288,7 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
       projectId,
       briefing: '<texto do pedido>',
       name: 'Campanha de descoberta',
-      objective: 'content-distribution',
+      objective: 'discovery',
       sourceGroups: [
         {
           id: 'source-group-hooks',

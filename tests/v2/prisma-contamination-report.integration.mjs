@@ -263,7 +263,7 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
         workspaceId,
         name: 'Diagnóstico multimodal',
         status: 'draft',
-        objective: 'content-distribution',
+        objective: 'discovery',
         format: '9:16',
         locale: 'pt-BR',
         createdByType: 'api-client',
@@ -480,7 +480,7 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
       desiredRole: 'complete',
       validationScope: 'full',
       targetComposition: {
-        objective: 'content-distribution',
+        objective: 'discovery',
         outputSpecId: '9:16',
         targetDurationMs: 2_000,
       },

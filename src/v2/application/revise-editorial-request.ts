@@ -7,6 +7,7 @@ import {
   directivesOfChoices,
   createEditorialRequest,
   deriveEditorialRequestFromBrief,
+  parseBriefInterpretationAudit,
   parseEditorialDirective,
   type BriefInterpretationV1,
   type BriefQuestionChoice,
@@ -159,7 +160,8 @@ export function reviseEditorialRequestService(dependencies: {
           'Questions are answered about the interpretation that raised them; this revision reads the briefing again, so there is nothing to answer yet')
         const read = await dependencies.interpretBrief({ briefing: nextText })
         interpretation = read.interpretation
-        interpretationAudit = read.audit
+        // The audit is the record of the call that read THIS text: checked against the text and the interpretation before a Version carries it.
+        interpretationAudit = parseBriefInterpretationAudit(JSON.parse(JSON.stringify(read.audit)), nextText, read.interpretation) as unknown as Readonly<BriefInterpretationAudit>
         interpreted = true
       }
       if (answers !== undefined) {

@@ -777,7 +777,7 @@ test('the service waits longer than the provider: its default timeout is the ada
     await interpretBriefService({ model: bare })({ briefing: 'alpha beta' })
     await interpretBriefService({ model: codexLike, timeoutMs: 5_000 })({ briefing: 'alpha beta' })
   } finally { AbortSignal.timeout = original }
-  assert.equal(waits[0] > 180_000, true, 'the backstop outlasts a 180 s provider')
+  assert.equal(waits[0] > 180_000 + 2 * 30_000, true, 'the backstop outlasts a 180 s provider AND the two 30 s checks the Codex adapter makes before it (strictly, never a tie)')
   assert.equal(waits[1] > 120_000, true)
   assert.equal(waits[2], 5_000, 'an explicit deployment timeout is kept as stated')
 })

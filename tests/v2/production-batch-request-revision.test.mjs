@@ -53,7 +53,7 @@ function model(answerFor) {
     } }
 }
 const body = () => ({
-  projectId: 'project-fixture', name: 'Lote de teste', objective: 'content-distribution', briefing: BRIEFING,
+  projectId: 'project-fixture', name: 'Lote de teste', objective: 'discovery', briefing: BRIEFING,
   sourceGroups: [{ id: 'group-a', name: 'Grupo A', sourceArtifactIds: ['artifact-a'] }],
   recipes: [{ id: 'recipe-a', name: 'Receita A', sourceGroupIds: ['group-a'] }],
   variants: [{ id: 'variant-a', name: 'Variante A', outputSpecId: 'spec-a', locale: 'pt-BR' }],

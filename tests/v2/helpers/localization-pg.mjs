@@ -232,7 +232,7 @@ export async function createLocalizationPgFixture(
       workspaceId,
       projectId,
       name: "Alignment fixture",
-      objective: "content-distribution",
+      objective: "discovery",
       sourceGroups: [
         { id: "source-group", name: "Source", sourceArtifactIds: [artifactId] },
       ],

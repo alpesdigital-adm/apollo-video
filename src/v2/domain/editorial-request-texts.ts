@@ -7,7 +7,7 @@
  * learns it before asking, not after a refusal.
  *
  * The module imports nothing: the screens, the application services and the tests read the same table.
- * `tests/v2/editorial-request-texts.test.mjs` fails when a code of the vocabulary has no words here.
+ * The test `ADR-160: no question, choice or unsupported item the Apollo writes carries a code…` in `tests/v2/briefing-screens.test.mjs` fails when a code of the vocabulary has no words here.
  */
 
 export const DIRECTIVE_KIND_LABELS: Readonly<Record<string, string>> = Object.freeze({

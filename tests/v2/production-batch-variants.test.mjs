@@ -35,7 +35,7 @@ function batchFixture(budget = {
     workspaceId: 'workspace-fixture',
     projectId: 'project-fixture',
     name: 'Campanha de descoberta',
-    objective: 'content-distribution',
+    objective: 'discovery',
     sourceGroups: [
       {
         id: 'group-hooks',

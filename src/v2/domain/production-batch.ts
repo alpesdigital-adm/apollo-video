@@ -1,7 +1,8 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
-import { createEditorialRequest, type EditorialRequestV1 } from './editorial-request.ts'
+import { createEditorialRequest, parseBriefInterpretationAudit, type EditorialRequestV1 } from './editorial-request.ts'
 import { assertDomain } from './errors.ts'
 import type { ScriptBlockRole } from './script-alignment.ts'
+import { resolveStrategicObjective } from './strategic-objective.ts'
 
 export const PRODUCTION_BATCH_POLICY_VERSION =
   'production-batch/v1' as const
@@ -425,6 +426,10 @@ export function sealedBatchEditorialRequest(value: unknown): Readonly<Production
     ...(stored.request!.directives && stored.request!.directives.length > 0 ? { directives: stored.request!.directives } : {}),
   })
   assertDomain(request.requestHash === stored.request!.requestHash, 'PERSISTENCE_CONFLICT', 'Stored production batch request hash is inconsistent')
+  // The audit of the reading is the record of the call that read THIS briefing: it is checked against it when the batch (or a revision) is made and when it is read back.
+  if (stored.interpretationAudit && request.interpretation && request.briefing) {
+    parseBriefInterpretationAudit(stored.interpretationAudit, request.briefing.text, request.interpretation)
+  }
   return Object.freeze({ request, interpretationAudit: stored.interpretationAudit ? Object.freeze({ ...stored.interpretationAudit }) : null })
 }
 
@@ -637,7 +642,8 @@ export function createProductionBatch(input: {
     projectId: normalizedToken(input.projectId, 'projectId'),
     name: normalizedLabel(input.name, 'name', 200),
     ...(input.objective !== undefined && input.objective !== null
-      ? { objective: normalizedToken(input.objective, 'objective', BATCH_KEY) }
+      // The objective is one of the strategic objectives the Apollo knows, never free text: an unknown id is refused, naming it.
+      ? { objective: resolveStrategicObjective(input.objective).id }
       : {}),
     policyVersion: PRODUCTION_BATCH_POLICY_VERSION,
     revision: normalizedInteger(

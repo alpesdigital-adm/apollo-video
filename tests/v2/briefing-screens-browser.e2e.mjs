@@ -316,7 +316,7 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
       method: 'POST',
       headers: { authorization, 'content-type': 'application/json', 'idempotency-key': `batch-screens-${fixture.suffix}` },
       body: JSON.stringify({
-        projectId: fixture.projectId, name: 'Lote do teste de tela', objective: 'content-distribution', briefing: BATCH_BRIEFING,
+        projectId: fixture.projectId, name: 'Lote do teste de tela', objective: 'discovery', briefing: BATCH_BRIEFING,
         sourceGroups: [{ id: 'group-a', name: 'Grupo A', sourceArtifactIds: [fixture.artifactId] }],
         recipes: [{ id: 'recipe-a', name: 'Receita A', sourceGroupIds: ['group-a'] }],
         variants: [{ id: 'variant-a', name: 'Variante A', outputSpecId: 'spec-a', locale: 'pt-BR' }],

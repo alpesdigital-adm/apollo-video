@@ -9,6 +9,7 @@ import {
 import { createEditorialRequest } from '../domain/editorial-request.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { normalizeBriefingText } from '../domain/production-brief.ts'
+import { resolveStrategicObjective } from '../domain/strategic-objective.ts'
 import type { InterpretBrief } from './interpret-brief.ts'
 import { assertBatchRequestAllowsGeneration, currentBatchEditorialRequest, describeBatchEditorialRequest } from './batch-editorial-request.ts'
 import {
@@ -203,6 +204,8 @@ export function createProductionBatchService(dependencies: {
     )
     const actorClientId = authenticationAudit.clientId
     const replayKey = idempotencyKey(request.idempotencyKey)
+    // Before anything is paid for: the objective is one of the strategic objectives, never free text.
+    if (request.objective !== undefined) resolveStrategicObjective(request.objective)
     const briefing = normalizeBriefingText(typeof request.briefing === 'string' ? request.briefing : '')
     assertDomain(briefing.length > 0 && briefing.length <= 10_000, 'INVALID_ARGUMENT', 'A batch needs a briefing: any text of 1 to 10000 characters')
     const requestFingerprint = calculateCanonicalHash({

@@ -30294,6 +30294,8 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     title: 'Create one explicit bounded production batch under the editorial request of its briefing; the objective is optional and the Apollo presumes none',
   }, (body) => {
     body.required = (body.required as string[]).filter((key) => key !== 'objective')
+    // One of the strategic objectives, never free text (an unknown id is refused).
+    schemaNode(body, 'properties').objective = { ...strategicObjectiveSchema, description: 'Optional. One of the strategic objectives; when it is absent the batch has none and the Apollo presumes none.' }
   }),
   defineSchema('production-batch-mutated', 3, 'Created or mutated production batch whose objective may be absent',
     successSchema({ type: 'object', additionalProperties: false, required: ['batch', 'replayed'], properties: { batch: productionBatchSchemaV3, replayed: { type: 'boolean' } } })),
@@ -30310,7 +30312,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     title: 'Compile one immutable variant recipe from an exact compatibility graph and an H+B+optional proof+CTA path whose links are accepted by the map or confirmed by the owner',
   }, (body) => {
     const properties = schemaNode(body, 'properties')
-    properties.objective = { type: 'string', minLength: 1, maxLength: 128, description: 'The objective the recipe is judged against. Required when the batch was created with none (refused with the reason objective-required); never different from the batch objective when it has one.' }
+    properties.objective = { ...strategicObjectiveSchema, description: 'The objective the recipe is judged against. Required when the batch was created with none (refused with the reason objective-required); never different from the batch objective when it has one.' }
     const assumptions = schemaNode(properties, 'assumptions')
     assumptions.description = 'Supposed facts of the recipe. A link the map left borderline is taken only with an assumption OWNER_CONFIRMED_LINK_<FROM>_<TO> (roles in capitals) whose evidenceRefs name the edge; a blocked link is never taken.'
   }),
@@ -30318,7 +30320,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     id: 'create-variant-portfolio-preflight-request', version: 2,
     title: 'Count, filter, rank and bound the variant space before any paid job is created, against the objective of the batch or the one the request names',
   }, (body) => {
-    schemaNode(body, 'properties').objective = { type: 'string', minLength: 1, maxLength: 128, description: 'The objective the portfolio is judged against. Required when the batch was created with none (refused with the reason objective-required); never different from the batch objective when it has one.' }
+    schemaNode(body, 'properties').objective = { ...strategicObjectiveSchema, description: 'The objective the portfolio is judged against. Required when the batch was created with none (refused with the reason objective-required); never different from the batch objective when it has one.' }
   }),
 ])
 

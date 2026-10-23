@@ -105,7 +105,7 @@ function sourceReport(fixture) {
     desiredRole: 'hook',
     validationScope: 'opening-edit',
     targetComposition: {
-      objective: 'content-distribution',
+      objective: 'discovery',
       outputSpecId: '9:16',
       targetDurationMs: 15_000,
     },

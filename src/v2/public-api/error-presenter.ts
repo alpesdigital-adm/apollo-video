@@ -211,7 +211,7 @@ export function presentPublicDomainError(error: DomainError, requestId: string) 
       ? { requiredScope: error.details.requiredScope }
       : error.code === 'PERSISTENCE_NOT_CONFIGURED'
         ? presentMissingTool(error.details)
-        : error.code === 'PRECONDITION_REQUIRED'
+        : error.code === 'PRECONDITION_REQUIRED' || error.code === 'RENDER_OUTPUT_INVALID'
           ? presentPreconditionReason(error.details)
           : STALE_PAIR_CODES.has(error.code)
             ? presentStalePair(error.details)

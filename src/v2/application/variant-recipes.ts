@@ -1,6 +1,7 @@
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { OBJECTIVE_REQUIRED_REASON } from '../domain/editorial-request.ts'
+import { resolveStrategicObjective } from '../domain/strategic-objective.ts'
 import {
   createVariantRecipe,
   type VariantRecipeAssumptionInput,
@@ -79,6 +80,8 @@ export interface CreateVariantRecipeRequest {
 /** The objective of a step: the batch's own, or the one the request names when the batch has none. The Apollo presumes none. */
 export function objectiveOf(batchObjective: string | undefined, requested: string | undefined): string {
   assertDomain(batchObjective === undefined || requested === undefined || requested === batchObjective, 'INVALID_ARGUMENT', 'The batch already has an objective; a step is judged against it')
+  // What the request names is one of the strategic objectives (a batch made before the catalog was closed may carry another id, which stays as it was).
+  if (requested !== undefined) resolveStrategicObjective(requested)
   const objective = batchObjective ?? requested
   if (objective === undefined) {
     throw new DomainError('PRECONDITION_REQUIRED', 'This step is judged against an objective and the batch has none: name the objective in the request', { reason: OBJECTIVE_REQUIRED_REASON })

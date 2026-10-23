@@ -250,3 +250,20 @@ test('free text the model writes is short and carries no data the briefing could
   const { interpretation } = await interpret(model({ ...empty, unsupported: [{ summary: `a ${'long '.repeat(80)}summary`, quote: 'two' }] }), briefing)
   assert.ok(interpretation.unsupported[0].summary.length <= 200)
 })
+
+test('ADR-160: an answer the Apollo refuses carries a published reason, and what exactly was wrong stays internal', async () => {
+  const { presentPublicDomainError } = await import('../../src/v2/public-api/error-presenter.ts')
+  const briefing = 'alpha beta gamma delta'
+  const invented = { directives: [], unsupported: [], questions: [{ question: 'x', quote: 'words that are nowhere' }], coverage: [] }
+  const model = { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', async interpret() { return { text: JSON.stringify(invented) } } }
+  let refusal
+  await interpretBriefService({ model })({ briefing }).catch((error) => { refusal = error })
+  assert.equal(refusal.code, 'RENDER_OUTPUT_INVALID')
+  assert.equal(refusal.details.reason, 'brief-interpretation-invalid')
+  const published = presentPublicDomainError(refusal, 'request-1')
+  assert.deepEqual(published.body?.error?.details ?? published.error?.details ?? published.details, { reason: 'brief-interpretation-invalid' })
+  assert.doesNotMatch(JSON.stringify(published), /words that are nowhere|questions\[0\]/, 'the internal detail does not cross')
+  // A reply that is not even JSON has the same reason.
+  const garbage = { ...model, async interpret() { return { text: 'not json' } } }
+  await assert.rejects(interpretBriefService({ model: garbage })({ briefing }), (error) => error.details.reason === 'brief-interpretation-invalid')
+})

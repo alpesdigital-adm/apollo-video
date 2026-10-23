@@ -202,7 +202,7 @@ test('T-FR-120 deconstructs an exact published Reel through public API and Postg
         workspaceId,
         name: 'Reel publicado validado',
         status: 'draft',
-        objective: 'content-distribution',
+        objective: 'discovery',
         format: '9:16',
         locale: 'pt-BR',
         createdByType: 'api-client',
@@ -391,7 +391,7 @@ test('T-FR-120 deconstructs an exact published Reel through public API and Postg
       desiredRole: 'hook',
       validationScope: 'full',
       targetComposition: {
-        objective: 'content-distribution',
+        objective: 'discovery',
         outputSpecId: '9:16',
         targetDurationMs: 15_000,
       },

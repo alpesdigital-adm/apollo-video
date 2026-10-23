@@ -2700,7 +2700,7 @@ const sourceDeconstructionRequestExample = {
   desiredRole: 'hook',
   validationScope: 'full',
   targetComposition: {
-    objective: 'content-distribution',
+    objective: 'discovery',
     outputSpecId: '9:16',
     targetDurationMs: 15_000,
   },
@@ -3429,7 +3429,7 @@ const validationEnvelopeRecordExample = {
 const productionBatchCreateRequestExample = {
   projectId,
   name: 'Campanha de descoberta — julho',
-  objective: 'content-distribution',
+  objective: 'discovery',
   sourceGroups: [
     {
       id: 'source-group-hooks',

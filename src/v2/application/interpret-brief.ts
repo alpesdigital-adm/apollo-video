@@ -16,7 +16,7 @@ import {
   type InterpretedDirective,
   type UnsupportedBriefItem,
 } from '../domain/editorial-request.ts'
-import { BRIEF_INTERPRETATION_FAILED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON } from '../domain/editorial-request.ts'
+import { BRIEF_INTERPRETATION_FAILED_REASON, BRIEF_INTERPRETATION_INVALID_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON } from '../domain/editorial-request.ts'
 import { ambiguousDirectiveQuestion, describeDirectiveWords, keepAndAvoidQuestion, outsideVocabularySummary } from '../domain/editorial-request-texts.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { normalizeBriefingText } from '../domain/production-brief.ts'
@@ -38,8 +38,12 @@ import type { BriefInterpreterModel } from './ports/brief-interpreter-model.ts'
 export const BRIEF_INTERPRETER_PROMPT_VERSION = 'brief-interpreter/v1'
 export const BRIEF_INTERPRETATION_AUDIT_SCHEMA = 'brief-interpretation-audit/v1' as const
 export { BRIEF_INTERPRETER_UNAVAILABLE_REASON }
-/** The service waits this much longer than the adapter's own timeout (its preflight calls included) before it gives up on the model. */
-const BRIEF_INTERPRETER_BACKSTOP_MARGIN_MS = 60_000
+/** What an adapter may spend before its own timeout starts to count: the Codex adapter checks its login and its version first, 30 s each. */
+const BRIEF_INTERPRETER_PREFLIGHT_ALLOWANCE_MS = 2 * 30_000
+/** An explicit slack on top, so the adapter's own typed failure always arrives strictly before the service's backstop (never a tie). */
+const BRIEF_INTERPRETER_BACKSTOP_SLACK_MS = 15_000
+/** The service waits this much longer than the adapter's own timeout before it gives up on the model. */
+export const BRIEF_INTERPRETER_BACKSTOP_MARGIN_MS = BRIEF_INTERPRETER_PREFLIGHT_ALLOWANCE_MS + BRIEF_INTERPRETER_BACKSTOP_SLACK_MS
 const MAX_ITEMS = 64
 const MAX_TEXT = 200
 /** A quote must stand on words: at least this many letters or digits. A space, a letter or a punctuation mark is not a citation. */
@@ -166,7 +170,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function refused(message: string, details: Record<string, unknown> = {}): never {
-  throw new DomainError('RENDER_OUTPUT_INVALID', message, details)
+  throw new DomainError('RENDER_OUTPUT_INVALID', message, { ...details, reason: BRIEF_INTERPRETATION_INVALID_REASON })
 }
 
 /** Finds the words of a quote in the briefing, exactly. A quote that is not literally there is the model's invention. */

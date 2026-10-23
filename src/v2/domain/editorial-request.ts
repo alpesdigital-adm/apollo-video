@@ -438,12 +438,17 @@ export const BRIEF_INTERPRETATION_FAILED_REASON = 'brief-interpretation-failed' 
  */
 export const DIRECTOR_OBJECTIVE_REQUIRED_REASON = 'director-objective-required' as const
 /**
- * A step of a production batch judges against an objective (a recipe, a portfolio), and the batch was created with none. The Apollo presumes none: the
- * request of that step names the objective it is judged against.
+ * A step judges against an objective (a recipe, a portfolio, a treatment plan) and the project or the batch was created with none. The Apollo presumes
+ * none: the request of a batch step names the objective it is judged against, and the project is given one before the step runs.
  */
 export const OBJECTIVE_REQUIRED_REASON = 'objective-required' as const
+/**
+ * The interpreter answered, and what it answered was refused (a citation that is not in the briefing, a malformed item, an invented vocabulary). The
+ * briefing was not read; what exactly was wrong stays in the internal details (a field and an index), never in the public error.
+ */
+export const BRIEF_INTERPRETATION_INVALID_REASON = 'brief-interpretation-invalid' as const
 /** The `reason` codes the public error envelope publishes for the editorial request (PRECONDITION_REQUIRED). */
-export const EDITORIAL_REQUEST_PUBLISHED_REASONS = Object.freeze([BRIEF_INTERPRETATION_REQUIRED_REASON, EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON, EDITORIAL_REQUEST_BLOCKED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON, BRIEF_INTERPRETATION_FAILED_REASON, DIRECTOR_OBJECTIVE_REQUIRED_REASON, OBJECTIVE_REQUIRED_REASON] as const)
+export const EDITORIAL_REQUEST_PUBLISHED_REASONS = Object.freeze([BRIEF_INTERPRETATION_REQUIRED_REASON, EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON, EDITORIAL_REQUEST_BLOCKED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON, BRIEF_INTERPRETATION_FAILED_REASON, DIRECTOR_OBJECTIVE_REQUIRED_REASON, OBJECTIVE_REQUIRED_REASON, BRIEF_INTERPRETATION_INVALID_REASON] as const)
 
 /**
  * A briefing with text and no interpretation of exactly that text is NOT an empty briefing: it is a request nobody has read. The Director

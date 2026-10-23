@@ -101,7 +101,7 @@ function sourceDeconstruction() {
     desiredRole: 'complete',
     validationScope: 'full',
     targetComposition: {
-      objective: 'content-distribution',
+      objective: 'discovery',
       outputSpecId: '9:16',
       targetDurationMs: 30_000,
     },
