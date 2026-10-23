@@ -66,8 +66,12 @@ export class PrismaMusicAnalysisRunRepository implements MusicAnalysisRunReposit
     });
     const artifact = link?.artifact,
       rights = artifact?.currentRightsSnapshot;
-    if (!project)
-      throw new DomainError("PROJECT_NOT_FOUND", "Music analysis requires the project");
+    if (!project) {
+      // No project at the version asked for: a project that is not there is one thing, a version that is no longer the current one is another.
+      const exists = await this.prisma.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { id: true } });
+      if (!exists) throw new DomainError("PROJECT_NOT_FOUND", "Music analysis requires an existing project");
+      throw new DomainError("VERSION_CONFLICT", "Music analysis requires the current project version");
+    }
     if (
       !artifact ||
       artifact.status !== "available" ||

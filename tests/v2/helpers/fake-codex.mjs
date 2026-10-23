@@ -15,7 +15,7 @@ const config = JSON.parse(readFileSync(`${decoded}.config.json`, 'utf8'))
 const log = (entry) => appendFileSync(`${decoded}.log.jsonl`, `${JSON.stringify(entry)}\n`)
 const args = process.argv.slice(2)
 
-if (args[0] === '--version') { process.stdout.write('codex-cli 0.0.0-fake\n'); process.exit(0) }
+if (args[0] === '--version') { process.stdout.write(`${config.version ?? 'codex-cli 0.154.0'}\n`); process.exit(0) }
 if (args[0] === 'login' && args[1] === 'status') {
   log({ command: 'login-status' })
   if (config.loggedIn === false) { process.stderr.write('Not logged in\n'); process.exit(1) }
@@ -38,6 +38,7 @@ process.stdin.on('end', async () => {
   emit({ type: 'turn.started' })
   if (config.routerError) process.stderr.write('2026-10-23T02:27:38.357966Z ERROR codex_core::tools::router: error=code-mode host is disabled\n')
   if (config.fail) { emit({ type: 'turn.failed', error: { message: 'refused' } }); process.exit(1) }
+  if (config.toolThenHang) { emit({ type: 'item.started', item: { id: 'item_0', type: 'collab_tool_call', tool: 'wait' } }); setInterval(() => undefined, 1_000); return }
   if (config.tool) emit({ type: 'item.completed', item: { id: 'item_0', type: 'command_execution', command: 'whoami' } })
   const briefing = JSON.parse(stdin.slice(stdin.lastIndexOf('{"briefing":'))).briefing
   const answer = Object.hasOwn(config.answers ?? {}, briefing) ? config.answers[briefing] : (config.fallback ?? { directives: [], unsupported: [], questions: [], coverage: [] })

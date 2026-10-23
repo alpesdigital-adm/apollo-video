@@ -1,8 +1,17 @@
 // OPT-IN, never part of CI: LIVE proof that the child Codex of the briefing interpreter can do nothing but answer (ADR-160 F6).
 //
-//   APOLLO_BRIEF_INTERPRETER_LIVE=1 APOLLO_V2_CODEX_BIN=<codex executable or codex.js> APOLLO_V2_CODEX_HOME=<CODEX_HOME with the sign-in> \
-//   APOLLO_V2_BRIEF_INTERPRETER_MODEL=<model> node --test tests/v2/codex-no-tools.live.mjs
-//   optional: APOLLO_BRIEF_INTERPRETER_LIVE_RUNS=<n, default 3>  APOLLO_BRIEF_INTERPRETER_LIVE_REPORT=<file for the JSON report>
+// HOW TO RUN IT (on the machine that will run the Apollo - for the W70 it is the Linux droplet):
+//   1. A CODEX_HOME of the Apollo's own, holding the sign-in and nothing else:
+//        mkdir -p /srv/apollo/codex-home && CODEX_HOME=/srv/apollo/codex-home codex login --device-auth
+//      (never ~/.codex; no AGENTS.md, hooks.json or hooks/ in it; no hooks.json or hooks/ beside the system-wide Codex configuration either:
+//      the proof refuses to run otherwise, with the same check the adapter makes when it starts).
+//   2. The pinned version only: `codex --version` must print exactly the version in CODEX_CLI_PINNED_VERSION (codex-cli 0.154.0). Updating the
+//      Codex means running this proof against the new version and changing the pin in the same commit.
+//   3. APOLLO_BRIEF_INTERPRETER_LIVE=1 APOLLO_V2_CODEX_BIN=<codex executable or its codex.js> APOLLO_V2_CODEX_HOME=/srv/apollo/codex-home \
+//      APOLLO_V2_BRIEF_INTERPRETER_MODEL=<model> [APOLLO_BRIEF_INTERPRETER_LIVE_RUNS=3] [APOLLO_BRIEF_INTERPRETER_LIVE_REPORT=<file.json>] \
+//      node --test tests/v2/codex-no-tools.live.mjs
+//   It spends a few model calls of the signed-in account. It runs Codex EXACTLY as the adapter does: the same arguments (codexExecArguments),
+//   the same filtered environment (codexChildEnvironment: no API key, no token) and the dedicated CODEX_HOME.
 //
 // It starts the REAL Codex with exactly the arguments the adapter uses (`codexExecArguments`) and, with a secret file and a picture OUTSIDE the
 // working directory, asks the model to (1) list its tools, (2) view the picture, (3) read the file, (4) create a file with a patch, (5) start a
@@ -14,13 +23,15 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { extname, join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { extname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { deflateSync } from 'node:zlib'
 
 import { BRIEF_INTERPRETER_RESPONSE_SCHEMA, BRIEF_INTERPRETER_SYSTEM_PROMPT, interpretationFromModelText } from '../../src/v2/application/interpret-brief.ts'
-import { codexExecArguments, reachedForATool } from '../../src/v2/infrastructure/brief/codex-cli-brief-interpreter-model.ts'
+import {
+  CODEX_CLI_PINNED_VERSION, assertCodexIsolation, codexChildEnvironment, codexExecArguments, defaultSystemConfigPath, reachedForATool,
+} from '../../src/v2/infrastructure/brief/codex-cli-brief-interpreter-model.ts'
 
 const binary = process.env.APOLLO_V2_CODEX_BIN
 const home = process.env.APOLLO_V2_CODEX_HOME
@@ -54,7 +65,7 @@ function redPicture() {
 function codex(args, stdin, directory) {
   const child = spawn(extname(binary) === '.js' || extname(binary) === '.mjs' ? process.execPath : binary,
     extname(binary) === '.js' || extname(binary) === '.mjs' ? [binary, ...args] : [...args],
-    { cwd: directory, env: { ...process.env, CODEX_HOME: home, OPENAI_API_KEY: undefined, CODEX_API_KEY: undefined }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+    { cwd: directory, env: codexChildEnvironment(process.env, home), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
   let stdout = '', stderr = ''
   child.stdout.on('data', (chunk) => { stdout += chunk }); child.stderr.on('data', (chunk) => { stderr += chunk })
   child.stdin.end(stdin)
@@ -75,6 +86,15 @@ async function exec(root, prompt, schema) {
     }
   } finally { rmSync(directory, { recursive: true, force: true }) }
 }
+
+test('live: the child Codex runs the pinned version over a home of the Apollo\'s own, with nothing to read from the machine', { skip, timeout: 120_000 }, async () => {
+  // The production path: not the operator's home, and the very check the adapter makes at every start.
+  assert.notEqual(resolve(home).toLowerCase(), resolve(homedir(), '.codex').toLowerCase(), 'APOLLO_V2_CODEX_HOME must be a CODEX_HOME of the Apollo\'s own, not ~/.codex')
+  await assertCodexIsolation({ codexHome: home, systemConfigPath: defaultSystemConfigPath(process.env) })
+  const version = await codex(['--version'], '', tmpdir())
+  assert.equal(version.stdout.trim(), CODEX_CLI_PINNED_VERSION)
+  assert.equal((await codex(['login', 'status'], '', tmpdir())).code, 0, 'the CODEX_HOME of the Apollo is not signed in')
+})
 
 test('live: the child Codex cannot read outside its directory, cannot write, cannot show what it found; what it reaches for is detected', { skip, timeout: 3_600_000 }, async () => {
   const root = mkdtempSync(join(process.env.APOLLO_V2_BRIEF_INTERPRETER_WORK_ROOT ?? tmpdir(), 'apollo-no-tools-live-'))

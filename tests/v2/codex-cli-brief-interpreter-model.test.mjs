@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
@@ -51,7 +51,7 @@ test('the child is closed: read-only sandbox, approval never, no user configurat
     assert.equal(interpretation.directives[0].excerpt.text, 'alpha')
     assert.match(audit.modelInputHash, /^[a-f0-9]{64}$/)
     assert.notEqual(audit.modelInputHash, audit.promptHash)
-    assert.deepEqual([audit.provider, audit.model, audit.providerVersion, audit.costBasis, audit.costMinorUnits], ['codex-cli', 'configured-model', 'codex-cli 0.0.0-fake', 'subscription', null])
+    assert.deepEqual([audit.provider, audit.model, audit.providerVersion, audit.costBasis, audit.costMinorUnits], ['codex-cli', 'configured-model', 'codex-cli 0.154.0', 'subscription', null])
     assert.deepEqual(audit.usage, { inputTokens: 1200, outputTokens: 40 })
     assert.equal(audit.resolvedModel, null)
     assert.match(audit.responseHash, /^[a-f0-9]{64}$/)
@@ -145,7 +145,7 @@ test('the Apollo starts Codex only over a home and a system configuration that p
     // The system-wide configuration cannot be ignored by Codex: one that defines hooks, MCP servers, plugins or a notifier stops the start.
     const system = join(fake.directory, 'system-config.toml')
     for (const [text, refused] of [
-      ['[features]\ncodex_hooks = true\n', false],
+      ['[features]\nmemories = false\n', false], ['[features]\ncodex_hooks = true\n', true], ['[features]\nhooks = true\n', true],
       ['[hooks]\nStop = []\n', true], ['[[hooks.Stop]]\ncommand = "x"\n', true], ['[mcp_servers.x]\ncommand = "x"\n', true],
       ['notify = ["x"]\n', true], ['[plugins]\nx = 1\n', true],
     ]) {
@@ -156,5 +156,57 @@ test('the Apollo starts Codex only over a home and a system configuration that p
     }
     // No CODEX_HOME of its own, no interpreter.
     assert.throws(() => new CodexCliBriefInterpreterModel({ binary: fake.binary, codexHome: 'relative', model: 'm' }), (error) => error.code === 'PERSISTENCE_NOT_CONFIGURED')
+  } finally { fake.remove() }
+})
+
+test('hooks anywhere Codex would load them stop the start: in the home of the Apollo, beside the system configuration, or switched on in it', async () => {
+  const fake = installFakeCodex({ answers: { [BRIEFING]: answerOf('alpha') } })
+  try {
+    const read = (model) => interpretBriefService({ model })({ briefing: BRIEFING })
+    const hooked = /hooks/
+    // hooks.json and a hooks folder in the home of the Apollo
+    writeFileSync(join(fake.codexHome, 'hooks.json'), '{}')
+    await assert.rejects(read(adapter(fake)), (error) => error.code === 'PERSISTENCE_NOT_CONFIGURED' && hooked.test(error.message))
+    rmSync(join(fake.codexHome, 'hooks.json'))
+    mkdirSync(join(fake.codexHome, 'hooks'))
+    await assert.rejects(read(adapter(fake)), (error) => error.code === 'PERSISTENCE_NOT_CONFIGURED' && hooked.test(error.message))
+    rmSync(join(fake.codexHome, 'hooks'), { recursive: true })
+    // hooks.json and a hooks folder beside the system-wide configuration (even with no config.toml at all)
+    const system = join(fake.directory, 'system-codex')
+    mkdirSync(system)
+    const systemAdapter = () => adapter(fake, { systemConfigPath: join(system, 'config.toml') })
+    await read(systemAdapter())
+    writeFileSync(join(system, 'hooks.json'), '{"Stop":[]}')
+    await assert.rejects(read(systemAdapter()), (error) => error.code === 'PERSISTENCE_NOT_CONFIGURED' && /system-wide/.test(error.message) && hooked.test(error.message))
+    rmSync(join(system, 'hooks.json'))
+    mkdirSync(join(system, 'hooks'))
+    await assert.rejects(read(systemAdapter()), (error) => error.code === 'PERSISTENCE_NOT_CONFIGURED')
+    rmSync(join(system, 'hooks'), { recursive: true })
+    await read(systemAdapter())
+    assert.deepEqual(leftovers(fake.directory), [])
+  } finally { fake.remove() }
+})
+
+test('only the Codex version the detection was proven against is run', async () => {
+  const fake = installFakeCodex({ version: 'codex-cli 0.155.0', answers: { [BRIEFING]: answerOf('alpha') } })
+  try {
+    const read = () => interpretBriefService({ model: adapter(fake) })({ briefing: BRIEFING })
+    await assert.rejects(read(), (error) => error.code === 'PERSISTENCE_NOT_CONFIGURED' && /exactly codex-cli 0\.154\.0/.test(error.message))
+    fake.configure({ version: 'codex-cli 0.154.0-beta', answers: { [BRIEFING]: answerOf('alpha') } })
+    await assert.rejects(read(), (error) => error.code === 'PERSISTENCE_NOT_CONFIGURED')
+    assert.equal(fake.executions().length, 0, 'nothing was run under another version')
+    fake.configure({ answers: { [BRIEFING]: answerOf('alpha') } })
+    await read()
+    assert.equal(fake.executions().length, 1)
+  } finally { fake.remove() }
+})
+
+test('the first thing that is not the agent\'s message stops the run: a worker is not held until the timeout', async () => {
+  const fake = installFakeCodex({ toolThenHang: true })
+  try {
+    const started = Date.now()
+    await assert.rejects(interpretBriefService({ model: adapter(fake, { timeoutMs: 120_000 }) })({ briefing: BRIEFING }), (error) => error.code === 'RENDER_OUTPUT_INVALID' && /tool/.test(error.message))
+    assert.ok(Date.now() - started < 15_000, `held for ${Date.now() - started} ms`)
+    assert.deepEqual(leftovers(fake.directory), [])
   } finally { fake.remove() }
 })
