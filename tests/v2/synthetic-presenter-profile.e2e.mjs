@@ -268,6 +268,13 @@ test('T-FR-103 presenter lifecycle and generation gates hold from the browser to
     await fill('consentId', 'presenter-e2e-consent-v1')
     await fill('consentEvidenceArtifactId', 'presenter-e2e-consent-1')
     await fill('consentExpiresAt', '2030-01-01T00:00:00.000Z')
+    // The product pre-fills no language: the grant of the consent and the profile's own language are stated here.
+    await fill('defaultLocale', 'pt-BR')
+    await fill('consentLocales', 'pt-BR')
+    // The grant and the disclosure are the owner's statement too: nothing is pre-filled.
+    await fill('disclosure', 'Conteúdo gerado com IA')
+    await fill('consentUses', 'ads')
+    await fill('consentMarkets', 'BRA')
     await page.getByTestId('presenter-create-submit').click()
     await page.getByTestId(`presenter-card-${profileId}`).waitFor({ state: 'visible', timeout: 30_000 })
     assert.equal(await page.getByTestId(`presenter-status-${profileId}`).innerText(), 'Ativo')
@@ -289,6 +296,9 @@ test('T-FR-103 presenter lifecycle and generation gates hold from the browser to
     await page.getByTestId('presenter-detail-restrictions').waitFor({ state: 'visible' })
     assert.match(await page.getByTestId('presenter-detail-disclosure').innerText(), /Conteúdo gerado com IA/)
     await page.screenshot({ path: join(shotsDirectory, 'presenter-active-consent-restrictions.png'), fullPage: true })
+    await fill('eligibilityLocale', 'pt-BR')
+    await fill('eligibilityUse', 'ads')
+    await fill('eligibilityMarket', 'BRA')
     await page.getByTestId('presenter-eligibility-submit').click()
     await page.getByTestId('presenter-eligibility-result').waitFor({ state: 'visible', timeout: 15_000 })
     assert.match(await page.getByTestId('presenter-eligibility-result').innerText(), /Elegível/)
@@ -343,6 +353,9 @@ test('T-FR-103 presenter lifecycle and generation gates hold from the browser to
     assert.equal(await client.v2ProviderJob.count({ where: { workspaceId } }), jobsBefore, 'zero provider jobs reserved')
 
     // The UI explains why: eligibility now denies with the current-state code.
+    await fill('eligibilityLocale', 'pt-BR')
+    await fill('eligibilityUse', 'ads')
+    await fill('eligibilityMarket', 'BRA')
     await page.getByTestId('presenter-eligibility-submit').click()
     await page.getByTestId('presenter-eligibility-result').filter({ hasText: 'Não elegível' }).waitFor({ timeout: 15_000 })
     assert.match(await page.getByTestId('presenter-eligibility-result').innerText(), /PROFILE_NOT_ACTIVE|CURRENT_VERSION_NOT_ACTIVE/)

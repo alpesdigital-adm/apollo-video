@@ -305,7 +305,7 @@ async function ensureDirectorSource(client, { workspaceId, clientId, createdAt }
  * `seedFinalExportChain` hangs its proxy and final-export rows off.
  */
 export async function seedDirectedProject(client, {
-  workspaceId, clientId, credentialId, environment = 'production', projectId, suffix, words,
+  workspaceId, clientId, credentialId, environment = 'production', projectId, suffix, words, directed: runDirector = true,
 }) {
   const actor = testActor({ workspaceId, clientId, credentialId, environment })
   const now = Date.now()
@@ -351,6 +351,10 @@ export async function seedDirectedProject(client, {
     selection: { mode: 'none' }, actor: { type: 'system', id: 'w34-w35-dashboard-fixture' },
     idempotencyKey: id('lut-none'), reason: 'Keep the dashboard fixture colorimetrically neutral.',
   })
+  // `directed: false` stops at the Version the Director would direct: a suite about the request the Director reads runs it itself.
+  if (!runDirector) {
+    return Object.freeze({ projectId, source, head: noLut, versions: Object.freeze({ base: base.version.id, lut: noLut.version.id }) })
+  }
   const directed = await runProjectDirectorService({
     repository: new PrismaDirectorRunRepository(client), clock: () => new Date(), createEventId: randomUUID,
     compileBrief: createEvidenceBoundBriefCompiler(),

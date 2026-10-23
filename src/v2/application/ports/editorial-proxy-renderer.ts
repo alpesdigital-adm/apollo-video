@@ -99,7 +99,7 @@ export interface EditorialProxyRenderer {
     ctaOverlays?: readonly Readonly<DirectedCtaOverlay>[]
     transitions?: readonly Readonly<DirectedTransition>[]
     backgroundMusic?: Readonly<DirectedMusicTrack>
-    composition?: Readonly<{ foregroundScale: number; verticalPosition: number }>
+    composition?: Readonly<{ foregroundScale: number; verticalPosition: number; layout?: 'landscape-inset' | 'source-native' }>
     /** Content-addressed placement geometry; drawable entries require a matching `placementAssets` row. */
     placementPlan?: Readonly<RenderPlacementPlan>
     placementAssets?: readonly Readonly<EditorialPlacementAsset>[]

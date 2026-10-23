@@ -8,6 +8,7 @@ import type { ProjectVersionV2, ProjectVersionV3 } from '../../domain/project-ve
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type { Rational } from '../../domain/session-time.ts'
 import type { StrategicObjectiveId } from '../../domain/strategic-objective.ts'
+import type { EditorialPolicyResolutionV1 } from '../../domain/editorial-policy-resolution.ts'
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectMulticamSessionPayload } from '../direct-multicam-session.ts'
 
@@ -58,6 +59,11 @@ export interface MulticamDirectionCommandContext {
    */
   readonly currentPlan: Readonly<EditorialCutEditPlan | DirectedEditPlan>
   readonly currentDurationFrames: number
+  /**
+   * The sealed editorial policy resolution of the Director run the head Version carries (its own or an inherited one), when it has one. The
+   * re-cut plan is judged against it, and the call to action is placed where it asks.
+   */
+  readonly policyResolution?: Readonly<EditorialPolicyResolutionV1>
   /** Every output of the project: the stable variant ids of the sealed State the Command's child Version carries. */
   readonly variantIds: readonly string[]
   /** The renders of the head Version, each attributed to its own output. */

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { buildRetainedSourceRanges } from '../../src/v2/application/editorial-phrase-rules.ts'
 import {
-  buildRetainedSourceRanges,
   deriveRecoveryEditorialExclusions,
   RECOVERY_EDITORIAL_EXCLUSION_RULES,
   validateRecoveryEditorialAcceptance,
-} from '../../src/v2/application/recovery-project-acceptance.ts'
+} from './helpers/recovery-master-regression-case.mjs'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 
 function recoveryTranscript() {

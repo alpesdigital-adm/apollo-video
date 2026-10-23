@@ -155,8 +155,10 @@ test('T-FR-084 /batches compiles and renders VariantRecipe through the public V2
     batchUiSource,
     /expectedCompatibilityGraphRunHash:\s*activeCompatibilityGraph\.runHash/,
   )
-  assert.match(batchUiSource, /edge\.decision === 'accepted'/)
-  assert.match(batchUiSource, /proofOptionalObjectives/)
+  // ADR-160 F8: the path is the owner's pick, never "the first accepted path" chosen by the screen.
+  assert.match(batchUiSource, /<RecipePathPicker/)
+  assert.match(batchUiSource, /pathFromPicks\(/)
+  assert.doesNotMatch(batchUiSource, /proofOptionalObjectives|UI_BEST_ACCEPTED_PATH/)
   assert.match(batchUiSource, /scores\.minimumEdgeScore/)
   assert.match(batchUiSource, /storyPlan\.blocks/)
   assert.match(batchUiSource, /editPlan\.duplicatesMasters/)
@@ -194,7 +196,7 @@ test('T-FR-085 /batches preflights a bounded portfolio through the public V2 API
   assert.match(batchUiSource, /expectedReuseRate/)
   assert.match(batchUiSource, /confirmationToken/)
   assert.match(batchUiSource, /produto cartesiano nunca materializado/)
-  assert.match(batchUiSource, /0 jobs criados/)
+  assert.match(batchUiSource, /Nenhuma tarefa criada/)
 })
 
 test('T-FR-086 /batches edits only an explicit recipe, format and target scope through the public V2 API', () => {

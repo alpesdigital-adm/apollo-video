@@ -1,5 +1,6 @@
 import type { DomainError } from '../domain/errors.ts'
 import { PUBLIC_ERROR_CATALOG } from './public-error-catalog.ts'
+import { EDITORIAL_REQUEST_PUBLISHED_REASONS } from '../domain/editorial-request.ts'
 import { PUBLISHED_CONSUMPTION_REASONS } from '../domain/output-consumption.ts'
 import { DIRECTOR_INHERITANCE_BLOCK_REASONS } from '../domain/director-run-inheritance.ts'
 
@@ -153,7 +154,7 @@ function presentMissingTool(details: Readonly<Record<string, unknown>>) {
  * The closed set of reasons a precondition refusal publishes, each one a stable code a client can branch on and an operator can
  * act on. Anything else a domain throw put in `details` stays internal.
  */
-const PUBLISHED_PRECONDITION_REASONS: ReadonlySet<string> = new Set(PUBLISHED_CONSUMPTION_REASONS)
+const PUBLISHED_PRECONDITION_REASONS: ReadonlySet<string> = new Set([...PUBLISHED_CONSUMPTION_REASONS, ...EDITORIAL_REQUEST_PUBLISHED_REASONS])
 
 /**
  * The reasons a subtitle sidecar refusal publishes (`SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH`), with the identifiers that let a client act on them:
@@ -210,7 +211,7 @@ export function presentPublicDomainError(error: DomainError, requestId: string) 
       ? { requiredScope: error.details.requiredScope }
       : error.code === 'PERSISTENCE_NOT_CONFIGURED'
         ? presentMissingTool(error.details)
-        : error.code === 'PRECONDITION_REQUIRED'
+        : error.code === 'PRECONDITION_REQUIRED' || error.code === 'RENDER_OUTPUT_INVALID'
           ? presentPreconditionReason(error.details)
           : STALE_PAIR_CODES.has(error.code)
             ? presentStalePair(error.details)

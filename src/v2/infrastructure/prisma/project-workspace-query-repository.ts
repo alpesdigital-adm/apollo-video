@@ -312,6 +312,8 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
         : undefined
       if (brief) {
         brief.productionBrief = parseProductionBrief(brief.productionBrief)
+        // The editorial request has its own read (apollo.projects.editorial-request.read); the workspace brief does not carry it.
+        delete brief.editorialRequest
         if (brief.briefCompilation !== undefined) {
           brief.briefCompilation = parseBriefCompilation(brief.briefCompilation)
         }

@@ -1,5 +1,6 @@
 import type { AdoptableObservationReader } from './adoptable-observation-reader.ts'
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
+import type { EditorialPhraseRule } from '../editorial-phrase-rules.ts'
 import type { DirectorRun, RunDirectorCommandPayload } from '../../domain/director-run.ts'
 import type { EditCommand } from '../../domain/edit-command.ts'
 import type { OperationalOutputParentV3, OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
@@ -22,7 +23,8 @@ export interface DirectorRunContext {
   project: Readonly<{
     id: string
     objective: StrategicObjectiveId
-    locale: string
+    /** The language the project states, when it states one. The Director takes the language of its captions from the request or the observed transcript, never from here. */
+    locale?: string
   }>
   latestDirectorObjective?: Readonly<PreviousDirectorObjectiveBinding>
   /** The sealed output bundle of the current head: the exact parent the Director's Version is born from. */
@@ -32,6 +34,8 @@ export interface DirectorRunContext {
   policies: Readonly<Record<string, unknown>>
   editPlan: Readonly<EditorialCutEditPlan>
   currentDurationFrames: number
+  /** Pixels of the source master, as its manifest probed them (absent: not known). The Director compares the shape of the source with the shape of the outputs. */
+  sourceDimensions?: Readonly<{ width: number; height: number }>
   /** Every output of the project: the stable variant ids of the sealed State the Command's child Version carries. */
   variantIds: readonly string[]
   /** The renders of the head Version, each attributed to its own output. */
@@ -59,6 +63,8 @@ export interface DirectorRunContext {
     id: string
     sourceArtifactId: string
     language: string
+    /** How the language was found (absent: the transcript records no basis). */
+    languageBasis?: 'detected-from-media' | 'declared-not-verified'
     provider: string
     model: string
     transcriptHash: string
@@ -68,6 +74,13 @@ export interface DirectorRunContext {
      */
     words?: readonly Readonly<{ word: string; start: number; end: number }>[]
   }>
+  /**
+   * The speech this project asked to have removed: the phrase rules of the `remove-spoken-content` Commands in the lineage of the
+   * Version the Director directs (the same rules the cut applied). The Director holds no phrase of its own - what must not be said
+   * is what THIS project asked to cut. REQUIRED: an empty list says nothing was asked and nothing is forbidden, and only that; an
+   * implementation that does not state it does not implement the port (the Director refuses the context rather than read it as empty).
+   */
+  requestedSpeechRemovals: readonly Readonly<EditorialPhraseRule>[]
   /** Absent means no server-produced OCR envelope exists for this input version. */
   ocrEnvelope?: Readonly<PerceptionProducerEnvelope>
   /**

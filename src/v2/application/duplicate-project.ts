@@ -93,7 +93,7 @@ export function duplicateProjectService(dependencies: {
     const facts: CreationSourceFactsV3 = {schemaVersion:'project-creation-source-facts/v3',project:source.projectFacts,bundle:source.bundle,
       snapshots:source.snapshots,editPlanSnapshot:source.snapshots.find(s=>s.kind==='edit-plan')!,renderablePlanSnapshot:source.renderablePlanSnapshot,references}
     const proposal = compose(facts), bundle = buildCreationOutputVersionBundleV2(proposal), metadata = creationProjectMetadataV2(proposal)
-    const project = createProject({id:targetProjectId,workspaceId,name:metadata.name,status:'draft',objective:metadata.objective,locale:metadata.locale,
+    const project = createProject({id:targetProjectId,workspaceId,name:metadata.name,status:'draft',...(metadata.objective!==null?{objective:metadata.objective}:{}),...(metadata.locale!==null?{locale:metadata.locale}:{}),
       ownerId:audit.clientId,duplicatedFromProjectId:projectId,createdBy:proposal.author,createdAt})
     const idempotency = {id:dependencies.createId('idempotency-record'),workspaceId,clientId,key,requestFingerprint,
       expiresAt:new Date(createdAtDate.getTime()+ttlSeconds*1000).toISOString()}

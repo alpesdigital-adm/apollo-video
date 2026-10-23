@@ -57,7 +57,8 @@ test('W63a PostgreSQL Director: its perception is the server snapshot, written o
       // decisions are what they were: the new evidence kinds decide nothing, face safety stays unknown
       assert.equal(directed.run.qualityReport.status, 'review-required')
       assert.equal(directed.run.qualityReport.faceSafety.status, 'unknown')
-      assert.equal(directed.run.qualityReport.hardChecks.subtitlesFaceSafe, false)
+      assert.equal(directed.run.qualityReport.hardChecks.find((check) => check.id === 'subtitlesFaceSafe'), undefined, 'face safety is claimed by nobody: no check of the v5 list says it, the faceSafety object does')
+      assert.equal(directed.run.qualityReport.faceSafety.status, 'unknown')
       assert.equal(perception.summary.confidence, 0.82)
       assert.equal(perception.summary.faceCoverage, 'partial')
       assert.equal(perception.summary.visualCoverage, 'partial')

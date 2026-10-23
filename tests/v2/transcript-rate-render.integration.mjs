@@ -174,15 +174,14 @@ const EXPECTED_RETIMED_WORDS = Object.freeze([
   ['final', 192, 228],
 ])
 
-// Director cue grouping (32 characters, 2.4s, 0.55s gap, 5 words per block):
-// every gap between the retained words is wider than 0.55s * 30 = 16.5 frames
-// except the first, so the first two words share a cue and the rest are solo.
+// Director cue grouping (ADR-160): the grouping is the preset's, here the baseline one of the renderer registry (clean-color: at most 4 words,
+// 5 s on screen, a silence LONGER than its minimum time on screen of 600 ms = 18 frames ends the cue). The gaps between the retained words are
+// 5 frames (Abertura/clara: one cue), 23 (a new cue), 18 (rapido/corte: exactly the minimum, not longer, so one cue), 27 and 36 (new cues).
 const EXPECTED_CUES = Object.freeze([
   ['subtitle-cue-1', 6, 40, 'Abertura clara'],
-  ['subtitle-cue-2', 63, 75, 'rapido'],
-  ['subtitle-cue-3', 93, 105, 'corte'],
-  ['subtitle-cue-4', 132, 156, 'devagar'],
-  ['subtitle-cue-5', 192, 228, 'final'],
+  ['subtitle-cue-2', 63, 105, 'rapido corte'],
+  ['subtitle-cue-3', 132, 156, 'devagar'],
+  ['subtitle-cue-4', 192, 228, 'final'],
 ])
 
 /**
@@ -980,13 +979,13 @@ test('T-FR-233 retimed transcript drives the Director, the real V2 worker and th
     // retimed cues. Planned spans remain exact; this is not burned-cue timing.
     // -----------------------------------------------------------------------
     // subtitle-cue-1 covers frames 6..40 (0.20s-1.33s) over the red segment;
-    // subtitle-cue-4 covers frames 132..156 (4.40s-5.20s) over the green one.
-    for (const [second, label] of [[0.5, 'subtitle-cue-1'], [4.8, 'subtitle-cue-4']]) {
+    // subtitle-cue-3 covers frames 132..156 (4.40s-5.20s) over the green one.
+    for (const [second, label] of [[0.5, 'subtitle-cue-1'], [4.8, 'subtitle-cue-3']]) {
       const white = captionBandWhitePixels(proxyPath, second)
       assert.ok(white <= 10, `${label} must be suppressed at ${second}s with unknown face coverage, found ${white} white pixels`)
     }
     // Frames 40..63 (1.33s-2.10s) and 156..192 (5.20s-6.40s) carry no cue.
-    for (const [second, label] of [[1.7, 'gap after subtitle-cue-1'], [5.7, 'gap after subtitle-cue-4']]) {
+    for (const [second, label] of [[1.7, 'gap after subtitle-cue-1'], [5.7, 'gap after subtitle-cue-3']]) {
       const white = captionBandWhitePixels(proxyPath, second)
       assert.ok(white <= 10, `${label} at ${second}s must stay clean, found ${white} white pixels`)
     }

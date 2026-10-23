@@ -95,6 +95,8 @@ const BARE_BINARY_NAME =
  * undeclared spawn appears.
  */
 const NON_MEDIA_SPAWNS = new Map([
+  // The briefing interpreter's child (the Codex CLI, or a stand-in script run by this Node) and the cleanup of its process tree: no media is touched.
+  ['src/v2/infrastructure/brief/codex-cli-brief-interpreter-model.ts', ["'taskkill.exe'", 'this.start.command']],
   ['src/v2/infrastructure/image/tesseract-image-vision-provider.ts', ['this.binary']],
   ['src/v2/infrastructure/remotion-render-input-renderer.ts', ["'taskkill'", 'process.execPath']],
   ['src/v2/infrastructure/synthetic-build-attestation-runner.ts', ["'taskkill'", 'executable']],
@@ -461,6 +463,8 @@ test('every ffmpeg and ffprobe spawn in src/ uses the resolver or audited explic
   // The two lists of exceptions are pinned, so an entry that stops being true
   // is as red as an entry nobody declared.
   assert.deepEqual(declaredNonMedia, [
+    "src/v2/infrastructure/brief/codex-cli-brief-interpreter-model.ts::'taskkill.exe'",
+    'src/v2/infrastructure/brief/codex-cli-brief-interpreter-model.ts::this.start.command',
     'src/v2/infrastructure/image/tesseract-image-vision-provider.ts::this.binary',
     "src/v2/infrastructure/remotion-render-input-renderer.ts::'taskkill'",
     'src/v2/infrastructure/remotion-render-input-renderer.ts::process.execPath',

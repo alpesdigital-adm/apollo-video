@@ -1,5 +1,6 @@
 import type { PrismaClient, V2MediaSegmentDerivativeJob } from '../../../../generated/prisma-v2/index.js'
 import type { MediaSegmentDerivativeJob, MediaSegmentDerivativeJobRepository, MediaSegmentDerivativeJobStatus } from '../../application/ports/media-segment-derivative-job-repository.ts'
+import { UNDETERMINED_LOCALE } from '../../domain/asset-rights.ts'
 import { DomainError } from '../../domain/errors.ts'
 import type { PreparedSegmentDerivative } from '../../application/ports/media-segment-derivative-job-repository.ts'
 import { PrismaMediaArtifactRepository } from './media-artifact-repository.ts'
@@ -34,7 +35,7 @@ export class PrismaMediaSegmentDerivativeJobRepository implements MediaSegmentDe
       const artifact = await tx.v2MediaArtifact.findUnique({ where: { id: segment.artifactId }, include: { currentRightsSnapshot: true } })
       if (!artifact || artifact.status !== 'available' || artifact.sha256 !== job!.sourceSha256 || artifact.currentRightsSnapshotId !== job!.rightsSnapshotId || segment.segmentHash !== job!.segmentHash) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Derivative source or rights changed before publication')
       const assertRights = () => {
-        if (mediaLibraryRights(artifact.currentRightsSnapshot ? hydrateAssetRights(artifact.currentRightsSnapshot) : null, { workspaceId: job!.workspaceId, locale: 'pt-BR', now: new Date() }).status !== 'eligible') throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Derivative rights expired before publication')
+        if (mediaLibraryRights(artifact.currentRightsSnapshot ? hydrateAssetRights(artifact.currentRightsSnapshot) : null, { workspaceId: job!.workspaceId, locale: UNDETERMINED_LOCALE, now: new Date() }).status !== 'eligible') throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Derivative rights expired before publication')
       }
       // Promotion cannot start after an accepted cancel/reclaim/expired deadline.
       assertLease()

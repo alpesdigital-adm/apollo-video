@@ -27,7 +27,7 @@ migrations V2. A jornada:
 
 1. cria workspace, cliente de API e projetos 9:16/16:9;
 2. persiste master, transcript alinhado, direitos e assets;
-3. remove pela API as falas “31 de janeiro”, “1 de fevereiro” e “dois dias”;
+3. remove pela API as falas que o pedido do teste nomeia (“31 de janeiro”, “1 de fevereiro” e “dois dias”: teste pontual; não é regra do produto);
 4. executa Director V2, seleção/rejeição de insert e edição manual;
 5. prova split, trim, troca de B-roll, inspector e undo;
 6. renderiza proxies reais com FFmpeg;

@@ -7,7 +7,7 @@ import {
   type DirectorToolContext,
   type DirectorToolName,
 } from '../domain/director-tools.ts'
-import { evaluateAssetUse, type AssetRightsSnapshot } from '../domain/asset-rights.ts'
+import { evaluateAssetUse, UNDETERMINED_LOCALE, type AssetRightsSnapshot } from '../domain/asset-rights.ts'
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import { validateStoryPlan } from '../domain/story-plan.ts'
@@ -94,7 +94,7 @@ export function createDirectorToolContextResolver(dependencies: {
         const decision = evaluateAssetUse(snapshots.get(assetId) ?? null, {
           workspaceId: input.workspaceId,
           use: 'editorial-reuse',
-          locale: context.project.locale,
+          locale: context.project.locale ?? UNDETERMINED_LOCALE,
         }, dependencies.clock())
         if (decision.outcome === 'allow' && decision.rightsSnapshotHash) eligible.set(assetId, decision.rightsSnapshotHash)
       }

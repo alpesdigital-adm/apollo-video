@@ -118,7 +118,7 @@ function matrixReviewRequiredQuality(id, desiredActionId, evaluatedAt,
     hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true,
       subtitlesFaceSafe: false, subtitlesBounded: true, forbiddenSpeechAbsent: true,
       timelineContinuous: true },
-    issues: [], criticVersion: 'matrix-controlled-critic-1.0.0', evaluatedAt,
+    issues: [], criticVersion: 'apollo-director-critic/v3', evaluatedAt,
   } }
 }
 
@@ -636,7 +636,7 @@ test('T-F2-GATE/F2.028 admits the real API per burned caption without a global f
       ])
       if (!project || (!immutable && project.currentVersionId !== cell.projectVersionId) ||
           !version || version.editPlanSnapshotId !== evidence.editPlanSnapshotId ||
-          !run || !quality || quality.schemaVersion !== 4 ||
+          !run || !quality || quality.schemaVersion !== 5 ||
           quality.contentHash !== evidence.qualitySnapshotHash ||
           quality.contentJson !== stableSerialize(evidence.quality) ||
           !review || !sourceArtifact || Number(sourceArtifact.byteSize) !== sourceBytes.byteLength ||

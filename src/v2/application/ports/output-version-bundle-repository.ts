@@ -36,6 +36,11 @@ export interface CreationOutputBundleWriteV2 {
 }
 export interface CreationOutputBundleRepositoryV2 {
   persist(input: CreationOutputBundleWriteV2): Promise<Readonly<{ bundle: CreationOutputVersionBundleV2; replayed: boolean }>>
+  /**
+   * Whether a creation with this idempotency key already completed for this client. A replay never calls a model: the answer is the first one,
+   * so the caller asks before it spends a reading. Optional: a repository that cannot say simply lets the persist step decide.
+   */
+  hasCompletedCreation?(input: Readonly<{ workspaceId: string; clientId: string; idempotencyKey: string }>): Promise<boolean>
   read(input: Readonly<{ workspaceId: string; projectId: string; versionId: string }>): Promise<Readonly<CreationOutputVersionBundleV2> | null>
 }
 

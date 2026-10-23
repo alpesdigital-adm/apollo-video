@@ -85,16 +85,17 @@ const STATUS_LABEL: Record<PresenterSummary['status'], string> = {
 const emptyCreateForm = {
   profileId: '', actorIdentityId: '', avatarAdapterId: 'heygen-v3', avatarAdapterVersion: '3.1.0', avatarIdentityRef: '',
   voiceId: '', voiceAdapterId: 'elevenlabs-tts', voiceAdapterVersion: '1.0.0',
-  defaultLocale: 'pt-BR', disclosure: 'Conteúdo gerado com IA',
-  consentId: '', consentEvidenceArtifactId: '', consentUses: 'ads', consentMarkets: 'BRA',
-  consentLocales: 'pt-BR', consentExpiresAt: '',
+  defaultLocale: '', disclosure: '',
+  consentId: '', consentEvidenceArtifactId: '', consentUses: '', consentMarkets: '',
+  consentLocales: '', consentExpiresAt: '',
 }
 
 const emptyConsentForm = {
-  consentId: '', evidenceArtifactId: '', uses: 'ads', markets: 'BRA', locales: 'pt-BR', expiresAt: '',
+  consentId: '', evidenceArtifactId: '', uses: '', markets: '', locales: '', expiresAt: '',
 }
 
-const emptyEligibilityForm = { operation: 'tts', use: 'ads', market: 'BRA', locale: 'pt-BR' }
+// What a consent grants (uses, markets, languages) and the disclosure shown are the owner's statement: nothing is pre-filled.
+const emptyEligibilityForm = { operation: 'tts', use: '', market: '', locale: '' }
 
 export default function SyntheticPresentersManager() {
   const router = useRouter()

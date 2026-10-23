@@ -4,12 +4,12 @@ import test from 'node:test'
 import {
   classifyConfidence,
   CONFIDENCE_BAND_POLICY,
-  CONFIDENCE_CALIBRATION_GOLDEN,
   createDecisionConfidence,
   evaluateCalibrationRegression,
   expectedCalibrationError,
   relevantUncertainty,
 } from '../../src/v2/domain/decision-confidence.ts'
+import { CONFIDENCE_CALIBRATION_GOLDEN } from './helpers/confidence-calibration-golden.mjs'
 import { projectConfidenceUncertainties } from '../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts'
 
 const confidence = (value, overrides = {}) => createDecisionConfidence({

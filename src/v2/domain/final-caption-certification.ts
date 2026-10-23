@@ -75,32 +75,95 @@ export type FinalQualityAdmission =
   | Readonly<{ admitted: true; basis: 'verified-face-safety' | 'per-cue-caption-certification' }>
   | Readonly<{ admitted: false; reason: string }>
 
-const REQUIRED_HARD_CHECKS = Object.freeze([
-  'openingMotionProtected', 'automaticZoomDisabled', 'subtitlesBounded', 'forbiddenSpeechAbsent', 'timelineContinuous',
-] as const)
+/**
+ * The checks every admitted report must carry by name. They are structural, not editorial: that the plan honours the request it was made
+ * for, that the timeline is continuous, and that the rights of every source it plays are certain. What the request asked for beyond that
+ * (movement, opening, captions, speech removals) is judged by the other checks of the list, named by the policy they are about; admission
+ * requires every check of the list to hold whatever its name.
+ */
+export const REQUIRED_HARD_CHECKS = Object.freeze(['requestHonored', 'timelineContinuous', 'sourceRightsCertain'] as const)
 
 const refuse = (reason: string): FinalQualityAdmission => Object.freeze({ admitted: false as const, reason })
 
 /**
- * (a) of the policy. The legacy basis (a Director that really verified face safety) is unchanged; the new one admits the
- * report the Director actually produces - `review-required` with an unknown face claim - when that claim is its only
- * reservation. Everything else (blocked, a failed gate or hard check, a hard issue, an inconsistent claim) is refused.
+ * The oldest Director critic whose report names the request it answers. `apollo-director-critic/v4` judged the plan against a sealed policy
+ * resolution whose caption width, opening window, structure roles and rubric were still values the planner carried; `v5` judges it against
+ * a resolution derived from the request (ADR-160 F3-F5). A report born under an earlier critic is not inherited - the Director runs again.
+ *
+ * The admission is an ALLOW-LIST: only a report that names `apollo-director-critic/v<N>`, with N a plain positive integer ordered
+ * numerically at or above this minimum, is admitted. A report naming any other critic - or none - is refused, because nothing says
+ * what its hard checks mean; a list of the superseded would let an unknown name through.
  */
-export function admitDirectorQualityForFinal(report: Readonly<Pick<DirectorQualityReport, 'status' | 'faceSafety' | 'strategic' | 'hardChecks' | 'issues'>>): FinalQualityAdmission {
-  const { status, faceSafety, hardChecks } = report
+export const MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION = 5
+const APOLLO_DIRECTOR_CRITIC_VERSION = /^apollo-director-critic\/v([1-9]\d*)$/
+/** The only report schema a final export admits. v3 and v4 stay readable and are never admitted. */
+export const ADMITTED_DIRECTOR_QUALITY_REPORT_SCHEMA = 'director-quality-report/v5'
+
+/** What admission binds the report to: the request now in the Brief Snapshot, and what the DirectorRun sealed. All three must agree. */
+export type FinalQualityBinding = Readonly<{
+  /** The request hash recomputed from the Brief Snapshot of the Version being exported. */
+  currentRequestHash: string
+  /** The `requestHash` column of the DirectorRun (null: the run predates the request). */
+  sealedRequestHash: string | null
+  /** The hash of the policy resolution held by the snapshot the DirectorRun names (null: the run has none). */
+  sealedPolicyResolutionHash: string | null
+}>
+
+export type AdmissibleDirectorQuality = Readonly<Pick<DirectorQualityReport, 'status' | 'faceSafety' | 'strategic' | 'issues'> & {
+  schemaVersion?: string
+  hardChecks?: unknown
+  criticVersion?: string
+  requestHash?: string
+  policyResolutionHash?: string
+}>
+
+/**
+ * (a) of the policy. A report is admitted only when it is a v5 report of critic v5 or later (`MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION`), bound to the request now in the brief and to
+ * the policy resolution sealed in its run, with every hard check holding. A verified face safety claim keeps its original basis; the
+ * report the Director actually produces - `review-required` with an unknown face claim - is admitted when that claim is its only
+ * reservation. Everything else (blocked, an older report, a request that moved, a failed check, a hard issue, an inconsistent claim) is
+ * refused, and nothing is inherited from a report that did not judge this request.
+ */
+export function admitDirectorQualityForFinal(report: AdmissibleDirectorQuality, binding?: FinalQualityBinding): FinalQualityAdmission {
+  const { status, faceSafety } = report
   if (status === 'blocked') return refuse('Director quality status is blocked')
+  if (report.schemaVersion !== ADMITTED_DIRECTOR_QUALITY_REPORT_SCHEMA) {
+    return refuse(`Director quality report ${String(report.schemaVersion)} is superseded: it did not judge a sealed editorial request, so a new Director run is required`)
+  }
+  const criticVersion = APOLLO_DIRECTOR_CRITIC_VERSION.exec(report.criticVersion ?? '')
+  if (!criticVersion) {
+    return refuse(`Director critic ${JSON.stringify(report.criticVersion ?? null)} is not a critic the Apollo admits: only apollo-director-critic/v${MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION} or later is`)
+  }
+  if (Number(criticVersion[1]) < MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION) {
+    return refuse(`Director critic ${report.criticVersion} is superseded: its hard checks did not evaluate the sealed editorial request`)
+  }
+  if (!binding) return refuse('Director quality report cannot be bound to the editorial request now in the brief')
+  if (!/^[a-f0-9]{64}$/.test(report.requestHash ?? '') || !/^[a-f0-9]{64}$/.test(report.policyResolutionHash ?? '')) {
+    return refuse('Director quality report does not name its editorial request and policy resolution')
+  }
+  if (report.requestHash !== binding.currentRequestHash) {
+    return refuse('The editorial request changed after this Director run: the brief now states another request, so a new Director run is required')
+  }
+  if (binding.sealedRequestHash !== report.requestHash) return refuse('The Director run did not seal the editorial request its report names')
+  if (binding.sealedPolicyResolutionHash === null || binding.sealedPolicyResolutionHash !== report.policyResolutionHash) {
+    return refuse('The policy resolution sealed in the Director run is not the one its report was judged against')
+  }
+  if (!Array.isArray(report.hardChecks) || report.hardChecks.length === 0) return refuse('Director report carries no hard check list')
+  const checks = report.hardChecks as readonly Readonly<{ id?: unknown; passed?: unknown }>[]
+  const missing = REQUIRED_HARD_CHECKS.find((id) => !checks.some((check) => check.id === id))
+  if (missing) return refuse(`Director hard check ${missing} is missing`)
+  const failed = checks.find((check) => check.passed !== true)
+  if (failed) return refuse(`Director hard check ${String(failed.id)} did not hold`)
   if (status === 'approved' || status === 'approved-with-warnings') {
-    return faceSafety?.status === 'verified' && faceSafety.evidenceRefs.length > 0 && hardChecks?.subtitlesFaceSafe === true
+    return faceSafety?.status === 'verified' && faceSafety.evidenceRefs.length > 0
       ? Object.freeze({ admitted: true as const, basis: 'verified-face-safety' as const })
       : refuse(`Director quality status ${status} is inconsistent with an unverified face safety claim`)
   }
   if (status !== 'review-required') return refuse(`Director quality status ${String(status)} is not recognised`)
-  if (faceSafety?.status !== 'unknown' || faceSafety.evidenceRefs.length !== 0 || hardChecks?.subtitlesFaceSafe !== false) {
-    return refuse('Director face safety claim is not the plain unknown claim (no evidence, subtitles not claimed face safe)')
+  if (faceSafety?.status !== 'unknown' || faceSafety.evidenceRefs.length !== 0) {
+    return refuse('Director face safety claim is not the plain unknown claim (no evidence)')
   }
   if (report.strategic?.passed !== true) return refuse('Director strategic quality gate did not pass')
-  const failedCheck = REQUIRED_HARD_CHECKS.find((check) => hardChecks[check] !== true)
-  if (failedCheck) return refuse(`Director hard check ${failedCheck} did not hold`)
   const hardIssues = (report.issues ?? []).filter((issue) => issue.severity === 'hard')
   if (hardIssues.length > 0) return refuse(`Director report carries ${hardIssues.length} hard issue(s): ${[...new Set(hardIssues.map((issue) => issue.code))].join(', ')}`)
   return Object.freeze({ admitted: true as const, basis: 'per-cue-caption-certification' as const })

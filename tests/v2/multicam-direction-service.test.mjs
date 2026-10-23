@@ -2,6 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { planFrameRate } from '../../src/v2/application/multicam-direction.ts'
+import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
+import { resolveEditorialPolicies } from '../../src/v2/domain/editorial-policy-resolution.ts'
+import { createEditorialRequest } from '../../src/v2/domain/editorial-request.ts'
 import { childCommandOf } from '../../src/v2/domain/project-output-state-transition.ts'
 import { buildDirectableMulticamWorld, fixtureSeconds as sec } from './wave20-fixtures.mjs'
 import {
@@ -448,18 +451,55 @@ test('T-F4.012 every transition sits on the seam it names, and the call to actio
     assert.equal(to.timelineInFrame, transition.atFrame, `${transition.id} ends where ${to.id} begins`)
   }
 
-  // The CTA keeps its length and is re-anchored to the end of the timeline this
-  // direction produced. Keeping the base plan's frame numbers would leave a
-  // 90-frame call to action at 27 s of a 279 s cut.
-  const base = baseDirectedPlan({ versionId: HEAD.version.id }).overlayTracks[0]
+  // The base plan's call to action closes its video (frames 810 to 900 of 900) and its picture is cut from the first camera, 27 s into the recording.
+  // The direction starts at 1 s of the session, so the same moment is frame 780 of the new timeline; nothing moves it to the end but the video's own end.
   const overlay = result.editPlan.overlayTracks[0]
-  assert.equal(overlay.endFrame, result.editPlan.durationFrames, 'the CTA ends with the timeline')
-  assert.equal(
-    overlay.endFrame - overlay.startFrame,
-    base.endFrame - base.startFrame,
-    'and keeps exactly the length it had',
+  assert.equal(overlay.startFrame, (27 - 1) * 30, 'the call to action starts where it was said, on the new timeline')
+  assert.equal(overlay.endFrame, result.editPlan.durationFrames, 'and, being the closing of the video, runs to its end')
+  assert.notEqual(overlay.startFrame, 810, 'which is a different frame index on a different timeline')
+})
+
+// ADR-160 (validator, F3-F5): the direction honours the resolution the base plan was made under - the call to action is where the policy puts it.
+function resolutionWithCta({ directive, spokenCta }) {
+  const destination = { type: 'url', value: 'https://example.com/x' }
+  const request = createEditorialRequest({
+    objective: 'sale',
+    desiredAction: createDesiredAction({ objective: 'sale', desiredAction: { destination, visualCta: 'Fale com a gente', verbalCta: 'fale com a gente' } }),
+    ...(directive ? { directives: [{ id: 'c', kind: 'cta', value: directive }] } : {}),
+  })
+  return resolveEditorialPolicies(request, { transcriptId: 'transcript-base', transcriptLanguage: 'pt-BR', hasSelectedInsert: false, ...(spokenCta ? { spokenCta } : {}), timelineDurationSeconds: 30, closingSentenceStartSeconds: 27 }, [])
+}
+
+test('T-F4.012 a call to action the policy bounds to the spoken call ends where the call ends, not at the end of the video', async () => {
+  // The call is spoken from 27 s to 29 s of a 30 s plan, so the policy window is [27, 29], inside the video.
+  const policyResolution = resolutionWithCta({ directive: 'overlay-at-spoken-cta', spokenCta: { startSeconds: 27, endSeconds: 29 } })
+  assert.equal(policyResolution.policies.ctaOverlay.value.anchoredTo, 'spoken-cta')
+  const plan = baseDirectedPlan({ versionId: HEAD.version.id })
+  const bounded = { ...plan, movementPolicy: { automaticZoom: false, protectedOpeningFrames: 0 }, overlayTracks: [{ ...plan.overlayTracks[0], startFrame: 810, endFrame: 870 }] }
+  const wired = wire({ commands: { policyResolution, plan: bounded } })
+  const result = await wired.execute(request())
+  const overlay = result.editPlan.overlayTracks[0]
+  assert.equal(overlay.startFrame, (27 - 1) * 30)
+  assert.equal(overlay.endFrame, (29 - 1) * 30, 'it keeps the span of the spoken call: it ends where the call does')
+  assert.ok(overlay.endFrame < result.editPlan.durationFrames)
+})
+
+test('T-F4.012 a policy that draws no call to action leaves the re-cut plan without one, and the plan is judged against it', async () => {
+  const request0 = createEditorialRequest({ objective: 'discovery' })
+  const policyResolution = resolveEditorialPolicies(request0, { transcriptId: 'transcript-base', transcriptLanguage: 'pt-BR', hasSelectedInsert: false }, [])
+  assert.equal(policyResolution.policies.ctaOverlay.value.mode, 'none')
+  const plan = { ...baseDirectedPlan({ versionId: HEAD.version.id }), movementPolicy: { automaticZoom: false, protectedOpeningFrames: 0 } }
+  const wired = wire({ commands: { policyResolution, plan } })
+  const result = await wired.execute(request())
+  assert.deepEqual([...result.editPlan.overlayTracks], [])
+})
+
+test('T-F4.012 a call to action at a moment the directed range does not contain is refused, never drawn somewhere else', async () => {
+  const wired = wire()
+  await assert.rejects(
+    () => wired.execute(request({ range: { sessionStartTicks: sec(40).toString(), sessionEndTicks: sec(120).toString() } })),
+    (error) => error.code === 'PRECONDITION_REQUIRED' && /call to action/.test(error.message),
   )
-  assert.notEqual(overlay.startFrame, base.startFrame, 'which is a different frame index on a different timeline')
 })
 
 test('T-F4.012 omitting the range directs the reference hull, uncovered stretches and all', async () => {

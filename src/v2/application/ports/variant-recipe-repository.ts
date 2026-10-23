@@ -32,7 +32,8 @@ export interface VariantRecipeRepository {
     actorClientId: string
   }): Promise<Readonly<{
     projectId: string
-    objective: string
+    /** Absent when the batch was created with none. */
+    objective?: string
     compatibilityGraph: Readonly<CompatibilityGraphRun>
   }>>
   findCreateReplay(input: {

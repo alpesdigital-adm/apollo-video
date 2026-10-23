@@ -6,7 +6,7 @@ import { forkOwnedIdentities, forkCreationSourceBaselineV3, validateProjectForkC
 import { creationProjectMetadataV2, validateProjectCreationOutputCommandV2 } from '../../domain/project-creation-command.ts'
 import { buildCreationOutputVersionBundleV2, type CreationOutputVersionBundleV2 } from '../../domain/output-version-bundle.ts'
 import { serializeOutputCanonicalJson, calculateOutputCanonicalHash } from '../../domain/output-canonical-policy.ts'
-import { evaluateAssetUse } from '../../domain/asset-rights.ts'
+import { evaluateAssetUse, UNDETERMINED_LOCALE } from '../../domain/asset-rights.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
 import { PrismaAssetRightsRepository } from './asset-rights-repository.ts'
 import { readPersistedCreationOutputBundleV2, readPersistedForkCreationOutputBundleV3 } from './output-state-consumption.ts'
@@ -88,7 +88,7 @@ async function sourceFacts(tx: Tx, command: CreationOutputBundleWriteV2['proposa
     throw new DomainError('VERSION_CONFLICT','Creation source head/lifecycle changed')
   const projectFact = { id:project.id,workspaceId:project.workspaceId,currentVersionId:project.currentVersionId,
     name:project.name,status:project.status,format:project.format,ownerId:project.ownerId,
-    administrationRevision:project.administrationRevision,updatedAt:project.updatedAt.toISOString(),objective:project.objective!,locale:project.locale!,
+    administrationRevision:project.administrationRevision,updatedAt:project.updatedAt.toISOString(),objective:project.objective!,locale:project.locale ?? null,
     createdByType:project.createdByType,createdById:project.createdById,createdAt:project.createdAt.toISOString() }
   if (!identical(projectFact,d.sourceProject)) throw new DomainError('VERSION_CONFLICT','Creation source metadata changed')
   const ids = [...new Set(d.sourceReferences.map((r) => r.artifactId))].sort((a,b) => Buffer.compare(Buffer.from(a),Buffer.from(b)))
@@ -162,7 +162,7 @@ async function sourceFacts(tx: Tx, command: CreationOutputBundleWriteV2['proposa
         snapshot.snapshotHash!==artifact.currentRightsSnapshot?.snapshotHash || snapshot.sequence>artifact.rightsRevision))
       return conflict('Creation current rights snapshot scope/revision differs')
     const decision=evaluateAssetUse(snapshot,
-      {workspaceId:command.workspaceId,use:r.purpose,locale:projectFact.locale},now)
+      {workspaceId:command.workspaceId,use:r.purpose,locale:projectFact.locale ?? UNDETERMINED_LOCALE},now)
     if (decision.outcome!=='allow') throw new DomainError('ASSET_RIGHTS_BLOCKED','Current rights block copying this inactive reference',
       {artifactId:r.artifactId,use:r.purpose,reasonCodes:decision.reasonCodes})
   }
@@ -179,6 +179,11 @@ function assertDomainHistoricalSource(source: import('../../domain/output-versio
 export class PrismaCreationOutputBundleRepositoryV2 implements CreationOutputBundleRepositoryV2 {
   private readonly client: PrismaClient
   constructor(client: PrismaClient) { this.client=client }
+  async hasCompletedCreation(input: Readonly<{workspaceId:string;clientId:string;idempotencyKey:string}>): Promise<boolean> {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(input.idempotencyKey)) return false
+    const existing=await this.client.v2IdempotencyRecord.findUnique({where:{workspaceId_clientId_key:{workspaceId:input.workspaceId,clientId:input.clientId,key:input.idempotencyKey}}})
+    return existing!==null
+  }
   async read(input: Readonly<{workspaceId:string;projectId:string;versionId:string}>) {
     const anchor=await readPersistedOperationalOutputBundleV3(this.client,input)
     if(!anchor)return null

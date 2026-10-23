@@ -5,6 +5,7 @@ import { dispatchGeneratedCutawayFallbackService } from '../../src/v2/applicatio
 import { materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { runControlledTransformationFallback } from './helpers/run-controlled-transformation-fallback.mjs'
+import { TRANSFORMATION_GOLDENS } from './helpers/transformation-goldens.mjs'
 
 import {
   classifyProviderCallbackReplay,
@@ -21,7 +22,6 @@ import {
 } from '../../src/v2/domain/provider-job-transport.ts'
 
 import {
-  TRANSFORMATION_GOLDENS,
   TRANSFORMATION_MODE_CONTRACTS,
   TRANSFORMATION_MODE_REGISTRY_HASH,
   TRANSFORMATION_MODES,

@@ -46,7 +46,11 @@ export interface ArtifactFileIntegrity {
 }
 
 export interface MediaTranscriber {
-  transcribe(input: { audioPath: string; language: string; signal?: AbortSignal }): Promise<Readonly<MediaTranscript>>
+  /**
+   * `language` is the project's declared language; without it the provider detects the language of the speech and the transcript records it as
+   * detected (`languageBasis`). Nothing is assumed in its place.
+   */
+  transcribe(input: { audioPath: string; language?: string; signal?: AbortSignal }): Promise<Readonly<MediaTranscript>>
 }
 
 export interface VerifiedMediaStorage {
@@ -70,7 +74,8 @@ export interface ProjectMediaRepository {
   readIngestRequestFingerprint(input:{workspaceId:string;projectId:string;operationId:string}):Promise<string>
   readProject(input: { workspaceId: string; projectId: string }): Promise<Readonly<{
     id: string
-    locale: string
+    /** The language the project declares, when it declares one. */
+    locale?: string
     currentVersion: Readonly<import('../../domain/project-version.ts').ProjectVersionV3>
     outputBundle:Readonly<import('../../domain/output-version-bundle.ts').OperationalOutputVersionBundleV3>
   }> | null>

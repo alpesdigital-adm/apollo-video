@@ -40,7 +40,7 @@ export function bindDirectorSnapshotIdentities(
   candidates: readonly Readonly<ProjectSnapshot>[],
   resolved: readonly Readonly<ProjectSnapshot>[],
 ): readonly Readonly<ProjectSnapshot>[] {
-  assertDomain(candidates.length > 0 && candidates.length <= 6 &&
+  assertDomain(candidates.length > 0 && candidates.length <= 7 &&
     resolved.length === candidates.length &&
     new Set(candidates.map((item) => item.kind)).size === candidates.length &&
     new Set(resolved.map((item) => item.kind)).size === resolved.length &&

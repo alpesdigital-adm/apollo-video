@@ -85,6 +85,8 @@
     "test:e2e:multicam-longform-gate-browser": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/multicam-longform-gate-browser.e2e.mjs",
     "test:e2e:wave20-browser": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/wave20-operator-browser.e2e.mjs",
     "test:e2e:editor-reliability": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/editor-reliability-browser.e2e.mjs",
+    "test:e2e:briefing-screens-browser": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/briefing-screens-browser.e2e.mjs",
+    "test:e2e:recipe-path-browser": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/recipe-path-browser.e2e.mjs",
     "test:e2e:issue-override-ui": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/issue-override-ui-browser.e2e.mjs",
     "test:e2e:subtitle-sidecar-override": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/subtitle-sidecar-override.e2e.mjs",
     "test:e2e:proxy-carry-over": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/proxy-carry-over.e2e.mjs",

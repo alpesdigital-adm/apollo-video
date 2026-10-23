@@ -26,7 +26,8 @@ export interface NormalizedBounds {
 export interface OutputSpec {
   schemaVersion: 1
   id: string
-  locale: string
+  /** The language the output is delivered in, when someone stated it. A format preset has none: no language is assumed (ADR-160). */
+  locale?: string
   aspectRatio: OutputAspectRatio
   width: number
   height: number
@@ -49,7 +50,6 @@ export const OUTPUT_PRESETS: Readonly<Record<OutputAspectRatio, Readonly<OutputS
   Object.freeze({
     '9:16': Object.freeze({
       id: 'preset-9x16',
-      locale: 'pt-BR',
       aspectRatio: '9:16',
       width: 1080,
       height: 1920,
@@ -58,7 +58,6 @@ export const OUTPUT_PRESETS: Readonly<Record<OutputAspectRatio, Readonly<OutputS
     }),
     '16:9': Object.freeze({
       id: 'preset-16x9',
-      locale: 'pt-BR',
       aspectRatio: '16:9',
       width: 1920,
       height: 1080,
@@ -67,7 +66,6 @@ export const OUTPUT_PRESETS: Readonly<Record<OutputAspectRatio, Readonly<OutputS
     }),
     '4:5': Object.freeze({
       id: 'preset-4x5',
-      locale: 'pt-BR',
       aspectRatio: '4:5',
       width: 1080,
       height: 1350,
@@ -76,7 +74,6 @@ export const OUTPUT_PRESETS: Readonly<Record<OutputAspectRatio, Readonly<OutputS
     }),
     '1:1': Object.freeze({
       id: 'preset-1x1',
-      locale: 'pt-BR',
       aspectRatio: '1:1',
       width: 1080,
       height: 1080,
@@ -85,7 +82,6 @@ export const OUTPUT_PRESETS: Readonly<Record<OutputAspectRatio, Readonly<OutputS
     }),
     '21:9': Object.freeze({
       id: 'preset-21x9',
-      locale: 'pt-BR',
       aspectRatio: '21:9',
       width: 2520,
       height: 1080,
@@ -134,7 +130,7 @@ export function assertSubtitleDeliverySupportedAtFps(mode: 'none' | 'burn-in' | 
 
 export function validateOutputSpec(input: OutputSpecInput): void {
   assertDomain(input.id.trim().length > 0, 'INVALID_OUTPUT_SPEC', 'OutputSpec id is required')
-  assertDomain(input.locale.trim().length > 0, 'INVALID_OUTPUT_SPEC', 'OutputSpec locale is required')
+  assertDomain(input.locale === undefined || input.locale.trim().length > 0, 'INVALID_OUTPUT_SPEC', 'OutputSpec locale cannot be blank')
   assertDomain(
     OUTPUT_ASPECT_RATIOS.includes(input.aspectRatio),
     'INVALID_OUTPUT_SPEC',

@@ -4,6 +4,7 @@ import type { PersistedTreatmentPlan, TreatmentPlanRepository } from '../../appl
 import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { OBJECTIVE_REQUIRED_REASON } from '../../domain/editorial-request.ts'
 import { resolveStrategicObjective } from '../../domain/strategic-objective.ts'
 import { validateTreatmentPlan, type TreatmentPlan } from '../../domain/treatment-plan.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
@@ -64,7 +65,11 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       where: { id: input.projectVersionId, workspaceId: input.workspaceId, projectId: input.projectId, policiesSnapshotId: input.policySnapshotId },
       include: { project: { select: { objective: true } }, policiesSnapshot: true },
     })
-    if (!row?.project.objective) return null
+    if (!row) return null
+    // The project exists and states no objective: that is a precondition the owner can meet, not a project that is not there.
+    if (!row.project.objective) {
+      throw new DomainError('PRECONDITION_REQUIRED', 'The project has no strategic objective, and a treatment plan is judged against the rubric of one', { reason: OBJECTIVE_REQUIRED_REASON })
+    }
     return Object.freeze({
       workspaceId: row.workspaceId,
       projectId: row.projectId,

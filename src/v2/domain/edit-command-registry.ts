@@ -35,6 +35,7 @@ export const EDIT_COMMAND_IMPACT_SCHEMAS = [
   'project-color-plan-impact/v1',
   'project-subtitle-configuration-impact/v1',
   'project-policy-overrides-impact/v1',
+  'editorial-request-revision-impact/v1',
   'compare-action-impact/v1',
   'multicam-direction-impact/v1',
   'project-output-state-impact/v1',
@@ -231,6 +232,16 @@ export const EDIT_COMMAND_POLICIES = Object.freeze({
     evidence: 'project-policy-overrides-impact.ts:21 declares renderBlockedUntilDirectorRun true; '
       + 'resolved policy changes invalidate existing outputs but no render is enqueued before a '
       + 'new DirectorRun recompiles treatment, story and edit plan',
+  }),
+  'revise-editorial-request': Object.freeze({
+    renderPolicy: 'deferred',
+    impactSchema: 'editorial-request-revision-impact/v1',
+    requiresImpact: true,
+    supportsRenderFreeImpact: true,
+    deferralReason: 'director-run',
+    evidence: 'editorial-request-revision-impact.ts:90 declares renderBlockedUntilDirectorRun true; a revised request '
+      + 'invalidates existing outputs but no render is enqueued before a new DirectorRun resolves the new request '
+      + 'into policies and recompiles treatment, story and edit plan',
   }),
   'compile-renderable-plan': Object.freeze({
     // The Version a renderable plan is born with. The EditPlan is the parent's under a new identity, so no existing render is

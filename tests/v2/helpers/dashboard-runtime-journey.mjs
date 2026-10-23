@@ -1548,7 +1548,7 @@ export async function runDashboardRuntimeJourney(input) {
       ])
       if (!project || (!immutable && project.currentVersionId !== projectVersionId) ||
           !version || version.editPlanSnapshotId !== identity.editPlanSnapshotId || !run || !quality ||
-          quality.schemaVersion !== 4 || quality.contentHash !== identity.qualitySnapshotHash ||
+          quality.schemaVersion !== 5 || quality.contentHash !== identity.qualitySnapshotHash ||
           quality.contentJson !== qualityJson || !storedReview || reviewSeal(storedReview) !== sealedReview ||
           !artifact || Number(artifact.byteSize) !== sourceByteSize || !manifest ||
           manifest.manifestHash !== sourceManifest.manifestHash ||

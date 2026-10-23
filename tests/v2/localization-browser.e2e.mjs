@@ -196,7 +196,13 @@ test(
       await page.getByRole("button", { name: "Entrar no Apollo" }).click();
       await page.waitForURL("**/localization**");
       await page.getByRole("heading", { name: "Localização" }).waitFor();
-      await page.getByLabel("Novo locale").fill("x");
+      // ADR-160: nothing is chosen for the owner. The new profile starts with no language, no market and no mode.
+      assert.equal(await page.getByLabel("Idioma do novo perfil").inputValue(), "");
+      assert.equal(await page.getByLabel("Mercado (opcional)").inputValue(), "");
+      assert.equal(await page.getByLabel("Som original + legendas").isChecked(), false);
+      assert.equal(await page.getByTestId("create-localization-profile").isDisabled(), true);
+      await page.getByLabel("Idioma do novo perfil").fill("x");
+      await page.getByLabel("Som original + legendas").check();
       const invalidProfileResponse = page.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
@@ -225,8 +231,8 @@ test(
         }),
         0,
       );
-      await page.getByLabel("Novo locale").fill("fr-FR");
-      await page.getByLabel("Mercado", { exact: true }).fill("FR");
+      await page.getByLabel("Idioma do novo perfil").fill("fr-FR");
+      await page.getByLabel("Mercado (opcional)", { exact: true }).fill("FR");
       const createdProfileResponse = page.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
@@ -263,6 +269,10 @@ test(
         },
       });
       assert.notEqual(profile.id, fixture.profile.id);
+      // The mode is the owner's choice too: the button waits for it.
+      assert.equal(await page.getByLabel("Modo solicitado").inputValue(), "");
+      assert.equal(await page.getByRole("button", { name: "Criar variante" }).isDisabled(), true);
+      await page.getByLabel("Modo solicitado").selectOption({ label: "Som original + legendas" });
       await page.getByRole("button", { name: "Criar variante" }).click();
       await page.getByRole("button", { name: /fr-FR/ }).waitFor();
       const variant = await prisma.v2LocalizationVariantHead.findFirstOrThrow({

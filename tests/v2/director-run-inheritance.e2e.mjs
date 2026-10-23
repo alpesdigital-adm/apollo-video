@@ -9,6 +9,7 @@ import test from 'node:test'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { runProxyWorkerOnce, seedIssueOverrideWorld } from './helpers/issue-override-world.mjs'
 import { commitSealedChild } from './helpers/pg-output-world.mjs'
+import { sealedEditorialFixture } from './helpers/editorial-request-fixture.mjs'
 
 const require = createRequire(import.meta.url)
 const { enqueueProjectProxyRenderService } = await import('../../src/v2/application/enqueue-project-proxy-render.ts')
@@ -25,6 +26,7 @@ const { presentPublicDomainError } = await import('../../src/v2/public-api/error
 const { createQualityReport, resolveStrategicRubric } = await import('../../src/v2/domain/strategic-rubric.ts')
 const { createPerceptionTimeline } = await import('../../src/v2/domain/perception-timeline.ts')
 const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
+const { readOutputFormatPreset } = await import('../../src/v2/domain/output-format-registry.ts')
 const factory = await import('../../src/v2/infrastructure/repository-factory.ts')
 
 /**
@@ -47,23 +49,19 @@ const factory = await import('../../src/v2/infrastructure/repository-factory.ts'
 const enabled = process.env.APOLLO_DIRECTOR_INHERITANCE_E2E === '1'
 const WARNING_CODE = 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED'
 
-function directorQualityReport({ suffix, evaluatedAt }) {
+/** The v5 report a Director run of the request-driven era leaves behind, over the brief of the Version it directs, carrying one WARNING. */
+async function directorQualityReport({ suffix, evaluatedAt, briefContentJson, workspaceId, projectId, projectVersionId, outputs }) {
   const rubric = resolveStrategicRubric('discovery')
   const strategic = createQualityReport({ objective: 'discovery',
     evidence: rubric.criteria.map((criterion) => ({ criterionId: criterion.id, score: 100, evidence: [`controlled:${criterion.id}`] })),
     gates: { narrativeIntegrity: true, legibility: true, rights: true }, evaluatedAt })
-  return {
-    schemaVersion: 'director-quality-report/v3', id: `quality-report-${suffix}`, desiredActionRef: { id: `action-${suffix}` },
-    status: 'review-required', strategic, score: 1,
-    faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
-    hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true, subtitlesFaceSafe: false, subtitlesBounded: true, forbiddenSpeechAbsent: true, timelineContinuous: true },
+  return sealedEditorialFixture({ briefContentJson, strategic, suffix, evaluatedAt, workspaceId, projectId, projectVersionId, outputs,
     issues: [{ code: WARNING_CODE, severity: 'warning', category: 'editorial',
-      message: 'Face detector evidence is unavailable. Caption placement requires review before approval or final export.', correctable: true }],
-    criticVersion: 'project-director-critic/v2', evaluatedAt,
-  }
+      message: 'Face detector evidence is unavailable. Caption placement requires review before approval or final export.', correctable: true }] })
 }
 
-test('W70 readiness: an exception Version inherits the Director quality (final admitted, warnings kept) and nothing else does', { skip: !enabled, timeout: 1_500_000 }, async () => {
+/** The world both proofs start from: a seeded project whose head is a Director Version with a WARNING, and the helpers that act on it. */
+async function directedProject({ sealedWideRatio = '16:9' } = {}) {
   const harnessUrl = process.env.V2_DATABASE_URL
   const poolOf = (limit) => { const url = new URL(harnessUrl); url.searchParams.set('connection_limit', String(limit)); return url.toString() }
   process.env.V2_DATABASE_URL = poolOf(3)
@@ -73,7 +71,11 @@ test('W70 readiness: an exception Version inherits the Director quality (final a
   await mkdir(artifactRoot, { recursive: true })
   const suffix = randomUUID().replaceAll('-', '').slice(0, 8)
   const ffmpegPath = process.env.FFMPEG_BIN ?? require('ffmpeg-static')
-  try {
+  const dispose = async () => {
+    await db.$disconnect().catch(() => undefined)
+    const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
+    await disconnectV2PostgresClient().catch(() => undefined)
+  }
     const world = await seedIssueOverrideWorld({ db, artifactRoot, suffix, ffmpegPath })
     const environment = {
       ...process.env, APOLLO_V2_ARTIFACT_ROOT: artifactRoot, APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local', V2_DATABASE_URL: poolOf(3),
@@ -99,13 +101,20 @@ test('W70 readiness: an exception Version inherits the Director quality (final a
     /* ---------------------------------------------------------- V0: the Director's Version, with a quality report that carries a WARNING */
     const directedIds = { version: `director-version-${suffix}`, snapshot: `director-plan-${suffix}`, run: `director-run-${suffix}` }
     const snapshotIds = { perception: `director-perception-${suffix}`, treatment: `director-treatment-${suffix}`, story: `director-story-${suffix}`, quality: `director-quality-${suffix}` }
-    const qualityReport = directorQualityReport({ suffix, evaluatedAt: now.toISOString() })
+    const baseHead = await head()
+    const baseBrief = await db.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: baseHead.briefSnapshotId } })
+    // The resolution the Director run sealed carries the caption geometry of each output that burns captions: the band the final measures again.
+    const outputs = [[WIDE, sealedWideRatio], [TALL, '9:16']].map(([variantId, ratio]) => ({ variantId, spec: readOutputFormatPreset(ratio).spec, subtitleMode: 'burn-in' }))
+    const sealed = await directorQualityReport({ suffix, evaluatedAt: now.toISOString(), briefContentJson: baseBrief.contentJson, workspaceId, projectId, projectVersionId: directedIds.version, outputs })
+    const qualityReport = sealed.qualityReport
+    snapshotIds.policy = `director-policy-${suffix}`
     for (const [id, kind, schemaVersion, content] of [
       [snapshotIds.perception, 'perception', 1, { schemaVersion: 1, id: snapshotIds.perception, timeline: createPerceptionTimeline({ durationMs: 5_000, observations: [] }),
         summary: { id: `${snapshotIds.perception}-summary`, speechCoverage: 0, visualCoverage: 'absent', faceCoverage: 'absent', confidence: 0, sourceTranscriptId: `transcript-${suffix}` } }],
       [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
-      [snapshotIds.quality, 'quality-report', 3, qualityReport],
+      [snapshotIds.quality, 'quality-report', 5, qualityReport],
+      [snapshotIds.policy, 'policy-resolution', 2, sealed.resolution],
     ]) {
       await db.v2ProjectSnapshot.create({ data: { id, workspaceId, projectId, kind, schemaVersion, contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt: now } })
     }
@@ -116,6 +125,7 @@ test('W70 readiness: an exception Version inherits the Director quality (final a
       objective: 'discovery', objectiveVersion: 1, rubricRef: 'awareness-discovery/v1', plannerVersion: 'director-inheritance-1.0.0', criticVersion: 'critic-inheritance-1.0.0',
       perceptionSnapshotId: snapshotIds.perception, treatmentSnapshotId: snapshotIds.treatment, storySnapshotId: snapshotIds.story,
       editPlanSnapshotId: directed.editPlanSnapshot.id, qualitySnapshotId: snapshotIds.quality, decisionsJson: stableSerialize([]), assumptionsJson: stableSerialize([]),
+      policySnapshotId: snapshotIds.policy, requestHash: sealed.request.requestHash,
       initiatedByType: 'api-client', initiatedById: world.owner.clientId, createdAt: now, updatedAt: now,
     } })
     const V0 = await head()
@@ -144,6 +154,21 @@ test('W70 readiness: an exception Version inherits the Director quality (final a
     })({ ...scope, projectVersionId: versionRow.id, projectVersionHash: versionRow.baseHash, format: variantId === TALL ? '9:16' : '16:9', variantId,
       approval: { approved: true, note: 'Aprovado na prova de herança do Diretor.' }, actor, idempotencyKey: `w70i-${suffix}-final-${label}` })
 
+    const finalRepository = new PrismaProjectFinalExportRepository(db)
+    const override = applySubtitleSegmentOverrideService({ repository: new PrismaSubtitleSegmentOverrideRepository(db), createId: (kind) => `w70i-${suffix}-${kind}-${randomUUID()}`, clock: () => new Date() })
+    const commandOn = async (variantId, segmentId, text, label) => {
+      const base = await head()
+      const applied = await override({ ...scope, baseVersionId: base.id, baseHash: base.baseHash, variantId, segmentId, dimensions: [{ kind: 'text', text }], actor, idempotencyKey: `w70i-${suffix}-${label}` })
+      await carryOverAfterCommand({ ...scope, versionId: applied.version.id, commandId: applied.command.id, affectedVariantIds: applied.impact.affectedVariantIds, actor, log: (message) => assert.fail(message) })
+      return applied
+    }
+  return { db, world, environment, finalEnvironment, suffix, workspaceId, projectId, actor, WIDE, TALL, scope, head, reviews, directedIds, V0, qualitySnapshotHash,
+    renderOf, reviewAt, acknowledge, finalOf, finalRepository, commandOn, dispose }
+}
+
+test('W70 readiness: an exception Version inherits the Director quality (final admitted, warnings kept) and nothing else does', { skip: !enabled, timeout: 1_500_000 }, async () => {
+  const { db, world, environment, finalEnvironment, suffix, workspaceId, projectId, actor, WIDE, TALL, scope, head, reviews, directedIds, V0, qualitySnapshotHash, renderOf, reviewAt, acknowledge, finalOf, finalRepository, commandOn, dispose } = await directedProject()
+  try {
     const wideV0 = await renderOf(WIDE), tallV0 = await renderOf(TALL)
     const tallReview0 = await reviewAt(TALL, V0.id)
     assert.ok(tallReview0.criticIssues.some((issue) => issue.code === WARNING_CODE), 'on the Director Version the review carries the Director warning (the baseline)')
@@ -154,18 +179,10 @@ test('W70 readiness: an exception Version inherits the Director quality (final a
     assert.equal(runsBefore, 1)
 
     // the Director's own Version is admitted exactly as it always was: no inheritance anywhere
-    const finalRepository = new PrismaProjectFinalExportRepository(db)
     const own = await finalRepository.readApprovedCurrentSource({ ...scope, projectVersionId: V0.id, projectVersionHash: V0.baseHash, variantId: TALL })
     assert.ok(own); assert.equal(own.directorRunId, directedIds.run); assert.equal(own.directorInheritance, undefined)
 
     /* ---------------------------------------------------------- V1: a subtitle exception on 16:9 */
-    const override = applySubtitleSegmentOverrideService({ repository: new PrismaSubtitleSegmentOverrideRepository(db), createId: (kind) => `w70i-${suffix}-${kind}-${randomUUID()}`, clock: () => new Date() })
-    const commandOn = async (variantId, segmentId, text, label) => {
-      const base = await head()
-      const applied = await override({ ...scope, baseVersionId: base.id, baseHash: base.baseHash, variantId, segmentId, dimensions: [{ kind: 'text', text }], actor, idempotencyKey: `w70i-${suffix}-${label}` })
-      await carryOverAfterCommand({ ...scope, versionId: applied.version.id, commandId: applied.command.id, affectedVariantIds: applied.impact.affectedVariantIds, actor, log: (message) => assert.fail(message) })
-      return applied
-    }
     const c1 = await commandOn(WIDE, 'cue-1', 'Ação', 'text-1')
     const V1 = await head()
     assert.equal(V1.id, c1.version.id)
@@ -233,6 +250,7 @@ test('W70 readiness: an exception Version inherits the Director quality (final a
     assert.ok(finalArtifact && finalArtifact.status === 'available', 'a final of the exception Version exists')
     console.log(`W70-EVIDENCE ${JSON.stringify({ label: 'inherited-final', director: V0.id, version: V1.id, command: c1.command.id, run: directedIds.run, operation: finalTall.operation.id, artifact: finalArtifact.id, inputHash: finalTall.context.inputHash })}`)
 
+
     /* ---------------------------------------------------------- V2: a Command that is not an exception Command; V3: an exception on top of it */
     const lut = await setProjectLutSelectionService({
       repository: new PrismaProjectLutSelectionRepository(db), createId: (kind) => `w70i-${suffix}-lut-${kind}-${randomUUID()}`, createEventId: () => randomUUID(),
@@ -257,8 +275,52 @@ test('W70 readiness: an exception Version inherits the Director quality (final a
       refusal(V2.id, 'set-project-lut-selection'), 'an exception stacked on a Version the rule does not cover is not covered either: the Director run behind it is never reached')
     assert.equal(await db.v2DirectorRun.count({ where: scope }), runsBefore, 'the DirectorRun table was never written')
   } finally {
-    await db.$disconnect().catch(() => undefined)
-    const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
-    await disconnectV2PostgresClient().catch(() => undefined)
+    await dispose()
+  }
+})
+
+test('ADR-160 F6: an inherited text exception that no longer fits the width measured for its output refuses the final, fail closed', { skip: !enabled, timeout: 1_500_000 }, async () => {
+  const { db, suffix, scope, WIDE, TALL, head, V0, renderOf, reviewAt, acknowledge, finalOf, finalRepository, commandOn, dispose } = await directedProject({ sealedWideRatio: '9:16' })
+  try {
+    // The Director sealed for the 16:9 output a band as narrow as the 9:16 one (a stricter band than the one the proxy review measures),
+    // so a caption can pass the proxy review and still not fit the width the Director's resolution measured. The Director measured every cue of its plan against the band of each output that burns captions (the geometry its sealed policy
+    // resolution carries). A text exception made afterwards can lengthen a caption beyond that band without the Director ever seeing it:
+    // the admission of the final measures again what the output would burn.
+    await renderOf(WIDE); await renderOf(TALL)
+    const runsBefore = await db.v2DirectorRun.count({ where: scope })
+    const tallV0 = await reviewAt(TALL, V0.id)
+    assert.equal((await acknowledge(tallV0, V0.id, 'f6-v0-tall')).status, 'ready-for-final')
+
+    const tooLong = await commandOn(WIDE, 'cue-1', 'palavra '.repeat(12).trim(), 'f6-text-too-long')
+    const V1 = await head()
+    assert.equal(V1.id, tooLong.version.id)
+    const captionTooWide = (error) => error.code === 'EDITORIAL_ACCEPTANCE_FAILED' && error.details.reason === 'caption-text-does-not-fit-measured-output' &&
+      error.details.versionId === V1.id && error.details.variantId === WIDE && Array.isArray(error.details.cueIds) && error.details.cueIds.includes('cue-1')
+
+    // the 9:16 output has no exception: its captions are the plan's, it is still admitted with the Director's quality
+    const tall = await finalRepository.readApprovedCurrentSource({ ...scope, projectVersionId: V1.id, projectVersionHash: V1.baseHash, variantId: TALL })
+    assert.ok(tall, 'an exception of the 16:9 output does not reach the 9:16 output')
+
+    // the person approves the 16:9 proxy drawn with the long caption: only the admission of the final stands between it and the output
+    await renderOf(WIDE)
+    const approved = await acknowledge(await reviewAt(WIDE, V1.id), V1.id, 'f6-v1-wide')
+    assert.equal(approved.status, 'ready-for-final')
+    await assert.rejects(() => finalRepository.readApprovedCurrentSource({ ...scope, projectVersionId: V1.id, projectVersionHash: V1.baseHash, variantId: WIDE }),
+      captionTooWide, 'the admission recomputes the fit on what the final burns and refuses it')
+    await assert.rejects(() => finalOf(WIDE, 'f6-wide-too-long', V1), captionTooWide, 'and so does the final queued for it')
+    assert.equal(await db.v2ProjectFinalExportOperation.count({ where: { ...scope, projectVersionId: V1.id } }), 0, 'nothing was queued for the caption that does not fit')
+
+    // a caption that fits is admitted: the same output, the same inheritance, a shorter text
+    const fits = await commandOn(WIDE, 'cue-1', 'Ação', 'f6-text-fits')
+    const V2 = await head()
+    assert.equal(V2.id, fits.version.id)
+    await renderOf(WIDE)
+    assert.equal((await acknowledge(await reviewAt(WIDE, V2.id), V2.id, 'f6-v2-wide')).status, 'ready-for-final')
+    const admitted = await finalRepository.readApprovedCurrentSource({ ...scope, projectVersionId: V2.id, projectVersionHash: V2.baseHash, variantId: WIDE })
+    assert.ok(admitted, 'the same output with a text that fits the measured band is admitted')
+    assert.equal(admitted.directorRunId, `director-run-${suffix}`)
+    assert.equal(await db.v2DirectorRun.count({ where: scope }), runsBefore, 'the DirectorRun table was never written')
+  } finally {
+    await dispose()
   }
 })

@@ -25,7 +25,7 @@ export async function proveCatalogOutputBrowser({ baseUrl, authorization, userna
   const evidence = { schemaVersion: 'catalog-output-browser-proof/v1', sourceCommit: process.env.GITHUB_SHA ?? null, ciRunId: process.env.GITHUB_RUN_ID ?? null, ownerPid: process.pid, outcome: 'started', proofScope, qualityStatus, faceSafety, artifactId: output.artifactId, manifestId: output.manifestId, sha256: output.sha256, recordHash: catalogRecord.recordHash, checks: [], screenshots: [], network: [], pageErrors: [], postflight: {} }
   let server, child, browser, context, primaryError
   try {
-    const query = '/v1/media/library?kind=video&rightsStatus=eligible&limit=24'
+    const query = '/v1/media/library?kind=video&rightsStatus=eligible&limit=24&locale=pt-BR'
     const response = await fetch(`${baseUrl}${query}`, { headers: { authorization }, signal: AbortSignal.timeout(15_000), cache: 'no-store' })
     assert.equal(response.status, 200)
     const payload = await response.json()
@@ -87,6 +87,7 @@ export async function proveCatalogOutputBrowser({ baseUrl, authorization, userna
       const card = page.locator(`article[data-library-id="${output.artifactId}"]`)
       await card.waitFor({ state: 'visible' })
       await page.getByLabel('Tipo', { exact: true }).selectOption('video')
+      await page.getByLabel('Idioma', { exact: true }).fill('pt-BR')
       await page.getByLabel('Direitos', { exact: true }).selectOption('eligible')
       assert.equal(await page.getByLabel('Tipo', { exact: true }).inputValue(), 'video')
       assert.equal(await page.getByLabel('Direitos', { exact: true }).inputValue(), 'eligible')

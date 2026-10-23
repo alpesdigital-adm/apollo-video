@@ -14,6 +14,7 @@ import {
   readMediaColorProbeService,
 } from '../../src/v2/application/read-media-color-probe.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
+import { normalizeDetectedLanguage, primaryLanguageSubtag } from '../../src/v2/domain/language-detection.ts'
 import { createMediaUpload } from '../../src/v2/domain/media-transfer.ts'
 import {
   createMediaArtifactManifest,
@@ -268,6 +269,81 @@ test('Groq adapter clamps regressive provider timestamps without changing spoken
     { word: 'preservada', start: 1 },
   ])
   assert.equal(transcript.segments[1].start, 1)
+})
+
+async function transcribeWith(t, { reported, language }) {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-v2-transcript-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const audioPath = join(root, 'speech.flac')
+  await writeFile(audioPath, new Uint8Array([1, 2, 3]))
+  let sent
+  const transcriber = new GroqMediaTranscriber({
+    apiKey: 'gsk_test_123456789012345678901234567890', model: 'whisper-large-v3',
+    fetchImplementation: async (_url, init) => {
+      sent = init.body
+      return Response.json({ text: 'uma frase', ...(reported !== undefined ? { language: reported } : {}), words: [{ word: 'uma', start: 0, end: 0.4 }], segments: [{ id: 0, text: 'uma', start: 0, end: 0.4, avg_logprob: -0.1 }] })
+    },
+  })
+  const transcript = await transcriber.transcribe({ audioPath, ...(language ? { language } : {}) })
+  return { transcript, sent }
+}
+
+test('without a declared language the Groq adapter asks for detection and records the detected language as detected from the media', async (t) => {
+  const { transcript, sent } = await transcribeWith(t, { reported: 'portuguese' })
+  assert.equal(sent.has('language'), false)
+  assert.equal(transcript.language, 'pt')
+  assert.equal(transcript.languageBasis, 'detected-from-media')
+  const code = await transcribeWith(t, { reported: 'en' })
+  assert.equal(code.transcript.language, 'en')
+  assert.equal(code.transcript.languageBasis, 'detected-from-media')
+})
+
+test('a language the provider reports that cannot be resolved is the undetermined language, never a guess', async (t) => {
+  for (const reported of ['klingon-ish', undefined, '']) {
+    const { transcript, sent } = await transcribeWith(t, { reported })
+    assert.equal(sent.has('language'), false)
+    assert.equal(transcript.language, 'und')
+    assert.equal(transcript.languageBasis, 'detected-from-media')
+  }
+})
+
+test('a declared language is sent, kept and recorded as declared and not verified; a contradicting detection wins and says so', async (t) => {
+  const agreeing = await transcribeWith(t, { reported: 'english', language: 'en-US' })
+  assert.equal(agreeing.sent.get('language'), 'en')
+  assert.equal(agreeing.transcript.language, 'en-US')
+  assert.equal(agreeing.transcript.languageBasis, 'declared-not-verified')
+  // an echo the provider cannot tell apart from detection is still not verification: the declared language stands
+  const silent = await transcribeWith(t, { reported: undefined, language: 'pt-BR' })
+  assert.equal(silent.transcript.language, 'pt-BR')
+  assert.equal(silent.transcript.languageBasis, 'declared-not-verified')
+  const contradicted = await transcribeWith(t, { reported: 'spanish', language: 'pt-BR' })
+  assert.equal(contradicted.transcript.language, 'es')
+  assert.equal(contradicted.transcript.languageBasis, 'detected-from-media')
+})
+
+test('provider language reports normalise to BCP-47 deterministically', () => {
+  assert.equal(normalizeDetectedLanguage('portuguese'), 'pt')
+  assert.equal(normalizeDetectedLanguage('Portuguese'), 'pt')
+  assert.equal(normalizeDetectedLanguage('german'), 'de')
+  assert.equal(normalizeDetectedLanguage('castilian'), 'es')
+  // measured on Groq whisper-large-v3-turbo (verbose_json, no language sent): the capitalised English name, and no region
+  assert.equal(normalizeDetectedLanguage('Portuguese'), 'pt')
+  assert.equal(normalizeDetectedLanguage('Haitian Creole'), 'ht')
+  assert.equal(normalizeDetectedLanguage('Cantonese'), 'yue')
+  assert.equal(normalizeDetectedLanguage('pt'), 'pt')
+  assert.equal(normalizeDetectedLanguage('pt_br'), 'pt-BR')
+  assert.equal(normalizeDetectedLanguage('und'), null)
+  assert.equal(normalizeDetectedLanguage('not a language'), null)
+  assert.equal(normalizeDetectedLanguage(42), null)
+  assert.equal(normalizeDetectedLanguage(''), null)
+  assert.equal(primaryLanguageSubtag('pt-BR'), 'pt')
+})
+
+test('a transcript refuses an unknown language basis and keeps its shape without one', () => {
+  const base = { language: 'pt', text: 'uma', provider: 'groq', model: 'm', words: [{ word: 'uma', start: 0, end: 0.4 }], segments: [{ id: 0, text: 'uma', start: 0, end: 0.4 }] }
+  assert.throws(() => createMediaTranscript({ ...base, languageBasis: 'guessed' }), /language basis is invalid/)
+  assert.equal(createMediaTranscript(base).languageBasis, undefined)
+  assert.notEqual(createMediaTranscript({ ...base, languageBasis: 'detected-from-media' }).transcriptHash, createMediaTranscript(base).transcriptHash)
 })
 
 test('T-FR-236 ingest failure fences the exact project transition and rejects stale state', async () => {

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
-export type FoundationWorkspace = { id: string; ownerId: string; status: 'active' | 'suspended' | 'archived'; createdAt: string; updatedAt: string; settings: { version: number; locale: string; retentionDays: number } };
-export function createFoundationWorkspace(input: { id: string; ownerId: string; locale?: string; now?: string }): FoundationWorkspace { const now=input.now??new Date().toISOString(); if(!input.id||!input.ownerId) throw new Error('workspace-identity-required'); return {id:input.id,ownerId:input.ownerId,status:'active',createdAt:now,updatedAt:now,settings:{version:1,locale:input.locale??'pt-BR',retentionDays:90}}; }
+export type FoundationWorkspace = { id: string; ownerId: string; status: 'active' | 'suspended' | 'archived'; createdAt: string; updatedAt: string; settings: { version: number; locale?: string; retentionDays: number } };
+export function createFoundationWorkspace(input: { id: string; ownerId: string; locale?: string; now?: string }): FoundationWorkspace { const now=input.now??new Date().toISOString(); if(!input.id||!input.ownerId) throw new Error('workspace-identity-required'); return {id:input.id,ownerId:input.ownerId,status:'active',createdAt:now,updatedAt:now,settings:{version:1,...(input.locale?{locale:input.locale}:{}),retentionDays:90}}; }
 export function resolveWorkspaceActor(workspace: FoundationWorkspace, actor: { workspaceId: string; role: string }) { if(actor.workspaceId!==workspace.id||workspace.status!=='active') throw new Error('workspace-access-denied'); return {...actor,resolvedServerSide:true}; }
 
 export type BrandKit = { version: number; colors?: string[]; logos?: { assetId:string;checksum:string;rightsId:string }[]; handles?: {instagram?:string;youtube?:string}; professional?:string; company?:string; introAssetId?:string; instructions?:string };

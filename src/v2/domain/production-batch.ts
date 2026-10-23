@@ -1,6 +1,8 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
+import { createEditorialRequest, parseBriefInterpretationAudit, type EditorialRequestV1 } from './editorial-request.ts'
 import { assertDomain } from './errors.ts'
 import type { ScriptBlockRole } from './script-alignment.ts'
+import { resolveStrategicObjective } from './strategic-objective.ts'
 
 export const PRODUCTION_BATCH_POLICY_VERSION =
   'production-batch/v1' as const
@@ -89,13 +91,23 @@ export interface BatchItem {
   itemHash: string
 }
 
+/**
+ * The request of a batch (ADR-160): the briefing of the whole batch as the requester wrote it and how the interpreter read it. Every item of the
+ * batch is made under it. A batch created before the request existed has none. The audit is the interpreter's own record of the call.
+ */
+export interface ProductionBatchEditorialRequest {
+  request: Readonly<EditorialRequestV1>
+  interpretationAudit: Readonly<Record<string, unknown>> | null
+}
+
 export interface ProductionBatch {
   schemaVersion: typeof PRODUCTION_BATCH_SCHEMA_VERSION
   id: string
   workspaceId: string
   projectId: string
   name: string
-  objective: string
+  /** Absent when the requester chose none: the Apollo presumes none (ADR-160). The steps that judge against one ask for it where they need it. */
+  objective?: string
   policyVersion: typeof PRODUCTION_BATCH_POLICY_VERSION
   revision: number
   sourceGroups: readonly Readonly<ProductionBatchSourceGroup>[]
@@ -107,6 +119,7 @@ export interface ProductionBatch {
     reservedCostMinorUnits: number
   }>
   items: readonly Readonly<BatchItem>[]
+  editorialRequest?: Readonly<ProductionBatchEditorialRequest>
   createdBy: Readonly<{ type: 'api-client'; id: string }>
   createdAt: string
   updatedAt: string
@@ -401,6 +414,25 @@ function freezeItem(
   return Object.freeze({ ...content, itemHash: hash })
 }
 
+/** The request a batch stores, rebuilt through the request constructor: its briefing, its interpretation and its hash must agree. */
+export function sealedBatchEditorialRequest(value: unknown): Readonly<ProductionBatchEditorialRequest> {
+  const stored = value as { request?: EditorialRequestV1; interpretationAudit?: Readonly<Record<string, unknown>> | null }
+  assertDomain(typeof stored === 'object' && stored !== null && stored.request !== undefined && stored.request.briefing !== undefined,
+    'PERSISTENCE_CONFLICT', 'Stored production batch request has no briefing')
+  const request = createEditorialRequest({
+    briefing: stored.request!.briefing!.text,
+    ...(stored.request!.interpretation ? { interpretation: stored.request!.interpretation } : {}),
+    // The choices the owner made about the questions of the reading are the directives of the request; a batch that never had one stores none.
+    ...(stored.request!.directives && stored.request!.directives.length > 0 ? { directives: stored.request!.directives } : {}),
+  })
+  assertDomain(request.requestHash === stored.request!.requestHash, 'PERSISTENCE_CONFLICT', 'Stored production batch request hash is inconsistent')
+  // The audit of the reading is the record of the call that read THIS briefing: it is checked against it when the batch (or a revision) is made and when it is read back.
+  if (stored.interpretationAudit && request.interpretation && request.briefing) {
+    parseBriefInterpretationAudit(stored.interpretationAudit, request.briefing.text, request.interpretation)
+  }
+  return Object.freeze({ request, interpretationAudit: stored.interpretationAudit ? Object.freeze({ ...stored.interpretationAudit }) : null })
+}
+
 function definitionHash(
   batch: Omit<ProductionBatch, 'items' | 'definitionHash'>,
 ): string {
@@ -417,7 +449,7 @@ export function createProductionBatch(input: {
   workspaceId: string
   projectId: string
   name: string
-  objective: string
+  objective?: string
   revision?: number
   sourceGroups: readonly Readonly<ProductionBatchSourceGroup>[]
   recipes: readonly Readonly<ProductionBatchRecipe>[]
@@ -434,6 +466,7 @@ export function createProductionBatch(input: {
     recipeId: string
     variantId: string
   }>[]
+  editorialRequest?: Readonly<ProductionBatchEditorialRequest>
   createdBy: Readonly<{ type: 'api-client'; id: string }>
   createdAt: string
 }): Readonly<ProductionBatch> {
@@ -608,11 +641,10 @@ export function createProductionBatch(input: {
     workspaceId: normalizedToken(input.workspaceId, 'workspaceId'),
     projectId: normalizedToken(input.projectId, 'projectId'),
     name: normalizedLabel(input.name, 'name', 200),
-    objective: normalizedToken(
-      input.objective,
-      'objective',
-      BATCH_KEY,
-    ),
+    ...(input.objective !== undefined && input.objective !== null
+      // The objective is one of the strategic objectives the Apollo knows, never free text: an unknown id is refused, naming it.
+      ? { objective: resolveStrategicObjective(input.objective).id }
+      : {}),
     policyVersion: PRODUCTION_BATCH_POLICY_VERSION,
     revision: normalizedInteger(
       input.revision ?? 1,
@@ -624,6 +656,8 @@ export function createProductionBatch(input: {
     recipes,
     variants,
     budget,
+    // Present only for a batch created with a briefing: a batch without one hashes exactly as it did before the request existed.
+    ...(input.editorialRequest ? { editorialRequest: sealedBatchEditorialRequest(input.editorialRequest) } : {}),
     createdBy: Object.freeze({
       type: input.createdBy.type,
       id: normalizedToken(input.createdBy.id, 'createdBy.id'),
@@ -672,13 +706,14 @@ export function hydrateProductionBatch(
     workspaceId: input.workspaceId,
     projectId: input.projectId,
     name: input.name,
-    objective: input.objective,
+    ...(input.objective !== undefined ? { objective: input.objective } : {}),
     policyVersion: input.policyVersion,
     revision: input.revision,
     sourceGroups,
     recipes,
     variants,
     budget: Object.freeze({ ...input.budget }),
+    ...(input.editorialRequest ? { editorialRequest: sealedBatchEditorialRequest(input.editorialRequest) } : {}),
     createdBy: Object.freeze({ ...input.createdBy }),
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,
