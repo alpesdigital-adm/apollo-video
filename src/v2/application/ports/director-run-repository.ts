@@ -77,9 +77,10 @@ export interface DirectorRunContext {
   /**
    * The speech this project asked to have removed: the phrase rules of the `remove-spoken-content` Commands in the lineage of the
    * Version the Director directs (the same rules the cut applied). The Director holds no phrase of its own - what must not be said
-   * is what THIS project asked to cut. Absent or empty: nothing was asked, nothing is forbidden.
+   * is what THIS project asked to cut. REQUIRED: an empty list says nothing was asked and nothing is forbidden, and only that; an
+   * implementation that does not state it does not implement the port (the Director refuses the context rather than read it as empty).
    */
-  requestedSpeechRemovals?: readonly Readonly<EditorialPhraseRule>[]
+  requestedSpeechRemovals: readonly Readonly<EditorialPhraseRule>[]
   /** Absent means no server-produced OCR envelope exists for this input version. */
   ocrEnvelope?: Readonly<PerceptionProducerEnvelope>
   /**

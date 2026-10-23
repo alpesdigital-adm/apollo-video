@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { defineEditorialPhraseRules, editorialRulesMatchingSpeech } from '../../src/v2/application/editorial-phrase-rules.ts'
-import { collectRequestedSpeechRemovals } from '../../src/v2/application/requested-speech-removals.ts'
+import { collectRequestedSpeechRemovals, requestedSpeechReintroducedByCaptions } from '../../src/v2/application/requested-speech-removals.ts'
+import { createSubtitleSegmentOverride } from '../../src/v2/domain/subtitle-segment-override.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 
 // The Director forbids in the captions only what the project itself asked to remove. Nothing here is a product phrase: every rule
@@ -12,10 +13,13 @@ const rule = (id, ...alternatives) => ({ id, label: alternatives[0], alternative
 const removal = (id, ...rules) => ({ id, type: 'remove-spoken-content', payload: { schemaVersion: 3, rules } })
 const manualRestore = (id, restoresVersionId) => ({ id, type: 'manual-edit', payload: { schemaVersion: 2, action: 'undo', restoresVersionId } })
 const version = (id, parentVersionId, commandId = null, fork = {}) => ({
-  id, parentVersionId, commandId, forkedFromProjectId: fork.projectId ?? null, forkedFromVersionId: fork.versionId ?? null,
+  id, parentVersionId, commandId, commandType: fork.commandType, forkedFromProjectId: fork.projectId ?? null, forkedFromVersionId: fork.versionId ?? null,
 })
+// The type of a Version's Command is what the Command row says, unless the fixture states it (a row that is missing).
 const project = (versions, commands) => ({
-  versions: new Map(versions.map((item) => [item.id, item])),
+  versions: new Map(versions.map((item) => [item.id, {
+    ...item, commandType: item.commandType ?? commands.find((command) => command.id === item.commandId)?.type ?? null,
+  }])),
   commands: new Map(commands.map((item) => [item.id, item])),
 })
 const idsOf = (rules) => rules.map((item) => item.id)
@@ -80,4 +84,60 @@ test('a lineage that loops terminates, and stored rules that are not valid are a
     collectRequestedSpeechRemovals({ projectId: 'p1', headVersionId: 'missing', load: async () => loop }),
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
   )
+})
+
+test('a Version a remove-spoken-content Command made, whose Command row is missing, fails closed instead of being skipped', async () => {
+  const missingRow = project([version('v1', null), version('v2', 'v1', 'c2', { commandType: 'remove-spoken-content' })], [])
+  await assert.rejects(
+    collectRequestedSpeechRemovals({ projectId: 'p1', headVersionId: 'v2', load: async () => missingRow }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT' && /does not exist/.test(error.message),
+  )
+  // a Command of another type that the walk does not load is not a missing request
+  const other = project([version('v1', null), version('v2', 'v1', 'c2', { commandType: 'run-director' })], [])
+  assert.deepEqual(await collectRequestedSpeechRemovals({ projectId: 'p1', headVersionId: 'v2', load: async () => other }), [])
+  // a row of another type under a removal Version is a conflict too
+  const wrongType = project([version('v2', null, 'c2', { commandType: 'remove-spoken-content' })], [{ id: 'c2', type: 'run-director', payload: {} }])
+  await assert.rejects(
+    collectRequestedSpeechRemovals({ projectId: 'p1', headVersionId: 'v2', load: async () => wrongType }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+})
+
+// A text exception on a caption can write a removed phrase back after the Director read the plan. The final is judged on what it burns.
+const VARIANT = 'variant-tall-0001'
+let counter = 0
+const exception = (segmentId, range, dimensions, extra = {}) => {
+  counter += 1
+  return createSubtitleSegmentOverride({
+    id: `override-${counter}-${segmentId}`, workspaceId: 'workspace-x', projectId: 'project-x', baseVersionId: 'version-base', resultVersionId: `version-${counter}`,
+    commandId: `command-${counter}`, variantId: VARIANT, segmentId, range, action: 'set', dimensions, protected: false, previousOverrideId: null,
+    createdAt: '2026-10-20T10:00:00.000Z', ...extra,
+  })
+}
+const CUES = [
+  { id: 'cue-a', startFrame: 20, endFrame: 50, text: 'primeira fala' },
+  { id: 'cue-b', startFrame: 100, endFrame: 130, text: 'segunda fala' },
+]
+const requested = defineEditorialPhraseRules([rule('phrase-rule-requested-1', 'promoção relâmpago')])
+
+test('a text exception that writes a requested phrase back is found; one that does not, or a request that was never made, is not', () => {
+  const reintroduces = exception('cue-b', { startFrame: 100, endFrame: 130 }, [{ kind: 'text', text: 'Aproveite a PROMOÇÃO, relâmpago!' }])
+  assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: requested, cues: CUES, overrides: [reintroduces], variantId: VARIANT }), ['phrase-rule-requested-1'])
+  const harmless = exception('cue-b', { startFrame: 100, endFrame: 130 }, [{ kind: 'text', text: 'outra fala' }])
+  assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: requested, cues: CUES, overrides: [harmless], variantId: VARIANT }), [])
+  // nothing was asked: nothing is forbidden, whatever the exception says
+  assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: [], cues: CUES, overrides: [reintroduces], variantId: VARIANT }), [])
+  // an exception of another output does not reach this one
+  assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: requested, cues: CUES, overrides: [reintroduces], variantId: 'variant-wide-0001' }), [])
+  // a phrase split across two cues is found as the Director found it (the cues are read as one speech)
+  const split = [{ id: 'cue-a', startFrame: 20, endFrame: 50, text: 'hoje tem promoção' }, { id: 'cue-b', startFrame: 100, endFrame: 130, text: 'relâmpago na loja' }]
+  assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: requested, cues: split, overrides: [], variantId: VARIANT }), ['phrase-rule-requested-1'])
+})
+
+test('a caption hidden by an exception says nothing, and a text exception that removes the phrase clears it', () => {
+  const cues = [{ id: 'cue-a', startFrame: 20, endFrame: 50, text: 'promoção relâmpago' }]
+  const hidden = exception('cue-a', { startFrame: 20, endFrame: 50 }, [{ kind: 'visibility', visible: false }])
+  assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: requested, cues, overrides: [hidden], variantId: VARIANT }), [])
+  const rewritten = exception('cue-a', { startFrame: 20, endFrame: 50 }, [{ kind: 'text', text: 'fala sem o pedido' }])
+  assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: requested, cues, overrides: [rewritten], variantId: VARIANT }), [])
 })

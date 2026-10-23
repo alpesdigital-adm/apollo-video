@@ -17,6 +17,7 @@ import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import { overrideOfRow, PrismaVariantReframePlanRepository, readVariantReframeOverrideHeads, readVariantReframePlanHead } from './variant-reframe-plan-repository.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 const include = Prisma.validator<Prisma.V2VariantReframeOverrideInclude>()({ command: true, resultVersion: true })
 type Stored = Prisma.V2VariantReframeOverrideGetPayload<{ include: typeof include }>
@@ -210,12 +211,15 @@ export class PrismaVariantReframeOverrideRepository implements VariantReframeOve
         return this.hydrate(row, false, tx)
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const replay = await this.findIdempotent({ workspaceId: command.workspaceId, projectId: command.projectId, idempotencyKey: command.idempotencyKey })
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 3) return this.commitOrReplay(input, attempt + 1)
+      if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === 'P2002' || error.code === 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({ workspaceId: command.workspaceId, projectId: command.projectId, idempotencyKey: command.idempotencyKey }),
+        )
         if (replay?.requestFingerprint === requestFingerprint) return replay.result
         if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was reused with another variant reframe override')
       }
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 3) return this.commitOrReplay(input, attempt + 1)
       throw error
     }
   }

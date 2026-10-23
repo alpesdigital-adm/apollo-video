@@ -20,6 +20,7 @@ import {
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { batchActorAuditData, hydrateBatchActorAudit } from './batch-actor-audit.ts'
 import { hydrateRunRow as hydrateAlignmentRow } from './script-alignment-repository.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' &&
@@ -309,13 +310,16 @@ implements TakeLibraryRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.create(record, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findCreateReplay({
-          workspaceId: record.run.workspaceId,
-          actorClientId: record.run.createdByClientId,
-          actorContextHash: record.authenticationAudit.contextHash,
-          idempotencyKey: record.idempotencyKey,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findCreateReplay({
+            workspaceId: record.run.workspaceId,
+            actorClientId: record.run.createdByClientId,
+            actorContextHash: record.authenticationAudit.contextHash,
+            idempotencyKey: record.idempotencyKey,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
@@ -633,13 +637,16 @@ implements TakeLibraryRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.persistSelection(record, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findSelectionReplay({
-          workspaceId: record.resultingRun.workspaceId,
-          actorClientId: record.selection.actorClientId,
-          actorContextHash: record.authenticationAudit.contextHash,
-          idempotencyKey: record.idempotencyKey,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findSelectionReplay({
+            workspaceId: record.resultingRun.workspaceId,
+            actorClientId: record.selection.actorClientId,
+            actorContextHash: record.authenticationAudit.contextHash,
+            idempotencyKey: record.idempotencyKey,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(

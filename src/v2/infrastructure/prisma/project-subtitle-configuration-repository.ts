@@ -13,6 +13,7 @@ import { SUBTITLE_PRESETS, validateSubtitlePreset, type SubtitleModeRequest, typ
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 const include = Prisma.validator<Prisma.V2ProjectSubtitleConfigurationInclude>()({ command: true, resultVersion: true })
 type Stored = Prisma.V2ProjectSubtitleConfigurationGetPayload<{ include: typeof include }>
@@ -150,8 +151,8 @@ export class PrismaProjectSubtitleConfigurationRepository implements ProjectSubt
         return hydrate(await tx.v2ProjectSubtitleConfiguration.findUniqueOrThrow({ where: { id_workspaceId: { id: input.configuration.id, workspaceId: input.configuration.workspaceId } }, include }), false)
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') { const replay = await this.findIdempotent({ workspaceId: command.workspaceId, projectId: command.projectId, idempotencyKey: command.idempotencyKey }); if (replay?.requestFingerprint === requestFingerprint) return replay.result; if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was reused with another subtitle configuration') }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 3) return this.commitOrReplay(input, attempt + 1)
+      if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === 'P2002' || error.code === 'P2034')) { const replay = await reconcileAfterConflict(error, () => this.findIdempotent({ workspaceId: command.workspaceId, projectId: command.projectId, idempotencyKey: command.idempotencyKey })); if (replay?.requestFingerprint === requestFingerprint) return replay.result; if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was reused with another subtitle configuration') }
       throw error
     }
   }

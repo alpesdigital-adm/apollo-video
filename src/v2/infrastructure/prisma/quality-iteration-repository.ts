@@ -39,6 +39,7 @@ import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
 import { requireCriticOutputConsumption } from './critic-output-consumption.ts'
 import { hydrateProxyReview } from './proxy-review-repository.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type StoredQualityIteration = Prisma.V2QualityIterationGetPayload<{
   include: { assetSelections: true }
@@ -851,13 +852,16 @@ export class PrismaQualityIterationRepository implements QualityIterationReposit
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
         return this.persist(iteration, authenticationAudit, serializationAttempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotent({
-          workspaceId: iteration.workspaceId,
-          projectId: iteration.projectId,
-          idempotencyKey: iteration.idempotencyKey,
-          actorContextHash: authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({
+            workspaceId: iteration.workspaceId,
+            projectId: iteration.projectId,
+            idempotencyKey: iteration.idempotencyKey,
+            actorContextHash: authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== iteration.requestFingerprint) {
             throw new DomainError(

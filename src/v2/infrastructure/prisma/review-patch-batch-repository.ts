@@ -42,6 +42,7 @@ import {
   externalActorAuditData,
   hydrateExternalActorAudit,
 } from './external-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 function parseJson<T>(value: string, field: string): T {
   try {
@@ -274,7 +275,7 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
     return context ? Object.freeze({ ...context, batch: hydrateBatch(row) }) : null
   }
 
-  async readAppliedResult(input: { workspaceId: string; projectId: string; batchId: string; applyIdempotencyKey: string; applyRequestFingerprint: string; actorContextHash: string }): Promise<Readonly<ReviewPatchBatchApplyResult> | null> {
+  async readAppliedResult(input: { workspaceId: string; projectId: string; batchId: string; applyIdempotencyKey: string; applyRequestFingerprint: string; actorContextHash: string }, options: { rejectFingerprintMismatch?: boolean } = {}): Promise<Readonly<ReviewPatchBatchApplyResult> | null> {
     const row = await this.client.v2ReviewPatchBatch.findFirst({
       where: { id: input.batchId, workspaceId: input.workspaceId, projectId: input.projectId },
       include: {
@@ -284,7 +285,11 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
       },
     })
     if (!row || row.status !== 'applied' || !row.resultVersion?.command || !row.comparisonJson) return null
-    if (row.applyIdempotencyKey !== input.applyIdempotencyKey || row.applyRequestFingerprint !== input.applyRequestFingerprint) return null
+    if (row.applyIdempotencyKey !== input.applyIdempotencyKey) return null
+    if (row.applyRequestFingerprint !== input.applyRequestFingerprint) {
+      if (options.rejectFingerprintMismatch) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different review batch apply request')
+      return null
+    }
     const commandRow = row.resultVersion.command
     if (hydrateEditCommandExternalActorAudit(commandRow).contextHash !== input.actorContextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Batch review replay belongs to another authentication context')
     const payload = parseJson<Record<string, unknown>>(commandRow.payloadJson, 'batch patch command payload')
@@ -344,6 +349,7 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
       actorContextHash: bundle.authenticationAudit.contextHash,
     })
     if (replay) return replay
+    let lostRace: unknown = null
     try {
       await this.client.$transaction(async (transaction) => {
         const batch = await transaction.v2ReviewPatchBatch.findFirst({
@@ -453,18 +459,20 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(input, serializationAttempt + 1)
-      if (!isPrismaCode(error, 'P2002')) throw error
+      if (!isPrismaCode(error, 'P2002') && !isPrismaCode(error, 'P2034')) throw error
+      lostRace = error
     }
-    const result = await this.readAppliedResult({
+    const result = await reconcileAfterConflict(lostRace, () => this.readAppliedResult({
       workspaceId: bundle.version.workspaceId,
       projectId: bundle.version.projectId,
       batchId: bundle.batchId,
       applyIdempotencyKey: bundle.applyIdempotencyKey,
       applyRequestFingerprint: bundle.applyRequestFingerprint,
       actorContextHash: bundle.authenticationAudit.contextHash,
-    })
+    }, { rejectFingerprintMismatch: true }))
     if (!result) throw new DomainError('PERSISTENCE_CONFLICT', 'Applied batch review could not be reconstructed')
-    return Object.freeze({ ...result, replayed: false })
+    // A lost race answers like a sequential duplicate (replayed); the committer's own readback is not a replay.
+    return Object.freeze({ ...result, replayed: lostRace !== null })
   }
 
   async attachRenderOperation(input: { workspaceId: string; projectId: string; batchId: string; renderOperationId: string }) {

@@ -25,7 +25,9 @@ import {
   assertWebhookAdministrationReplay,
   webhookAdministrationCommandData,
 } from './webhook-administration-command-persistence.ts'
-import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
+import { readCompletedIdempotencyResponse,
+  reconcileAfterConflict,
+} from './idempotency-record-persistence.ts'
 
 interface StoredRotationResponse { endpointId: string; rotationId: string }
 
@@ -239,7 +241,7 @@ export class PrismaWebhookSigningSecretRotationRepository implements WebhookSign
       }, { isolationLevel: 'Serializable' })
     } catch (error) {
       if (isPrismaError(error, 'P2034') || isPrismaError(error, 'P2002')) {
-        const existing = await this.client.v2IdempotencyRecord.findUnique({ where: key })
+        const existing = await reconcileAfterConflict(error, () => this.client.v2IdempotencyRecord.findUnique({ where: key }))
         if (existing && existing.expiresAt > requestedAt) return readReplay(this.client, existing)
         throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook endpoint or rotation changed concurrently')
       }
@@ -361,7 +363,7 @@ export class PrismaWebhookSigningSecretRotationRepository implements WebhookSign
       }, { isolationLevel: 'Serializable' })
     } catch (error) {
       if (isPrismaError(error, 'P2034') || isPrismaError(error, 'P2002')) {
-        const replay = await readActivated(this.client)
+        const replay = await reconcileAfterConflict(error, () => readActivated(this.client))
         if (replay) return replay
         throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook endpoint or rotation changed concurrently')
       }
@@ -457,7 +459,7 @@ export class PrismaWebhookSigningSecretRotationRepository implements WebhookSign
       }, { isolationLevel: 'Serializable' })
     } catch (error) {
       if (isPrismaError(error, 'P2034') || isPrismaError(error, 'P2002')) {
-        const terminal = await readTerminal(this.client)
+        const terminal = await reconcileAfterConflict(error, () => readTerminal(this.client))
         if (terminal) return terminal
         throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook signing secret rotation changed concurrently')
       }

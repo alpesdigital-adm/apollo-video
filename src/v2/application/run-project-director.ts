@@ -998,6 +998,10 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     }
     const context = await dependencies.repository.readContext({ workspaceId, projectId })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Project with aligned media was not found')
+    // Fail closed: a context that does not state the speech the project asked to remove must not be read as "nothing was asked".
+    if (!Array.isArray(context.requestedSpeechRemovals)) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Director context does not state the speech the project asked to remove')
+    }
     if (context.currentVersion.id !== baseVersionId || context.currentVersion.baseHash !== request.baseHash) {
       throw new DomainError('VERSION_CONFLICT', 'Director base version is stale', { currentVersionId: context.currentVersion.id, currentBaseHash: context.currentVersion.baseHash })
     }
@@ -1115,7 +1119,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const desiredActionRef = createDesiredActionReference(desiredAction)
     // ADR-160. Nothing below is fixed: the editorial request of the brief this run leaves behind (and the speech its Commands asked to
     // remove) resolves to the policies the plan is made from. A request the Apollo cannot execute, or a question it left open, stops here.
-    const requestedRemovalIds = (context.requestedSpeechRemovals ?? []).map((rule) => rule.id)
+    const requestedRemovalIds = context.requestedSpeechRemovals.map((rule) => rule.id)
     const editorialRequest = deriveEditorialRequestFromBrief({ ...context.brief, objective: objective.id, desiredAction }, requestedRemovalIds)
     const resolution = resolveEditorialPolicies(editorialRequest, {
       transcriptId: context.transcript.id, ...(transcriptLanguage ? { transcriptLanguage, transcriptLanguageBasis: context.transcript.languageBasis ?? 'declared-not-verified' as const } : {}),
@@ -1406,7 +1410,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       rightsVerdicts,
       decisions,
       perceptionEvidence: perceptionEvidenceReport,
-      requestedSpeechRemovals: context.requestedSpeechRemovals ?? [],
+      requestedSpeechRemovals: context.requestedSpeechRemovals,
       resolution,
       ...(transcriptLanguage ? { speechLanguage: transcriptLanguage } : {}),
     })
@@ -1421,7 +1425,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         gateFailures: qualityReport.strategic.gateFailures,
         requestedSpeechStillPresent: editorialRulesMatchingSpeech(
           editPlan.subtitleTracks.flatMap((track) => track.cues).map((cue) => cue.text).join(' '),
-          context.requestedSpeechRemovals ?? []),
+          context.requestedSpeechRemovals),
         blockedDecisions: decisions.filter((decision) => decision.perceptionEvidence !== undefined && decision.confidenceBand === 'block')
           .map((decision) => decision.id),
         uncertainRights: rightsVerdicts.filter((verdict) => !verdict.certain).map((verdict) => `${verdict.artifactId}:${verdict.reasonCode}`),

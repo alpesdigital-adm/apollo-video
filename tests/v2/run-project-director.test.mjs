@@ -1965,7 +1965,7 @@ test('ADR-160 the final admission needs the v5 report, critic v4, every check, t
   refused(report, { ...bound, sealedPolicyResolutionHash: 'e'.repeat(64) }, /policy resolution sealed/)
   refused(report, { ...bound, sealedPolicyResolutionHash: null }, /policy resolution sealed/)
   refused({ ...report, criticVersion: 'apollo-director-critic/v3' }, bound, /superseded/)
-  refused({ ...report, criticVersion: 'whatever' }, bound, /superseded/)
+  refused({ ...report, criticVersion: 'whatever' }, bound, /not a critic the Apollo admits/)
   refused({ ...report, schemaVersion: 'director-quality-report/v4' }, bound, /superseded/)
   refused({ ...report, schemaVersion: 'director-quality-report/v3' }, bound, /superseded/)
   refused({ ...report, hardChecks: report.hardChecks.map((check) => check.id === 'movementMatchesPolicy' ? { ...check, passed: false } : check) }, bound, /movementMatchesPolicy did not hold/)
@@ -2055,4 +2055,15 @@ test('ADR-160: a transcript whose language the provider could not tell is the un
     () => unknown.service(request({ idempotency: { key: 'director-language-undetermined' } })),
     (error) => error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' && JSON.stringify(error.details).includes('caption-language-unknown'),
   )
+})
+
+test('a Director context that does not state the speech the project asked to remove is refused, never read as "nothing was asked"', async () => {
+  const { repository, service } = fixture()
+  const readContext = repository.readContext.bind(repository)
+  repository.readContext = async (input) => {
+    const { requestedSpeechRemovals: _omitted, ...context } = await readContext(input)
+    return context
+  }
+  await assert.rejects(service(request()), (error) => error.code === 'PERSISTENCE_CONFLICT' && /asked to remove/.test(error.message))
+  assert.equal(repository.lastBundle, undefined)
 })

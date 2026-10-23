@@ -27,6 +27,7 @@ import {
 import type { TransformationFallback, TransformationPreserve } from '../../domain/transformation-brief.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type FallbackRow = V2TransformationFallbackLedger & { attempts: V2TransformationFallbackAttempt[] }
 type CriticRow = V2TransformationCriticReport & {
@@ -260,7 +261,7 @@ export class PrismaTransformationQualityRepository implements TransformationQual
       return await execute(Prisma.TransactionIsolationLevel.ReadCommitted)
     } catch (error) {
       if (!(error instanceof Prisma.PrismaClientKnownRequestError) || !['P2002', 'P2034'].includes(error.code)) throw error
-      const winner = await this.readFallbackDispatchRequest({ workspaceId: input.workspaceId, actorClientId: input.authenticationAudit.clientId, idempotencyKey: input.idempotencyKey })
+      const winner = await reconcileAfterConflict(error, () => this.readFallbackDispatchRequest({ workspaceId: input.workspaceId, actorClientId: input.authenticationAudit.clientId, idempotencyKey: input.idempotencyKey }))
       if (!winner) throw new DomainError('PERSISTENCE_CONFLICT', 'Fallback dispatch claim did not converge')
       if (winner.requestFingerprint !== input.requestFingerprint || winner.authenticationAudit.contextHash !== input.authenticationAudit.contextHash) {
         throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Fallback dispatch idempotency key was already used for a different request')

@@ -34,6 +34,7 @@ import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { policyResolutionOf } from './proxy-source-authority.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 /**
  * The project side of `direct-multicam-session` against PostgreSQL (F4.012).
@@ -484,13 +485,16 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
         return this.commitOrReplay(input, serializationAttempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const existing = await this.findIdempotentResult({
-          workspaceId: bundle.command.workspaceId,
-          projectId: bundle.command.projectId,
-          idempotencyKey: bundle.command.idempotencyKey,
-          actorContextHash: bundle.authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const existing = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotentResult({
+            workspaceId: bundle.command.workspaceId,
+            projectId: bundle.command.projectId,
+            idempotencyKey: bundle.command.idempotencyKey,
+            actorContextHash: bundle.authenticationAudit.contextHash,
+          }),
+        )
         if (existing) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) {
             throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different multicam direction')

@@ -40,6 +40,7 @@ import {
   persistOperationStatusEvents,
   PrismaPublicOperationRepository,
 } from './public-operation-repository.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type WorkflowWithStages = V2LongFormIndexWorkflow & {
   stages: V2LongFormIndexStageCheckpoint[]
@@ -945,13 +946,16 @@ implements LongFormIndexWorkflowRepository {
         isPrismaCode(error, 'P2002') ||
         isPrismaCode(error, 'P2034')
       ) {
-        const replay = await this.findReplay({
-          workspaceId: input.workflow.workspaceId,
-          projectId: input.workflow.projectId,
-          createdByClientId: input.workflow.createdByClientId,
-          actorContextHash: audit.contextHash,
-          idempotencyKey: input.idempotencyKey,
-        })
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findReplay({
+            workspaceId: input.workflow.workspaceId,
+            projectId: input.workflow.projectId,
+            createdByClientId: input.workflow.createdByClientId,
+            actorContextHash: audit.contextHash,
+            idempotencyKey: input.idempotencyKey,
+          }),
+        )
         if (replay) {
           if (
             replay.requestFingerprint !== input.requestFingerprint
@@ -1350,16 +1354,19 @@ implements LongFormIndexWorkflowRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.persistTranscriptWithLease(input, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findTranscriptStageReplay({
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          sourceArtifactId: input.sourceArtifactId,
-          sourceManifestId: input.sourceManifestId,
-          provider: transcript.provider,
-          model: transcript.model,
-          providerVersion: input.providerVersion,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findTranscriptStageReplay({
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            sourceArtifactId: input.sourceArtifactId,
+            sourceManifestId: input.sourceManifestId,
+            provider: transcript.provider,
+            model: transcript.model,
+            providerVersion: input.providerVersion,
+          }),
+        )
         if (
           replay?.transcript.transcriptHash ===
           transcript.transcriptHash

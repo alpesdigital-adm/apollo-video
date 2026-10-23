@@ -29,6 +29,7 @@ import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import {
   hydrateSourceDeconstructionRow,
 } from './source-deconstruction-repository.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 const SOURCE_INCLUDE = {
   segments: {
@@ -552,9 +553,11 @@ function overlapData(
 
 export class PrismaContaminationReportRepository
 implements ContaminationReportRepository {
-  constructor(
-    private readonly prisma: PrismaClient = getV2PostgresClient(),
-  ) {}
+  private readonly prisma: PrismaClient
+
+  constructor(prisma: PrismaClient = getV2PostgresClient()) {
+    this.prisma = prisma
+  }
 
   async findCreateReplay(input: {
     workspaceId: string
@@ -694,13 +697,16 @@ implements ContaminationReportRepository {
       // Another transaction may commit the same key while all serializable
       // attempts fail with P2034. Check the committed winner before failing.
       if (isPrismaCode(error, 'P2034') || isPrismaCode(error, 'P2002')) {
-        const replay = await this.findCreateReplay({
-          workspaceId: record.report.workspaceId,
-          projectId: record.report.projectId,
-          actorClientId: record.report.createdByClientId,
-          actorContextHash: record.authenticationAudit.contextHash,
-          idempotencyKey: record.idempotencyKey,
-        })
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findCreateReplay({
+            workspaceId: record.report.workspaceId,
+            projectId: record.report.projectId,
+            actorClientId: record.report.createdByClientId,
+            actorContextHash: record.authenticationAudit.contextHash,
+            idempotencyKey: record.idempotencyKey,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(

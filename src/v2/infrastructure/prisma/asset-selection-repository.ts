@@ -20,6 +20,7 @@ import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-
 import { DomainError } from '../../domain/errors.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type StoredSelection = Prisma.V2AssetSelectionGetPayload<Record<string, never>>
 
@@ -351,13 +352,16 @@ export class PrismaAssetSelectionRepository implements AssetSelectionRepository 
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
         return this.persist(selection, authenticationAudit, serializationAttempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotent({
-          workspaceId: selection.workspaceId,
-          projectId: selection.projectId,
-          idempotencyKey: selection.idempotencyKey,
-          actorContextHash: authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({
+            workspaceId: selection.workspaceId,
+            projectId: selection.projectId,
+            idempotencyKey: selection.idempotencyKey,
+            actorContextHash: authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== selection.requestFingerprint) {
             throw new DomainError(
