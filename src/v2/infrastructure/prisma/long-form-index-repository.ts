@@ -52,6 +52,7 @@ import {
   hydrateProjectAnalysisExecution,
   projectAnalysisExecutionData,
 } from './project-analysis-execution.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type RunWithHierarchy = V2LongFormIndexRun & {
   chapters: V2LongFormChapter[]
@@ -1126,13 +1127,16 @@ implements LongFormIndexRepository {
           attempt + 1,
         )
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotent({
-          workspaceId: run.workspaceId,
-          projectId: run.projectId,
-          idempotencyKey: run.idempotencyKey,
-          actorContextHash: run.authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({
+            workspaceId: run.workspaceId,
+            projectId: run.projectId,
+            idempotencyKey: run.idempotencyKey,
+            actorContextHash: run.authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== run.requestFingerprint) {
             throw new DomainError(

@@ -7,6 +7,10 @@ import { assertInlineProxySourceAuthority } from '../../src/v2/infrastructure/pr
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
 import { fakeOutputWorld } from './helpers/output-consumption-fakes.mjs'
+import { configureIdempotencyWinnerWait } from '../../src/v2/infrastructure/prisma/idempotency-record-persistence.ts'
+
+// The exhaustion tests below count attempts: keep the lost-race budget at three attempts and never sleep (this file's process only).
+configureIdempotencyWinnerWait({ delaysMs: [0, 0], async sleep() {} })
 
 const workspaceId = 'workspace-proxy-rights', projectId = 'project-proxy-rights'
 const createdAt = '2026-10-01T00:00:00.000Z'
@@ -200,7 +204,7 @@ for (const method of ['attachCompletedOutput', 'attachCompletedSnapshotOutput'])
 }
 
 // Admission retries open a new Serializable transaction, never reinterpret an error message.
-test('inline admission retries only P2034/raw 40001 and exhausts after three attempts', async () => {
+test('inline admission retries only P2034/raw 40001 and exhausts after three attempts (zero-wait schedule: three attempts)', async () => {
   const { createQueuedPublicOperation, startPublicOperationAttempt, advancePublicOperationPhase, succeedPublicOperation } =
     await import('../../src/v2/domain/public-operation.ts')
   const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')

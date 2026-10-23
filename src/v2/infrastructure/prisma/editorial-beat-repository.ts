@@ -5,6 +5,7 @@ import type { AlignedBeatWord, BeatSignal, EditorialBeat } from '../../domain/ed
 import { DomainError } from '../../domain/errors.ts'
 import { hydrateStoredMediaTranscript } from './speech-segment-catalog-repository.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
+import { pauseBeforeLostRaceRetry } from './idempotency-record-persistence.ts'
 
 function json<T>(value: string, field: string): T {
   try { return JSON.parse(value) as T } catch { throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`) }
@@ -57,7 +58,7 @@ export class PrismaEditorialBeatRepository implements EditorialBeatRepository {
     return row ? hydrateSet(row) : null
   }
   async persistSet(set: EditorialBeatSet) {
-    for (let attempt = 0; attempt < 3; attempt += 1) try {
+    for (let attempt = 0; ; attempt += 1) try {
       return await this.client.$transaction(async (tx) => {
         const existing = await tx.v2EditorialBeatSet.findFirst({ where: { workspaceId: set.workspaceId, projectId: set.projectId, actorClientId: set.actor.clientId, idempotencyKey: set.idempotencyKey } })
         const row = existing ?? await tx.v2EditorialBeatSet.create({ data: { id: set.id, workspaceId: set.workspaceId, projectId: set.projectId, projectVersionId: set.projectVersionId, transcriptId: set.transcriptId, transcriptHash: set.transcriptHash, schemaVersion: set.schemaVersion, derivationVersion: set.derivationVersion, pauseBoundaryMs: set.pauseBoundaryMs, maxDurationMs: set.maxDurationMs, wordsJson: stableSerialize(set.words), wordsHash: set.wordsHash, signalsJson: stableSerialize(set.signals), signalsHash: set.signalsHash, beatsJson: stableSerialize(set.beats), beatsHash: set.beatsHash, idempotencyKey: set.idempotencyKey, requestFingerprint: set.requestFingerprint, actorClientId: set.actor.clientId, ...externalActorAuditData(set.actor, set.workspaceId, set.actor.clientId), actorDelegatedUserId: set.actor.delegatedUserId ?? null, actorDelegatedIdentityId: set.actor.delegatedIdentityId ?? null, actorWorkspaceRole: set.actor.workspaceRole ?? null, createdAt: new Date(set.createdAt), recordHash: set.recordHash } })
@@ -65,8 +66,7 @@ export class PrismaEditorialBeatRepository implements EditorialBeatRepository {
         if (hydrated.recordHash !== set.recordHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Stored editorial beat set conflicts with request')
         return Object.freeze({ set: hydrated, replayed: existing !== null })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
-    } catch (error) { if (attempt < 2 && (prismaCode(error, 'P2002') || prismaCode(error, 'P2034'))) continue; throw error }
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial beat set could not be serialized')
+    } catch (error) { if (prismaCode(error, 'P2002') || prismaCode(error, 'P2034')) { if (await pauseBeforeLostRaceRetry(attempt + 1)) continue; throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial beat set could not be serialized') } throw error }
   }
   async assertDirectorRun(input: { workspaceId: string; projectId: string; projectVersionId: string; directorRunId: string }) {
     return Boolean(await this.client.v2DirectorRun.findFirst({ where: { id: input.directorRunId, workspaceId: input.workspaceId, projectId: input.projectId, resultVersionId: input.projectVersionId, status: 'completed' }, select: { id: true } }))
@@ -78,7 +78,7 @@ export class PrismaEditorialBeatRepository implements EditorialBeatRepository {
     return hydrateAdjustment(row)
   }
   async persistAdjustment(adjustment: EditorialBeatAdjustment) {
-    for (let attempt = 0; attempt < 3; attempt += 1) try {
+    for (let attempt = 0; ; attempt += 1) try {
       return await this.client.$transaction(async (tx) => {
         const set = await tx.v2EditorialBeatSet.findFirst({ where: { id: adjustment.beatSetId, workspaceId: adjustment.workspaceId, projectId: adjustment.projectId }, select: { wordsHash: true, beatsJson: true } })
         if (!set || set.wordsHash !== adjustment.wordAlignmentHash || !json<EditorialBeat[]>(set.beatsJson, 'beats').some((beat) => beat.id === adjustment.sourceBeatId && beat.beatHash === adjustment.sourceBeatHash)) throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial beat adjustment source evidence changed')
@@ -88,7 +88,6 @@ export class PrismaEditorialBeatRepository implements EditorialBeatRepository {
         if (hydrated.recordHash !== adjustment.recordHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Stored editorial beat adjustment conflicts with request')
         return Object.freeze({ adjustment: hydrated, replayed: existing !== null })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
-    } catch (error) { if (attempt < 2 && (prismaCode(error, 'P2002') || prismaCode(error, 'P2034'))) continue; throw error }
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial beat adjustment could not be serialized')
+    } catch (error) { if (prismaCode(error, 'P2002') || prismaCode(error, 'P2034')) { if (await pauseBeforeLostRaceRetry(attempt + 1)) continue; throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial beat adjustment could not be serialized') } throw error }
   }
 }

@@ -18,6 +18,7 @@ import {
 } from '../../domain/synthetic-script-plan.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 function hydrateBlock(row: V2SyntheticScriptBlock): Readonly<SyntheticScriptBlock> {
   const block: SyntheticScriptBlock = Object.freeze({
@@ -338,14 +339,18 @@ export class PrismaSyntheticScriptPlanRepository implements SyntheticScriptPlanR
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
         return Object.freeze({ plan: await this.hydratePlanFromVersion(created), replayed: false })
       } catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-          const replay = await this.findCommandReplay({
-            workspaceId: input.workspaceId,
-            planId: input.planId,
-            actorClientId: input.authenticationAudit.clientId,
-            actorContextHash: input.authenticationAudit.contextHash,
-            idempotencyKey: input.idempotencyKey,
-          })
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 3) continue
+        if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === 'P2002' || error.code === 'P2034')) {
+          const replay = await reconcileAfterConflict(
+            error,
+            () => this.findCommandReplay({
+              workspaceId: input.workspaceId,
+              planId: input.planId,
+              actorClientId: input.authenticationAudit.clientId,
+              actorContextHash: input.authenticationAudit.contextHash,
+              idempotencyKey: input.idempotencyKey,
+            }),
+          )
           if (replay && replay.requestFingerprint === input.requestFingerprint) {
             return Object.freeze({ plan: replay, replayed: true })
           }
@@ -354,7 +359,6 @@ export class PrismaSyntheticScriptPlanRepository implements SyntheticScriptPlanR
           // internal failure, so it must not escape as a raw driver error.
           throw new DomainError('VERSION_CONFLICT', 'Synthetic script plan advanced concurrently')
         }
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 3) continue
         throw error
       }
     }

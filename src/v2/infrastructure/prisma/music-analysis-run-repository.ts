@@ -14,6 +14,7 @@ import {
   hydrateBatchActorAudit,
 } from "./batch-actor-audit.ts";
 import { childRowId } from "./child-row-id.ts";
+import { retryAfterLostRace } from './idempotency-record-persistence.ts'
 
 function hydrate(row: any): Readonly<MusicAnalysisRun> {
   return Object.freeze({
@@ -134,7 +135,7 @@ export class PrismaMusicAnalysisRunRepository implements MusicAnalysisRunReposit
   }
   async create(input: Parameters<MusicAnalysisRunRepository["create"]>[0]) {
     try {
-      return await this.prisma.$transaction(
+      return await retryAfterLostRace(() => this.prisma.$transaction(
         async (tx) => {
           const replay = await tx.v2MusicAnalysisRun.findFirst({
             where: {
@@ -229,7 +230,7 @@ export class PrismaMusicAnalysisRunRepository implements MusicAnalysisRunReposit
           return Object.freeze({ run: hydrate(row), replayed: false });
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-      );
+      ));
     } catch (error) {
       if (
         typeof error === "object" &&

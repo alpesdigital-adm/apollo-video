@@ -26,6 +26,7 @@ import { createApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { pauseBeforeLostRaceRetry } from './idempotency-record-persistence.ts'
 
 function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002'
@@ -554,7 +555,7 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
       // An enclosing transaction owns retries; never retry inside its aborted snapshot.
       if (!('$transaction' in this.client)) throw error
       if (isSerializationConflict(error)) {
-        if (serializationAttempt < 3) {
+        if (await pauseBeforeLostRaceRetry(serializationAttempt)) {
           return this.setCurrent(prototype, baseRevision, change, serializationAttempt + 1)
         }
         throw new DomainError(

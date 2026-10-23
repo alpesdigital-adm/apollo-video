@@ -43,6 +43,7 @@ import {
   hydrateStoredMediaTranscript,
   hydrateStoredSpeechSegment,
 } from './speech-segment-catalog-repository.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 function isPrismaCode(error: unknown, code: string): boolean {
   return (
@@ -371,9 +372,11 @@ function persistenceData(
 
 export class PrismaEvidenceSegmentRepository
 implements EvidenceSegmentRepository {
-  constructor(
-    private readonly client: PrismaClient = getV2PostgresClient(),
-  ) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
+  }
 
   async readCreationContext(input: {
     workspaceId: string
@@ -576,19 +579,16 @@ implements EvidenceSegmentRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.persist(evidence, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2034')) {
-        throw new DomainError(
-          'PERSISTENCE_CONFLICT',
-          'Evidence catalog conflicted with another transaction',
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({
+            workspaceId: evidence.workspaceId,
+            projectId: evidence.projectId,
+            idempotencyKey: evidence.idempotencyKey,
+            actorContextHash: evidence.authenticationAudit.contextHash,
+          }),
         )
-      }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotent({
-          workspaceId: evidence.workspaceId,
-          projectId: evidence.projectId,
-          idempotencyKey: evidence.idempotencyKey,
-          actorContextHash: evidence.authenticationAudit.contextHash,
-        })
         if (replay) {
           if (replay.requestFingerprint !== evidence.requestFingerprint) {
             throw new DomainError(
@@ -598,6 +598,12 @@ implements EvidenceSegmentRepository {
           }
           return Object.freeze({ evidence: replay, replayed: true })
         }
+      }
+      if (isPrismaCode(error, 'P2034')) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Evidence catalog conflicted with another transaction',
+        )
       }
       throw error
     }

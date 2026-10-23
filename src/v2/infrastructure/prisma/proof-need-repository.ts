@@ -26,6 +26,7 @@ import {
   externalActorAuditData,
   hydrateExternalActorAudit,
 } from './external-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type RunWithItems = V2ProofNeedRun & {
   items: V2ProofNeedItem[]
@@ -458,14 +459,17 @@ implements ProofNeedRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.create(input, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findReplay({
-          workspaceId: input.run.workspaceId,
-          projectId: input.run.projectId,
-          actorClientId: input.run.createdByClientId,
-          idempotencyKey: input.idempotencyKey,
-          actorContextHash: input.authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findReplay({
+            workspaceId: input.run.workspaceId,
+            projectId: input.run.projectId,
+            actorClientId: input.run.createdByClientId,
+            idempotencyKey: input.idempotencyKey,
+            actorContextHash: input.authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== input.requestFingerprint) {
             throw new DomainError(

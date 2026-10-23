@@ -87,3 +87,19 @@ test('nothing the product ships or runs carries the content of the one-off test 
   assert.ok(scanned > 500, `the guard must scan the product, but only ${scanned} files were read`)
   assert.deepEqual(offenders, [], `test-video content leaked into the product (it may live only in tests/):\n${offenders.join('\n')}`)
 })
+
+// Golden sets and fixtures whose only consumers are tests live under tests/. These were product exports once; the product never read them.
+const TEST_ONLY_SETS = Object.freeze([
+  'BRIEF_COMPILER_GOLDEN_SET', 'TRANSFORMATION_GOLDENS', 'NARRATIVE_POLICY_FIXTURES',
+  'NEGATIVE_GOAL_FIXTURES', 'IMAGE_EVAL_FIXTURES', 'CONFIDENCE_CALIBRATION_GOLDEN',
+])
+
+test('golden sets used only by tests are not declared in the product', () => {
+  const offenders = []
+  for (const path of productFiles()) {
+    if (!isGuardedText(path)) continue
+    const text = readFileSync(path, 'utf8')
+    for (const name of TEST_ONLY_SETS) if (text.includes(name)) offenders.push(`${relative(root, path).replaceAll('\\', '/')} (${name})`)
+  }
+  assert.deepEqual(offenders, [], `test-only golden sets leaked back into the product (they live in tests/v2/helpers/):\n${offenders.join('\n')}`)
+})

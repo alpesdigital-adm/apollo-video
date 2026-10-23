@@ -6,6 +6,7 @@ import type {
   ProjectFinalExportAttemptHistory,
   ProjectFinalExportRepository,
 } from '../../application/ports/project-final-export-repository.ts'
+import type { ProjectProxyRenderSource } from '../../application/ports/project-proxy-render-repository.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { admitDirectorQualityForFinal } from '../../domain/final-caption-certification.ts'
@@ -22,6 +23,8 @@ import { legacyProxyBelongsToOutput } from './proxy-reuse-safety.ts'
 import { PrismaProjectProxyRenderRepository } from './project-proxy-render-repository.ts'
 import { parseDirectorQualityReport } from './director-run-repository.ts'
 import { readDirectorInheritanceWalk } from './director-run-inheritance.ts'
+import { readRequestedSpeechRemovals } from './speech-removal-lineage.ts'
+import { requestedSpeechReintroducedByCaptions } from '../../application/requested-speech-removals.ts'
 import {
   describeDirectorInheritanceBlock, directorRunInheritanceEquals, type DirectorRunInheritance,
 } from '../../domain/director-run-inheritance.ts'
@@ -220,6 +223,34 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     })
   }
 
+  /**
+   * Admission of the final, last gate. A Version that inherits the Director's quality through a subtitle text exception (or that was
+   * edited by one at all) shows captions the Director never read: the text of an exception can write back a phrase the project asked to
+   * remove. So the requests in the lineage of the exported Version are checked again against the captions the final would burn
+   * (the plan's cues with this output's exceptions applied). A phrase that is back refuses the final, fail closed.
+   */
+  private async assertCaptionsHonourRequestedSpeechRemovals(
+    input: Readonly<{ workspaceId: string; projectId: string; projectVersionId: string }>,
+    source: Readonly<ProjectProxyRenderSource>,
+  ): Promise<void> {
+    const rules = await readRequestedSpeechRemovals(this.client, {
+      workspaceId: input.workspaceId, projectId: input.projectId, headVersionId: input.projectVersionId,
+    })
+    const present = requestedSpeechReintroducedByCaptions({
+      rules,
+      cues: (source.editPlan.subtitleTracks as readonly Readonly<{ cues: readonly Readonly<{ id: string; startFrame: number; endFrame: number; text: string }>[] }>[])
+        .flatMap((track) => track.cues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame, text: cue.text }))),
+      overrides: source.subtitleOverrides ?? [],
+      variantId: sourceOutputVariantId(source),
+    })
+    if (present.length > 0) {
+      throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED',
+        'The captions of this final say again a phrase the project asked to remove; the exception that wrote it back must be changed first', {
+          reason: 'requested-speech-reintroduced', versionId: input.projectVersionId, ruleIds: [...present],
+        })
+    }
+  }
+
   async readApprovedCurrentSource(input: {
     workspaceId: string
     projectId: string
@@ -235,6 +266,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     const approval = await this.readApproval({ ...input, outputVariantId: sourceOutputVariantId(source),
       outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: true })
     if (!approval || !reframeMatchesApproval(source, approval) || !subtitleOverridesMatchApproval(source, approval)) return null
+    await this.assertCaptionsHonourRequestedSpeechRemovals(input, source)
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
   }
 
@@ -281,6 +313,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     const approval = await this.readApproval({ ...input, directorInheritance: input.directorInheritance ?? null, outputVariantId: sourceOutputVariantId(source),
       outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: false })
     if (!approval || !reframeMatchesApproval(source, approval) || !subtitleOverridesMatchApproval(source, approval)) return null
+    await this.assertCaptionsHonourRequestedSpeechRemovals(input, source)
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
   }
 

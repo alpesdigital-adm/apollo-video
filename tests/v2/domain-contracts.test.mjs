@@ -105,6 +105,10 @@ import {
 import {
   createPublicOperationStatusEvents,
 } from '../../src/v2/domain/public-operation-event.ts'
+import { configureIdempotencyWinnerWait } from '../../src/v2/infrastructure/prisma/idempotency-record-persistence.ts'
+
+// The exhaustion tests below count attempts: keep the lost-race budget at three attempts and never sleep (this file's process only).
+configureIdempotencyWinnerWait({ delaysMs: [0, 0], async sleep() {} })
 
 function authenticatedActor({
   clientId = 'client-1', credentialId = `credential-${clientId}`, workspaceId = 'workspace-1',
@@ -820,7 +824,7 @@ test('PublicOperation queue invariants fail closed and presenter omits execution
   )
 })
 
-test('PublicOperation creation retries serialization conflicts before failing explicitly', async () => {
+test('PublicOperation creation retries serialization conflicts before failing explicitly (zero-wait schedule: three attempts)', async () => {
   const operation = createQueuedPublicOperation({
     id: 'operation-serialization-retry-1',
     workspaceId: 'workspace-serialization-retry-1',
@@ -1714,7 +1718,7 @@ test('asset rights and consent are immutable, content-addressed and fail closed'
   )
 })
 
-test('asset rights persistence retries serialization conflicts before failing explicitly', async () => {
+test('asset rights persistence retries serialization conflicts before failing explicitly (zero-wait schedule: three attempts)', async () => {
   let attempts = 0
   const repository = new PrismaAssetRightsRepository({
     async $transaction() {
@@ -1884,7 +1888,7 @@ test('materialization authorization evaluates every RenderInput asset and record
   )
 })
 
-test('materialization authorization retries serialization conflicts before failing explicitly', async () => {
+test('materialization authorization retries serialization conflicts before failing explicitly (zero-wait schedule: three attempts)', async () => {
   const authorization = createMaterializationAuthorization({
     id: 'authorization-serialization-retry-1',
     workspaceId: 'workspace-serialization-retry-1',

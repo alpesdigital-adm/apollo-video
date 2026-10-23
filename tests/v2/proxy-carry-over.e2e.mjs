@@ -177,6 +177,16 @@ test('W70 prep: the untouched output keeps its render and approval by content ad
     assert.equal(decisions[0].actorId, world.owner.clientId, 'and the actor who triggered it')
     assert.equal(await db.v2ProxyReviewDecision.count({ where: { workspaceId, action: 'acknowledge-warnings' } }), 1, 'no second human acknowledgement was invented')
     assert.deepEqual(carriedReview.acknowledgedBy, { type: 'automatic-carry', id: decisions[0].id, at: decisions[0].createdAt.toISOString() }, 'named by its decision and the time it re-bound the approval')
+    // Raw rows: the stored review of a carried approval names the automatic carry as its acknowledger (the decision and the time it was made); no
+    // stored row other than the source's names the person who acknowledged V0, and the read path published that as stored, not rewritten.
+    const rawCarried = await db.v2ProxyReview.findUniqueOrThrow({ where: { id: carriedReview.id } })
+    assert.deepEqual([rawCarried.acknowledgedByType, rawCarried.acknowledgedById, rawCarried.acknowledgedAt?.toISOString()],
+      ['automatic-carry', decisions[0].id, decisions[0].createdAt.toISOString()], 'the stored carried review names the automatic carry, not the earlier person')
+    assert.deepEqual(
+      (await db.v2ProxyReview.findMany({ where: { workspaceId, acknowledgedById: approved0.acknowledgedBy.id }, select: { id: true } })).map((row) => row.id),
+      [approved0.id], 'the earlier person is the acknowledger of exactly the review they acknowledged')
+    const rawSource = await db.v2ProxyReview.findUniqueOrThrow({ where: { id: approved0.id } })
+    assert.deepEqual([rawSource.acknowledgedByType, rawSource.acknowledgedById], ['api-client', approved0.acknowledgedBy.id], 'and the source review still names them')
     // W70 readiness (R1): the carry is VISIBLE as what it is - an automatic carry of an identical render, with the review, the decision and the content
     // address - in the review a client reads; a render made for the Version says nothing of the kind. The approval is the one a person gave on V0.
     assert.deepEqual(carriedReview.carriedFrom, { versionId: V0.id, reviewId: approved0.id, reviewHash: approved0.reviewHash, decisionId: decisions[0].id, renderContentHash: tallV0.renderContentHash,

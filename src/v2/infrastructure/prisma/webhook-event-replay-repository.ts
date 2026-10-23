@@ -17,7 +17,9 @@ import {
   replayWebhookDelivery,
   type WebhookDelivery,
 } from '../../domain/webhook.ts'
-import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
+import { readCompletedIdempotencyResponse,
+  pauseBeforeLostRaceRetry,
+} from './idempotency-record-persistence.ts'
 
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -304,12 +306,11 @@ export class PrismaWebhookEventReplayRepository implements WebhookEventReplayRep
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (isSerializationConflict(error)) {
-        await new Promise<void>((resolve) => setTimeout(resolve, serializationAttempt * 10))
         const committed = await this.client.v2IdempotencyRecord.findUnique({ where: key })
         if (committed && committed.expiresAt > requestedAt && committed.status === 'completed') {
           return await readReplay(this.client, committed)
         }
-        if (serializationAttempt < 3) {
+        if (await pauseBeforeLostRaceRetry(serializationAttempt)) {
           return this.replayEvent(command, serializationAttempt + 1)
         }
         throw new DomainError(

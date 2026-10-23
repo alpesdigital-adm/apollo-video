@@ -326,11 +326,11 @@ const canonicalProjectBriefExample = {
   productionBrief: {
     schemaVersion: 1,
     ownerInput: {
-      text: 'Público: gestores. Oferta: guia. Tom: direto.',
+      text: 'Público: <público>. Oferta: <oferta>. Tom: <tom>.',
       trust: 'owner-authorized',
     },
     summary: {
-      text: 'Público: gestores. Oferta: guia. Tom: direto.', supplied: true,
+      text: 'Público: <público>. Oferta: <oferta>. Tom: <tom>.', supplied: true,
       coverage: { audience: true, offer: true, tone: true },
     },
     assumptions: [], readyForExpensiveGeneration: false,
@@ -345,13 +345,13 @@ const compiledProjectBriefExample = {
     compiled: {
       schemaVersion: 1,
       fields: {
-        audience: ['gestores'], offer: ['guia'], constraints: [], mustUse: [],
-        avoid: [], tone: ['direto'], successCriteria: [],
+        audience: ['<público>'], offer: ['<oferta>'], constraints: [], mustUse: [],
+        avoid: [], tone: ['<tom>'], successCriteria: [],
       },
       evidence: [
-        { field: 'audience', start: 9, end: 17, quote: 'gestores', confidence: 0.98 },
-        { field: 'offer', start: 27, end: 31, quote: 'guia', confidence: 0.98 },
-        { field: 'tone', start: 38, end: 44, quote: 'direto', confidence: 0.98 },
+        { field: 'audience', start: 9, end: 18, quote: '<público>', confidence: 0.98 },
+        { field: 'offer', start: 28, end: 36, quote: '<oferta>', confidence: 0.98 },
+        { field: 'tone', start: 43, end: 48, quote: '<tom>', confidence: 0.98 },
       ],
       conflicts: [], requiresReview: false,
       assumptions: ['constraints-not-specified', 'mustUse-not-specified', 'avoid-not-specified', 'successCriteria-not-specified'],
@@ -360,7 +360,7 @@ const compiledProjectBriefExample = {
       schemaVersion: 1, promptVersion: 'brief-compiler/v1',
       modelId: 'apollo-evidence-bound-brief-compiler', modelVersion: '1.0.0',
       compilerSchemaVersion: 1, inputHash: '1'.repeat(64),
-      inputRedacted: 'Publico: gestores. Oferta: guia. Tom: direto.',
+      inputRedacted: 'Publico: <publico>. Oferta: <oferta>. Tom: <tom>.',
       outputRedacted: '{"schemaVersion":1}', outputHash: '2'.repeat(64),
     },
   },
@@ -1245,7 +1245,7 @@ const proxyReviewExampleV1 = {
   criticIssues: proxyReviewExample.criticIssues.map(({ outputSpecId: _o, outputPresetHash: _p, placementPlanHash: _l, reframePlanHash: _f, format: _a, evidenceRange: _r, elementIds: _e, evidenceIds: _v, ...issue }) => issue),
 }
 const assetBriefExample = {
-  intention: 'Reforçar visualmente o ganho de clareza sem interromper a fala.',
+  intention: 'Intenção editorial de exemplo.',
   content: ['dashboard', 'resultado'],
   style: ['clean', 'editorial'],
   durationMs: { min: 1200, max: 3500 },
@@ -5954,10 +5954,9 @@ const syntheticCriticMeasurementsExample = [
   criticMeasured('temporal-integrity', 'ffprobe-media-integrity', 0, 'ms-drift', 34),
   criticMeasured('audiovisual-integrity', 'ffprobe-media-integrity', 1, 'live-signal', 1),
 ]
-// F3.013 / FR-113 — the canonical example from spec 06 §17: a specialist filmed
-// against a controlled background, placed in a medieval British village to
-// illustrate medieval traffic management. The person, their speech and their
-// wardrobe are protected; only the background may change.
+// F3.013 / FR-113 — a generative transformation example: a person filmed against a
+// controlled background, placed in another background described by the request.
+// The person, their speech and their wardrobe are protected; only the background may change.
 const transformationBriefRequestExample = {
   projectVersionId: 'project-version-medieval-01',
   storyPlanId: 'story-plan-medieval-01',
@@ -5966,13 +5965,13 @@ const transformationBriefRequestExample = {
   sourceArtifactHash: 'c'.repeat(64),
   sourceRange: { startFrame: 30, endFrame: 210 },
   intent: 'world-shift',
-  editorialIntent: 'Colocar o especialista numa vila medieval britânica para ilustrar gestão de tráfego medieval.',
+  editorialIntent: 'Intenção editorial de exemplo para a troca de fundo.',
   mode: 'background-replacement',
-  prompt: 'Medieval British village street at midday, packed earth road, timber-framed houses, market carts.',
-  negativeConstraints: ['no weapons', 'no crowd violence', 'no modern signage'],
+  prompt: 'Example background scene description.',
+  negativeConstraints: ['no logos', 'no on-screen text'],
   preserve: ['identity', 'lips', 'expression', 'body-motion', 'wardrobe', 'speech', 'foreground'],
   allowedChanges: ['background', 'ambient-light'],
-  target: { era: 'medieval', region: 'britain', timeOfDay: 'midday' },
+  target: { era: 'example-era', region: 'example-region', timeOfDay: 'midday' },
   outputSpecIds: ['output-spec-16x9-1080p'],
   intensityBps: 6_500,
   noveltyBps: 7_000,
@@ -6315,7 +6314,7 @@ const captureSessionExample = Object.freeze({
     actorKind: 'human',
     actorId: 'user-editor-1',
     occurredAt: '2029-04-01T09:21:00.000Z',
-    note: 'Card filled at 10:09:58; the recorder wrote a second file.',
+    note: 'Example operator note.',
   },
   staleDerivations: ['track-coverage', 'session-clock-map'],
   sessionHash: 'c'.repeat(64),
@@ -6883,7 +6882,7 @@ const w20MatchPlanOverriddenExample = addMulticamMatchRangeOverride(w20MatchPlan
     cameraId: 'camera-b',
     range: createTickInterval(w20Ticks(120), w20Ticks(180)),
     parameters: { brightness: 0.04, contrast: 1, saturation: 1 },
-    reason: 'The wide shot sits under the window; the practical behind the guest reads a third of a stop hotter there than anywhere else.',
+    reason: 'Example reason for the measured difference.',
     actor: { kind: 'human', id: 'user-colourist-1' },
   },
 })
@@ -7075,7 +7074,7 @@ const w20AnchoredPlaybackMapExample = applyPlaybackAnchor(w20PlaybackMapExample,
     referenceTick: w20Ticks(20),
     mode: 'playing',
     actorId: 'user-editor-1',
-    note: 'The player was off-screen here; the timecode in the corner reads 00:20 when it comes back.',
+    note: 'Example operator note.',
     createdAt: w20At(400),
   },
 })
@@ -9477,7 +9476,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         region: { x: 0.18, y: 0.12, width: 0.42, height: 0.28 },
         targetIds: [],
         screenshotRef: `data:image/jpeg;base64,${Buffer.from('apollo-review-frame').toString('base64')}`,
-        text: 'Reposicionar a legenda abaixo do rosto.',
+        text: 'Comentário de exemplo.',
       },
     ],
     'apollo://schemas/create-review-annotation-request/v2': [
@@ -9492,7 +9491,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         targetIds: [],
         applicationScope: { kind: 'scene', global: false },
         screenshotRef: `data:image/jpeg;base64,${Buffer.from('apollo-review-frame').toString('base64')}`,
-        text: 'Reposicionar a legenda abaixo do rosto.',
+        text: 'Comentário de exemplo.',
       },
     ],
     'apollo://schemas/project-review/v1': [
@@ -9520,7 +9519,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             scope: 'region',
             region: { x: 0.18, y: 0.12, width: 0.42, height: 0.28 },
             targetIds: [],
-            text: 'Reposicionar a legenda abaixo do rosto.',
+            text: 'Comentário de exemplo.',
             author: { id: clientId, name: 'Editor Apollo', type: 'api-client' },
             status: 'open',
             createdAt,
@@ -9577,7 +9576,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             targetIds: [],
             applicationScope: { kind: 'scene', targetIds: ['scene:clip-example-1'], formatIds: ['9:16'], localeIds: ['pt-BR'], recipeIds: ['project-final-export'], global: false },
             affectedCount: 1,
-            text: 'Reposicionar a legenda abaixo do rosto.',
+            text: 'Comentário de exemplo.',
             author: { id: clientId, name: 'Editor Apollo', type: 'api-client' },
             status: 'open',
             createdAt,
@@ -9640,7 +9639,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             scope: 'region',
             region: { x: 0.18, y: 0.12, width: 0.42, height: 0.28 },
             targetIds: [],
-            text: 'Reposicionar a legenda abaixo do rosto.',
+            text: 'Comentário de exemplo.',
             author: { id: clientId, name: 'Editor Apollo', type: 'api-client' },
             status: 'open',
             createdAt,
@@ -9666,7 +9665,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             targetIds: [],
             applicationScope: { kind: 'scene', targetIds: ['scene:clip-example-1'], formatIds: ['9:16'], localeIds: ['pt-BR'], recipeIds: ['project-final-export'], global: false },
             affectedCount: 1,
-            text: 'Reposicionar a legenda abaixo do rosto.',
+            text: 'Comentário de exemplo.',
             author: { id: clientId, name: 'Editor Apollo', type: 'api-client' },
             status: 'open',
             createdAt,
@@ -10820,7 +10819,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         objective: 'discovery',
         format: '9:16',
         locale: 'pt-BR',
-        briefing: 'Apresentar a ideia com ritmo natural e sem efeitos gratuitos.',
+        briefing: 'Briefing de exemplo.',
       },
     ],
     'apollo://schemas/project-created/v1': [
@@ -10960,7 +10959,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     'apollo://schemas/create-project-request/v3': [
       {
         name: 'Campanha de venda', objective: 'sale', format: '9:16', locale: 'pt-BR',
-        briefing: 'Apresentar a oferta com ritmo natural e sem efeitos gratuitos.',
+        briefing: 'Briefing de exemplo.',
         desiredAction: {
           destination: { type: 'url', value: 'https://checkout.example/oferta' },
           verbalCta: 'CTA falado de exemplo', visualCta: 'CTA visual de exemplo',
@@ -11780,7 +11779,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
           commandId: 'command-open-session-1',
           actorKind: 'human',
           actorId: 'user-editor-1',
-          note: 'Two cameras, one phone, one lav recorder.',
+          note: 'Example session note.',
         },
       },
     ],
@@ -11807,7 +11806,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
           commandId: 'command-add-phone-part-2',
           actorKind: 'human',
           actorId: 'user-editor-1',
-          note: 'Card filled at 10:09:58; the recorder wrote a second file.',
+          note: 'Example operator note.',
         },
       },
     ],
@@ -11820,7 +11819,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
           commandId: 'command-change-reference-1',
           actorKind: 'human',
           actorId: 'user-editor-1',
-          note: 'The lav recorder was the reference by mistake; the A camera has timecode.',
+          note: 'Example correction note.',
         },
       },
     ],
@@ -12141,7 +12140,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
                     confidence: 'high',
                     residualBoundTicks: '44',
                     openedBy: 'recorder-restart',
-                    openedByDetail: 'card full at 10:09:58; the recorder wrote a new file ten seconds later',
+                    openedByDetail: 'example detail of the opened gap',
                     anchorIds: ['anchor-phone-7', 'anchor-phone-8'],
                     evidenceRefs: ['probe-phone-fingerprint-2'],
                   },
@@ -15114,7 +15113,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         baseHash: w20Digest('1'),
         format: { aspectRatio: '16:9' },
         range: { sessionStartTicks: w20Ticks(1).toString(), sessionEndTicks: w20Ticks(300).toString() },
-        reason: 'Re-cut the panel across both cameras now that the second camera is synced.',
+        reason: 'Example reason for the new cut.',
       },
     ],
     'apollo://schemas/protect-multicam-selection-request/v1': [
@@ -15128,7 +15127,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             trackId: 'track-camera-b',
             sessionStartTicks: w20Ticks(60).toString(),
             sessionEndTicks: w20Ticks(90).toString(),
-            note: 'Hold on camera B through the demo: the scorer prefers the speaker, and the thing being demonstrated is on the other side of the table.',
+            note: 'Example note for the held shot.',
           },
         ],
       },
@@ -15174,7 +15173,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         baseHash: w20DirectionSessionExample.sessionHash,
         projectBaseVersionId: 'project-version-panel-8',
         projectBaseHash: w20DirectedProjectVersionExample.baseHash,
-        note: 'Camera A is the one lit for the guest; B is the wide.',
+        note: 'Example note about the cameras.',
       },
     ],
     'apollo://schemas/add-multicam-match-override-request/v1': [
@@ -15280,7 +15279,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
           reactionTick: ((w20PlaybackUncoveredExample.range.start + w20PlaybackUncoveredExample.range.end) / BigInt(2)).toString(),
           referenceTick: w20Ticks(20).toString(),
           mode: 'playing',
-          note: 'The player was off-screen here; the timecode in the corner reads 00:20 when it comes back.',
+          note: 'Example operator note.',
         },
       },
     ],

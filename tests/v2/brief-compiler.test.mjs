@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  BRIEF_COMPILER_GOLDEN_SET,
   briefCompilerService,
   parseBriefCompilation,
 } from '../../src/v2/application/compile-brief.ts'
+import { BRIEF_COMPILER_GOLDEN_SET } from './helpers/brief-compiler-goldens.mjs'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 
 function emptyFields(overrides = {}) { return { audience: [], offer: [], constraints: [], mustUse: [], avoid: [], tone: [], successCriteria: [], ...overrides } }

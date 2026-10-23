@@ -20,6 +20,7 @@ import {
 import { DomainError } from '../../domain/errors.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type Transaction = Prisma.TransactionClient
 
@@ -240,7 +241,7 @@ async function executeMutation<T extends DirectorBudgetMutationResult>(
     return await client.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
   } catch (error) {
     if (prismaCode(error, 'P2002') || prismaCode(error, 'P2034')) {
-      const replay = await replayFor(client, replayInput)
+      const replay = await reconcileAfterConflict(error, () => replayFor(client, replayInput))
       if (replay) return replay as T
       throw new DomainError('PERSISTENCE_CONFLICT', 'Director budget transaction conflicted and can be retried')
     }
@@ -286,7 +287,7 @@ export class PrismaDirectorBudgetRepository implements DirectorBudgetRepository 
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (prismaCode(error, 'P2002') || prismaCode(error, 'P2034')) {
-        const won = await replayFor(this.client, { ...input.state, command: input.command })
+        const won = await reconcileAfterConflict(error, () => replayFor(this.client, { ...input.state, command: input.command }))
         if (won) return won
         throw new DomainError('PERSISTENCE_CONFLICT', 'Director budget creation conflicted and can be retried')
       }
