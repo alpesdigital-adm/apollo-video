@@ -819,3 +819,29 @@ test('ADR-160: the audit sealed with a reading is checked against the text and t
   assert.throws(() => parseBriefInterpretationAudit({ ...real.audit, inputHash: 'b'.repeat(64) }, BRIEFING, real.interpretation), (error) => error.code === 'INVALID_ARGUMENT')
   assert.deepEqual(parseBriefInterpretationAudit(real.audit, BRIEFING, real.interpretation), real.audit)
 })
+
+test('ADR-160: the objective is optional; with none the Apollo presumes none, and a desired action (which belongs to an objective) is refused', async () => {
+  const none = createFixture()
+  const created = await none.service(request({ objective: undefined, briefing: 'alpha beta gamma' }))
+  assert.equal('objective' in created.projectAtCreation, false, 'the project states no objective')
+  const intent = created.bundle.command.payload.callerIntent
+  assert.equal(intent.objective, null)
+  assert.equal(intent.desiredAction, null, 'the kind of action is the objective\'s: there is none to give')
+  const brief = JSON.parse(none.repository.lastBundle.snapshots[0].contentJson)
+  assert.equal(brief.objective, null)
+  assert.equal(brief.desiredAction, null)
+  assert.equal(brief.productionBrief.ownerInput.text, 'alpha beta gamma', 'the briefing is kept as written')
+  // null and absent are the same request; a replay returns the stored result.
+  const replay = await none.service(request({ objective: null, briefing: 'alpha beta gamma' }))
+  assert.equal(replay.replayed, true)
+  // A desired action without an objective is refused, whatever it holds.
+  await assert.rejects(createFixture().service(request({ objective: undefined, desiredAction: { verbalCta: 'um texto' } })), (error) => error.code === 'INVALID_COMMAND')
+  // An empty desired action is no desired action.
+  assert.equal((await createFixture().service(request({ objective: undefined, desiredAction: {} }))).bundle.command.payload.callerIntent.desiredAction, null)
+  // With an objective everything is as it was.
+  const withObjective = await createFixture().service(request())
+  assert.equal(withObjective.projectAtCreation.objective, 'discovery')
+  assert.equal(withObjective.bundle.command.payload.callerIntent.desiredAction.kind, 'continue-viewing')
+  // The request hash of "none" differs from the request of any objective.
+  assert.notEqual(created.bundle.command.requestFingerprint, withObjective.bundle.command.requestFingerprint)
+})

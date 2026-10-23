@@ -117,10 +117,12 @@ test('the published batch does not carry its stored request, and the contract as
   return service(memoryRepository(), stubModel())(request()).then(({ batch }) => {
     assert.equal('editorialRequest' in presentProductionBatchV2(batch), false)
     const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.batches.create')
-    assert.equal(capability.version, '3.0.0')
-    assert.equal(capability.inputSchemaRef, 'apollo://schemas/create-production-batch-request/v2')
-    const schema = getPublicSchema('apollo://schemas/create-production-batch-request/v2')
+    assert.equal(capability.version, '4.0.0')
+    assert.equal(capability.inputSchemaRef, 'apollo://schemas/create-production-batch-request/v3')
+    const schema = getPublicSchema('apollo://schemas/create-production-batch-request/v3')
     assert.ok(schema.schema.required.includes('briefing'))
+    assert.equal(schema.schema.required.includes('objective'), false, 'the objective is optional: the Apollo presumes none')
+    assert.equal(getPublicSchema('apollo://schemas/create-production-batch-request/v2').schema.required.includes('objective'), true)
     assert.equal(getPublicSchema('apollo://schemas/create-production-batch-request/v1').schema.required.includes('briefing'), false)
     assert.match(JSON.stringify(publicSchemaExamples(schema)), /<texto do pedido>/)
     assert.throws(() => parseCreateProductionBatchBody(body()), (error) => error.code === 'INVALID_ARGUMENT')
@@ -164,4 +166,25 @@ test('the request of a batch is read through its own capability: briefing, readi
     assert.equal(validate(JSON.parse(JSON.stringify(value))), true, JSON.stringify(validate.errors)?.slice(0, 600))
   }
   for (const example of publicSchemaExamples(schema)) assert.equal(validate(example), true, JSON.stringify(validate.errors)?.slice(0, 600))
+})
+
+test('ADR-160: a batch may be created with no objective; the Apollo presumes none and the batch hashes without the key', async () => {
+  const withObjective = await service(memoryRepository(), stubModel())(request())
+  const { objective: _omitted, ...fields } = parseCreateProductionBatchBody(body({ briefing: BRIEFING }))
+  void _omitted
+  const created = await service(memoryRepository(), stubModel())({ workspaceId: 'workspace-fixture', ...fields, actor: actor(), idempotencyKey: 'batch-briefing-none' })
+  assert.equal('objective' in created.batch, false)
+  assert.notEqual(created.batch.definitionHash, withObjective.batch.definitionHash)
+  assert.equal(hydrateProductionBatch(JSON.parse(JSON.stringify(created.batch))).definitionHash, created.batch.definitionHash)
+  assert.equal(parseCreateProductionBatchBody(body({ briefing: BRIEFING })).objective, 'content-distribution')
+  assert.equal('objective' in parseCreateProductionBatchBody((() => { const { objective: _o, ...rest } = body({ briefing: BRIEFING }); void _o; return rest })()), false)
+})
+
+test('ADR-160: a step that judges against an objective takes it from the batch, or from its own request when the batch has none; never both different, never presumed', async () => {
+  const { objectiveOf } = await import('../../src/v2/application/variant-recipes.ts')
+  assert.equal(objectiveOf('lead-generation', undefined), 'lead-generation')
+  assert.equal(objectiveOf('lead-generation', 'lead-generation'), 'lead-generation')
+  assert.equal(objectiveOf(undefined, 'sale'), 'sale')
+  assert.throws(() => objectiveOf('lead-generation', 'sale'), (error) => error.code === 'INVALID_ARGUMENT')
+  assert.throws(() => objectiveOf(undefined, undefined), (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'objective-required')
 })

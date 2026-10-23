@@ -3154,6 +3154,10 @@ export default function ProjectWorkspacePage() {
   }
 
   async function runDirector() {
+    if (workspace?.version && !workspace.project.objective) {
+      setNotice('Este projeto foi criado sem objetivo, e o Apollo não presume um. O Diretor julga o resultado contra o objetivo do projeto, então ele espera: o que não depende de objetivo segue funcionando.')
+      return
+    }
     if (!workspace?.version || !workspace.project.objective || workspace.editPlan?.state !== 'compiled' || !transcript) {
       setNotice('O Diretor V2 precisa do corte editorial compilado e da transcrição alinhada.')
       return

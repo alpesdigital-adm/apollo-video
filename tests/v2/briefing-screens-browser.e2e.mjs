@@ -54,6 +54,7 @@ async function stop(child) {
 const PROJECT_BRIEFING = 'texto do pedido do projeto de teste'
 const CREATED_BRIEFING = 'briefing de uma linha do projeto novo'
 const BATCH_BRIEFING = 'texto do pedido do lote de teste'
+const BATCH_BRIEFING_CHANGED = 'novo texto do lote depois da resposta'
 
 const enabled = process.env.APOLLO_BRIEFING_SCREENS_E2E === '1'
 
@@ -81,6 +82,7 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
         questions: [{ question: 'Qual é o idioma da fala?', quote: 'linha' }],
         coverage: [{ topic: 'audience', quote: 'projeto' }],
       },
+      [BATCH_BRIEFING_CHANGED]: { directives: [], unsupported: [], questions: [], coverage: [{ topic: 'audience', quote: 'texto' }] },
       [BATCH_BRIEFING]: {
         directives: [{ kind: 'movement', value: 'zoom-in', param: null, quote: 'lote' }],
         unsupported: [],
@@ -183,6 +185,8 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     const dialog = page.getByRole('dialog')
     await dialog.waitFor({ state: 'visible' })
     assert.equal(await dialog.locator('button[aria-pressed="true"]').count(), 0, 'no objective is pre-selected')
+    assert.match(await dialog.getByTestId('project-objective-none').textContent(), /o Apollo não presume um/)
+    assert.match(await dialog.textContent(), /Se não escolher, o Apollo não presume um objetivo/)
     assert.equal(await dialog.locator('select').inputValue(), '', 'the language is empty by default')
     assert.match(await dialog.textContent(), /Se você não informar, o Apollo detecta o idioma pela fala/)
     assert.equal(await dialog.getByText(/Formato de saída/).count(), 0, 'no format is chosen here')
@@ -196,16 +200,20 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     assert.equal(await dialog.locator('input[placeholder^="Ex."]').count(), 0, 'no example placeholder')
     await shot('01-projeto-novo-vazio.png')
 
-    // The briefing is required and any text is valid: the objective too is the owner's choice, and nothing is sent before both exist.
+    // Every field that is wrong is told at once, the first one gets the focus, and nothing is sent. The objective is optional: nothing asks for it.
+    await dialog.getByRole('button', { name: 'Criar e continuar' }).click()
+    await dialog.locator('#project-name-error').waitFor()
+    await dialog.locator('#project-briefing-error').waitFor()
+    assert.match(await dialog.locator('#project-name-error').textContent(), /pelo menos 2 caracteres/)
+    assert.match(await dialog.locator('#project-briefing-error').textContent(), /Escreva o briefing/)
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'project-name', 'the first invalid field has the focus')
+    assert.equal(await dialog.getByTestId('project-composer-notice').count(), 0, 'no generic notice: the errors are on the fields')
     await dialog.getByLabel('Nome da produção').fill('Projeto do teste de tela')
     await dialog.getByRole('button', { name: 'Criar e continuar' }).click()
-    await dialog.getByTestId('project-composer-notice').waitFor()
-    assert.match(await dialog.getByTestId('project-composer-notice').textContent(), /Escolha o que este vídeo precisa provocar/)
-    await dialog.locator('fieldset button[aria-pressed]').first().click()
-    await dialog.getByRole('button', { name: 'Criar e continuar' }).click()
     await dialog.locator('#project-briefing-error').waitFor()
-    assert.match(await dialog.locator('#project-briefing-error').textContent(), /Escreva o briefing/)
+    assert.equal(await dialog.locator('#project-name-error').count(), 0)
     assert.equal(await briefingField.getAttribute('aria-invalid'), 'true')
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'project-briefing')
     assert.equal(posts.filter((path) => path === '/v1/projects').length, 0, 'nothing was sent without a briefing')
     await shot('02-projeto-briefing-obrigatorio.png')
 
@@ -216,6 +224,9 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     await dialog.getByTestId('project-created-step').waitFor()
     const freshBlock = dialog.getByTestId('editorial-request-block')
     await dialog.getByTestId('editorial-request-questions').waitFor({ timeout: 60_000 })
+    // The project has no output yet: the briefing cannot be read again or changed from here, and the screen says why.
+    assert.match(await dialog.getByTestId('editorial-request-needs-output-note').textContent(), /ainda não tem um vídeo e uma saída/)
+    assert.equal(await dialog.getByRole('button', { name: 'Mudar o briefing' }).isDisabled(), true)
     assert.equal(await freshBlock.getAttribute('data-blocks-director'), 'true')
     assert.match(await freshBlock.textContent(), /O Diretor está bloqueado até você responder a pergunta/)
     assert.match(await dialog.getByTestId('editorial-request-briefing').textContent(), /briefing de uma linha do projeto novo/)
@@ -228,6 +239,7 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     const created = projects.data.projects.find((project) => project.name === 'Projeto do teste de tela')
     assert.ok(created, 'the project exists')
     assert.equal(created.locale, undefined, 'the project states no language: none was chosen')
+    assert.equal(created.objective, undefined, 'the project states no objective: none was chosen, and the Apollo presumes none')
     const stored = await (await fetch(`${baseUrl}/v1/projects/${created.id}/editorial-request`, { headers: { authorization } })).json()
     assert.equal(stored.data.state, 'interpreted')
     assert.equal(stored.data.request.briefing.text, CREATED_BRIEFING, 'the text is saved exactly as written')
@@ -329,6 +341,37 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     assert.match(await page.getByTestId('batch-request-unsupported').textContent(), /O Apollo entendeu, mas ainda não consegue executar este pedido/)
     await section.scrollIntoViewIfNeeded()
     await shot('09-lotes-pedido-do-lote.png')
+
+    // The request of the batch blocks its generation, and the owner answers it and changes its briefing on this screen.
+    const batchId = batchPayload.data.batch.id
+    const requestBlock = page.getByTestId('batch-request-block')
+    assert.equal(await requestBlock.getAttribute('data-blocks-generation'), 'true')
+    assert.match(await requestBlock.textContent(), /O lote não será gerado enquanto isto não for resolvido/)
+    const startItem = (key) => fetch(`${baseUrl}/v1/batches/${batchId}/items/${batchPayload.data.batch.items[0].id}/actions`, {
+      method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': key },
+      body: JSON.stringify({ action: 'start-step', step: 'planning', expectedBatchRevision: batchPayload.data.batch.revision, expectedItemRevision: batchPayload.data.batch.items[0].revision }),
+    })
+    const refusedStart = await startItem(`batch-start-refused-${fixture.suffix}`)
+    assert.equal(refusedStart.status, 428)
+    assert.equal((await refusedStart.json()).error.details.reason, 'editorial-request-blocked')
+    await shot('15-lotes-pedido-bloqueia-a-geracao.png')
+    await page.locator('#answer-q1').fill('Português do Brasil.')
+    await page.getByTestId('batch-request-send-answers').click()
+    await page.getByTestId('batch-request-answered').waitFor()
+    assert.match(await page.getByTestId('batch-request-answered').textContent(), /Sua resposta: Português do Brasil./)
+    assert.equal(await requestBlock.getAttribute('data-blocks-generation'), 'true', 'the zoom is still something the Apollo does not do')
+    assert.match(await page.getByTestId('batch-request-unsupported').textContent(), /Zoom (o Apollo ainda não aplica zoom)/)
+    await shot('16-lotes-pedido-respondido-ainda-bloqueado.png')
+    await page.getByTestId('batch-request-change').click()
+    await page.getByTestId('batch-request-draft').fill(BATCH_BRIEFING_CHANGED)
+    await page.getByTestId('batch-request-save').click()
+    await page.locator('[data-testid="batch-request-block"][data-blocks-generation="false"]').waitFor({ timeout: 60_000 })
+    assert.match(await page.getByTestId('batch-request-briefing').textContent(), /novo texto do lote depois da resposta/)
+    assert.match(await page.getByTestId('batch-request-revision').textContent(), /2 vezes/)
+    assert.equal(fake.calls.filter((call) => call.briefing === BATCH_BRIEFING_CHANGED).length, 1, 'the new briefing was read once')
+    await shot('17-lotes-pedido-liberado.png')
+    const released = await startItem(`batch-start-released-${fixture.suffix}`)
+    assert.equal(released.status, 201, JSON.stringify(await released.json()))
   } catch (error) {
     if (shots) {
       const visible = await page?.locator('body').innerText().catch(() => '(page text unavailable)')

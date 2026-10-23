@@ -380,6 +380,8 @@ export function interpretBriefService(dependencies: InterpretBriefDependencies) 
       // A refusal the adapter typed stays as it is. Anything else (a timeout, an abort, a network error, a defect in the adapter) is a reading that
       // was not made: it fails closed with a typed, published reason and never as an untyped server error.
       if (error instanceof DomainError) throw error
+      // The caller who gave up is not an interpreter that failed: their own reason goes back to them.
+      if (input.signal?.aborted) throw error
       throw new DomainError('PRECONDITION_REQUIRED', 'The brief interpreter did not answer, so the briefing was not read', { reason: BRIEF_INTERPRETATION_FAILED_REASON })
     }
     const interpreter = Object.freeze({ provider: model.provider, model: model.model, promptVersion })

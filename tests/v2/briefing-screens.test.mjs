@@ -247,7 +247,7 @@ test('the path picker announces that the objective requires a proof BEFORE the o
     assert.ok(picker.includes(piece), piece)
   }
   const batch = source('src/app/batches/page.tsx')
-  for (const piece of ['proofRequired={batchObjectiveRequiresProof}', 'ownerConfirmationAssumptions(variantRecipeLinks, confirmedLinks)', 'disabled={busy || !variantRecipePath || variantRecipeLinksKeepingBack.length > 0}', 'data-testid="portfolio-needs-owner-links"']) {
+  for (const piece of ['proofRequired={batchObjectiveRequiresProof}', 'ownerConfirmationAssumptions(variantRecipeLinks, confirmedLinks)', 'disabled={busy || !variantRecipePath || variantRecipeLinksKeepingBack.length > 0 || stepNeedsObjective}', 'data-testid="portfolio-needs-owner-links"']) {
     assert.ok(batch.includes(piece), piece)
   }
   assert.match(batch, /data-testid="portfolio-needs-owner-links"/)
