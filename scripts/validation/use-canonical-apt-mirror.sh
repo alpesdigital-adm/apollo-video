@@ -8,8 +8,10 @@
 set -euo pipefail
 
 # The Canonical archive carries every suite the image lists (release, updates, backports and security), so only the host changes.
+# The runner image lists its sources as `URIs: mirror+file:/etc/apt/apt-mirrors.txt`, so the Azure host lives in that mirror list
+# rather than in the sources files; both places are rewritten.
 changed=0
-for file in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+for file in /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$file" ] || continue
   if grep -q 'azure\.archive\.ubuntu\.com' "$file"; then
     sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g' "$file"
@@ -26,3 +28,9 @@ printf '%s\n' \
 
 echo "apt sources rewritten to the Canonical archive in ${changed} file(s)"
 grep -h -E '^(deb |URIs:)' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null | sort -u || true
+[ -f /etc/apt/apt-mirrors.txt ] && sed -n '1,5p' /etc/apt/apt-mirrors.txt
+# Nothing left pointing at the Azure mirror: a layout this script does not know fails here instead of silently keeping the slow host.
+if grep -rqs 'azure\.archive\.ubuntu\.com' /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/; then
+  echo 'apt still points at azure.archive.ubuntu.com after the rewrite' >&2
+  exit 1
+fi
