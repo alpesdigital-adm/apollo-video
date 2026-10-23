@@ -5,6 +5,7 @@ import {
   type V2ProductionBatchItem,
   type V2ProductionBatchItemArtifact,
   type V2ProductionBatchAction,
+  type V2ProductionBatchRequestRevision,
   type V2ProductionBatchRetryJob,
   type V2ProductionBatchStep,
 } from '../../../../generated/prisma-v2/index.js'
@@ -17,6 +18,9 @@ import type {
   ProductionBatchPartialRetryReplay,
   ProductionBatchReplay,
   ProductionBatchRepository,
+  ProductionBatchRequestRevision,
+  ProductionBatchRequestRevisionRecord,
+  ProductionBatchRequestRevisionReplay,
 } from '../../application/ports/production-batch-repository.ts'
 import {
   productionBatchItemOperationId,
@@ -39,6 +43,7 @@ import {
   batchProgress,
   deriveBatchStatus,
   hydrateProductionBatch,
+  sealedBatchEditorialRequest,
   type BatchItem,
   type BatchItemStep,
   type ProductionBatch,
@@ -78,6 +83,21 @@ const batchInclude = {
 const partialRetryActionInclude = {
   retryJobs: true,
 } satisfies Prisma.V2ProductionBatchActionInclude
+
+function hydrateRequestRevision(row: V2ProductionBatchRequestRevision): Readonly<ProductionBatchRequestRevision> {
+  const stored = canonicalJson<ProductionBatchEditorialRequest>(row.briefingJson, 'production batch request revision')
+  const editorialRequest = sealedBatchEditorialRequest(stored)
+  if (editorialRequest.request.requestHash !== row.requestHash) {
+    throw new DomainError('PERSISTENCE_CONFLICT', `Stored request revision ${row.id} has an inconsistent hash`)
+  }
+  return Object.freeze({
+    id: row.id, workspaceId: row.workspaceId, batchId: row.batchId, sequence: row.sequence,
+    previousRequestHash: row.previousRequestHash,
+    editorialRequest,
+    change: canonicalJson<Record<string, unknown>>(row.changeJson, 'production batch request revision change'),
+    createdAt: row.createdAt.toISOString(),
+  })
+}
 
 function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' &&
@@ -956,6 +976,98 @@ implements ProductionBatchRepository {
         ? { nextCursor: retries.at(-1)!.id }
         : {}),
     })
+  }
+
+  async readCurrentEditorialRequest(input: { workspaceId: string; batchId: string }): Promise<Readonly<ProductionBatchRequestRevision> | null> {
+    const row = await this.prisma.v2ProductionBatchRequestRevision.findFirst({
+      where: { workspaceId: input.workspaceId, batchId: input.batchId },
+      orderBy: { sequence: 'desc' },
+    })
+    return row ? hydrateRequestRevision(row) : null
+  }
+
+  async findRequestRevisionReplay(input: {
+    workspaceId: string
+    actorClientId: string
+    actorContextHash: string
+    idempotencyKey: string
+  }): Promise<Readonly<ProductionBatchRequestRevisionReplay> | null> {
+    const row = await this.prisma.v2ProductionBatchRequestRevision.findFirst({
+      where: { workspaceId: input.workspaceId, actorClientId: input.actorClientId, idempotencyKey: input.idempotencyKey },
+    })
+    if (!row) return null
+    if (hydrateBatchActorAudit(row, row.actorClientId).contextHash !== input.actorContextHash) {
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+    }
+    return Object.freeze({ revision: hydrateRequestRevision(row), requestFingerprint: row.requestFingerprint })
+  }
+
+  async persistRequestRevision(
+    record: Readonly<ProductionBatchRequestRevisionRecord>,
+    attempt = 1,
+  ): Promise<Readonly<{ revision: Readonly<ProductionBatchRequestRevision>; replayed: boolean }>> {
+    const sealed = sealedBatchEditorialRequest(record.editorialRequest)
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        const replay = await transaction.v2ProductionBatchRequestRevision.findFirst({
+          where: { workspaceId: record.workspaceId, actorClientId: record.actorClientId, idempotencyKey: record.idempotencyKey },
+        })
+        if (replay) {
+          if (hydrateBatchActorAudit(replay, replay.actorClientId).contextHash !== record.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+          }
+          if (replay.requestFingerprint !== record.requestFingerprint) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different editorial request revision')
+          }
+          return Object.freeze({ revision: hydrateRequestRevision(replay), replayed: true })
+        }
+        const batchRow = await transaction.v2ProductionBatch.findFirst({
+          where: { id: record.batchId, workspaceId: record.workspaceId },
+          select: { id: true, requestHash: true },
+        })
+        if (!batchRow) throw new DomainError('PRODUCTION_BATCH_NOT_FOUND', 'Production batch was not found')
+        const latest = await transaction.v2ProductionBatchRequestRevision.findFirst({
+          where: { workspaceId: record.workspaceId, batchId: record.batchId },
+          orderBy: { sequence: 'desc' },
+          select: { sequence: true, requestHash: true },
+        })
+        const currentHash = latest?.requestHash ?? batchRow.requestHash ?? null
+        if (currentHash !== record.previousRequestHash || (latest?.sequence ?? 0) + 1 !== record.sequence) {
+          throw new DomainError('VERSION_CONFLICT', 'The request of the batch changed before this revision was committed')
+        }
+        const created = await transaction.v2ProductionBatchRequestRevision.create({
+          data: {
+            id: record.id, workspaceId: record.workspaceId, batchId: record.batchId, sequence: record.sequence,
+            previousRequestHash: record.previousRequestHash,
+            requestHash: sealed.request.requestHash,
+            briefingJson: stableSerialize(sealed),
+            changeJson: stableSerialize(record.change),
+            requestFingerprint: record.requestFingerprint,
+            idempotencyKey: record.idempotencyKey,
+            actorClientId: record.actorClientId,
+            ...batchActorAuditData(record.authenticationAudit, record.workspaceId, record.actorClientId),
+            createdAt: new Date(record.createdAt),
+          },
+        })
+        return Object.freeze({ revision: hydrateRequestRevision(created), replayed: false })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      if (isPrismaCode(error, 'P2034') && attempt < 3) return this.persistRequestRevision(record, attempt + 1)
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(error, () => this.findRequestRevisionReplay({
+          workspaceId: record.workspaceId, actorClientId: record.actorClientId,
+          actorContextHash: record.authenticationAudit.contextHash, idempotencyKey: record.idempotencyKey,
+        }))
+        if (replay) {
+          if (replay.requestFingerprint !== record.requestFingerprint) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different editorial request revision')
+          }
+          return Object.freeze({ revision: replay.revision, replayed: true })
+        }
+        throw new DomainError('VERSION_CONFLICT', 'The request of the batch changed before this revision was committed')
+      }
+      throw error
+    }
   }
 
   async persistAction(

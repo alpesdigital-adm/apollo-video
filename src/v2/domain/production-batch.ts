@@ -420,6 +420,8 @@ export function sealedBatchEditorialRequest(value: unknown): Readonly<Production
   const request = createEditorialRequest({
     briefing: stored.request!.briefing!.text,
     ...(stored.request!.interpretation ? { interpretation: stored.request!.interpretation } : {}),
+    // The choices the owner made about the questions of the reading are the directives of the request; a batch that never had one stores none.
+    ...(stored.request!.directives && stored.request!.directives.length > 0 ? { directives: stored.request!.directives } : {}),
   })
   assertDomain(request.requestHash === stored.request!.requestHash, 'PERSISTENCE_CONFLICT', 'Stored production batch request hash is inconsistent')
   return Object.freeze({ request, interpretationAudit: stored.interpretationAudit ? Object.freeze({ ...stored.interpretationAudit }) : null })

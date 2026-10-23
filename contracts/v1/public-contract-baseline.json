@@ -811,14 +811,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.batches.editorial-request.read": {
-      "version": "2.0.0",
+      "version": "1.0.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "projects:read"
       ],
-      "outputSchemaRef": "apollo://schemas/batch-editorial-request-response/v2",
+      "outputSchemaRef": "apollo://schemas/batch-editorial-request-response/v1",
       "endpoint": {
         "method": "GET",
         "path": "/v1/batches/{batchId}/editorial-request"
@@ -831,6 +831,32 @@
         200
       ],
       "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.batches.editorial-request.revise": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/batch-editorial-request-revise-request/v1",
+      "outputSchemaRef": "apollo://schemas/batch-editorial-request-revised/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/batches/{batchId}/editorial-request"
+      },
+      "toolName": "apollo.batches.editorial-request.revise",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
     "apollo.batches.items.actions.apply": {
@@ -24829,960 +24855,9 @@
             "interpretationAudit",
             "unsupported",
             "openQuestions",
-            "hashes"
-          ],
-          "properties": {
-            "batch": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "id",
-                "projectId",
-                "name"
-              ],
-              "properties": {
-                "id": {
-                  "type": "string",
-                  "minLength": 3,
-                  "maxLength": 128
-                },
-                "projectId": {
-                  "type": "string",
-                  "minLength": 3,
-                  "maxLength": 128
-                },
-                "name": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 200
-                }
-              }
-            },
-            "state": {
-              "enum": [
-                "no-request",
-                "interpreted"
-              ]
-            },
-            "request": {
-              "anyOf": [
-                {
-                  "type": "null"
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "schemaVersion",
-                    "directives",
-                    "variantOverrides",
-                    "requestHash"
-                  ],
-                  "properties": {
-                    "schemaVersion": {
-                      "const": "editorial-request/v1"
-                    },
-                    "briefing": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "text",
-                        "sha256"
-                      ],
-                      "properties": {
-                        "text": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 10000
-                        },
-                        "sha256": {
-                          "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
-                        }
-                      }
-                    },
-                    "objective": {
-                      "enum": [
-                        "discovery",
-                        "awareness",
-                        "warming",
-                        "lead-generation",
-                        "sale",
-                        "whatsapp",
-                        "booking",
-                        "download"
-                      ]
-                    },
-                    "desiredAction": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "schemaVersion",
-                        "kind",
-                        "disclosures"
-                      ],
-                      "properties": {
-                        "schemaVersion": {
-                          "const": 1
-                        },
-                        "kind": {
-                          "enum": [
-                            "continue-viewing",
-                            "submit-lead",
-                            "buy",
-                            "message-whatsapp",
-                            "book",
-                            "download"
-                          ]
-                        },
-                        "destination": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "type",
-                            "value"
-                          ],
-                          "properties": {
-                            "type": {
-                              "enum": [
-                                "url",
-                                "handle",
-                                "whatsapp",
-                                "calendar",
-                                "file"
-                              ]
-                            },
-                            "value": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 2048
-                            }
-                          }
-                        },
-                        "verbalCta": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 160
-                        },
-                        "visualCta": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 160
-                        },
-                        "disclosures": {
-                          "type": "array",
-                          "maxItems": 12,
-                          "uniqueItems": true,
-                          "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 300
-                          }
-                        }
-                      }
-                    },
-                    "directives": {
-                      "type": "array",
-                      "maxItems": 64,
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "id",
-                          "kind",
-                          "value"
-                        ],
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                          },
-                          "kind": {
-                            "enum": [
-                              "movement",
-                              "opening",
-                              "structure",
-                              "cta",
-                              "layout",
-                              "caption-language",
-                              "caption-style",
-                              "keep",
-                              "avoid"
-                            ]
-                          },
-                          "value": {
-                            "enum": [
-                              "none",
-                              "punch-in",
-                              "zoom-in",
-                              "zoom-out",
-                              "pan",
-                              "tilt",
-                              "parallax",
-                              "protect-first-sentence",
-                              "protect-seconds",
-                              "source-order",
-                              "hook-first",
-                              "verbal-only",
-                              "overlay-closing",
-                              "overlay-at-spoken-cta",
-                              "overlay-whole-video",
-                              "overlay-from-seconds",
-                              "source-native",
-                              "fit-with-backdrop",
-                              "fill-crop",
-                              "set",
-                              "kinetic",
-                              "karaoke-box",
-                              "karaoke-pill",
-                              "caps-stroke",
-                              "clean-color",
-                              "subject"
-                            ]
-                          },
-                          "param": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              {
-                                "type": "number",
-                                "exclusiveMinimum": 0,
-                                "maximum": 30
-                              }
-                            ]
-                          }
-                        }
-                      }
-                    },
-                    "variantOverrides": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "array",
-                        "maxItems": 64,
-                        "items": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "id",
-                            "kind",
-                            "value"
-                          ],
-                          "properties": {
-                            "id": {
-                              "type": "string",
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                            },
-                            "kind": {
-                              "enum": [
-                                "movement",
-                                "opening",
-                                "structure",
-                                "cta",
-                                "layout",
-                                "caption-language",
-                                "caption-style",
-                                "keep",
-                                "avoid"
-                              ]
-                            },
-                            "value": {
-                              "enum": [
-                                "none",
-                                "punch-in",
-                                "zoom-in",
-                                "zoom-out",
-                                "pan",
-                                "tilt",
-                                "parallax",
-                                "protect-first-sentence",
-                                "protect-seconds",
-                                "source-order",
-                                "hook-first",
-                                "verbal-only",
-                                "overlay-closing",
-                                "overlay-at-spoken-cta",
-                                "overlay-whole-video",
-                                "overlay-from-seconds",
-                                "source-native",
-                                "fit-with-backdrop",
-                                "fill-crop",
-                                "set",
-                                "kinetic",
-                                "karaoke-box",
-                                "karaoke-pill",
-                                "caps-stroke",
-                                "clean-color",
-                                "subject"
-                              ]
-                            },
-                            "param": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 200
-                                },
-                                {
-                                  "type": "number",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 30
-                                }
-                              ]
-                            }
-                          }
-                        }
-                      }
-                    },
-                    "requestHash": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    }
-                  }
-                }
-              ]
-            },
-            "interpretation": {
-              "anyOf": [
-                {
-                  "type": "null"
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "schemaVersion",
-                    "briefingSha256",
-                    "interpreter",
-                    "directives",
-                    "unsupported",
-                    "questions",
-                    "interpretationHash"
-                  ],
-                  "properties": {
-                    "schemaVersion": {
-                      "const": "brief-interpretation/v1"
-                    },
-                    "briefingSha256": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "interpreter": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "provider",
-                        "model",
-                        "promptVersion"
-                      ],
-                      "properties": {
-                        "provider": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "model": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "promptVersion": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        }
-                      }
-                    },
-                    "directives": {
-                      "type": "array",
-                      "maxItems": 64,
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "id",
-                          "kind",
-                          "value",
-                          "excerpt"
-                        ],
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                          },
-                          "kind": {
-                            "enum": [
-                              "movement",
-                              "opening",
-                              "structure",
-                              "cta",
-                              "layout",
-                              "caption-language",
-                              "caption-style",
-                              "keep",
-                              "avoid"
-                            ]
-                          },
-                          "value": {
-                            "enum": [
-                              "none",
-                              "punch-in",
-                              "zoom-in",
-                              "zoom-out",
-                              "pan",
-                              "tilt",
-                              "parallax",
-                              "protect-first-sentence",
-                              "protect-seconds",
-                              "source-order",
-                              "hook-first",
-                              "verbal-only",
-                              "overlay-closing",
-                              "overlay-at-spoken-cta",
-                              "overlay-whole-video",
-                              "overlay-from-seconds",
-                              "source-native",
-                              "fit-with-backdrop",
-                              "fill-crop",
-                              "set",
-                              "kinetic",
-                              "karaoke-box",
-                              "karaoke-pill",
-                              "caps-stroke",
-                              "clean-color",
-                              "subject"
-                            ]
-                          },
-                          "param": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              {
-                                "type": "number",
-                                "exclusiveMinimum": 0,
-                                "maximum": 30
-                              }
-                            ]
-                          },
-                          "excerpt": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "start",
-                              "end",
-                              "text"
-                            ],
-                            "properties": {
-                              "start": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "end": {
-                                "type": "integer",
-                                "minimum": 1
-                              },
-                              "text": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 10000
-                              }
-                            }
-                          }
-                        }
-                      }
-                    },
-                    "unsupported": {
-                      "type": "array",
-                      "maxItems": 64,
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "id",
-                          "excerpt",
-                          "summary",
-                          "reason"
-                        ],
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                          },
-                          "excerpt": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "start",
-                              "end",
-                              "text"
-                            ],
-                            "properties": {
-                              "start": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "end": {
-                                "type": "integer",
-                                "minimum": 1
-                              },
-                              "text": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 10000
-                              }
-                            }
-                          },
-                          "summary": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 500
-                          },
-                          "reason": {
-                            "enum": [
-                              "outside-vocabulary",
-                              "not-executable"
-                            ]
-                          }
-                        }
-                      }
-                    },
-                    "questions": {
-                      "type": "array",
-                      "maxItems": 64,
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "id",
-                          "question",
-                          "status"
-                        ],
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                          },
-                          "question": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 500
-                          },
-                          "excerpt": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "start",
-                              "end",
-                              "text"
-                            ],
-                            "properties": {
-                              "start": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "end": {
-                                "type": "integer",
-                                "minimum": 1
-                              },
-                              "text": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 10000
-                              }
-                            }
-                          },
-                          "status": {
-                            "enum": [
-                              "open",
-                              "answered"
-                            ]
-                          },
-                          "answer": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 500
-                          }
-                        }
-                      }
-                    },
-                    "coverage": {
-                      "type": "array",
-                      "minItems": 1,
-                      "maxItems": 3,
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "topic",
-                          "excerpt"
-                        ],
-                        "properties": {
-                          "topic": {
-                            "enum": [
-                              "audience",
-                              "offer",
-                              "tone"
-                            ]
-                          },
-                          "excerpt": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "start",
-                              "end",
-                              "text"
-                            ],
-                            "properties": {
-                              "start": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "end": {
-                                "type": "integer",
-                                "minimum": 1
-                              },
-                              "text": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 10000
-                              }
-                            }
-                          }
-                        }
-                      }
-                    },
-                    "interpretationHash": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    }
-                  }
-                }
-              ]
-            },
-            "interpretationAudit": {
-              "anyOf": [
-                {
-                  "type": "null"
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "schemaVersion",
-                    "provider",
-                    "model",
-                    "resolvedModel",
-                    "providerVersion",
-                    "promptVersion",
-                    "promptHash",
-                    "inputHash",
-                    "modelInputHash",
-                    "responseHash",
-                    "usage",
-                    "costBasis",
-                    "costMinorUnits",
-                    "signals",
-                    "directivesMovedToUnsupported",
-                    "directivesWithdrawnAsAmbiguous"
-                  ],
-                  "properties": {
-                    "schemaVersion": {
-                      "const": "brief-interpretation-audit/v1"
-                    },
-                    "provider": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128
-                    },
-                    "model": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128
-                    },
-                    "resolvedModel": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "providerVersion": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "costBasis": {
-                      "enum": [
-                        "api-metered",
-                        "subscription"
-                      ]
-                    },
-                    "promptVersion": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128
-                    },
-                    "promptHash": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "inputHash": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "modelInputHash": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "responseHash": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "usage": {
-                      "anyOf": [
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "inputTokens",
-                            "outputTokens"
-                          ],
-                          "properties": {
-                            "inputTokens": {
-                              "type": "integer",
-                              "minimum": 0
-                            },
-                            "outputTokens": {
-                              "type": "integer",
-                              "minimum": 0
-                            }
-                          }
-                        }
-                      ]
-                    },
-                    "costMinorUnits": {
-                      "anyOf": [
-                        {
-                          "type": "integer",
-                          "minimum": 0
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "signals": {
-                      "type": "array",
-                      "maxItems": 16,
-                      "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 128
-                      }
-                    },
-                    "directivesMovedToUnsupported": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "directivesWithdrawnAsAmbiguous": {
-                      "type": "integer",
-                      "minimum": 0
-                    }
-                  }
-                }
-              ]
-            },
-            "unsupported": {
-              "type": "array",
-              "maxItems": 192,
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "id",
-                  "source",
-                  "reason",
-                  "summary",
-                  "excerpt"
-                ],
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                  },
-                  "source": {
-                    "enum": [
-                      "interpretation",
-                      "directive"
-                    ]
-                  },
-                  "reason": {
-                    "enum": [
-                      "outside-vocabulary",
-                      "not-executable"
-                    ]
-                  },
-                  "summary": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
-                  },
-                  "excerpt": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                }
-              }
-            },
-            "openQuestions": {
-              "type": "array",
-              "maxItems": 64,
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "id",
-                  "question",
-                  "excerpt"
-                ],
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                  },
-                  "question": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
-                  },
-                  "excerpt": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                }
-              }
-            },
-            "hashes": {
-              "anyOf": [
-                {
-                  "type": "null"
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "requestHash",
-                    "briefingSha256",
-                    "interpretationHash"
-                  ],
-                  "properties": {
-                    "requestHash": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "briefingSha256": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "interpretationHash": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  }
-                }
-              ]
-            }
-          }
-        },
-        "meta": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "apiVersion"
-          ],
-          "properties": {
-            "apiVersion": {
-              "const": "v1"
-            }
-          }
-        }
-      }
-    },
-    "apollo://schemas/batch-editorial-request-response/v2": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "data",
-        "meta"
-      ],
-      "properties": {
-        "data": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "batch",
-            "state",
-            "request",
-            "interpretation",
-            "interpretationAudit",
-            "unsupported",
-            "openQuestions",
-            "hashes"
+            "hashes",
+            "blocksGeneration",
+            "revision"
           ],
           "properties": {
             "batch": {
@@ -26893,6 +25968,1349 @@
                   }
                 }
               ]
+            },
+            "blocksGeneration": {
+              "type": "boolean"
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "sequence",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/batch-editorial-request-revise-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRequestHash"
+      ],
+      "properties": {
+        "expectedRequestHash": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The hash of the request you were looking at; null when the batch has none. A request that changed since is a conflict."
+        },
+        "briefing": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10000
+        },
+        "answers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "questionId"
+            ],
+            "description": "The owner answers a question in words (answer) or chooses one of its closed answers (choiceId): exactly one of the two.",
+            "properties": {
+              "questionId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "answer": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "choiceId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "oneOf": [
+              {
+                "required": [
+                  "answer"
+                ],
+                "properties": {
+                  "answer": {}
+                }
+              },
+              {
+                "required": [
+                  "choiceId"
+                ],
+                "properties": {
+                  "choiceId": {}
+                }
+              }
+            ]
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "briefing"
+          ],
+          "properties": {
+            "briefing": {}
+          }
+        },
+        {
+          "required": [
+            "answers"
+          ],
+          "properties": {
+            "answers": {}
+          }
+        }
+      ]
+    },
+    "apollo://schemas/batch-editorial-request-revised/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "batch",
+            "state",
+            "request",
+            "interpretation",
+            "interpretationAudit",
+            "unsupported",
+            "openQuestions",
+            "hashes",
+            "blocksGeneration",
+            "revision",
+            "change",
+            "replayed"
+          ],
+          "properties": {
+            "batch": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "projectId",
+                "name"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              }
+            },
+            "state": {
+              "enum": [
+                "no-request",
+                "interpreted"
+              ]
+            },
+            "request": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "directives",
+                    "variantOverrides",
+                    "requestHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "editorial-request/v1"
+                    },
+                    "briefing": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "text",
+                        "sha256"
+                      ],
+                      "properties": {
+                        "text": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 10000
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    "objective": {
+                      "enum": [
+                        "discovery",
+                        "awareness",
+                        "warming",
+                        "lead-generation",
+                        "sale",
+                        "whatsapp",
+                        "booking",
+                        "download"
+                      ]
+                    },
+                    "desiredAction": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "kind",
+                        "disclosures"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "const": 1
+                        },
+                        "kind": {
+                          "enum": [
+                            "continue-viewing",
+                            "submit-lead",
+                            "buy",
+                            "message-whatsapp",
+                            "book",
+                            "download"
+                          ]
+                        },
+                        "destination": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "value"
+                          ],
+                          "properties": {
+                            "type": {
+                              "enum": [
+                                "url",
+                                "handle",
+                                "whatsapp",
+                                "calendar",
+                                "file"
+                              ]
+                            },
+                            "value": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2048
+                            }
+                          }
+                        },
+                        "verbalCta": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "visualCta": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "disclosures": {
+                          "type": "array",
+                          "maxItems": 12,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 300
+                          }
+                        }
+                      }
+                    },
+                    "directives": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "kind",
+                          "value"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "kind": {
+                            "enum": [
+                              "movement",
+                              "opening",
+                              "structure",
+                              "cta",
+                              "layout",
+                              "caption-language",
+                              "caption-style",
+                              "keep",
+                              "avoid"
+                            ]
+                          },
+                          "value": {
+                            "enum": [
+                              "none",
+                              "punch-in",
+                              "zoom-in",
+                              "zoom-out",
+                              "pan",
+                              "tilt",
+                              "parallax",
+                              "protect-first-sentence",
+                              "protect-seconds",
+                              "source-order",
+                              "hook-first",
+                              "verbal-only",
+                              "overlay-closing",
+                              "overlay-at-spoken-cta",
+                              "overlay-whole-video",
+                              "overlay-from-seconds",
+                              "source-native",
+                              "fit-with-backdrop",
+                              "fill-crop",
+                              "set",
+                              "kinetic",
+                              "karaoke-box",
+                              "karaoke-pill",
+                              "caps-stroke",
+                              "clean-color",
+                              "subject"
+                            ]
+                          },
+                          "param": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              {
+                                "type": "number",
+                                "exclusiveMinimum": 0,
+                                "maximum": 30
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "variantOverrides": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "array",
+                        "maxItems": 64,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "kind",
+                            "value"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "kind": {
+                              "enum": [
+                                "movement",
+                                "opening",
+                                "structure",
+                                "cta",
+                                "layout",
+                                "caption-language",
+                                "caption-style",
+                                "keep",
+                                "avoid"
+                              ]
+                            },
+                            "value": {
+                              "enum": [
+                                "none",
+                                "punch-in",
+                                "zoom-in",
+                                "zoom-out",
+                                "pan",
+                                "tilt",
+                                "parallax",
+                                "protect-first-sentence",
+                                "protect-seconds",
+                                "source-order",
+                                "hook-first",
+                                "verbal-only",
+                                "overlay-closing",
+                                "overlay-at-spoken-cta",
+                                "overlay-whole-video",
+                                "overlay-from-seconds",
+                                "source-native",
+                                "fit-with-backdrop",
+                                "fill-crop",
+                                "set",
+                                "kinetic",
+                                "karaoke-box",
+                                "karaoke-pill",
+                                "caps-stroke",
+                                "clean-color",
+                                "subject"
+                              ]
+                            },
+                            "param": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 30
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "requestHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                }
+              ]
+            },
+            "interpretation": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "briefingSha256",
+                    "interpreter",
+                    "directives",
+                    "unsupported",
+                    "questions",
+                    "interpretationHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "brief-interpretation/v1"
+                    },
+                    "briefingSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "interpreter": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "provider",
+                        "model",
+                        "promptVersion"
+                      ],
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "model": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "promptVersion": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        }
+                      }
+                    },
+                    "directives": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "kind",
+                          "value",
+                          "excerpt"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "kind": {
+                            "enum": [
+                              "movement",
+                              "opening",
+                              "structure",
+                              "cta",
+                              "layout",
+                              "caption-language",
+                              "caption-style",
+                              "keep",
+                              "avoid"
+                            ]
+                          },
+                          "value": {
+                            "enum": [
+                              "none",
+                              "punch-in",
+                              "zoom-in",
+                              "zoom-out",
+                              "pan",
+                              "tilt",
+                              "parallax",
+                              "protect-first-sentence",
+                              "protect-seconds",
+                              "source-order",
+                              "hook-first",
+                              "verbal-only",
+                              "overlay-closing",
+                              "overlay-at-spoken-cta",
+                              "overlay-whole-video",
+                              "overlay-from-seconds",
+                              "source-native",
+                              "fit-with-backdrop",
+                              "fill-crop",
+                              "set",
+                              "kinetic",
+                              "karaoke-box",
+                              "karaoke-pill",
+                              "caps-stroke",
+                              "clean-color",
+                              "subject"
+                            ]
+                          },
+                          "param": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              {
+                                "type": "number",
+                                "exclusiveMinimum": 0,
+                                "maximum": 30
+                              }
+                            ]
+                          },
+                          "excerpt": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "start",
+                              "end",
+                              "text"
+                            ],
+                            "properties": {
+                              "start": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "end": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 10000
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "unsupported": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "excerpt",
+                          "summary",
+                          "reason"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "excerpt": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "start",
+                              "end",
+                              "text"
+                            ],
+                            "properties": {
+                              "start": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "end": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 10000
+                              }
+                            }
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "reason": {
+                            "enum": [
+                              "outside-vocabulary",
+                              "not-executable"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "questions": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "question",
+                          "status"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "question": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "excerpt": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "start",
+                              "end",
+                              "text"
+                            ],
+                            "properties": {
+                              "start": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "end": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 10000
+                              }
+                            }
+                          },
+                          "status": {
+                            "enum": [
+                              "open",
+                              "answered"
+                            ]
+                          },
+                          "answer": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "choices": {
+                            "type": "array",
+                            "minItems": 2,
+                            "maxItems": 8,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "label",
+                                "directive"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "directive": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "id",
+                                    "kind",
+                                    "value"
+                                  ],
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                                    },
+                                    "kind": {
+                                      "enum": [
+                                        "movement",
+                                        "opening",
+                                        "structure",
+                                        "cta",
+                                        "layout",
+                                        "caption-language",
+                                        "caption-style",
+                                        "keep",
+                                        "avoid"
+                                      ]
+                                    },
+                                    "value": {
+                                      "enum": [
+                                        "none",
+                                        "punch-in",
+                                        "zoom-in",
+                                        "zoom-out",
+                                        "pan",
+                                        "tilt",
+                                        "parallax",
+                                        "protect-first-sentence",
+                                        "protect-seconds",
+                                        "source-order",
+                                        "hook-first",
+                                        "verbal-only",
+                                        "overlay-closing",
+                                        "overlay-at-spoken-cta",
+                                        "overlay-whole-video",
+                                        "overlay-from-seconds",
+                                        "source-native",
+                                        "fit-with-backdrop",
+                                        "fill-crop",
+                                        "set",
+                                        "kinetic",
+                                        "karaoke-box",
+                                        "karaoke-pill",
+                                        "caps-stroke",
+                                        "clean-color",
+                                        "subject"
+                                      ]
+                                    },
+                                    "param": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 200
+                                        },
+                                        {
+                                          "type": "number",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 30
+                                        }
+                                      ]
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "coverage": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 3,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "topic",
+                          "excerpt"
+                        ],
+                        "properties": {
+                          "topic": {
+                            "enum": [
+                              "audience",
+                              "offer",
+                              "tone"
+                            ]
+                          },
+                          "excerpt": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "start",
+                              "end",
+                              "text"
+                            ],
+                            "properties": {
+                              "start": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "end": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 10000
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "interpretationHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                }
+              ]
+            },
+            "interpretationAudit": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "provider",
+                    "model",
+                    "resolvedModel",
+                    "providerVersion",
+                    "promptVersion",
+                    "promptHash",
+                    "inputHash",
+                    "modelInputHash",
+                    "responseHash",
+                    "usage",
+                    "costBasis",
+                    "costMinorUnits",
+                    "signals",
+                    "directivesMovedToUnsupported",
+                    "directivesWithdrawnAsAmbiguous"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "brief-interpretation-audit/v1"
+                    },
+                    "provider": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "model": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "resolvedModel": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "providerVersion": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "costBasis": {
+                      "enum": [
+                        "api-metered",
+                        "subscription"
+                      ]
+                    },
+                    "promptVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "promptHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "inputHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "modelInputHash": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "responseHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "usage": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "inputTokens",
+                            "outputTokens"
+                          ],
+                          "properties": {
+                            "inputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "outputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "costMinorUnits": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "signals": {
+                      "type": "array",
+                      "maxItems": 16,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "directivesMovedToUnsupported": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "directivesWithdrawnAsAmbiguous": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              ]
+            },
+            "unsupported": {
+              "type": "array",
+              "maxItems": 192,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "source",
+                  "reason",
+                  "summary",
+                  "excerpt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "source": {
+                    "enum": [
+                      "interpretation",
+                      "directive"
+                    ]
+                  },
+                  "reason": {
+                    "enum": [
+                      "outside-vocabulary",
+                      "not-executable"
+                    ]
+                  },
+                  "summary": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "excerpt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "openQuestions": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "question",
+                  "excerpt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "excerpt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "choices": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 8,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "label",
+                        "directive"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "directive": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "kind",
+                            "value"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                            },
+                            "kind": {
+                              "enum": [
+                                "movement",
+                                "opening",
+                                "structure",
+                                "cta",
+                                "layout",
+                                "caption-language",
+                                "caption-style",
+                                "keep",
+                                "avoid"
+                              ]
+                            },
+                            "value": {
+                              "enum": [
+                                "none",
+                                "punch-in",
+                                "zoom-in",
+                                "zoom-out",
+                                "pan",
+                                "tilt",
+                                "parallax",
+                                "protect-first-sentence",
+                                "protect-seconds",
+                                "source-order",
+                                "hook-first",
+                                "verbal-only",
+                                "overlay-closing",
+                                "overlay-at-spoken-cta",
+                                "overlay-whole-video",
+                                "overlay-from-seconds",
+                                "source-native",
+                                "fit-with-backdrop",
+                                "fill-crop",
+                                "set",
+                                "kinetic",
+                                "karaoke-box",
+                                "karaoke-pill",
+                                "caps-stroke",
+                                "clean-color",
+                                "subject"
+                              ]
+                            },
+                            "param": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 30
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "hashes": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "requestHash",
+                    "briefingSha256",
+                    "interpretationHash"
+                  ],
+                  "properties": {
+                    "requestHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "briefingSha256": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "interpretationHash": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "blocksGeneration": {
+              "type": "boolean"
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "sequence",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              ]
+            },
+            "change": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "previousRequestHash",
+                "briefing",
+                "answeredQuestionIds",
+                "interpreted"
+              ],
+              "properties": {
+                "previousRequestHash": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "briefing": {
+                  "enum": [
+                    "kept",
+                    "replaced"
+                  ]
+                },
+                "answeredQuestionIds": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  }
+                },
+                "interpreted": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
             }
           }
         },

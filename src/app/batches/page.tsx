@@ -33,6 +33,7 @@ import {
   type PickRole,
   type ProofChoice,
 } from '@/v2/ui/compatibility-context'
+import { describeRequestFailure } from '@/v2/ui/editorial-request-view'
 import { LOCALE_OPTIONS } from '@/v2/ui/locale-options'
 import { objectiveRequiresProof } from '@/v2/domain/recipe-path-policy'
 
@@ -903,6 +904,9 @@ export default function BatchesPage() {
   const [batchRequest, setBatchRequest] = useState<BatchEditorialRequestData | null>(null)
   const [batchRequestLoading, setBatchRequestLoading] = useState(false)
   const [batchRequestError, setBatchRequestError] = useState<string | null>(null)
+  const [batchRequestBusy, setBatchRequestBusy] = useState(false)
+  const [batchRequestActionError, setBatchRequestActionError] = useState<string | null>(null)
+  const batchRequestIdempotency = useRef<{ fingerprint: string; key: string } | null>(null)
   const [ownerContext, setOwnerContext] = useState<OwnerCompatibilityContext>({ ...EMPTY_OWNER_CONTEXT })
   const [recipePicks, setRecipePicks] = useState<PathPicks>(EMPTY_PICKS)
   const [proofChoice, setProofChoice] = useState<ProofChoice>('')
@@ -1134,6 +1138,8 @@ export default function BatchesPage() {
   useEffect(() => {
     setBatchRequest(null)
     setBatchRequestError(null)
+    setBatchRequestActionError(null)
+    batchRequestIdempotency.current = null
     setOwnerContext({ ...EMPTY_OWNER_CONTEXT })
     setRecipePicks(EMPTY_PICKS)
     setProofChoice('')
@@ -2300,6 +2306,37 @@ export default function BatchesPage() {
       )
     } finally {
       setBusy(false)
+    }
+  }
+
+  // ADR-160 F8. The owner answers the open questions of the request of the batch, or gives the batch a new briefing (it is read again). The request it
+  // replaces is kept as a revision; the batch itself does not change. The hash of the request the owner was looking at travels with the body.
+  async function reviseBatchRequest(body: { briefing: string } | { answers: unknown }): Promise<boolean> {
+    if (!selectedBatch || !batchRequest) return false
+    setBatchRequestBusy(true)
+    setBatchRequestActionError(null)
+    const fingerprint = JSON.stringify([selectedBatch.id, batchRequest.request?.requestHash ?? null, body])
+    if (batchRequestIdempotency.current?.fingerprint !== fingerprint) {
+      batchRequestIdempotency.current = { fingerprint, key: globalThis.crypto.randomUUID() }
+    }
+    try {
+      const response = await fetch(`/v1/batches/${encodeURIComponent(selectedBatch.id)}/editorial-request`, {
+        method: 'POST',
+        headers: { accept: 'application/json', 'content-type': 'application/json', 'idempotency-key': batchRequestIdempotency.current.key },
+        body: JSON.stringify({ expectedRequestHash: batchRequest.request?.requestHash ?? null, ...body }),
+      })
+      if (response.status === 401) { router.replace('/login'); return false }
+      const payload = await response.json().catch(() => null) as ApiEnvelope<BatchEditorialRequestData> | null
+      if (!response.ok || !payload?.data) throw new Error(describeRequestFailure(response.status, payload as never).message)
+      setBatchRequest(payload.data)
+      batchRequestIdempotency.current = null
+      setNotice('Pedido do lote salvo.')
+      return true
+    } catch (error) {
+      setBatchRequestActionError(error instanceof Error ? error.message : 'Não foi possível salvar o pedido do lote.')
+      return false
+    } finally {
+      setBatchRequestBusy(false)
     }
   }
 
@@ -3537,7 +3574,7 @@ export default function BatchesPage() {
                         {batchRequest && batchRequest.unsupported.length > 0 ? <span className="ml-2 text-[10px] font-normal text-[#c9908f]">{batchRequest.unsupported.length === 1 ? '1 pedido que o Apollo não faz' : `${batchRequest.unsupported.length} pedidos que o Apollo não faz`}</span> : null}
                       </summary>
                       <div className="mt-3">
-                        <BatchEditorialRequestPanel data={batchRequest} error={batchRequestError} loading={batchRequestLoading} />
+                        <BatchEditorialRequestPanel actionError={batchRequestActionError} busy={batchRequestBusy} data={batchRequest} error={batchRequestError} loading={batchRequestLoading} onAnswer={(answers) => reviseBatchRequest(answers)} onChangeBriefing={(briefing) => reviseBatchRequest({ briefing })} />
                       </div>
                     </details>
 

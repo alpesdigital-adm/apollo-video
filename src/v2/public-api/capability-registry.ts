@@ -4671,11 +4671,19 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     idempotency: 'not-applicable',
   },
   {
-    id: 'apollo.batches.editorial-request.read', version: '2.0.0', title: 'Read the editorial request of a production batch',
-    description: 'Reads the editorial request stored with one production batch: the briefing of the whole batch as written, how it was read (directives with the exact words they stand on, what is unsupported, what is still a question), the audit of that reading and the hashes that bind it. A batch made before the request existed answers no-request. The batch document itself does not carry the request.',
+    id: 'apollo.batches.editorial-request.read', version: '1.0.0', title: 'Read the editorial request of a production batch',
+    description: 'Reads the editorial request a production batch is under now: the briefing of the whole batch as written, how it was read (directives with the exact words they stand on, what is unsupported, what is still a question and the closed answers it offers), the audit of that reading, the revision it is at (0 is the request the batch was created with) and the hashes that bind it. blocksGeneration tells whether an open question or an item the Apollo cannot do keeps the batch from being generated. A batch made before the request existed answers no-request. The batch document itself does not carry the request.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
-    outputSchemaRef: 'apollo://schemas/batch-editorial-request-response/v2', endpoint: { method: 'GET', path: '/v1/batches/{batchId}/editorial-request' }, toolName: 'apollo.batches.editorial-request.read',
+    outputSchemaRef: 'apollo://schemas/batch-editorial-request-response/v1', endpoint: { method: 'GET', path: '/v1/batches/{batchId}/editorial-request' }, toolName: 'apollo.batches.editorial-request.read',
     supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.batches.editorial-request.revise', version: '1.0.0', title: 'Answer or change the editorial request of a production batch',
+    description: 'Answers the open questions of the request of a production batch (in words, or by choosing one of the closed answers a question offers), or gives the batch a new briefing that is read again by the interpreter configured for the deployment (fail-closed with PRECONDITION_REQUIRED when there is none or it did not answer). The batch document is immutable: the revision is stored beside it, append-only, and the request it replaces is kept. expectedRequestHash is the hash of the request you were looking at; a request that changed since is a VERSION_CONFLICT. While a question is open or an item is not something the Apollo can do, the batch is not generated (resuming, starting or retrying a step is refused with the reason editorial-request-blocked).',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/batch-editorial-request-revise-request/v1', outputSchemaRef: 'apollo://schemas/batch-editorial-request-revised/v1',
+    endpoint: { method: 'POST', path: '/v1/batches/{batchId}/editorial-request' }, toolName: 'apollo.batches.editorial-request.revise',
+    supportsDryRun: false, costClass: 'low', confirmation: 'none', successStatuses: [200, 201], idempotency: 'required', requestBodyRequired: true,
   },
   {
     id: 'apollo.batches.script-alignments.list',

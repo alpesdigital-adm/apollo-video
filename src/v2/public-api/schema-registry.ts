@@ -8754,12 +8754,46 @@ const editorialRequestReviseRequestSchemaV2 = {
     } },
   },
 }
-const batchEditorialRequestSchemaV2 = {
+// The request of a batch as it stands NOW: a later request is a revision stored beside the immutable batch (`revision.sequence`, 0 is the request the
+// batch was created with), and `blocksGeneration` says that an open question or an item the Apollo cannot do keeps the batch from being generated.
+const batchEditorialRequestResponseSchema = {
   ...batchEditorialRequestSchema,
+  required: [...batchEditorialRequestSchema.required, 'blocksGeneration', 'revision'],
   properties: {
     ...batchEditorialRequestSchema.properties,
     interpretation: currentEditorialRequestSchemaV2.properties.interpretation,
     openQuestions: currentEditorialRequestSchemaV2.properties.openQuestions,
+    blocksGeneration: { type: 'boolean' },
+    revision: { anyOf: [{ type: 'null' }, {
+      type: 'object', additionalProperties: false, required: ['sequence', 'createdAt'],
+      properties: { sequence: { type: 'integer', minimum: 0, maximum: 100000 }, createdAt: dateTimeSchema },
+    }] },
+  },
+}
+const batchEditorialRequestReviseRequestSchema = {
+  type: 'object', additionalProperties: false, required: ['expectedRequestHash'],
+  properties: {
+    expectedRequestHash: { anyOf: [sha256Schema, { type: 'null' }], description: 'The hash of the request you were looking at; null when the batch has none. A request that changed since is a conflict.' },
+    briefing: { type: 'string', minLength: 1, maxLength: 10000 },
+    answers: editorialRequestReviseRequestSchemaV2.properties.answers,
+  },
+  oneOf: [{ required: ['briefing'], properties: { briefing: {} } }, { required: ['answers'], properties: { answers: {} } }],
+}
+const batchEditorialRequestRevisedSchema = {
+  ...batchEditorialRequestResponseSchema,
+  required: [...batchEditorialRequestResponseSchema.required, 'change', 'replayed'],
+  properties: {
+    ...batchEditorialRequestResponseSchema.properties,
+    change: {
+      type: 'object', additionalProperties: false, required: ['previousRequestHash', 'briefing', 'answeredQuestionIds', 'interpreted'],
+      properties: {
+        previousRequestHash: { anyOf: [sha256Schema, { type: 'null' }] },
+        briefing: { enum: ['kept', 'replaced'] },
+        answeredQuestionIds: { type: 'array', maxItems: 64, uniqueItems: true, items: editorialDirectiveIdSchema },
+        interpreted: { type: 'boolean' },
+      },
+    },
+    replayed: { type: 'boolean' },
   },
 }
 
@@ -27234,8 +27268,9 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
   }),
   defineSchema('project-policy-overrides-response', 1, 'Current version-bound project policy values, overrides and resolved origins', successSchema(currentProjectPolicyOverridesSchema)),
   defineSchema('project-policy-overrides-applied', 1, 'Applied project policy EditCommand, immutable Policy Snapshot and deferred render impact', successSchema(projectPolicyOverridesResultSchema)),
-  defineSchema('batch-editorial-request-response', 1, 'The editorial request of one production batch: the briefing as written and how it was read, with what is unsupported and what is still a question', successSchema(batchEditorialRequestSchema)),
-  defineSchema('batch-editorial-request-response', 2, 'The editorial request of one production batch: the briefing as written and how it was read, with what is unsupported, what is still a question and the closed answers a question offers', successSchema(batchEditorialRequestSchemaV2)),
+  defineSchema('batch-editorial-request-response', 1, 'The editorial request of one production batch as it stands now: the briefing as written and how it was read, with what is unsupported, what is still a question (and the closed answers it offers), the revision it is at and whether it keeps the batch from being generated', successSchema(batchEditorialRequestResponseSchema)),
+  defineSchema('batch-editorial-request-revise-request', 1, 'Answer the open questions of the request of a production batch, or give the batch a new briefing that is read again; the request it replaces is kept as a revision', batchEditorialRequestReviseRequestSchema),
+  defineSchema('batch-editorial-request-revised', 1, 'The request of a production batch after a revision: how the briefing is read now, what changed and whether the batch can be generated', successSchema(batchEditorialRequestRevisedSchema)),
   defineSchema('editorial-request-revise-request', 2, 'Replace the parts of the editorial request of a video that the body names; a question is answered in words or by choosing one of its closed answers, and a choice becomes the directive of the same revision', editorialRequestReviseRequestSchemaV2),
   defineSchema('editorial-request-response', 2, 'The editorial request of the current Version: what was asked, how the briefing was read, what is unsupported and what is still a question, with the closed answers a question offers', successSchema(currentEditorialRequestSchemaV2)),
   defineSchema('editorial-request-revised', 2, 'A revised editorial request: the EditCommand, the new Brief Snapshot state and the deferred render impact, with the closed answers a question offers', successSchema(editorialRequestRevisionResultSchemaV2)),

@@ -10,7 +10,7 @@ import { createEditorialRequest } from '../domain/editorial-request.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { normalizeBriefingText } from '../domain/production-brief.ts'
 import type { InterpretBrief } from './interpret-brief.ts'
-import { describeRequestReading } from './revise-editorial-request.ts'
+import { assertBatchRequestAllowsGeneration, currentBatchEditorialRequest, describeBatchEditorialRequest } from './batch-editorial-request.ts'
 import {
   batchProgress,
   cancelProductionBatch,
@@ -293,8 +293,9 @@ export function readProductionBatchService(dependencies: {
 }
 
 /**
- * ADR-160 F8. The editorial request of one batch: the briefing as written and how it was read. The batch document does not carry it (it is an
- * input of the batch, not part of its public state), so this is the one read of it. A batch created before the request existed has none.
+ * ADR-160 F8. The editorial request of one batch as it stands now: the briefing as written and how it was read. The batch document does not carry
+ * it (it is an input of the batch, and a later request is a revision stored beside it), so this is the one read of it. A batch created before the
+ * request existed has none.
  */
 export function readProductionBatchEditorialRequestService(dependencies: {
   repository: ProductionBatchRepository
@@ -304,26 +305,7 @@ export function readProductionBatchEditorialRequestService(dependencies: {
     batchId: string
   }) {
     const batch = await readProductionBatchService(dependencies)(request)
-    const stored = batch.editorialRequest
-    const identityOfBatch = Object.freeze({ id: batch.id, projectId: batch.projectId, name: batch.name })
-    if (!stored) {
-      return Object.freeze({ batch: identityOfBatch, state: 'no-request' as const, request: null, interpretation: null, interpretationAudit: null, unsupported: Object.freeze([]), openQuestions: Object.freeze([]), hashes: null })
-    }
-    const reading = describeRequestReading(stored.request, stored.interpretationAudit)
-    return Object.freeze({
-      batch: identityOfBatch,
-      state: 'interpreted' as const,
-      request: stored.request,
-      interpretation: reading.interpretation,
-      interpretationAudit: reading.interpretationAudit,
-      unsupported: reading.unsupported,
-      openQuestions: reading.openQuestions,
-      hashes: Object.freeze({
-        requestHash: stored.request.requestHash,
-        briefingSha256: stored.request.briefing?.sha256 ?? null,
-        interpretationHash: reading.interpretation?.interpretationHash ?? null,
-      }),
-    })
+    return describeBatchEditorialRequest(batch, await currentBatchEditorialRequest(dependencies.repository, batch))
   }
 }
 
@@ -592,6 +574,8 @@ export function actOnProductionBatchItemService(dependencies: {
       'VERSION_CONFLICT',
       'Production batch item revision is stale',
     )
+    // Starting, retrying or resuming a step is the generation itself: it does not start while the request of the batch is blocked.
+    if (request.action === 'start-step' || request.action === 'retry-step' || request.action === 'resume') await assertBatchRequestAllowsGeneration(dependencies.repository, batch)
     const stepAction = [
       'start-step',
       'complete-step',
@@ -720,6 +704,8 @@ export function actOnProductionBatchService(dependencies: {
       'VERSION_CONFLICT',
       'Production batch revision is stale',
     )
+    // Resuming restarts work: it does not start while the request of the batch has an open question or something the Apollo cannot do.
+    if (request.action === 'resume') await assertBatchRequestAllowsGeneration(dependencies.repository, batch)
     const now = instant(dependencies.clock)
     const next = request.action === 'cancel'
       ? cancelProductionBatch({ batch, now })

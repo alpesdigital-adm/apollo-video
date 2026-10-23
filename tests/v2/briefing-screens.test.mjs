@@ -274,7 +274,7 @@ test('the briefing is the first field after the name, in the project form and in
 })
 
 test('a closed question is shown as radio choices (accessible), an open one as a labelled text field, and an answer needs an output to be sent', () => {
-  const panel = source('src/components/EditorialRequestPanel.tsx')
+  const panel = source('src/components/EditorialRequestPanel.tsx') + source('src/components/EditorialQuestionsForm.tsx')
   assert.match(panel, /<fieldset[^>]*data-testid=\{`question-choices-\$\{question\.id\}`\}/)
   assert.match(panel, /<legend/)
   assert.match(panel, /type="radio"/)

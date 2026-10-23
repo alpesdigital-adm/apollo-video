@@ -16,7 +16,7 @@ import {
   type InterpretedDirective,
   type UnsupportedBriefItem,
 } from '../domain/editorial-request.ts'
-import { BRIEF_INTERPRETER_UNAVAILABLE_REASON } from '../domain/editorial-request.ts'
+import { BRIEF_INTERPRETATION_FAILED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON } from '../domain/editorial-request.ts'
 import { ambiguousDirectiveQuestion, describeDirectiveWords, keepAndAvoidQuestion, outsideVocabularySummary } from '../domain/editorial-request-texts.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { normalizeBriefingText } from '../domain/production-brief.ts'
@@ -367,13 +367,21 @@ export function interpretBriefService(dependencies: InterpretBriefDependencies) 
     assertDomain(promptVersion === BRIEF_INTERPRETER_PROMPT_VERSION, 'INVALID_ARGUMENT', 'Unsupported brief interpreter prompt version')
     // The service's wait is a backstop: it outlasts the provider's own timeout (and the adapter's preflight calls), never cuts it short.
     const timeout = AbortSignal.timeout(dependencies.timeoutMs ?? (model.timeoutMs ?? 120_000) + BRIEF_INTERPRETER_BACKSTOP_MARGIN_MS)
-    const response = await model.interpret({
-      promptVersion,
-      system: BRIEF_INTERPRETER_SYSTEM_PROMPT,
-      user: JSON.stringify({ briefing: briefingText }),
-      responseSchema: BRIEF_INTERPRETER_RESPONSE_SCHEMA,
-      signal: input.signal ? AbortSignal.any([input.signal, timeout]) : timeout,
-    })
+    let response: Awaited<ReturnType<BriefInterpreterModel['interpret']>>
+    try {
+      response = await model.interpret({
+        promptVersion,
+        system: BRIEF_INTERPRETER_SYSTEM_PROMPT,
+        user: JSON.stringify({ briefing: briefingText }),
+        responseSchema: BRIEF_INTERPRETER_RESPONSE_SCHEMA,
+        signal: input.signal ? AbortSignal.any([input.signal, timeout]) : timeout,
+      })
+    } catch (error) {
+      // A refusal the adapter typed stays as it is. Anything else (a timeout, an abort, a network error, a defect in the adapter) is a reading that
+      // was not made: it fails closed with a typed, published reason and never as an untyped server error.
+      if (error instanceof DomainError) throw error
+      throw new DomainError('PRECONDITION_REQUIRED', 'The brief interpreter did not answer, so the briefing was not read', { reason: BRIEF_INTERPRETATION_FAILED_REASON })
+    }
     const interpreter = Object.freeze({ provider: model.provider, model: model.model, promptVersion })
     const checked = interpretationFromModelText({ briefingText, responseText: response.text, interpreter })
     const usage = response.usage ?? null

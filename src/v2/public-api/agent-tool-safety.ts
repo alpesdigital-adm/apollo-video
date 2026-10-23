@@ -499,6 +499,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one explicit bounded item matrix from existing approved workspace artifacts without starting provider work.',
     },
+    'apollo.batches.editorial-request.revise': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Stores one append-only revision of the request of a production batch from the hash of the request it replaces, with at most one interpreter call for the briefing; the batch document is untouched, and the batch stays blocked from generating while a question is open.',
+    },
     'apollo.batches.script-alignments.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable virtual alignment from an exact labeled script and approved transcript hashes without materializing media.',

@@ -1666,6 +1666,74 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
       where: { id: retryJobToTamper.id },
       data: { failureMessage: retryJobToTamper.failureMessage },
     })
+
+    // ADR-160 F8. The request of a batch is answered after the batch exists, as an append-only revision beside the immutable batch; until it is
+    // resolved the batch is not generated, and the refusal carries the published reason.
+    const asking = '<texto com pergunta>'
+    interpreter.script.set(asking, {
+      directives: [
+        { kind: 'layout', value: 'source-native', param: null, quote: 'texto' },
+        { kind: 'layout', value: 'fit-with-backdrop', param: null, quote: 'pergunta' },
+      ],
+      unsupported: [], questions: [], coverage: [],
+    })
+    const askingCreate = await fetch(endpoint, {
+      method: 'POST',
+      headers: { ...headers, 'idempotency-key': `batch-asking-${suffix}` },
+      body: JSON.stringify({ ...body, briefing: asking, name: 'Lote com pergunta' }),
+    })
+    const askingCreated = await askingCreate.json()
+    assert.equal(askingCreate.status, 201, JSON.stringify(askingCreated))
+    const askingBatch = askingCreated.data.batch
+    const requestEndpoint = `${endpoint}/${askingBatch.id}/editorial-request`
+    const requestAction = (key, requestBody) => fetch(requestEndpoint, {
+      method: 'POST', headers: { ...headers, 'idempotency-key': key }, body: JSON.stringify(requestBody),
+    })
+    const startAsking = (key) => fetch(`${endpoint}/${askingBatch.id}/items/${askingBatch.items[0].id}/actions`, {
+      method: 'POST',
+      headers: { ...headers, 'idempotency-key': key },
+      body: JSON.stringify({ action: 'start-step', step: 'planning', expectedBatchRevision: askingBatch.revision, expectedItemRevision: askingBatch.items[0].revision }),
+    })
+    const blockedRead = (await (await fetch(requestEndpoint, { headers: { authorization } })).json()).data
+    assert.equal(blockedRead.blocksGeneration, true)
+    assert.equal(blockedRead.revision.sequence, 0)
+    assert.equal(blockedRead.openQuestions.length, 1)
+    const refusedStart = await startAsking(`batch-asking-start-refused-${suffix}`)
+    const refusedStartPayload = await refusedStart.json()
+    assert.equal(refusedStart.status, 428, JSON.stringify(refusedStartPayload))
+    assert.equal(refusedStartPayload.error.code, 'PRECONDITION_REQUIRED')
+    assert.equal(refusedStartPayload.error.details.reason, 'editorial-request-blocked')
+    const callsBeforeAnswer = interpreter.calls.length
+    const batchHashBefore = (await (await fetch(`${endpoint}/${askingBatch.id}`, { headers: { authorization } })).json()).data.batch.definitionHash
+    const answerBody = { expectedRequestHash: blockedRead.hashes.requestHash, answers: [{ questionId: blockedRead.openQuestions[0].id, choiceId: 'c2' }] }
+    const answered = await requestAction(`batch-asking-answer-${suffix}`, answerBody)
+    const answeredPayload = await answered.json()
+    assert.equal(answered.status, 201, JSON.stringify(answeredPayload))
+    assert.equal(answeredPayload.data.blocksGeneration, false)
+    assert.equal(answeredPayload.data.revision.sequence, 1)
+    assert.equal(answeredPayload.data.change.previousRequestHash, blockedRead.hashes.requestHash)
+    assert.equal(interpreter.calls.length, callsBeforeAnswer, 'answering never reads the briefing again')
+    const answerReplay = await requestAction(`batch-asking-answer-${suffix}`, answerBody)
+    assert.equal(answerReplay.status, 200)
+    assert.equal((await answerReplay.json()).data.replayed, true)
+    const staleAnswer = await requestAction(`batch-asking-answer-stale-${suffix}`, answerBody)
+    assert.equal(staleAnswer.status, 409, 'the request the owner looked at has changed since')
+    assert.equal((await staleAnswer.json()).error.code, 'VERSION_CONFLICT')
+    const unauthenticatedAnswer = await fetch(requestEndpoint, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': `batch-asking-anon-${suffix}` }, body: JSON.stringify(answerBody) })
+    assert.equal(unauthenticatedAnswer.status, 401)
+    const releasedStart = await startAsking(`batch-asking-start-released-${suffix}`)
+    assert.equal(releasedStart.status, 201, JSON.stringify(await releasedStart.json()))
+    // The revision is a row of its own: the batch document is untouched, and the row is append-only.
+    const batchHashAfter = (await (await fetch(`${endpoint}/${askingBatch.id}`, { headers: { authorization } })).json()).data.batch.definitionHash
+    assert.equal(batchHashAfter, batchHashBefore)
+    const storedRevisions = await client.v2ProductionBatchRequestRevision.findMany({ where: { batchId: askingBatch.id } })
+    assert.equal(storedRevisions.length, 1)
+    assert.equal(storedRevisions[0].previousRequestHash, blockedRead.hashes.requestHash)
+    await assert.rejects(client.$executeRaw(Prisma.sql`UPDATE "production_batch_request_revisions" SET "changeJson" = '{}' WHERE "id" = ${storedRevisions[0].id}`))
+    await assert.rejects(client.$executeRaw(Prisma.sql`DELETE FROM "production_batch_request_revisions" WHERE "id" = ${storedRevisions[0].id}`))
+    const finalRead = (await (await fetch(requestEndpoint, { headers: { authorization } })).json()).data
+    assert.equal(finalRead.revision.sequence, 1)
+    assert.deepEqual(finalRead.request.directives.map((directive) => directive.value), ['fit-with-backdrop'])
   } catch (error) {
     if (serverLogs) {
       error.message += `\nNext logs:\n${serverLogs.slice(-8_000)}`

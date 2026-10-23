@@ -135,7 +135,7 @@ test('the request of a batch is read through its own capability: briefing, readi
   })
   const { batch } = await service(memoryRepository(), model)(request())
   const { readProductionBatchEditorialRequestService } = await import('../../src/v2/application/production-batches.ts')
-  const read = await readProductionBatchEditorialRequestService({ repository: { async read() { return batch } } })({ workspaceId: 'workspace-fixture', batchId: batch.id })
+  const read = await readProductionBatchEditorialRequestService({ repository: { async read() { return batch }, async readCurrentEditorialRequest() { return null } } })({ workspaceId: 'workspace-fixture', batchId: batch.id })
   assert.equal(read.state, 'interpreted')
   assert.equal(read.request.briefing.text, BRIEFING)
   assert.equal(read.interpretation.coverage[0].topic, 'audience')
@@ -148,15 +148,15 @@ test('the request of a batch is read through its own capability: briefing, readi
   const old = createProductionBatch({ id: 'batch-old', workspaceId: 'workspace-fixture', projectId: 'project-fixture', name: 'Lote antigo', objective: 'content-distribution',
     sourceGroups: batch.sourceGroups, recipes: batch.recipes, variants: batch.variants, budget: batch.budget,
     itemDefinitions: [{ id: 'item-old', key: 'item-a', sourceGroupId: 'group-a', recipeId: 'recipe-a', variantId: 'variant-a' }], createdBy: batch.createdBy, createdAt: batch.createdAt })
-  const none = await readProductionBatchEditorialRequestService({ repository: { async read() { return old } } })({ workspaceId: 'workspace-fixture', batchId: old.id })
+  const none = await readProductionBatchEditorialRequestService({ repository: { async read() { return old }, async readCurrentEditorialRequest() { return null } } })({ workspaceId: 'workspace-fixture', batchId: old.id })
   assert.equal(none.state, 'no-request')
   assert.equal(none.request, null)
   // The contract: a query with an immutable ref, an example of placeholders, and a response schema that accepts what is published.
   const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.batches.editorial-request.read')
   assert.equal(capability.endpoint.path, '/v1/batches/{batchId}/editorial-request')
-  assert.equal(capability.outputSchemaRef, 'apollo://schemas/batch-editorial-request-response/v2')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/batch-editorial-request-response/v1')
   assert.equal(capability.toolName, 'apollo.batches.editorial-request.read')
-  const schema = getPublicSchema('apollo://schemas/batch-editorial-request-response/v2')
+  const schema = getPublicSchema('apollo://schemas/batch-editorial-request-response/v1')
   const ajv = new Ajv2020({ strict: false, allErrors: true })
   addFormats(ajv)
   const validate = ajv.compile(schema.schema)

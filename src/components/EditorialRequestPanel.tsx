@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import BriefingGuidance from '@/components/BriefingGuidance'
+import EditorialQuestionsForm from '@/components/EditorialQuestionsForm'
 import {
   BRIEFING_FIELD_LABEL,
   BRIEFING_MAX_LENGTH,
@@ -11,11 +12,9 @@ import {
   normalizeBriefingInput,
 } from '@/v2/ui/briefing-guidance'
 import {
-  ANSWER_MAX_LENGTH,
   COVERAGE_LABELS,
   UNSUPPORTED_REASON_LABELS,
   buildAnswersBody,
-  describeChoice,
   describeDirective,
   describeRequestBlock,
   describeRequestFailure,
@@ -193,45 +192,17 @@ export default function EditorialRequestPanel({
       </div>
 
       {current.openQuestions.length > 0 ? (
-        <form
-          className="space-y-4 rounded-xl border border-[#d9a43a]/30 bg-[#d9a43a]/[0.04] p-4"
-          data-testid="editorial-request-questions"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (!answersBody || answersNeedOutput) return
+        <EditorialQuestionsForm
+          answers={answers}
+          disabled={answersNeedOutput}
+          onAnswers={(update) => setAnswers(update)}
+          onSubmit={() => {
+            if (!answersBody) return
             void revise(current, answersBody, 'answering').then((saved) => { if (saved) setAnswers({}) })
           }}
+          questions={current.openQuestions}
+          testId="editorial-request-questions"
         >
-          <p className="text-xs font-semibold text-[#e6cf93]">{current.openQuestions.length === 1 ? 'O Apollo precisa de uma resposta' : `O Apollo precisa de ${current.openQuestions.length} respostas`}</p>
-          {current.openQuestions.map((question) => (
-            <div key={question.id}>
-              {question.choices ? (
-                <fieldset aria-describedby={question.excerpt ? `answer-${question.id}-excerpt` : undefined} data-testid={`question-choices-${question.id}`}>
-                  <legend className="text-xs leading-5 text-[#d1cbc1]">{question.question}</legend>
-                  {question.excerpt ? <p className="mt-1 text-[11px] leading-4 text-[#8f897f]" id={`answer-${question.id}-excerpt`}>Trecho do briefing: “{question.excerpt}”</p> : null}
-                  <div className="mt-2 grid gap-2 sm:grid-cols-2" role="radiogroup">
-                    {question.choices.map((choice) => {
-                      const selected = answers[question.id] === choice.id
-                      return (
-                        <label className={`flex cursor-pointer items-start gap-2 rounded-xl border px-3 py-2.5 text-xs leading-5 transition focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#f5d77f] ${selected ? 'border-[#d5a535]/60 bg-[#d5a535]/[0.1] text-[#edc45d]' : 'border-white/[0.09] bg-[#090909] text-[#c5c0b7] hover:border-white/[0.18]'} ${answersNeedOutput ? 'cursor-not-allowed opacity-60' : ''}`} key={choice.id}>
-                          <input checked={selected} className="mt-1 h-4 w-4 accent-[#dcae3a]" disabled={answersNeedOutput} name={`answer-${question.id}`} onChange={() => setAnswers((currentAnswers) => ({ ...currentAnswers, [question.id]: choice.id }))} type="radio" value={choice.id} />
-                          <span>{describeChoice(choice)}</span>
-                        </label>
-                      )
-                    })}
-                  </div>
-                </fieldset>
-              ) : (
-                <>
-                  <label className="block" htmlFor={`answer-${question.id}`}>
-                    <span className="text-xs leading-5 text-[#d1cbc1]">{question.question}</span>
-                  </label>
-                  {question.excerpt ? <p className="mt-1 text-[11px] leading-4 text-[#8f897f]">Trecho do briefing: “{question.excerpt}”</p> : null}
-                  <textarea className="mt-2 min-h-16 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-3 text-sm text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55 disabled:opacity-60" disabled={answersNeedOutput} id={`answer-${question.id}`} maxLength={ANSWER_MAX_LENGTH} onChange={(event) => setAnswers((currentAnswers) => ({ ...currentAnswers, [question.id]: event.target.value }))} value={answers[question.id] ?? ''} />
-                </>
-              )}
-            </div>
-          ))}
           {answersNeedOutput ? (
             <p className="text-[11px] leading-5 text-[#8f897f]" data-testid="editorial-request-answers-later">Você responde estas perguntas na página do projeto, assim que ele tiver um vídeo e uma saída. O que o Apollo entendeu já está salvo.</p>
           ) : (
@@ -240,7 +211,7 @@ export default function EditorialRequestPanel({
               <button className="h-10 rounded-xl bg-[#e0af37] px-4 text-xs font-bold text-[#171207] hover:bg-[#edc34f] disabled:cursor-not-allowed disabled:opacity-45" disabled={busy !== null || !answersBody} type="submit">{busy === 'answering' ? 'Enviando…' : 'Enviar respostas'}</button>
             </>
           )}
-        </form>
+        </EditorialQuestionsForm>
       ) : null}
 
       {current.unsupported.length > 0 ? (

@@ -193,7 +193,7 @@ test('the path selector of the recipe: links left to the owner are confirmed on 
       }),
     })
     const refusedBody = await refused.json()
-    assert.equal(refused.status, 412, JSON.stringify(refusedBody).slice(0, 400))
+    assert.equal(refused.status, 428, JSON.stringify(refusedBody).slice(0, 400))
     assert.match(JSON.stringify(refusedBody), /borderline: the owner must confirm it/)
 
     await page.getByTestId('recipe-confirm-body').check()

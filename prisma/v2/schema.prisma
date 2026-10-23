@@ -157,6 +157,7 @@ model V2Workspace {
   productionBatchSteps                   V2ProductionBatchStep[]
   productionBatchArtifacts               V2ProductionBatchItemArtifact[]
   productionBatchActions                 V2ProductionBatchAction[]
+  productionBatchRequestRevisions        V2ProductionBatchRequestRevision[]
   scriptAlignmentRuns                    V2ScriptAlignmentRun[]
   scriptAlignmentReviews                 V2ScriptAlignmentReview[]
   localizationCanonicalScripts           V2LocalizationCanonicalScript[]
@@ -374,6 +375,7 @@ model V2ApiClient {
   workspaceLutDefaultVersions           V2WorkspaceLutDefaultVersion[]
   productionBatches                     V2ProductionBatch[]                  @relation("ProductionBatchCreator")
   productionBatchActions                V2ProductionBatchAction[]            @relation("ProductionBatchActionActor")
+  productionBatchRequestRevisions       V2ProductionBatchRequestRevision[]   @relation("ProductionBatchRequestRevisionActor")
   scriptAlignmentRuns                   V2ScriptAlignmentRun[]               @relation("ScriptAlignmentRunCreator")
   scriptAlignmentReviews                V2ScriptAlignmentReview[]            @relation("ScriptAlignmentReviewActor")
   approvedLocalizationCanonicalScripts  V2LocalizationCanonicalScript[]      @relation("LocalizationCanonicalApprover")
@@ -7806,6 +7808,7 @@ model V2ProductionBatch {
   createdBy                  V2ApiClient                      @relation("ProductionBatchCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   items                      V2ProductionBatchItem[]
   actions                    V2ProductionBatchAction[]
+  requestRevisions           V2ProductionBatchRequestRevision[]
   scriptAlignmentRuns        V2ScriptAlignmentRun[]
   takeLibraryRuns            V2TakeLibraryRun[]
   compatibilityGraphs        V2CompatibilityGraphRun[]
@@ -8970,6 +8973,37 @@ model V2ProductionBatchAction {
   @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "production_batch_actions_actor_context_idx")
   @@index([workspaceId, itemId, createdAt(sort: Desc)])
   @@map("production_batch_actions")
+}
+
+/// ADR-160 F8. A later request of a production batch (the batch document itself is immutable). Append-only; the current request is the highest sequence.
+model V2ProductionBatchRequestRevision {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  batchId                 String   @db.VarChar(128)
+  sequence                Int
+  previousRequestHash     String?  @db.Char(64)
+  requestHash             String   @db.Char(64)
+  briefingJson            String   @db.Text
+  changeJson              String   @db.Text
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  actorClientId           String   @db.VarChar(80)
+  actorCredentialId       String?  @db.VarChar(128)
+  actorEnvironment        String?  @db.VarChar(16)
+  actorAuthenticationKind String?  @db.VarChar(16)
+  actorContextHash        String?  @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  batch     V2ProductionBatch @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  actor     V2ApiClient       @relation("ProductionBatchRequestRevisionActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([workspaceId, batchId, sequence], map: "production_batch_request_revisions_batch_sequence_key")
+  @@unique([workspaceId, actorClientId, idempotencyKey], map: "production_batch_request_revisions_idempotency_key")
+  @@map("production_batch_request_revisions")
 }
 
 model V2ProductionBatchRetryJob {

@@ -5717,6 +5717,8 @@ const editorialRequestOpenQuestionsExampleV2 = [{ id: 'q1', question: '<pergunta
 const batchEditorialRequestExample = {
   batch: { id: 'production-batch-example-1', projectId: 'project-example-1', name: '<nome do lote>' },
   state: 'interpreted',
+  blocksGeneration: true,
+  revision: { sequence: 0, createdAt },
   request: currentEditorialRequestExample.request,
   interpretation: editorialRequestViewExample.interpretation,
   interpretationAudit: editorialRequestViewExample.interpretationAudit,
@@ -14706,11 +14708,23 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       data: { ...editorialRequestRevisedExample, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2, blocksDirector: true },
       meta: { apiVersion: 'v1' },
     }],
-    'apollo://schemas/batch-editorial-request-response/v2': [{
+    'apollo://schemas/batch-editorial-request-response/v1': [{
       data: { ...batchEditorialRequestExample, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2 },
       meta: { apiVersion: 'v1' },
     }],
-    'apollo://schemas/batch-editorial-request-response/v1': [{ data: batchEditorialRequestExample, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/batch-editorial-request-revise-request/v1': [
+      { expectedRequestHash: editorialRequestViewExample.hashes.requestHash, answers: [{ questionId: 'q1', choiceId: 'c1' }] },
+      { expectedRequestHash: editorialRequestViewExample.hashes.requestHash, briefing: '<briefing do lote>' },
+    ],
+    'apollo://schemas/batch-editorial-request-revised/v1': [{
+      data: {
+        ...batchEditorialRequestExample, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2,
+        blocksGeneration: false, revision: { sequence: 1, createdAt },
+        change: { previousRequestHash: editorialRequestViewExample.hashes.requestHash, briefing: 'kept', answeredQuestionIds: ['q1'], interpreted: false },
+        replayed: false,
+      },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/editorial-request-revised/v1': [{ data: editorialRequestRevisedExample, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/project-proxy-review-response/v1': [
       {
