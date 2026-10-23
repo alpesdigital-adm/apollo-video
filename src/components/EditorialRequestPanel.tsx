@@ -13,6 +13,8 @@ import {
 } from '@/v2/ui/briefing-guidance'
 import {
   COVERAGE_LABELS,
+  COVERAGE_NOTE,
+  UNACCOUNTED_NOTE,
   UNSUPPORTED_REASON_LABELS,
   buildAnswersBody,
   describeDirective,
@@ -256,6 +258,19 @@ export default function EditorialRequestPanel({
               <li className="text-xs leading-5 text-[#b5afa5]" key={item.topic}><strong className="font-semibold text-[#d1cbc1]">{COVERAGE_LABELS[item.topic]}:</strong> “{item.excerpt.text}”</li>
             ))}
           </ul>
+          <p className="mt-2 text-[11px] leading-5 text-[#8f897f]" data-testid="editorial-request-coverage-note">{COVERAGE_NOTE}</p>
+        </div>
+      ) : null}
+
+      {interpretation?.unaccounted && interpretation.unaccounted.length > 0 ? (
+        <div data-testid="editorial-request-unaccounted">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#c99e39]">Frases que o Apollo não classificou</p>
+          <ul className="mt-2 space-y-1">
+            {interpretation.unaccounted.map((item) => (
+              <li className="text-xs leading-5 text-[#b5afa5]" key={item.excerpt.start}>“{item.excerpt.text}”</li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] leading-5 text-[#8f897f]">{UNACCOUNTED_NOTE}</p>
         </div>
       ) : null}
 

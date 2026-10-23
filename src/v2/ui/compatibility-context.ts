@@ -41,7 +41,7 @@ export interface BatchRequestForContext {
   request: { briefing?: { text: string }; requestHash: string } | null
   interpretation: null | {
     interpretationHash: string
-    coverage?: readonly { topic: 'audience' | 'offer' | 'tone'; excerpt: { text: string } }[]
+    coverage?: readonly { topic: 'audience' | 'offer' | 'tone' | 'context'; excerpt: { text: string } }[]
   }
 }
 

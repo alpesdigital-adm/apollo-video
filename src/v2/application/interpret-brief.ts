@@ -2,13 +2,17 @@ import { createHash } from 'node:crypto'
 
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import {
-  BRIEF_COVERAGE_TOPICS,
+  BRIEF_STATEMENT_TOPICS,
   EDITORIAL_DIRECTIVE_KINDS,
   EDITORIAL_DIRECTIVE_VOCABULARY,
   EDITORIAL_EXECUTABLE_VALUES,
+  EDITORIAL_MULTIPLE_KINDS,
   createBriefInterpretation,
+  directiveScope,
   parseEditorialDirective,
+  unaccountedSentences,
   type BriefCoverageItem,
+  type BriefCoverageTopic,
   type BriefExcerpt,
   type BriefInterpretationV1,
   type BriefQuestion,
@@ -17,7 +21,7 @@ import {
   type UnsupportedBriefItem,
 } from '../domain/editorial-request.ts'
 import { BRIEF_INTERPRETATION_FAILED_REASON, BRIEF_INTERPRETATION_INVALID_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON } from '../domain/editorial-request.ts'
-import { ambiguousDirectiveQuestion, describeDirectiveWords, keepAndAvoidQuestion, outsideVocabularySummary } from '../domain/editorial-request-texts.ts'
+import { ambiguousDirectiveQuestion, describeDirectiveWords, keepAndAvoidQuestion, notExecutableTogetherSummary, outsideVocabularySummary } from '../domain/editorial-request-texts.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { normalizeBriefingText } from '../domain/production-brief.ts'
 import { briefOverridesSafetyPolicy } from './brief-lexicon.ts'
@@ -35,7 +39,7 @@ import type { BriefInterpreterModel } from './ports/brief-interpreter-model.ts'
  *  - two directives of one kind that disagree are an ambiguity: both are withdrawn and the disagreement is a question;
  *  - the instruction the model receives is constant, so the audit can name it by hash.
  */
-export const BRIEF_INTERPRETER_PROMPT_VERSION = 'brief-interpreter/v1'
+export const BRIEF_INTERPRETER_PROMPT_VERSION = 'brief-interpreter/v2'
 export const BRIEF_INTERPRETATION_AUDIT_SCHEMA = 'brief-interpretation-audit/v1' as const
 export { BRIEF_INTERPRETER_UNAVAILABLE_REASON }
 /** What an adapter may spend before its own timeout starts to count: the Codex adapter checks its login and its version first, 30 s each. */
@@ -57,12 +61,58 @@ const WHOLE_BRIEFING_SHARE = 0.6
  */
 const HOST_DATA = /(?:[A-Za-z]:[\\/][^\s]{2,})|(?:\\\\[^\s]+)|(?:\bfile:\/\/)|(?:https?:\/\/)|(?:(?:^|\s)\/(?:etc|home|usr|var|tmp|mnt|root|Users)\b)|(?:[A-Za-z0-9+/=_-]{40,})|(?:[\u0000-\u0008\u000e-\u001f])/u
 
+/**
+ * What each value of the vocabulary MEANS, for the model: a closed vocabulary is only as good as the reader's understanding of its words. A value the
+ * Apollo cannot execute yet is marked, so that the model reports it as the directive it is (the owner is told in the Apollo's own words that it is not
+ * done) instead of asking about its details.
+ */
+const VALUE_GUIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({
+  movement: Object.freeze({
+    none: 'the briefing says there must be no camera movement', zoom: 'a zoom, without saying whether it closes in or pulls away',
+    'zoom-in': 'a zoom that closes in', 'zoom-out': 'a zoom that pulls away', 'punch-in': 'an abrupt close-in', pan: 'a pan', tilt: 'a tilt', parallax: 'parallax',
+  }),
+  opening: Object.freeze({ none: 'no protected opening', 'protect-first-sentence': 'keep the first spoken sentence as it is', 'protect-seconds': 'keep the first seconds as they are' }),
+  structure: Object.freeze({ 'source-order': 'keep the order of the recording', 'hook-first': 'start from the hook, reordering the video' }),
+  cta: Object.freeze({
+    none: 'no call to action', 'verbal-only': 'the call to action is only spoken', 'overlay-closing': 'a written call to action in the closing',
+    'overlay-at-spoken-cta': 'a written call to action at the moment the speaker says the call', 'overlay-whole-video': 'a written call to action throughout the video',
+    'overlay-from-seconds': 'a written call to action from a given second',
+  }),
+  layout: Object.freeze({
+    'source-native': 'keep the recorded frame as it is, for every version', 'fit-with-backdrop': 'show the whole frame over a backdrop, for every version',
+    'fill-crop': 'fill the frame of every version whose shape differs, following the face',
+  }),
+  'caption-language': Object.freeze({ set: 'the language of the captions' }),
+  keep: Object.freeze({ subject: 'a subject to keep, as long as it is NOT a request about recorded speech' }),
+  avoid: Object.freeze({ subject: 'a subject to avoid, as long as it is NOT a request to cut recorded speech (use remove-speech for that)' }),
+  'cta-text': Object.freeze({ set: 'the exact words to write on screen as the call to action; the param is those words as the briefing quotes them' }),
+  output: Object.freeze({
+    vertical: 'a version of the video whose frame is taller than wide', horizontal: 'a version whose frame is wider than tall', square: 'a version whose frame is square',
+    aspect: 'a version in an aspect ratio the briefing names (param: 9:16, 16:9, 4:5, 1:1 or 21:9)',
+  }),
+  'output-layout': Object.freeze({
+    'fill-following-face': "in ONE version, fill the whole frame with the picture, keeping the speaker's face in view",
+    'source-native': 'in ONE version, keep the recorded frame as it is', 'fit-with-backdrop': 'in ONE version, show the whole recorded frame over a backdrop',
+  }),
+  'remove-speech': Object.freeze({ about: 'cut the part of the recording that talks about a subject; the param is the shortest words that name the subject, copied from the briefing' }),
+  invariant: Object.freeze({ 'captions-clear-of-face': 'the briefing asks that the captions never cover the face' }),
+  absent: Object.freeze({ music: 'the briefing asks for no music', effects: 'the briefing asks for no effects', transitions: 'the briefing asks for no transitions' }),
+})
+
+const PARAM_GUIDE: Readonly<Record<string, string>> = Object.freeze({
+  seconds: 'param: a number of seconds, 0 < n <= 30', language: 'param: a BCP-47 language tag',
+  text: 'param: a short free subject, quoted from the briefing', 'aspect-ratio': 'param: an aspect ratio',
+  'output-ref': 'param: the version it is about - vertical | horizontal | square | an aspect ratio | all',
+})
+
 function describeVocabulary(): string {
   return EDITORIAL_DIRECTIVE_KINDS.map((kind) => {
     const entry = EDITORIAL_DIRECTIVE_VOCABULARY[kind]
     const values = entry.values.map((value) => {
       const param = entry.params[value]
-      return param === undefined ? value : `${value} (param: ${param === 'seconds' ? 'a number of seconds, 0 < n <= 30' : param === 'language' ? 'a BCP-47 language tag' : 'a short free subject, quoted from the briefing'})`
+      const executable = EDITORIAL_EXECUTABLE_VALUES[kind].includes(value)
+      const meaning = VALUE_GUIDE[kind]?.[value]
+      return [value, ...(param === undefined ? [] : [`(${PARAM_GUIDE[param]})`]), ...(meaning ? [`= ${meaning}`] : []), ...(executable ? [] : ['[understood, not executable yet]'])].join(' ')
     })
     return `- ${kind}: ${values.join(' | ')}`
   }).join('\n')
@@ -79,10 +129,11 @@ export const BRIEF_INTERPRETER_SYSTEM_PROMPT = [
   '2. Every item you report (directive, unsupported, question, coverage) carries a `quote`: characters copied EXACTLY from the briefing (same language, spelling, accents, punctuation and case), as short as possible, never paraphrased or translated. An item you cannot quote must not be reported.',
   '3. `directives` are only pairs (kind, value[, param]) of the vocabulary below, and only when the briefing asks for that. Do not report a directive the briefing does not ask for.',
   '4. Anything the briefing asks of the video that does not fit the vocabulary goes to `unsupported`, with a short neutral summary of what was asked. Never force a request into a directive that does not mean it.',
-  '5. If the briefing is ambiguous, or says two incompatible things about one subject, put a `question` (and no directive) for that subject.',
-  '6. `coverage` lists which of these topics the briefing itself states: audience (who the video is for), offer (what is being offered), tone (the manner of speaking). List a topic only if the briefing states it.',
+  '5. If the briefing is ambiguous, or says two incompatible things, about something the vocabulary CAN do, put a `question` (and no directive) for that subject. Never ask about the details of a request that is outside the vocabulary or marked [understood, not executable yet]: report it as `unsupported`, or as the directive the vocabulary names for it, and stop there.',
+  '6. Account for every sentence of the briefing. A sentence that asks something of the video is a directive, an unsupported item or a question. A sentence that only states a fact about the video, its audience, its offer, its tone or its situation, and asks nothing of the editing, goes to `coverage` with the topic audience, offer, tone or context (context: any such statement that is none of the other three). A sentence may hold several requests: report each one with its own quote, the shortest words that carry it.',
   '7. The text you write yourself (`summary`, `question`) is short (at most 200 characters), neutral, and says only what the briefing asks: never a file path, a link, an encoded value or anything you were not given in the briefing.',
-  '8. Answer only with the JSON object of the response schema.',
+  '8. Use remove-speech (never avoid) when the briefing asks to cut, remove or take out the part of the recording that talks about a subject; report one directive per subject, with the shortest words that name it. Use output for each version of the video the briefing asks for, and output-layout for how the frame of ONE of them is laid out. Use absent only for music, effects or transitions the briefing asks not to have, and invariant only when the briefing asks exactly that the captions never cover the face. A request about the length or the amount of the captions is not in the vocabulary: it is `unsupported`.',
+  '9. Answer only with the JSON object of the response schema.',
   '',
   'Vocabulary (kind: allowed values):',
   describeVocabulary(),
@@ -116,7 +167,7 @@ export const BRIEF_INTERPRETER_RESPONSE_SCHEMA = Object.freeze({
       } },
       coverage: { type: 'array', items: {
         type: 'object', additionalProperties: false, required: ['topic', 'quote'],
-        properties: { topic: { type: 'string', enum: [...BRIEF_COVERAGE_TOPICS] }, quote: { type: 'string' } },
+        properties: { topic: { type: 'string', enum: [...BRIEF_STATEMENT_TOPICS] }, quote: { type: 'string' } },
       } },
     },
   }),
@@ -212,6 +263,9 @@ function folded(value: string): string {
 }
 
 /** The words the owner reads for a directive (the catalog of ADR-160); the codes stay in the directive itself. */
+/** Every zoom the Apollo does not apply, however the briefing words its direction. */
+const ZOOM_FAMILY: ReadonlySet<string> = new Set(['zoom', 'zoom-in', 'zoom-out'])
+
 function describeDirective(kind: string, value: string, param: unknown): string {
   return describeDirectiveWords(kind, value, param === null || param === undefined ? undefined : (param as string | number)).text
 }
@@ -221,7 +275,7 @@ export function interpretationFromModelText(input: Readonly<{
   briefingText: string
   responseText: string
   interpreter: Readonly<{ provider: string; model: string; promptVersion: string }>
-}>): Readonly<{ interpretation: Readonly<BriefInterpretationV1>; directivesMovedToUnsupported: number; directivesWithdrawnAsAmbiguous: number }> {
+}>): Readonly<{ interpretation: Readonly<BriefInterpretationV1>; directivesMovedToUnsupported: number; directivesWithdrawnAsAmbiguous: number; droppedMootQuestions: number }> {
   let parsed: unknown
   try { parsed = JSON.parse(input.responseText) } catch { refused('Brief interpreter returned invalid JSON') }
   if (!isRecord(parsed) || Object.keys(parsed).some((key) => !['directives', 'unsupported', 'questions', 'coverage'].includes(key))) {
@@ -249,12 +303,15 @@ export function interpretationFromModelText(input: Readonly<{
     const paramKind = typeof kind === 'string' && (EDITORIAL_DIRECTIVE_KINDS as readonly string[]).includes(kind) && typeof value === 'string'
       ? EDITORIAL_DIRECTIVE_VOCABULARY[kind as EditorialDirectiveKind].params[value] : undefined
     if (paramKind === 'seconds' && typeof param === 'string' && /^\d+(?:\.\d+)?$/u.test(param.trim())) param = Number(param.trim())
+    // The output a directive is about is a word of the catalog (or an aspect ratio): its case is not a meaning.
+    if ((paramKind === 'aspect-ratio' || paramKind === 'output-ref') && typeof param === 'string') param = param.trim().toLowerCase()
     try {
       const directive = parseEditorialDirective({
         id: `d${accepted.length + 1}`, kind, value, ...(param !== null && param !== undefined ? { param } : {}),
       }, 'brief interpretation')
-      // The subject a directive keeps or avoids is a name the requester wrote: it has to be found in the briefing.
-      if ((directive.kind === 'keep' || directive.kind === 'avoid') && !folded(input.briefingText).includes(folded(String(directive.param)))) {
+      // The subject a directive keeps, avoids or takes out of the speech, and the words of the written call to action, are what the requester wrote: they
+      // have to be found in the briefing.
+      if (EDITORIAL_DIRECTIVE_VOCABULARY[directive.kind].params[directive.value] === 'text' && !folded(input.briefingText).includes(folded(String(directive.param)))) {
         throw new DomainError('INVALID_ARGUMENT', 'subject is not in the briefing')
       }
       accepted.push(Object.freeze({ ...directive, excerpt }) as InterpretedDirective)
@@ -272,6 +329,22 @@ export function interpretationFromModelText(input: Readonly<{
   const directives: InterpretedDirective[] = []
   let withdrawn = 0
   const meaning = (directive: InterpretedDirective) => `${directive.value}\u0000${String(directive.param ?? '')}`
+  const executable = (directive: Readonly<Pick<InterpretedDirective, 'kind' | 'value'>>) => EDITORIAL_EXECUTABLE_VALUES[directive.kind].includes(directive.value)
+  // The answers are closed when the Apollo can do each of them: the owner chooses one, and the choice becomes the directive of the revision.
+  const ambiguity = (kind: EditorialDirectiveKind, distinct: readonly InterpretedDirective[]): BriefQuestion => {
+    const doable = distinct.filter(executable)
+    const choices = doable.length >= 2 && doable.length === distinct.length
+      ? doable.map((directive, index) => Object.freeze({
+        id: `c${index + 1}`, label: shortText(describeDirective(kind, directive.value, directive.param), 'questions.choices.label'),
+        directive: Object.freeze({ id: `c${index + 1}`, kind, value: directive.value, ...(directive.param !== undefined ? { param: directive.param } : {}) }),
+      }))
+      : undefined
+    return Object.freeze({
+      id: nextId('q', questions), status: 'open' as const, excerpt: distinct[0]!.excerpt,
+      question: shortText(ambiguousDirectiveQuestion(kind, distinct.map((directive) => describeDirective(kind, directive.value, directive.param))), 'questions.question'),
+      ...(choices !== undefined ? { choices } : {}),
+    })
+  }
   for (const kind of EDITORIAL_DIRECTIVE_KINDS) {
     const ofKind = accepted.filter((directive) => directive.kind === kind)
     if (kind === 'keep' || kind === 'avoid') {
@@ -294,23 +367,39 @@ export function interpretationFromModelText(input: Readonly<{
       }
       continue
     }
+    if (EDITORIAL_MULTIPLE_KINDS.has(kind)) {
+      // A kind that states several things at once (the versions, the subjects of the speech, the guarantees): identical directives are one, and the one
+      // place two of them can disagree is the output a layout is for.
+      const groups = new Map<string, InterpretedDirective[]>()
+      for (const directive of ofKind) {
+        const key = directiveScope(directive) ?? meaning(directive)
+        groups.set(key, [...(groups.get(key) ?? []), directive])
+      }
+      for (const group of groups.values()) {
+        const distinct = [...new Map(group.map((directive) => [meaning(directive), directive])).values()]
+        if (distinct.length === 1) directives.push(distinct[0]!)
+        else { withdrawn += distinct.length; questions.push(ambiguity(kind, distinct)) }
+      }
+      continue
+    }
     const distinct = [...new Map(ofKind.map((directive) => [meaning(directive), directive])).values()]
     if (distinct.length === 1) directives.push(distinct[0]!)
     else if (distinct.length > 1) {
-      withdrawn += distinct.length
-      // The answers are closed when the Apollo can do each of them: the owner chooses one, and the choice becomes the directive of the revision.
-      const doable = distinct.filter((directive) => EDITORIAL_EXECUTABLE_VALUES[kind].includes(directive.value))
-      const choices = doable.length >= 2 && doable.length === distinct.length
-        ? doable.map((directive, index) => Object.freeze({
-          id: `c${index + 1}`, label: shortText(describeDirective(kind, directive.value, directive.param), 'questions.choices.label'),
-          directive: Object.freeze({ id: `c${index + 1}`, kind, value: directive.value, ...(directive.param !== undefined ? { param: directive.param } : {}) }),
-        }))
-        : undefined
-      questions.push(Object.freeze({
-        id: nextId('q', questions), status: 'open' as const, excerpt: distinct[0]!.excerpt,
-        question: shortText(ambiguousDirectiveQuestion(kind, distinct.map((directive) => describeDirective(kind, directive.value, directive.param))), 'questions.question'),
-        ...(choices !== undefined ? { choices } : {}),
-      }))
+      if (distinct.every((directive) => !executable(directive))) {
+        // Nothing of what is asked is something the Apollo does, so there is nothing to choose between and nothing to ask: every zoom is the zoom the
+        // Apollo does not apply, and anything else asked together is told as one item. Never a question about the details of what will not be done.
+        if (kind === 'movement' && distinct.every((directive) => ZOOM_FAMILY.has(directive.value))) {
+          directives.push(Object.freeze({ ...distinct[0]!, value: 'zoom' }) as InterpretedDirective)
+        } else {
+          unsupported.push(Object.freeze({
+            id: nextId('u', unsupported), excerpt: distinct[0]!.excerpt, reason: 'not-executable' as const,
+            summary: shortText(notExecutableTogetherSummary(kind, distinct.map((directive) => describeDirective(kind, directive.value, directive.param))), 'unsupported.summary'),
+          }))
+        }
+      } else {
+        withdrawn += distinct.length
+        questions.push(ambiguity(kind, distinct))
+      }
     }
   }
   // Ids follow the order of the kinds, so the same briefing read twice names its directives the same way.
@@ -324,28 +413,34 @@ export function interpretationFromModelText(input: Readonly<{
       excerpt: locateQuote(input.briefingText, entry.quote, `unsupported[${index}]`), summary: shortText(entry.summary, 'unsupported.summary'),
     }))
   })
+  // What the Apollo will not do is told as what it is. A question the model asked about the very words of such a request (which way the zoom goes)
+  // asks for the details of something that will not be done: it is dropped, and the words stay accounted for by the item that tells the owner so.
+  const wontBeDone = [...finalDirectives.filter((directive) => !executable(directive)), ...unsupported].map((item) => item.excerpt)
+  let droppedMootQuestions = 0
   questionItems.forEach((item, index) => {
     if (!isRecord(item)) refused('Brief interpreter returned a malformed question', { index })
     const entry = item as Record<string, unknown>
-    questions.push(Object.freeze({
-      id: nextId('q', questions), status: 'open' as const, question: shortText(entry.question, 'questions.question'),
-      ...(entry.quote === null || entry.quote === undefined ? {} : { excerpt: locateQuote(input.briefingText, entry.quote, `questions[${index}]`) }),
-    }))
+    const excerpt = entry.quote === null || entry.quote === undefined ? undefined : locateQuote(input.briefingText, entry.quote, `questions[${index}]`)
+    const text = shortText(entry.question, 'questions.question')
+    if (excerpt !== undefined && wontBeDone.some((other) => other.start < excerpt.end && other.end > excerpt.start)) { droppedMootQuestions += 1; return }
+    questions.push(Object.freeze({ id: nextId('q', questions), status: 'open' as const, question: text, ...(excerpt !== undefined ? { excerpt } : {}) }))
   })
   const coverage: BriefCoverageItem[] = []
   coverageItems.forEach((item, index) => {
     if (!isRecord(item)) refused('Brief interpreter returned a malformed coverage entry', { index })
     const entry = item as Record<string, unknown>
     const excerpt = locateQuote(input.briefingText, entry.quote, `coverage[${index}]`, true)
-    if (typeof entry.topic !== 'string' || !(BRIEF_COVERAGE_TOPICS as readonly string[]).includes(entry.topic)) refused('Brief interpreter returned a coverage topic outside the vocabulary', { index })
+    if (typeof entry.topic !== 'string' || !(BRIEF_STATEMENT_TOPICS as readonly string[]).includes(entry.topic)) refused('Brief interpreter returned a coverage topic outside the vocabulary', { index })
     if (!coverage.some((existing) => existing.topic === entry.topic)) coverage.push(Object.freeze({ topic: entry.topic as BriefCoverageItem['topic'], excerpt }))
   })
+  // A sentence no item stands on is said, not lost: the reading lists it (it does not block - it asks nothing the Apollo could name).
+  const unaccounted = unaccountedSentences(input.briefingText, [...accepted, ...unsupported, ...questions, ...coverage]).map((excerpt) => Object.freeze({ excerpt }))
 
   // The domain constructor repeats every citation check against the briefing: nothing leaves this function that it has not accepted.
   const interpretation = createBriefInterpretation({
-    briefingText: input.briefingText, interpreter: input.interpreter, directives: finalDirectives, unsupported, questions, coverage,
+    briefingText: input.briefingText, interpreter: input.interpreter, directives: finalDirectives, unsupported, questions, coverage, unaccounted,
   })
-  return Object.freeze({ interpretation, directivesMovedToUnsupported: movedToUnsupported, directivesWithdrawnAsAmbiguous: withdrawn })
+  return Object.freeze({ interpretation, directivesMovedToUnsupported: movedToUnsupported, directivesWithdrawnAsAmbiguous: withdrawn, droppedMootQuestions })
 }
 
 export interface InterpretBriefDependencies {
@@ -395,6 +490,8 @@ export function interpretBriefService(dependencies: InterpretBriefDependencies) 
     const signals = [
       ...(briefOverridesSafetyPolicy(briefingText) ? ['safety-policy-override-phrase'] : []),
       ...((dependencies.guardrails ?? []).some((guardrail) => guardrail.trim().length > 0 && lowered.includes(guardrail.trim().toLowerCase())) ? ['guardrail-quoted'] : []),
+      ...(checked.droppedMootQuestions > 0 ? ['moot-question-dropped'] : []),
+      ...((checked.interpretation.unaccounted?.length ?? 0) > 0 ? ['sentence-unaccounted'] : []),
     ]
     const costMinorUnits = usage && model.pricing && model.costBasis === 'api-metered'
       ? Math.ceil((usage.inputTokens * model.pricing.inputMinorUnitsPerMillionTokens + usage.outputTokens * model.pricing.outputMinorUnitsPerMillionTokens) / 1_000_000)
@@ -414,6 +511,7 @@ export function interpretBriefService(dependencies: InterpretBriefDependencies) 
 export type InterpretBrief = ReturnType<typeof interpretBriefService>
 
 /** The coverage topics an interpretation found, in the vocabulary of the production brief. */
-export function coveredTopicsOf(interpretation: Readonly<BriefInterpretationV1>): readonly ('audience' | 'offer' | 'tone')[] {
-  return Object.freeze((interpretation.coverage ?? []).map((item) => item.topic))
+export function coveredTopicsOf(interpretation: Readonly<BriefInterpretationV1>): readonly BriefCoverageTopic[] {
+  // `context` is a statement that asks nothing of the editing; it is not a topic of the production brief.
+  return Object.freeze((interpretation.coverage ?? []).flatMap((item) => item.topic === 'context' ? [] : [item.topic]))
 }

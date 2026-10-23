@@ -17,7 +17,9 @@ export interface ViewUnsupported { id: string; source: 'interpretation' | 'direc
 export interface ViewChoice { id: string; label: string; directive: Pick<ViewDirective, 'kind' | 'value' | 'param'> }
 export interface ViewQuestion { id: string; question: string; excerpt: string | null; choices?: readonly ViewChoice[] }
 export interface ViewInterpretationQuestion { id: string; question: string; status: 'open' | 'answered'; answer?: string; excerpt?: ViewExcerpt; choices?: readonly ViewChoice[] }
-export interface ViewCoverageItem { topic: 'audience' | 'offer' | 'tone'; excerpt: ViewExcerpt }
+export interface ViewCoverageItem { topic: 'audience' | 'offer' | 'tone' | 'context'; excerpt: ViewExcerpt }
+/** A sentence of the briefing that no item of the reading stands on: it is shown, so that nothing the owner wrote is lost in silence. */
+export interface ViewUnaccounted { excerpt: ViewExcerpt }
 
 export interface EditorialRequestData {
   state: 'no-briefing' | 'awaiting-interpretation' | 'interpreted'
@@ -26,6 +28,7 @@ export interface EditorialRequestData {
     directives: readonly ViewDirective[]
     questions: readonly ViewInterpretationQuestion[]
     coverage?: readonly ViewCoverageItem[]
+    unaccounted?: readonly ViewUnaccounted[]
   }
   unsupported: readonly ViewUnsupported[]
   openQuestions: readonly ViewQuestion[]
@@ -37,7 +40,13 @@ export function describeDirective(directive: Readonly<Pick<ViewDirective, 'kind'
   return describeDirectiveWords(directive.kind, directive.value, directive.param)
 }
 
-export const COVERAGE_LABELS: Readonly<Record<ViewCoverageItem['topic'], string>> = Object.freeze({ audience: 'Público', offer: 'Oferta', tone: 'Tom' })
+export const COVERAGE_LABELS: Readonly<Record<ViewCoverageItem['topic'], string>> = Object.freeze({ audience: 'Público', offer: 'Oferta', tone: 'Tom', context: 'Contexto' })
+
+/** What reading a statement does: it is recorded with its words, and it changes nothing in the video. */
+export const COVERAGE_NOTE = 'O Apollo leu e registrou estas frases. Elas descrevem o vídeo, mas não mudam nada no que ele faz.'
+
+/** Why the Apollo lists a sentence it could not stand an item on, and what the owner can do about it. */
+export const UNACCOUNTED_NOTE = 'O Apollo não classificou estas frases do briefing: nenhuma decisão foi tomada por causa delas. Se alguma pede algo ao vídeo, escreva de outro jeito ou diga o que é.'
 
 export const UNSUPPORTED_REASON_LABELS: Readonly<Record<ViewUnsupported['reason'], string>> = Object.freeze({
   'outside-vocabulary': 'O Apollo não sabe fazer este pedido.',
@@ -98,9 +107,21 @@ export function describeChoice(choice: Readonly<ViewChoice>): string {
 
 export const ANSWER_MAX_LENGTH = 500
 
+/** The reasons the Director stopped, in the Apollo's own words (what it does not do, and what it still needs to ask), one after the other. */
+function blockerTexts(blockers: readonly { kind?: string; text?: string }[] | undefined): string {
+  const texts = (blockers ?? []).flatMap((blocker) => typeof blocker.text === 'string' && blocker.text.trim().length > 0 ? [blocker.text.trim()] : [])
+  return texts.length > 0 ? ` ${texts.join(' ')}` : ''
+}
+
 /** What a failed read or revision of the request tells the owner. */
-export function describeRequestFailure(status: number, payload: { error?: { code?: string; message?: string; requestId?: string; details?: { reason?: string } } } | null): CommandFailure {
+export function describeRequestFailure(status: number, payload: { error?: { code?: string; message?: string; requestId?: string; details?: { reason?: string; blockers?: readonly { kind?: string; text?: string }[] } } } | null): CommandFailure {
   const reason = payload?.error?.details?.reason ?? null
+  if (payload?.error?.code === 'PRECONDITION_REQUIRED' && reason === 'reframe-plan-required') {
+    return {
+      kind: 'refused', status, code: 'PRECONDITION_REQUIRED', requestId: payload?.error?.requestId ?? null,
+      message: 'O pedido preenche a tela desta saída acompanhando o rosto, e esta versão ainda não tem o plano de enquadramento dela. Peça o plano de enquadramento da saída antes de gerar o vídeo.',
+    }
+  }
   if (payload?.error?.code === 'PRECONDITION_REQUIRED' && reason === 'editorial-request-needs-output') {
     return {
       kind: 'refused', status, code: 'PRECONDITION_REQUIRED', requestId: payload?.error?.requestId ?? null,
@@ -122,7 +143,7 @@ export function describeRequestFailure(status: number, payload: { error?: { code
   if (payload?.error?.code === 'PRECONDITION_REQUIRED' && reason === 'editorial-request-blocked') {
     return {
       kind: 'refused', status, code: 'PRECONDITION_REQUIRED', requestId: payload?.error?.requestId ?? null,
-      message: 'O pedido ainda tem uma pergunta sem resposta ou algo que o Apollo não faz. Responda ou mude o briefing antes de gerar.',
+      message: `O pedido ainda tem uma pergunta sem resposta ou algo que o Apollo não faz. Responda ou mude o briefing antes de gerar.${blockerTexts(payload.error.details?.blockers)}`,
     }
   }
   // The Command that reads a briefing is made on a Version that already has an output and a montage; a project just created has neither.

@@ -78,7 +78,7 @@
     {
       "uiAction": "src/app/batches/page.tsx:1162",
       "capabilityId": "apollo.batches.editorial-request.read",
-      "capabilityVersion": "1.0.0",
+      "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/batches/{batchId}/editorial-request",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -459,7 +459,7 @@
     {
       "uiAction": "src/app/batches/page.tsx:2344",
       "capabilityId": "apollo.batches.editorial-request.revise",
-      "capabilityVersion": "1.0.0",
+      "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/batches/{batchId}/editorial-request",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2233,7 +2233,7 @@
     {
       "uiAction": "src/app/projects/[id]/page.tsx:3192",
       "capabilityId": "apollo.projects.editorial-request.revise",
-      "capabilityVersion": "3.0.0",
+      "capabilityVersion": "4.0.0",
       "endpoint": "POST /v1/projects/{projectId}/editorial-request",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2597,9 +2597,9 @@
       ]
     },
     {
-      "uiAction": "src/components/EditorialRequestPanel.tsx:66",
+      "uiAction": "src/components/EditorialRequestPanel.tsx:68",
       "capabilityId": "apollo.projects.editorial-request.read",
-      "capabilityVersion": "2.0.0",
+      "capabilityVersion": "3.0.0",
       "endpoint": "GET /v1/projects/{projectId}/editorial-request",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2617,9 +2617,9 @@
       ]
     },
     {
-      "uiAction": "src/components/EditorialRequestPanel.tsx:85",
+      "uiAction": "src/components/EditorialRequestPanel.tsx:87",
       "capabilityId": "apollo.projects.editorial-request.revise",
-      "capabilityVersion": "3.0.0",
+      "capabilityVersion": "4.0.0",
       "endpoint": "POST /v1/projects/{projectId}/editorial-request",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -5824,7 +5824,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/batches/{batchId}/editorial-request",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/batch-editorial-request-response/v1",
+      "outputSchemaRef": "apollo://schemas/batch-editorial-request-response/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -5835,7 +5835,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/batches/{batchId}/editorial-request",
       "inputSchemaRef": "apollo://schemas/batch-editorial-request-revise-request/v1",
-      "outputSchemaRef": "apollo://schemas/batch-editorial-request-revised/v1",
+      "outputSchemaRef": "apollo://schemas/batch-editorial-request-revised/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -6858,7 +6858,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/projects/{projectId}/editorial-request",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/editorial-request-response/v2",
+      "outputSchemaRef": "apollo://schemas/editorial-request-response/v3",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -6868,8 +6868,8 @@
       "capabilityId": "apollo.projects.editorial-request.revise",
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/editorial-request",
-      "inputSchemaRef": "apollo://schemas/editorial-request-revise-request/v3",
-      "outputSchemaRef": "apollo://schemas/editorial-request-revised/v3",
+      "inputSchemaRef": "apollo://schemas/editorial-request-revise-request/v4",
+      "outputSchemaRef": "apollo://schemas/editorial-request-revised/v4",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

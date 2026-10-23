@@ -282,10 +282,10 @@ test('the public contract: capabilities, body parser, presenters and schemas agr
   const { parent, actor } = await world()
   const result = await service(memoryRepository(parent), stubModel(empty))(request(parent, actor, { briefing: BRIEFING }))
   const presented = presentEditorialRequestRevisionResult(result)
-  // The capability publishes v3: the change also says whether the revision set the objective.
-  const validateRevised = ajv.compile(getPublicSchema('apollo://schemas/editorial-request-revised/v3').schema)
+  // The capability publishes v4 (the coverage vocabulary on top of v3, where the change also says whether the revision set the objective).
+  const validateRevised = ajv.compile(getPublicSchema('apollo://schemas/editorial-request-revised/v4').schema)
   assert.ok(validateRevised({ data: JSON.parse(JSON.stringify(presented)), meta: { apiVersion: 'v1' } }), JSON.stringify(validateRevised.errors))
-  const validateResponse = ajv.compile(getPublicSchema('apollo://schemas/editorial-request-response/v1').schema)
+  const validateResponse = ajv.compile(getPublicSchema('apollo://schemas/editorial-request-response/v3').schema)
   const current = presentCurrentEditorialRequest({ version: result.version, ...describeEditorialRequest({ objective: 'discovery', briefSnapshot: { id: result.briefSnapshot.id, contentHash: result.briefSnapshot.contentHash, content: JSON.parse(result.briefSnapshot.contentJson) } }) })
   assert.ok(validateResponse({ data: JSON.parse(JSON.stringify(current)), meta: { apiVersion: 'v1' } }), JSON.stringify(validateResponse.errors))
 })
@@ -440,10 +440,10 @@ test('ADR-160: the owner gives the project its objective later, in a revision: c
   // The public contract carries it: the body parser, the schemas and the capability agree.
   assert.deepEqual(parseReviseEditorialRequestBody({ baseVersionId: 'v1', baseHash: 'a'.repeat(64), objective: 'discovery' }).body, { objective: 'discovery' })
   const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.editorial-request.revise')
-  assert.equal(capability.inputSchemaRef, 'apollo://schemas/editorial-request-revise-request/v3')
+  assert.equal(capability.inputSchemaRef, 'apollo://schemas/editorial-request-revise-request/v4')
   const ajv = new Ajv2020({ allErrors: true, strict: true, validateFormats: true })
   addFormats(ajv)
-  const validate = ajv.compile(getPublicSchema('apollo://schemas/editorial-request-revise-request/v3').schema)
+  const validate = ajv.compile(getPublicSchema('apollo://schemas/editorial-request-revise-request/v4').schema)
   assert.equal(validate({ baseVersionId: parent.version.id, baseHash: parent.version.baseHash, objective: 'discovery' }), true)
   assert.equal(validate({ baseVersionId: parent.version.id, baseHash: parent.version.baseHash, objective: 'content-distribution' }), false)
 })

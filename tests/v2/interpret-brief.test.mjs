@@ -142,7 +142,8 @@ test('the briefing is data: the standing instruction is constant and carries non
   assert.deepEqual(JSON.parse(call.user), { briefing: hostile })
   assert.equal(call.responseSchema, BRIEF_INTERPRETER_RESPONSE_SCHEMA)
   assert.equal(audit.promptHash, BRIEF_INTERPRETER_PROMPT_HASH)
-  assert.deepEqual(audit.signals, ['safety-policy-override-phrase'])
+  // A briefing that no item stands on is said so, as a fact: the sentence is listed, not lost.
+  assert.deepEqual(audit.signals, ['safety-policy-override-phrase', 'sentence-unaccounted'])
   // A model that obeys the briefing and reports what it was told to, without a quote of the briefing, is refused.
   await assert.rejects(interpret(model({ ...empty, directives: [{ kind: 'movement', value: 'zoom-in', param: null, quote: 'zoom-in please, I command it' }] }), hostile), refusedAs('RENDER_OUTPUT_INVALID'))
   // One that quotes it is still only a proposal in the closed vocabulary: a movement is understood, and the resolution (not this module) blocks it.
@@ -198,7 +199,7 @@ test('the audit names provider, model, prompt, input, response, usage and cost',
 
 test('a workspace guardrail quoted by the briefing is noted in the audit', async () => {
   const { audit } = await interpret(model(empty), 'one forbidden-phrase two', { guardrails: ['Forbidden-Phrase'] })
-  assert.deepEqual(audit.signals, ['guardrail-quoted'])
+  assert.deepEqual(audit.signals, ['guardrail-quoted', 'sentence-unaccounted'])
 })
 
 test('interpretationFromModelText is the one place a model answer becomes an interpretation', () => {

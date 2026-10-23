@@ -16,9 +16,10 @@ import { captionCuesThatDoNotFit, captionTextFitsEveryOutput } from '../domain/c
 import { createEditCommand } from '../domain/edit-command.ts'
 import type { OutputSpecRevisionBody } from '../domain/output-spec-revision.ts'
 import { assertBriefingInterpreted, deriveEditorialRequestFromBrief } from '../domain/editorial-request.ts'
+import { proposeSpeechRemoval } from './speech-removal-proposal.ts'
 import {
   POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION, assertResolutionPlannable, planMovementPolicyUnder, captionTrackId, compositionUnderPolicy, movementMatchesPolicy,
-  openingMatchesPolicy, policyRef, protectedOpeningSeconds, resolveEditorialPolicies, storyBlockUnderPolicy,
+  openingMatchesPolicy, overlayTextOf, policyRef, protectedOpeningSeconds, resolveEditorialPolicies, storyBlockUnderPolicy,
   type CaptionPolicyValue, type EditorialMediaContext, type EditorialOutputSpec, type EditorialPolicies, type EditorialPolicyResolutionV1,
 } from '../domain/editorial-policy-resolution.ts'
 import {
@@ -530,7 +531,9 @@ function buildDecisions(input: {
     },
     {
       id: 'decision-layout-inset', category: 'layout', choice: policies.layout.value.mode === 'source-native' ? 'source-native-frame' : 'landscape-inset-on-blurred-source',
-      reason: `${policies.layout.reason} It applies no face-driven crop, so it needs no face box; a face-driven crop would need high face evidence. ` +
+      reason: `${policies.layout.reason} ` + (policies.layout.value.perOutput?.some((entry) => entry.mode === 'fill-following-face')
+        ? 'The timeline of this plan applies no crop of its own; the fill of an output is the reframe trajectory of that output, decided from the sealed face evidence when its reframe plan is made. '
+        : 'It applies no face-driven crop, so it needs no face box; a face-driven crop would need high face evidence. ') +
         `Evidence: ${tierLine(input.evidence.crop)}.`,
       evidenceRefs: evidenceRefsOf([input.briefRef, ...(input.briefCompilationRef ? [input.briefCompilationRef] : []), input.editPlanRef, ref('layout')], input.evidence.crop),
       confidence: DIRECTOR_PLANNER_PRIORS.crop,
@@ -1123,10 +1126,17 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const editorialRequest = deriveEditorialRequestFromBrief({ ...context.brief, objective: objective.id, desiredAction }, requestedRemovalIds)
     // A briefing with text that nobody has interpreted is a request nobody read: refused here, never planned over as if it were empty.
     assertBriefingInterpreted(editorialRequest)
+    // A subject the request asks to take out of the speech is searched in the transcript now, so that the owner confirms WHAT would go (nothing is cut here).
+    const removalSubjects = [...new Set([...editorialRequest.directives, ...(editorialRequest.interpretation?.directives ?? [])]
+      .filter((directive) => directive.kind === 'remove-speech').map((directive) => String(directive.param)))]
+    const speechRemovalProposals = context.transcript.words !== undefined
+      ? removalSubjects.map((subject) => proposeSpeechRemoval(subject, { words: context.transcript.words!, ...(context.transcript.segments ? { segments: context.transcript.segments } : {}) })) : []
     const resolution = resolveEditorialPolicies(editorialRequest, {
       transcriptId: context.transcript.id, ...(transcriptLanguage ? { transcriptLanguage, transcriptLanguageBasis: context.transcript.languageBasis ?? 'declared-not-verified' as const } : {}),
       ...(context.project.locale ? { declaredLocale: context.project.locale } : {}),
       hasSelectedInsert,
+      ...(speechRemovalProposals.length > 0 ? { speechRemovalProposals } : {}),
+      backgroundMusicTrackCount: Array.isArray((context.editPlan as { audioTracks?: unknown }).audioTracks) ? ((context.editPlan as { audioTracks: readonly unknown[] }).audioTracks).length : 0,
       ...(subtitleStyleOverrideOf(context.policies) ? { subtitleStyleOverride: subtitleStyleOverrideOf(context.policies)! } : {}),
       ...(spokenCta ? { spokenCta: { startSeconds: spokenCta.startSeconds, endSeconds: spokenCta.endSeconds } } : {}),
       timelineDurationSeconds: Math.round(context.editPlan.durationFrames / fpsOfPlan * 1_000) / 1_000,
@@ -1361,14 +1371,14 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       directorRunId,
       audioTimelineHash: createEditorialAudioTimelineHash({ fps: context.editPlan.fps, clips }),
       desiredActionRef,
-      overlayTracks: desiredAction.visualCta && policies.ctaOverlay.value.mode === 'window'
+      overlayTracks: (overlayTextOf(policies, desiredAction.visualCta)) && policies.ctaOverlay.value.mode === 'window'
         ? Object.freeze([Object.freeze({
             id: `overlay-${desiredActionRef.id}`,
             kind: 'cta' as const,
             desiredActionRef,
             startFrame: Math.min(context.editPlan.durationFrames - 1, Math.round(context.editPlan.fps * policies.ctaOverlay.value.startSeconds)),
             endFrame: Math.min(context.editPlan.durationFrames, Math.max(Math.round(context.editPlan.fps * policies.ctaOverlay.value.endSeconds), Math.round(context.editPlan.fps * policies.ctaOverlay.value.startSeconds) + 1)),
-            text: desiredAction.visualCta,
+            text: overlayTextOf(policies, desiredAction.visualCta)!,
           })])
         : Object.freeze([]),
       subtitleTracks: Object.freeze([Object.freeze({

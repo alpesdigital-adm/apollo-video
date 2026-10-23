@@ -1,5 +1,6 @@
 import { captionLayoutOverflows } from '../domain/caption-burn-layout.ts'
 import { DomainError } from '../domain/errors.ts'
+import { assertReframePlanForFill } from '../domain/editorial-policy-resolution.ts'
 import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import {
   validateRenderPlacementPlan,
@@ -41,7 +42,7 @@ import type { ProjectProxyRenderSource } from './ports/project-proxy-render-repo
 export async function deriveEditorialRenderGeometry(input: Readonly<{
   source: Pick<
     ProjectProxyRenderSource,
-    'editPlan' | 'format' | 'trustedOcr' | 'subtitleResolution' | 'reframePlan' | 'reframeIssues' | 'renderSources' | 'sourceArtifactId' | 'outputConsumption' | 'subtitleOverrides'
+    'editPlan' | 'format' | 'trustedOcr' | 'subtitleResolution' | 'reframePlan' | 'reframeIssues' | 'renderSources' | 'sourceArtifactId' | 'outputConsumption' | 'subtitleOverrides' | 'policyResolution'
   >
   canvas: Readonly<{ width: number; height: number }>
   workspaceId: string
@@ -121,6 +122,9 @@ export async function deriveEditorialRenderGeometry(input: Readonly<{
       Math.abs(reframePlan.fps - source.editPlan.fps) > 0.01
     ) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted reframe plan does not describe this render')
   }
+  // ADR-160. A request that fills the frame of THIS output asks for the reframe trajectory of that output. Rendering it without that plan would draw the whole
+  // frame over a backdrop - something the request did not ask for, told to nobody - so the render is refused and says what is missing.
+  if (source.policyResolution?.policies.layout.value.perOutput !== undefined) assertReframePlanForFill(source.policyResolution, sourceOutputVariantId(source), reframePlan !== undefined)
   const placementElements: RenderPlacementRequestV1[] = ctaOverlays.map((overlay, index) => ({
     id: `cta-${index}-${overlay.id ?? index}`.slice(0, 96),
     kind: 'cta' as const, anchor: 'auto' as const, priority: 80, readingOrder: index,

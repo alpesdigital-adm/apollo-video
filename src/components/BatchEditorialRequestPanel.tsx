@@ -12,6 +12,8 @@ import {
 } from '@/v2/ui/briefing-guidance'
 import {
   COVERAGE_LABELS,
+  COVERAGE_NOTE,
+  UNACCOUNTED_NOTE,
   UNSUPPORTED_REASON_LABELS,
   buildAnswersBody,
   describeBatchGenerationBlock,
@@ -20,6 +22,7 @@ import {
   type ViewDirective,
   type ViewInterpretationQuestion,
   type ViewQuestion,
+  type ViewUnaccounted,
   type ViewUnsupported,
 } from '@/v2/ui/editorial-request-view'
 
@@ -33,6 +36,7 @@ export interface BatchEditorialRequestData {
     directives: readonly ViewDirective[]
     questions: readonly ViewInterpretationQuestion[]
     coverage?: readonly ViewCoverageItem[]
+    unaccounted?: readonly ViewUnaccounted[]
   }
   unsupported: readonly ViewUnsupported[]
   openQuestions: readonly ViewQuestion[]
@@ -196,11 +200,26 @@ export default function BatchEditorialRequestPanel({
       ) : null}
 
       {interpretation?.coverage && interpretation.coverage.length > 0 ? (
-        <ul className="space-y-1" data-testid="batch-request-coverage">
-          {interpretation.coverage.map((item) => (
-            <li className="text-xs leading-5 text-[#b5afa5]" key={item.topic}><strong className="font-semibold text-[#d1cbc1]">{COVERAGE_LABELS[item.topic]}:</strong> “{item.excerpt.text}”</li>
-          ))}
-        </ul>
+        <div data-testid="batch-request-coverage">
+          <ul className="space-y-1">
+            {interpretation.coverage.map((item) => (
+              <li className="text-xs leading-5 text-[#b5afa5]" key={item.topic}><strong className="font-semibold text-[#d1cbc1]">{COVERAGE_LABELS[item.topic]}:</strong> “{item.excerpt.text}”</li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] leading-5 text-[#8f897f]">{COVERAGE_NOTE}</p>
+        </div>
+      ) : null}
+
+      {interpretation?.unaccounted && interpretation.unaccounted.length > 0 ? (
+        <div data-testid="batch-request-unaccounted">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#c99e39]">Frases que o Apollo não classificou</p>
+          <ul className="mt-2 space-y-1">
+            {interpretation.unaccounted.map((item) => (
+              <li className="text-xs leading-5 text-[#b5afa5]" key={item.excerpt.start}>“{item.excerpt.text}”</li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] leading-5 text-[#8f897f]">{UNACCOUNTED_NOTE}</p>
+        </div>
       ) : null}
 
       {answered.length > 0 ? (
