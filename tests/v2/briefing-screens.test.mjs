@@ -195,3 +195,11 @@ test('the recipe path is the one the owner picked, and incomplete until the proo
   assert.deepEqual(edgeBetween(graph, 'n2', 'n4'), { verdict: 'borderline', notEvaluable: true })
   assert.deepEqual(edgeBetween(graph, 'n1', 'n4'), { verdict: 'absent', notEvaluable: false })
 })
+
+test('a briefing that cannot be read yet says why in plain words and keeps the text', () => {
+  const refused = describeRequestFailure(409, { error: { code: 'PERSISTENCE_CONFLICT' } })
+  assert.match(refused.message, /ainda não tem um vídeo e uma saída/)
+  assert.match(refused.message, /O texto ficou salvo/)
+  // A real version conflict keeps its own message.
+  assert.notEqual(describeRequestFailure(409, { error: { code: 'VERSION_CONFLICT' } }).message, refused.message)
+})

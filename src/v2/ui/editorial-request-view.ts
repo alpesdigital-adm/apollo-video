@@ -125,5 +125,14 @@ export function describeRequestFailure(status: number, payload: { error?: { code
       message: 'Este ambiente não tem o leitor de briefing ligado. O texto ficou salvo, mas o Diretor só começa depois que o briefing for lido.',
     }
   }
+  // The Command that reads a briefing is made on a Version that already has an output and a montage; a project just created has neither.
+  // The refusal says so in plain words (the text stays saved) instead of the generic "changed in another session".
+  const code = payload?.error?.code ?? null
+  if (status === 409 && code !== null && code !== 'VERSION_CONFLICT' && code !== 'IDEMPOTENCY_PAYLOAD_MISMATCH') {
+    return {
+      kind: 'refused', status, code, requestId: payload?.error?.requestId ?? null,
+      message: 'Não foi possível ler o briefing agora. Isso costuma acontecer enquanto o projeto ainda não tem um vídeo e uma saída. O texto ficou salvo, e a leitura pode ser feita depois, na página do projeto.',
+    }
+  }
   return classifyCommandFailure(status, payload)
 }

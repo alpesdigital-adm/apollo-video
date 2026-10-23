@@ -1061,8 +1061,8 @@ export default function BatchesPage() {
         }
         const payload = await response.json() as ApiEnvelope<{ projects: ProjectSummary[] }>
         if (!response.ok || !payload.data) throw new Error(apiError(payload, 'Não foi possível carregar os projetos.'))
+        // The project of a batch is the owner's choice: the first one of the list is not picked for them.
         setProjects(payload.data.projects)
-        setProjectId((current) => current || payload.data!.projects[0]?.id || '')
       } catch (error) {
         setNotice(error instanceof Error ? error.message : 'Não foi possível carregar os projetos.')
       }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
@@ -10,7 +11,6 @@ import test from 'node:test'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { assertIsolatedDatabase } from './helpers/capture-journey.mjs'
 import { installFakeCodex } from './helpers/install-fake-codex.mjs'
-import { createLocalizationPgFixture } from './helpers/localization-pg.mjs'
 
 /**
  * ADR-160 F7/F8, in a real browser against the production build. The two screens that take the request of a video ask for a briefing and pre-fill
@@ -79,10 +79,31 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
       },
     },
   })
-  let fixture, browser, server
+  let fixture, browser, server, page
+  const exchanges = []
   let serverLogs = ''
   try {
-    fixture = await createLocalizationPgFixture(prisma)
+    // A clean workspace with an API client, and in it a project that has a briefing and a montage (the Version a briefing is read on).
+    const { createWorkspaceRow, issueApiClient } = await import('./helpers/capture-journey.mjs')
+    const { seedSealedProject, testActor } = await import('./helpers/pg-output-world.mjs')
+    const { seedDirectedProject } = await import('./helpers/dashboard-w34-35-fixtures.mjs')
+    const suffix = randomUUID().replaceAll('-', '').slice(0, 12)
+    const workspaceId = `screens-${suffix}-ws`
+    const clientId = `screens-${suffix}-client`
+    const now = new Date()
+    await createWorkspaceRow({ prisma, workspaceId, name: 'Workspace do teste de tela', createdAt: now })
+    const issued = await issueApiClient({
+      prisma, workspaceId, clientId, name: 'Teste de tela', createdAt: now,
+      scopes: ['projects:read', 'projects:write', 'projects:approve'],
+    })
+    const credentialId = `${clientId}-screens`
+    const worldActor = testActor({ workspaceId, clientId, credentialId, environment: 'production', scopes: ['projects:write', 'projects:read', 'media:write'] })
+    const world = await seedSealedProject(prisma, { workspaceId, actor: worldActor, prefix: 'screens', name: 'Projeto com montagem', briefing: PROJECT_BRIEFING })
+    const directed = await seedDirectedProject(prisma, {
+      workspaceId, clientId, credentialId, environment: 'production', projectId: world.projectId, suffix: `screens${suffix.slice(0, 8)}`, directed: false,
+      words: [{ word: 'Primeira', start: 0.2, end: 0.7 }, { word: 'frase', start: 0.7, end: 1.1 }, { word: 'termina', start: 1.1, end: 1.6 }, { word: 'aqui.', start: 1.6, end: 2.0 }],
+    })
+    fixture = { suffix, workspaceId, clientId, issued, projectId: world.projectId, artifactId: directed.source.artifactId }
     const username = `briefing-ui-${fixture.suffix}`
     const password = `Briefing-${fixture.suffix}-secure`
     const port = await freePort()
@@ -129,8 +150,12 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } })
     context.setDefaultTimeout(20_000)
     context.setDefaultNavigationTimeout(30_000)
-    const page = await context.newPage()
+    page = await context.newPage()
     const posts = []
+    page.on('response', (response) => {
+      const url = new URL(response.url())
+      if (url.origin === baseUrl && url.pathname.startsWith('/v1/')) exchanges.push(response.request().method() + ' ' + url.pathname + ' ' + response.status())
+    })
     page.on('request', (request) => {
       const url = new URL(request.url())
       if (url.origin === baseUrl && request.method() === 'POST' && url.pathname.startsWith('/v1/')) posts.push(url.pathname)
@@ -175,45 +200,60 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     assert.equal(posts.filter((path) => path === '/v1/projects').length, 0, 'nothing was sent without a briefing')
     await shot('02-projeto-briefing-obrigatorio.png')
 
-    // A one-line briefing is a briefing. Saving shows how the Apollo read it, and its open question blocks the Director.
-    await briefingField.fill(PROJECT_BRIEFING)
+    // A one-line briefing is a briefing. Saving the project shows the screen that reads it. A project that was just created has no output and no
+    // montage yet, and the reading of a briefing is a Command on a Version that has both: the screen says so and keeps the text, and the Director stays blocked.
+    const unreadBriefing = 'um briefing de uma linha'
+    await briefingField.fill(unreadBriefing)
     await dialog.getByRole('button', { name: 'Criar e continuar' }).click()
     await dialog.getByTestId('project-created-step').waitFor()
-    const block = dialog.getByTestId('editorial-request-block')
-    await dialog.getByTestId('editorial-request-questions').waitFor({ timeout: 60_000 })
-    assert.equal(await block.getAttribute('data-blocks-director'), 'true')
-    assert.match(await block.textContent(), /O Diretor está bloqueado até você responder a pergunta/)
-    assert.match(await dialog.getByTestId('editorial-request-directives').textContent(), /Enquadramento: formato da gravação/)
-    assert.match(await dialog.getByTestId('editorial-request-directives').textContent(), /Trecho do briefing: “pedido”/)
-    assert.equal(fake.executions().length, 1, 'the briefing was read once')
-    await shot('03-projeto-leitura-com-pergunta.png')
-
+    const freshBlock = dialog.getByTestId('editorial-request-block')
+    await dialog.getByTestId('editorial-request-error').waitFor({ timeout: 60_000 })
+    assert.match(await dialog.getByTestId('editorial-request-error').textContent(), /ainda não tem um vídeo e uma saída/)
+    assert.equal(await freshBlock.getAttribute('data-blocks-director'), 'true')
+    assert.match(await freshBlock.textContent(), /O Diretor está bloqueado: o Apollo ainda não leu o seu briefing/)
+    assert.match(await dialog.getByTestId('editorial-request-briefing').textContent(), /um briefing de uma linha/)
+    assert.equal(fake.executions().length, 0, 'nothing was read yet')
+    await shot('03-projeto-criado-briefing-ainda-nao-lido.png')
     const projects = await (await fetch(`${baseUrl}/v1/projects?text=${encodeURIComponent('Projeto do teste de tela')}`, { headers: { authorization } })).json()
     const created = projects.data.projects.find((project) => project.name === 'Projeto do teste de tela')
     assert.ok(created, 'the project exists')
     assert.equal(created.locale, undefined, 'the project states no language: none was chosen')
-    const before = await (await fetch(`${baseUrl}/v1/projects/${created.id}/editorial-request`, { headers: { authorization } })).json()
+    const stored = await (await fetch(`${baseUrl}/v1/projects/${created.id}/editorial-request`, { headers: { authorization } })).json()
+    assert.equal(stored.data.state, 'awaiting-interpretation')
+    assert.equal(stored.data.request.briefing.text, unreadBriefing, 'the text is saved exactly as written')
+    await dialog.getByRole('button', { name: 'Abrir o projeto' }).click()
+    await page.waitForURL(`**/projects/${created.id}`)
+
+    // A project that has a montage: the owner reads the briefing from its page, answers the question, and the Director is released.
+    await page.goto(`${baseUrl}/projects/${world.projectId}`)
+    const requestPanel = page.getByTestId('project-editorial-request')
+    await requestPanel.waitFor()
+    const block = requestPanel.getByTestId('editorial-request-block')
+    assert.match(await block.textContent(), /O Diretor está bloqueado: o Apollo ainda não leu o seu briefing/)
+    await shot('04-projeto-pagina-briefing-nao-lido.png')
+    await requestPanel.getByRole('button', { name: 'Ler o briefing agora' }).click()
+    await requestPanel.getByTestId('editorial-request-questions').waitFor({ timeout: 60_000 })
+    assert.equal(await block.getAttribute('data-blocks-director'), 'true')
+    assert.match(await block.textContent(), /O Diretor está bloqueado até você responder a pergunta/)
+    assert.match(await requestPanel.getByTestId('editorial-request-directives').textContent(), /Enquadramento: formato da gravação/)
+    assert.match(await requestPanel.getByTestId('editorial-request-directives').textContent(), /Trecho do briefing: “pedido”/)
+    assert.equal(fake.executions().length, 1, 'the briefing was read once')
+    await requestPanel.getByTestId('editorial-request-questions').scrollIntoViewIfNeeded()
+    await shot('05-projeto-leitura-com-pergunta.png')
+    const before = await (await fetch(`${baseUrl}/v1/projects/${world.projectId}/editorial-request`, { headers: { authorization } })).json()
     assert.equal(before.data.blocksDirector, true)
     assert.equal(before.data.openQuestions.length, 1)
 
-    // Answering the question, from the same panel, releases the Director.
-    await dialog.getByLabel(/O vídeo deve manter o enquadramento/).fill('Manter o enquadramento da gravação.')
-    await dialog.getByRole('button', { name: 'Enviar respostas' }).click()
+    await requestPanel.getByLabel(/O vídeo deve manter o enquadramento/).fill('Manter o enquadramento da gravação.')
+    await requestPanel.getByRole('button', { name: 'Enviar respostas' }).click()
     await block.filter({ hasText: 'o Diretor está liberado' }).waitFor()
     assert.equal(await block.getAttribute('data-blocks-director'), 'false')
-    assert.match(await dialog.getByTestId('editorial-request-answered').textContent(), /Sua resposta: Manter o enquadramento da gravação\./)
-    await shot('04-projeto-pergunta-respondida.png')
-    const after = await (await fetch(`${baseUrl}/v1/projects/${created.id}/editorial-request`, { headers: { authorization } })).json()
+    assert.match(await requestPanel.getByTestId('editorial-request-answered').textContent(), /Sua resposta: Manter o enquadramento da gravação\./)
+    await shot('06-projeto-pergunta-respondida.png')
+    const after = await (await fetch(`${baseUrl}/v1/projects/${world.projectId}/editorial-request`, { headers: { authorization } })).json()
     assert.equal(after.data.blocksDirector, false)
     assert.equal(after.data.interpretation.questions[0].answer, 'Manter o enquadramento da gravação.')
     assert.equal(fake.executions().length, 1, 'answering never reads the briefing again')
-
-    // The same request is on the project page.
-    await dialog.getByRole('button', { name: 'Abrir o projeto' }).click()
-    await page.waitForURL(`**/projects/${created.id}`)
-    await page.getByTestId('project-editorial-request').waitFor()
-    assert.match(await page.getByTestId('project-editorial-request').textContent(), /Como o Apollo leu o seu briefing/)
-    await shot('05-projeto-pagina-com-pedido.png')
 
     // ---- 2. Lotes: nothing is pre-filled either ----
     await page.goto(`${baseUrl}/batches`)
@@ -228,7 +268,7 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     assert.equal(await composer.locator('input[type="number"]').inputValue(), '', 'the cost cap is empty')
     assert.equal(await composer.locator('textarea').nth(1).inputValue(), '', 'there is no recipe')
     assert.equal(await composer.locator('input[placeholder^="Ex."], textarea[placeholder]').count(), 0, 'no placeholder with a sentence')
-    await shot('06-lotes-novo-vazio.png')
+    await shot('07-lotes-novo-vazio.png')
     await composer.locator('select').first().selectOption(fixture.projectId)
     await composer.getByLabel('Nome do lote').fill('Lote do teste de tela')
     await composer.getByRole('button', { name: /^Criar \d+ saída/ }).click()
@@ -236,10 +276,13 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     assert.match(await composer.locator('#batch-briefing-error').textContent(), /Escreva o briefing/)
     assert.match(await composer.getByTestId('batch-composer-notice').textContent(), /Escreva o briefing/)
     assert.equal(posts.filter((path) => path === '/v1/batches').length, 0, 'nothing was sent without a briefing')
-    await shot('07-lotes-briefing-obrigatorio.png')
+    await shot('08-lotes-briefing-obrigatorio.png')
     await page.keyboard.press('Escape')
 
     // A batch made through the API (the briefing is read once, at creation) shows its request on the screen.
+    const listBefore = await fetch(`${baseUrl}/v1/batches`, { headers: { authorization } })
+    exchanges.push(`api list before ${listBefore.status} ${(await listBefore.text()).slice(0, 300)}`)
+    assert.equal(listBefore.status, 200, 'the workspace lists its batches before this one exists')
     const batchResponse = await fetch(`${baseUrl}/v1/batches`, {
       method: 'POST',
       headers: { authorization, 'content-type': 'application/json', 'idempotency-key': `batch-screens-${fixture.suffix}` },
@@ -267,9 +310,14 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     assert.match(await page.getByTestId('batch-request-briefing').textContent(), /texto do pedido do lote de teste/)
     assert.match(await page.getByTestId('batch-request-questions').textContent(), /Qual é o idioma da fala\?/)
     assert.match(await page.getByTestId('batch-request-unsupported').textContent(), /O Apollo entendeu, mas ainda não consegue executar este pedido/)
-    await shot('08-lotes-pedido-do-lote.png')
+    await section.scrollIntoViewIfNeeded()
+    await shot('09-lotes-pedido-do-lote.png')
   } catch (error) {
-    if (error instanceof Error) error.message += `\n--- server log tail ---\n${serverLogs.slice(-2000)}`
+    if (shots) {
+      const visible = await page?.locator('body').innerText().catch(() => '(page text unavailable)')
+      await page?.screenshot({ path: join(shots, 'failure.png') }).catch(() => undefined)
+      writeFileSync(join(shots, 'failure.txt'), ['page text', String(visible).slice(0, 3000), 'interpreter calls ' + fake.executions().length, 'exchanges', ...exchanges.slice(-30), 'server log tail', serverLogs.slice(-3000), 'error', String(error?.stack ?? error)].join(String.fromCharCode(10)))
+    }
     throw error
   } finally {
     if (browser) await browser.close()

@@ -91,8 +91,10 @@ export default function EditorialRequestPanel({
       if (next) onChanged?.(next)
       return true
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Não foi possível salvar o pedido do vídeo.')
+      const message = reason instanceof Error ? reason.message : 'Não foi possível salvar o pedido do vídeo.'
+      // The request is read again (another session may have changed it), and the reason it failed stays on the screen.
       await load()
+      setError(message)
       return false
     } finally {
       setBusy(null)
