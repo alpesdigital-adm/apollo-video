@@ -31,7 +31,9 @@ test('one chat completion with a strict JSON Schema; the briefing travels only i
   assert.deepEqual(body.messages, [{ role: 'system', content: 'standing instruction' }, { role: 'user', content: '{"briefing":"one two"}' }])
   assert.deepEqual(body.response_format, { type: 'json_schema', json_schema: { name: 'brief_interpretation', strict: true, schema: { type: 'object' } } })
   assert.ok(!('temperature' in body), 'no sampling parameter is imposed on the model')
-  assert.deepEqual(response, { text: empty, usage: { inputTokens: 120, outputTokens: 30 }, resolvedModel: 'resolved-model-1' })
+  // modelInputHash is the hash of the exact request body: what entered the model.
+  assert.match(response.modelInputHash, /^[a-f0-9]{64}$/)
+  assert.deepEqual({ ...response, modelInputHash: undefined }, { text: empty, usage: { inputTokens: 120, outputTokens: 30 }, resolvedModel: 'resolved-model-1', modelInputHash: undefined })
 })
 
 test('provider failures are typed, transient ones say so, and the credential never appears in an error', async () => {
