@@ -85,16 +85,16 @@ const STATUS_LABEL: Record<PresenterSummary['status'], string> = {
 const emptyCreateForm = {
   profileId: '', actorIdentityId: '', avatarAdapterId: 'heygen-v3', avatarAdapterVersion: '3.1.0', avatarIdentityRef: '',
   voiceId: '', voiceAdapterId: 'elevenlabs-tts', voiceAdapterVersion: '1.0.0',
-  defaultLocale: 'pt-BR', disclosure: 'Conteúdo gerado com IA',
+  defaultLocale: '', disclosure: 'Conteúdo gerado com IA',
   consentId: '', consentEvidenceArtifactId: '', consentUses: 'ads', consentMarkets: 'BRA',
-  consentLocales: 'pt-BR', consentExpiresAt: '',
+  consentLocales: '', consentExpiresAt: '',
 }
 
 const emptyConsentForm = {
-  consentId: '', evidenceArtifactId: '', uses: 'ads', markets: 'BRA', locales: 'pt-BR', expiresAt: '',
+  consentId: '', evidenceArtifactId: '', uses: 'ads', markets: 'BRA', locales: '', expiresAt: '',
 }
 
-const emptyEligibilityForm = { operation: 'tts', use: 'ads', market: 'BRA', locale: 'pt-BR' }
+const emptyEligibilityForm = { operation: 'tts', use: 'ads', market: 'BRA', locale: '' }
 
 export default function SyntheticPresentersManager() {
   const router = useRouter()

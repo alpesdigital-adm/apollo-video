@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation'
 
 import LogoutButton from '@/components/LogoutButton'
 import AppShellNavigation from '@/components/AppShellNavigation'
+import BriefingGuidance from '@/components/BriefingGuidance'
+import EditorialRequestPanel from '@/components/EditorialRequestPanel'
 import { useProjectEventFeed } from '@/app/useProjectEventFeed'
 import {
   STRATEGIC_OBJECTIVES,
@@ -15,7 +17,12 @@ import {
   OUTPUT_ASPECT_RATIOS,
   type OutputAspectRatio,
 } from '@/v2/domain/output-spec'
-import { createProductionBrief } from '@/v2/domain/production-brief'
+import {
+  BRIEFING_FIELD_LABEL,
+  BRIEFING_MAX_LENGTH,
+  BRIEFING_REQUIRED_MESSAGE,
+  normalizeBriefingInput,
+} from '@/v2/ui/briefing-guidance'
 import {
   projectDashboardDestination,
   projectPrimaryActionDestination,
@@ -111,14 +118,6 @@ const OBJECTIVE_GROUPS = [
   },
 ]
 
-const FORMAT_DETAILS: Record<OutputAspectRatio, { label: string; use: string; shape: string }> = {
-  '9:16': { label: 'Vertical', use: 'Reels, Shorts, TikTok', shape: 'h-8 w-[18px]' },
-  '16:9': { label: 'Horizontal', use: 'YouTube, sites', shape: 'h-[18px] w-8' },
-  '4:5': { label: 'Retrato', use: 'Feed social', shape: 'h-8 w-[26px]' },
-  '1:1': { label: 'Quadrado', use: 'Feed e display', shape: 'h-7 w-7' },
-  '21:9': { label: 'Cinema', use: 'Telas amplas', shape: 'h-[14px] w-8' },
-}
-
 const PROJECT_STATE_LABELS: Partial<Record<VisibleStateLabel, string>> = {
   draft: 'Configuração',
   ingesting: 'Ingestão',
@@ -173,13 +172,6 @@ const OPERATION_PHASE_LABELS: Record<string, string> = {
   canceled: 'Etapa cancelada',
 }
 
-const PRODUCTION_BRIEF_ASSUMPTION_LABELS: Readonly<Record<string, string>> = {
-  'briefing-absent': 'Briefing livre não informado',
-  'audience-not-specified': 'Público não especificado',
-  'offer-not-specified': 'Oferta não especificada',
-  'tone-not-specified': 'Tom não especificado',
-}
-
 function ApiIcon({ path, className = 'h-5 w-5' }: { path: string; className?: string }) {
   return (
     <svg aria-hidden="true" className={className} fill="none" viewBox="0 0 24 24">
@@ -228,10 +220,11 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
     ...EMPTY_PROJECT_DASHBOARD_FILTERS,
   })
   const [name, setName] = useState('')
-  const [objective, setObjective] = useState<StrategicObjectiveId>('discovery')
-  const [format, setFormat] = useState<OutputAspectRatio>('9:16')
-  const [locale, setLocale] = useState('pt-BR')
+  const [objective, setObjective] = useState<StrategicObjectiveId | null>(null)
+  const [locale, setLocale] = useState('')
   const [briefing, setBriefing] = useState('')
+  const [briefingError, setBriefingError] = useState<string | null>(null)
+  const [createdProject, setCreatedProject] = useState<{ id: string; name: string } | null>(null)
   const [destination, setDestination] = useState('')
   const [verbalCta, setVerbalCta] = useState('')
   const [visualCta, setVisualCta] = useState('')
@@ -414,10 +407,11 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
 
   function resetComposer() {
     setName('')
-    setObjective('discovery')
-    setFormat('9:16')
-    setLocale('pt-BR')
+    setObjective(null)
+    setLocale('')
     setBriefing('')
+    setBriefingError(null)
+    setCreatedProject(null)
     setDestination('')
     setVerbalCta('')
     setVisualCta('')
@@ -433,10 +427,20 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
     const normalizedVisualCta = visualCta.trim()
     const normalizedDisclosures = disclosures.split('\n')
       .map((item) => item.trim()).filter(Boolean)
+    const normalizedBriefing = normalizeBriefingInput(briefing)
     if (normalizedName.length < 2) {
       setNotice('Dê um nome com pelo menos 2 caracteres para a produção.')
       return
     }
+    if (objective === null) {
+      setNotice('Escolha o que este vídeo precisa provocar. O Apollo não escolhe por você.')
+      return
+    }
+    if (normalizedBriefing === null) {
+      setBriefingError(BRIEFING_REQUIRED_MESSAGE)
+      return
+    }
+    setBriefingError(null)
     if (DESTINATION_REQUIRED.has(objective) && !normalizedDestination) {
       setNotice('Informe o destino da ação para este objetivo de conversão.')
       return
@@ -455,9 +459,8 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
         body: JSON.stringify({
           name: normalizedName,
           objective,
-          format,
-          locale,
-          ...(briefing.trim() ? { briefing: briefing.trim() } : {}),
+          ...(locale ? { locale } : {}),
+          briefing: normalizedBriefing,
           ...(
             normalizedDestination || normalizedVerbalCta ||
             normalizedVisualCta || normalizedDisclosures.length
@@ -480,14 +483,14 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
         return
       }
       const payload = await response.json() as PublicApiEnvelope<{
-        project: { id: string }
+        projectAtCreation: { id: string; name?: string }
       }>
       if (!response.ok || !payload.data) {
         throw new Error(errorMessage(payload, 'Não foi possível criar o projeto.'))
       }
-      setComposerOpen(false)
-      resetComposer()
-      router.push(`/projects/${encodeURIComponent(payload.data.project.id)}`)
+      // The project exists. The next step shows how the briefing was read, with its questions, before the owner goes on.
+      setCreatedProject({ id: payload.data.projectAtCreation.id, name: normalizedName })
+      setRefreshRevision((value) => value + 1)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível criar o projeto.')
     } finally {
@@ -648,12 +651,10 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
     }
   }
 
-  const selectedObjective = STRATEGIC_OBJECTIVES.find((item) => item.id === objective)!
-  const requiresDestination = DESTINATION_REQUIRED.has(objective)
-  const productionBriefPreview = useMemo(
-    () => createProductionBrief({ ownerText: briefing }),
-    [briefing],
-  )
+  const selectedObjective = objective === null
+    ? null
+    : STRATEGIC_OBJECTIVES.find((item) => item.id === objective) ?? null
+  const requiresDestination = objective !== null && DESTINATION_REQUIRED.has(objective)
   const quickActionProject = quickActionDialog
     ? projects.find((item) => item.id === quickActionDialog.project.id) ?? quickActionDialog.project
     : null
@@ -875,7 +876,7 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                           <div aria-hidden="true" className="absolute -right-10 -top-20 h-40 w-40 rounded-full bg-[#d3a02e]/[0.08] blur-2xl" />
                           <div className="relative flex items-center justify-between">
                             <span className="rounded-md border border-white/[0.09] bg-black/20 px-2 py-1 text-[10px] font-semibold tracking-wide text-[#aaa49a]">{project.format ?? '—'}</span>
-                            <span className="text-[10px] uppercase tracking-[0.16em] text-[#5f5b54]">{project.locale ?? 'pt-BR'}</span>
+                            <span className="text-[10px] uppercase tracking-[0.16em] text-[#5f5b54]">{project.locale ?? 'idioma pela fala'}</span>
                           </div>
                         </div>
                         <div className="p-5">
@@ -960,13 +961,30 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
 
       {composerOpen ? (
         <div aria-labelledby="new-project-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-3 backdrop-blur-sm sm:p-6" role="dialog">
-          <button aria-label="Fechar criação de projeto" className="absolute inset-0 cursor-default" disabled={creating} onClick={() => setComposerOpen(false)} type="button" />
-          <form className="relative max-h-[94vh] w-full max-w-[980px] overflow-y-auto rounded-[24px] border border-white/[0.1] bg-[#0d0d0d] shadow-[0_30px_100px_rgba(0,0,0,.7)]" onSubmit={createProject}>
+          <button aria-label="Fechar criação de projeto" className="absolute inset-0 cursor-default" disabled={creating} onClick={() => { if (createdProject) resetComposer(); setComposerOpen(false) }} type="button" />
+          {createdProject ? (
+            <div className="relative max-h-[94vh] w-full max-w-[760px] overflow-y-auto rounded-[24px] border border-white/[0.1] bg-[#0d0d0d] shadow-[0_30px_100px_rgba(0,0,0,.7)]" data-testid="project-created-step">
+              <div className="flex items-start justify-between border-b border-white/[0.07] px-5 py-5 sm:px-7">
+                <div>
+                  <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b89034]"><span className="h-px w-6 bg-[#b89034]" /> Projeto criado</div>
+                  <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[#f4f0e8]" id="new-project-title">{createdProject.name}</h2>
+                  <p className="mt-1 text-sm text-[#77736c]">Confira como o Apollo entendeu o seu briefing antes de continuar.</p>
+                </div>
+              </div>
+              <div className="px-5 py-6 sm:px-7">
+                <EditorialRequestPanel projectId={createdProject.id} readWhenUnread />
+              </div>
+              <div className="flex flex-col-reverse items-stretch justify-end gap-3 border-t border-white/[0.07] px-5 py-4 sm:flex-row sm:items-center sm:px-7">
+                <button className="h-11 min-w-40 rounded-xl bg-[#e0af37] px-5 text-sm font-bold text-[#171207] transition hover:bg-[#edc34f]" onClick={() => router.push(`/projects/${encodeURIComponent(createdProject.id)}`)} type="button">Abrir o projeto</button>
+              </div>
+            </div>
+          ) : (
+          <form className="relative max-h-[94vh] w-full max-w-[980px] overflow-y-auto rounded-[24px] border border-white/[0.1] bg-[#0d0d0d] shadow-[0_30px_100px_rgba(0,0,0,.7)]" noValidate onSubmit={createProject}>
             <div className="flex items-start justify-between border-b border-white/[0.07] px-5 py-5 sm:px-7">
               <div>
                 <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b89034]"><span className="h-px w-6 bg-[#b89034]" /> Direção inicial</div>
                 <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[#f4f0e8]" id="new-project-title">Criar nova produção</h2>
-                <p className="mt-1 text-sm text-[#77736c]">Estas decisões entram na versão 1 e orientam todo o trabalho do Diretor.</p>
+                <p className="mt-1 text-sm text-[#77736c]">Estas decisões entram na versão 1 e orientam todo o trabalho do Diretor. Só vale o que você escrever aqui.</p>
               </div>
               <button aria-label="Fechar" className="grid h-9 w-9 place-items-center rounded-lg border border-white/[0.07] text-lg text-[#77736c] transition hover:bg-white/[0.04] hover:text-white" disabled={creating} onClick={() => setComposerOpen(false)} type="button">×</button>
             </div>
@@ -975,11 +993,11 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
               <div className="space-y-7 px-5 py-6 sm:px-7">
                 <label className="block">
                   <span className="text-xs font-semibold text-[#c8c2b8]">Nome da produção</span>
-                  <input autoFocus className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition placeholder:text-[#55524d] focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Ex.: Campanha Imersão — descoberta" required value={name} />
+                  <input autoFocus className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" maxLength={120} onChange={(event) => setName(event.target.value)} required value={name} />
                 </label>
 
-                <fieldset>
-                  <legend className="text-xs font-semibold text-[#c8c2b8]">O que este vídeo precisa provocar?</legend>
+                <fieldset aria-required="true">
+                  <legend className="text-xs font-semibold text-[#c8c2b8]">O que este vídeo precisa provocar? <span className="ml-1 text-[10px] font-normal text-[#77736c]">escolha um</span></legend>
                   <div className="mt-3 space-y-4">
                     {OBJECTIVE_GROUPS.map((group) => (
                       <div key={group.label}>
@@ -989,7 +1007,7 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                             const item = STRATEGIC_OBJECTIVES.find((candidate) => candidate.id === id)!
                             const selected = objective === id
                             return (
-                              <button aria-pressed={selected} className={`rounded-xl border px-3.5 py-3 text-left transition ${selected ? 'border-[#d5a535]/55 bg-[#d5a535]/[0.09]' : 'border-white/[0.07] bg-[#090909] hover:border-white/[0.15]'}`} key={id} onClick={() => { setObjective(id); setDestination(''); setVerbalCta(''); setVisualCta(''); setDisclosures('') }} type="button">
+                              <button aria-pressed={selected} className={`rounded-xl border px-3.5 py-3 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f5d77f] ${selected ? 'border-[#d5a535]/55 bg-[#d5a535]/[0.09]' : 'border-white/[0.07] bg-[#090909] hover:border-white/[0.15]'}`} key={id} onClick={() => { setObjective(id); setDestination(''); setVerbalCta(''); setVisualCta(''); setDisclosures('') }} type="button">
                                 <span className={`block text-sm font-medium ${selected ? 'text-[#edc45d]' : 'text-[#c5c0b7]'}`}>{item.label}</span>
                                 <span className="mt-1 block text-[11px] leading-4 text-[#69665f]">{item.description}</span>
                               </button>
@@ -999,9 +1017,10 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                       </div>
                     ))}
                   </div>
+                  {objective === null ? <p className="mt-3 text-[11px] text-[#8f897f]">Nenhum objetivo escolhido ainda.</p> : null}
                 </fieldset>
 
-                {requiresDestination ? (
+                {requiresDestination && selectedObjective ? (
                   <label className="block">
                     <span className="text-xs font-semibold text-[#c8c2b8]">Destino da ação</span>
                     <span className="ml-2 text-[10px] text-[#77736c]">obrigatório para {selectedObjective.label.toLocaleLowerCase('pt-BR')}</span>
@@ -1012,98 +1031,74 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
 
                 <div className="grid gap-4 sm:grid-cols-2" data-testid="desired-action-fields">
                   <label className="block">
-                    <span className="text-xs font-semibold text-[#c8c2b8]">CTA verbal</span>
-                    <span className="ml-2 text-[10px] text-[#77736c]">opcional, não será inventado</span>
-                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={160} onChange={(event) => setVerbalCta(event.target.value)} placeholder="Ex.: Agende sua conversa" value={verbalCta} />
+                    <span className="text-xs font-semibold text-[#c8c2b8]">Chamada falada</span>
+                    <span className="ml-2 text-[10px] text-[#77736c]">opcional, não será inventada</span>
+                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition focus:border-[#d5a535]/55" maxLength={160} onChange={(event) => setVerbalCta(event.target.value)} value={verbalCta} />
                   </label>
                   <label className="block">
-                    <span className="text-xs font-semibold text-[#c8c2b8]">CTA visual</span>
+                    <span className="text-xs font-semibold text-[#c8c2b8]">Chamada escrita na tela</span>
                     <span className="ml-2 text-[10px] text-[#77736c]">opcional</span>
-                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={160} onChange={(event) => setVisualCta(event.target.value)} placeholder="Ex.: Saiba mais" value={visualCta} />
+                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition focus:border-[#d5a535]/55" maxLength={160} onChange={(event) => setVisualCta(event.target.value)} value={visualCta} />
                   </label>
                   <label className="block sm:col-span-2">
-                    <span className="text-xs font-semibold text-[#c8c2b8]">Disclosures</span>
+                    <span className="text-xs font-semibold text-[#c8c2b8]">Avisos obrigatórios</span>
                     <span className="ml-2 text-[10px] text-[#77736c]">um por linha, opcional</span>
-                    <textarea className="mt-2 min-h-20 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-3 text-sm text-[#f2eee7] outline-hidden transition placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={2000} onChange={(event) => setDisclosures(event.target.value)} placeholder="Condições no site" value={disclosures} />
+                    <textarea className="mt-2 min-h-20 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-3 text-sm text-[#f2eee7] outline-hidden transition focus:border-[#d5a535]/55" maxLength={2000} onChange={(event) => setDisclosures(event.target.value)} value={disclosures} />
                   </label>
                 </div>
 
-                <label className="block">
-                  <span className="text-xs font-semibold text-[#c8c2b8]">Briefing para o Diretor</span>
-                  <span className="ml-2 text-[10px] text-[#77736c]">opcional</span>
-                  <textarea className="mt-2 min-h-32 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 text-sm leading-6 text-[#f2eee7] outline-hidden transition placeholder:text-[#55524d] focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" maxLength={10000} onChange={(event) => setBriefing(event.target.value)} placeholder="Público, oferta, tom, restrições, referências, elementos que devem ou não aparecer..." value={briefing} />
-                  <span className="mt-1.5 flex justify-between text-[10px] text-[#625f59]"><span>Se ficar vazio, o Diretor registra explicitamente as premissas ausentes.</span><span>{briefing.length}/10.000</span></span>
-                </label>
-                <section className="rounded-xl border border-[#d9a43a]/20 bg-[#d9a43a]/[0.035] p-4" data-testid="production-brief-preview">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#b58d31]">Prévia estruturada</p>
-                    <span className="rounded-md border border-white/[0.08] px-2 py-1 text-[9px] text-[#77736c]">Geração ainda não iniciada</span>
-                  </div>
-                  <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-[#aaa49a]" data-testid="production-brief-preview-summary">{productionBriefPreview.summary.text}</p>
-                  <div className="mt-3 flex flex-wrap gap-1.5" data-testid="production-brief-preview-coverage">
-                    {productionBriefPreview.ownerInput && !productionBriefPreview.assumptions.length ? null : Object.entries(productionBriefPreview.summary.coverage).map(([field, covered]) => (
-                      <span className={`rounded-md border px-2 py-1 text-[9px] ${covered ? 'border-[#5fbd7e]/25 text-[#74c98f]' : 'border-white/[0.07] text-[#716d65]'}`} key={field}>
-                        {field === 'audience' ? 'Público' : field === 'offer' ? 'Oferta' : 'Tom'}: {covered ? 'informado' : 'ausente'}
-                      </span>
-                    ))}
-                  </div>
-                  {productionBriefPreview.assumptions.length ? (
-                    <ul className="mt-3 space-y-1 text-[10px] text-[#8f897f]" data-testid="production-brief-preview-assumptions">
-                      {productionBriefPreview.assumptions.map((assumption) => <li key={assumption}>• {PRODUCTION_BRIEF_ASSUMPTION_LABELS[assumption]}</li>)}
-                    </ul>
-                  ) : productionBriefPreview.ownerInput
-                    ? <p className="mt-3 text-[10px] text-[#8f897f]" data-testid="production-brief-preview-assumptions">O briefing ainda não foi lido pelo interpretador: o que ele cobre só é dito depois da leitura.</p>
-                    : <p className="mt-3 text-[10px] text-[#74c98f]" data-testid="production-brief-preview-assumptions">Sem lacunas básicas detectadas.</p>}
-                </section>
+                <div>
+                  <label className="block" htmlFor="project-briefing">
+                    <span className="text-xs font-semibold text-[#c8c2b8]">{BRIEFING_FIELD_LABEL}</span>
+                    <span className="ml-2 text-[10px] text-[#d9a43a]">obrigatório</span>
+                  </label>
+                  <textarea aria-describedby={`project-briefing-guidance${briefingError ? ' project-briefing-error' : ''}`} aria-invalid={briefingError ? true : undefined} aria-required="true" className="mt-2 min-h-32 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 text-sm leading-6 text-[#f2eee7] outline-hidden transition focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" id="project-briefing" maxLength={BRIEFING_MAX_LENGTH} onChange={(event) => { setBriefing(event.target.value); if (briefingError) setBriefingError(null) }} value={briefing} />
+                  <span className="mt-1.5 flex justify-between gap-3 text-[10px] text-[#625f59]">
+                    <span>Qualquer texto serve, até uma linha. Depois de salvar, o Apollo mostra como entendeu.</span>
+                    <span>{briefing.length}/{BRIEFING_MAX_LENGTH.toLocaleString('pt-BR')}</span>
+                  </span>
+                  {briefingError ? <p className="mt-2 text-xs text-[#e0a0a0]" id="project-briefing-error" role="alert">{briefingError}</p> : null}
+                </div>
               </div>
 
               <aside className="border-t border-white/[0.07] bg-[#0a0a0a] px-5 py-6 sm:px-7 lg:border-l lg:border-t-0">
-                <fieldset>
-                  <legend className="text-xs font-semibold text-[#c8c2b8]">Formato de saída</legend>
-                  <p className="mt-1 text-[11px] leading-4 text-[#69665f]">O enquadramento, as legendas e as áreas seguras nascem deste canvas.</p>
-                  <div className="mt-4 space-y-2">
-                    {OUTPUT_ASPECT_RATIOS.map((value) => {
-                      const item = FORMAT_DETAILS[value]
-                      const selected = format === value
-                      return (
-                        <button aria-pressed={selected} className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ${selected ? 'border-[#d5a535]/55 bg-[#d5a535]/[0.09]' : 'border-white/[0.07] hover:border-white/[0.14]'}`} key={value} onClick={() => setFormat(value)} type="button">
-                          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-black/35"><span className={`rounded-[2px] border ${item.shape} ${selected ? 'border-[#e3b849] bg-[#e3b849]/10' : 'border-[#6c6860]'}`} /></span>
-                          <span className="min-w-0 flex-1"><span className={`block text-xs font-semibold ${selected ? 'text-[#e6bd55]' : 'text-[#bbb6ad]'}`}>{value} · {item.label}</span><span className="mt-0.5 block truncate text-[10px] text-[#66625b]">{item.use}</span></span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </fieldset>
+                <BriefingGuidance id="project-briefing-guidance" />
 
                 <label className="mt-6 block">
                   <span className="text-xs font-semibold text-[#c8c2b8]">Idioma principal</span>
-                  <select className="mt-2 h-11 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#c7c1b8] outline-hidden focus:border-[#d5a535]/55" onChange={(event) => setLocale(event.target.value)} value={locale}>
+                  <span className="ml-2 text-[10px] text-[#77736c]">opcional</span>
+                  <select aria-describedby="project-locale-help" className="mt-2 h-11 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#c7c1b8] outline-hidden focus:border-[#d5a535]/55" onChange={(event) => setLocale(event.target.value)} value={locale}>
+                    <option value="">Não informar</option>
                     <option value="pt-BR">Português (Brasil)</option>
                     <option value="en-US">English (US)</option>
                     <option value="es-ES">Español</option>
                   </select>
+                  <span className="mt-1.5 block text-[10px] leading-4 text-[#68645d]" id="project-locale-help">Se você não informar, o Apollo detecta o idioma pela fala do vídeo.</span>
                 </label>
 
                 <div className="mt-6 rounded-xl border border-white/[0.07] bg-white/[0.025] p-3.5">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#77736c]">O que será salvo agora</p>
                   <ul className="mt-3 space-y-2 text-[11px] leading-4 text-[#918c83]">
-                    <li className="flex gap-2"><span className="text-[#c99e39]">✓</span> Objetivo estratégico e ação desejada</li>
-                    <li className="flex gap-2"><span className="text-[#c99e39]">✓</span> Canvas, idioma e áreas seguras</li>
-                    <li className="flex gap-2"><span className="text-[#c99e39]">✓</span> Briefing e premissas explícitas</li>
+                    <li className="flex gap-2"><span className="text-[#c99e39]">✓</span> Objetivo e ação desejada</li>
+                    <li className="flex gap-2"><span className="text-[#c99e39]">✓</span> O texto exato do seu briefing</li>
+                    <li className="flex gap-2"><span className="text-[#c99e39]">✓</span> O idioma, só se você informar</li>
                     <li className="flex gap-2"><span className="text-[#c99e39]">✓</span> Versão inicial imutável e auditável</li>
                   </ul>
+                  <p className="mt-3 text-[10px] leading-4 text-[#68645d]">O formato do vídeo não é escolhido aqui: cada saída do projeto tem o seu.</p>
                 </div>
               </aside>
             </div>
 
+            {notice ? <p className="mx-5 mb-1 rounded-lg border border-[#d9a43a]/25 bg-[#d9a43a]/[0.07] px-3 py-2 text-xs leading-5 text-[#dbc88f] sm:mx-7" data-testid="project-composer-notice" role="alert">{notice}</p> : null}
             <div className="flex flex-col-reverse items-stretch justify-between gap-3 border-t border-white/[0.07] px-5 py-4 sm:flex-row sm:items-center sm:px-7">
               <p className="text-[10px] leading-4 text-[#625f59]">Nenhum vídeo é enviado nesta etapa. A origem será vinculada ao projeto criado.</p>
               <div className="flex gap-2">
                 <button className="h-11 rounded-xl px-4 text-sm text-[#8b877f] transition hover:bg-white/[0.04] hover:text-white disabled:opacity-40" disabled={creating} onClick={() => setComposerOpen(false)} type="button">Cancelar</button>
-                <button className="h-11 min-w-40 rounded-xl bg-[#e0af37] px-5 text-sm font-bold text-[#171207] transition hover:bg-[#edc34f] disabled:cursor-not-allowed disabled:opacity-45" disabled={creating || name.trim().length < 2 || (requiresDestination && !destination.trim())} type="submit">{creating ? 'Salvando direção…' : 'Criar e continuar'}</button>
+                <button className="h-11 min-w-40 rounded-xl bg-[#e0af37] px-5 text-sm font-bold text-[#171207] transition hover:bg-[#edc34f] disabled:cursor-not-allowed disabled:opacity-45" disabled={creating} type="submit">{creating ? 'Salvando direção…' : 'Criar e continuar'}</button>
               </div>
             </div>
           </form>
+          )}
         </div>
       ) : null}
       {quickActionDialog && quickActionProject ? (

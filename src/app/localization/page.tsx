@@ -939,7 +939,6 @@ export default function LocalizationPage() {
                                 onChange={(event) =>
                                   update({ ctaAction: event.target.value })
                                 }
-                                placeholder="Ex.: Inscreva-se"
                                 value={draft?.ctaAction ?? ""}
                               />
                             </label>

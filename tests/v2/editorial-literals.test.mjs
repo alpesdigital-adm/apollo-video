@@ -65,22 +65,11 @@ const PATTERNS = Object.freeze([
  * (Never add one: fix the literal, or move the rule into the resolution module.)
  */
 const BASELINE = Object.freeze({
-  "src/app/ProjectsPageClient.tsx :: ('discovery') as an initial objective": 2,
-  "src/app/ProjectsPageClient.tsx :: ?? 'pt-BR'": 1,
-  "src/app/ProjectsPageClient.tsx :: placeholder=\"Ex.": 3,
-  "src/app/ProjectsPageClient.tsx :: useState('pt-BR')": 1,
-  "src/app/ProjectsPageClient.tsx :: setLocale('pt-BR')": 1,
   "src/app/batches/page.tsx :: ['workspace-default'] (list of one)": 1,
   "src/app/batches/page.tsx :: placeholder=\"Ex.": 1,
   "src/app/batches/page.tsx :: useState('pt-BR')": 2,
   "src/app/batches/page.tsx :: || 'pt-BR'": 1,
   "src/app/batches/page.tsx :: setLocale('pt-BR')": 1,
-  "src/app/localization/page.tsx :: placeholder=\"Ex.": 1,
-  "src/app/projects/[id]/page.tsx :: ('discovery') as an initial objective": 2,
-  "src/app/projects/[id]/page.tsx :: ?? 'pt-BR'": 1,
-  "src/app/projects/[id]/page.tsx :: automaticZoom: false": 1,
-  "src/app/projects/[id]/page.tsx :: placeholder=\"Ex.": 2,
-  "src/components/SyntheticPresentersManager.tsx :: a locale property set to 'pt-BR'": 4,
 })
 
 const keyOf = (file, patternId) => `${file} :: ${patternId}`
