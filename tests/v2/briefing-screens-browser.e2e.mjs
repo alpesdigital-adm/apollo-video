@@ -360,7 +360,7 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     await page.getByTestId('batch-request-answered').waitFor()
     assert.match(await page.getByTestId('batch-request-answered').textContent(), /Sua resposta: Português do Brasil./)
     assert.equal(await requestBlock.getAttribute('data-blocks-generation'), 'true', 'the zoom is still something the Apollo does not do')
-    assert.match(await page.getByTestId('batch-request-unsupported').textContent(), /Zoom (o Apollo ainda não aplica zoom)/)
+    assert.ok((await page.getByTestId("batch-request-unsupported").textContent()).includes("Zoom (o Apollo ainda não aplica zoom)"))
     await shot('16-lotes-pedido-respondido-ainda-bloqueado.png')
     await page.getByTestId('batch-request-change').click()
     await page.getByTestId('batch-request-draft').fill(BATCH_BRIEFING_CHANGED)

@@ -907,6 +907,8 @@ export default function BatchesPage() {
   const [batchRequestLoading, setBatchRequestLoading] = useState(false)
   const [batchRequestError, setBatchRequestError] = useState<string | null>(null)
   const [batchRequestBusy, setBatchRequestBusy] = useState(false)
+  // The section stays open once the owner has acted on it: resolving the last question must not fold the screen away under them.
+  const [batchRequestKeepOpen, setBatchRequestKeepOpen] = useState(false)
   const [batchRequestActionError, setBatchRequestActionError] = useState<string | null>(null)
   const batchRequestIdempotency = useRef<{ fingerprint: string; key: string } | null>(null)
   const [ownerContext, setOwnerContext] = useState<OwnerCompatibilityContext>({ ...EMPTY_OWNER_CONTEXT })
@@ -1141,6 +1143,7 @@ export default function BatchesPage() {
     setBatchRequest(null)
     setBatchRequestError(null)
     setBatchRequestActionError(null)
+    setBatchRequestKeepOpen(false)
     batchRequestIdempotency.current = null
     setOwnerContext({ ...EMPTY_OWNER_CONTEXT })
     setRecipePicks(EMPTY_PICKS)
@@ -2343,6 +2346,7 @@ export default function BatchesPage() {
       const payload = await response.json().catch(() => null) as ApiEnvelope<BatchEditorialRequestData> | null
       if (!response.ok || !payload?.data) throw new Error(describeRequestFailure(response.status, payload as never).message)
       setBatchRequest(payload.data)
+      setBatchRequestKeepOpen(true)
       batchRequestIdempotency.current = null
       setNotice('Pedido do lote salvo.')
       return true
@@ -3583,7 +3587,7 @@ export default function BatchesPage() {
                       </div>
                     </div>
 
-                    <details className="border-b border-white/[0.07] bg-[#0a0a0a] px-4 py-3 sm:px-5" data-testid="batch-request-section" open={Boolean(batchRequest && (batchRequest.openQuestions.length > 0 || batchRequest.unsupported.length > 0))}>
+                    <details className="border-b border-white/[0.07] bg-[#0a0a0a] px-4 py-3 sm:px-5" data-testid="batch-request-section" open={batchRequestKeepOpen || Boolean(batchRequest && (batchRequest.openQuestions.length > 0 || batchRequest.unsupported.length > 0))}>
                       <summary className="cursor-pointer text-xs font-semibold text-[#c8c2b8]">
                         Pedido do lote
                         {batchRequest && batchRequest.openQuestions.length > 0 ? <span className="ml-2 text-[10px] font-normal text-[#c79b42]">{batchRequest.openQuestions.length === 1 ? '1 ponto em dúvida' : `${batchRequest.openQuestions.length} pontos em dúvida`}</span> : null}
