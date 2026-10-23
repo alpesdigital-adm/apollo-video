@@ -9,7 +9,7 @@ import { FACE_V9_OWNER_ACCEPTANCE_SHA256 } from './face-evidence-policy.ts'
  *
  * A platform enters this list only with the SHA-256 of a parity receipt. Windows is its own receipt (the V9 development run).
  * Linux enters with the receipt FACE_V9_LINUX_PARITY_RECEIPT_DOCUMENT under the explicit, owner-accepted
- * criterion `detections-identical-max-delta-1e-6` (22/10/2026; docs/adr/ADR-160-v9-linux-parity-criterion.md), and ONLY for the
+ * criterion `detections-identical-max-delta-1e-6` (22/10/2026; docs/adr/ADR-161-v9-linux-parity-criterion.md), and ONLY for the
  * exact interpreter, runtime manifest and bridge bytes that receipt names: any other bytes leave the worker refusing to start and
  * any envelope claiming Linux unauthenticated.
  */

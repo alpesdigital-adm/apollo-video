@@ -11,7 +11,7 @@ falha fechado em todos os pontos de confiança. **Nada foi executado contra um b
 OpenVINO real nesta árvore, em Linux, nem em vídeo real.** Por isso não há implantação.
 
 *Atualização de 22/10/2026:* a paridade do detector em Linux foi medida em outra frente e **aceita pelo dono** (bloqueio 1 abaixo;
-`docs/adr/ADR-160-v9-linux-parity-criterion.md`). As demais lacunas deste parágrafo seguem valendo.
+`docs/adr/ADR-161-v9-linux-parity-criterion.md`). As demais lacunas deste parágrafo seguem valendo.
 
 ## Decisão de proprietário e escopo
 
@@ -110,7 +110,7 @@ Executado nesta árvore, sem banco, sem OpenVINO real:
 
 1. **Execução supervisionada de paridade em Linux (obrigatória) — ACEITO pelo dono em 22/10/2026** (Brain #3803;
    recibo `docs/quality/w62-v9-linux-parity-receipt.json`; critério nomeado e limites em
-   `docs/adr/ADR-160-v9-linux-parity-criterion.md`). Resultado nas 60 imagens, Windows × Linux Intel × Linux AMD EPYC 9555P
+   `docs/adr/ADR-161-v9-linux-parity-criterion.md`). Resultado nas 60 imagens, Windows × Linux Intel × Linux AMD EPYC 9555P
    (OpenVINO 2026.4.0): detecções com score >= 0,5 idênticas (V9 61/61, retail-0004 52/52), delta máximo de caixa/score
    3,6e-7 e 8,9e-7; tensores brutos byte-idênticos em apenas 1/60 (V9) e 53/60 (retail), dependentes da CPU. **O critério
    original (byte a byte) NÃO foi atendido**; o dono aceitou o critério `detections-identical-max-delta-1e-6`. O recibo vale

@@ -1,4 +1,4 @@
-# ADR-160 — Linux parity of the V9 face detector: named criterion and byte-bound receipt
+# ADR-161 — Linux parity of the V9 face detector: named criterion and byte-bound receipt
 
 ## Status
 

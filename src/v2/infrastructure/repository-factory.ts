@@ -2196,7 +2196,7 @@ export function createFaceProducerWorker(
  * analyzer, so the analyzer is composed once, here, and a refusal is the same for both. It fails closed before it can claim anything:
  * on a platform the producer registry has no parity receipt for, without every pinned input, or with a runtime package root whose
  * files differ from the pinned manifest. Linux runs only with the exact interpreter, runtime manifest and bridge its parity receipt
- * names (criterion `detections-identical-max-delta-1e-6`, owner-accepted 22/10/2026, ADR-160); any other bytes are refused.
+ * names (criterion `detections-identical-max-delta-1e-6`, owner-accepted 22/10/2026, ADR-161); any other bytes are refused.
  */
 export async function createFaceWindowWorker(
   environment: NodeJS.ProcessEnv = process.env,
