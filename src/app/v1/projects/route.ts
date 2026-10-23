@@ -14,6 +14,7 @@ import {
   createProjectCreationRepository,
   createProjectQueryRepository,
 } from '@/v2/infrastructure/repository-factory'
+import { createInterpretBrief } from '@/v2/infrastructure/brief/create-interpret-brief'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { assertAllowlistedPublicQuery } from '@/v2/public-api/conventions'
 import {
@@ -113,6 +114,8 @@ export async function POST(request: NextRequest) {
 
     const createProject = createProjectService({
       repository: createProjectCreationRepository(),
+      // The briefing is read when the project is created (the reading is a property of the text); no interpreter, or a refused reading, keeps it unread.
+      interpretBrief: createInterpretBrief(),
       clock: () => new Date(),
       createId: (kind) => `${kind}-${randomUUID()}`,
       createEventId: randomUUID,

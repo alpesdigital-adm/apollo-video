@@ -4,10 +4,12 @@ import { createEditCommand } from '../domain/edit-command.ts'
 import {
   EDITORIAL_EXECUTABLE_VALUES,
   answerBriefQuestions,
+  directivesOfChoices,
   createEditorialRequest,
   deriveEditorialRequestFromBrief,
   parseEditorialDirective,
   type BriefInterpretationV1,
+  type BriefQuestionChoice,
   type EditorialDirective,
   type EditorialRequestV1,
 } from '../domain/editorial-request.ts'
@@ -140,6 +142,7 @@ export function reviseEditorialRequestService(dependencies: {
     let interpretationAudit: Readonly<BriefInterpretationAudit> | null = null
     let interpreted = false
     let answered: readonly string[] = []
+    let chosen: readonly EditorialDirective[] = []
     if (nextText !== undefined) {
       const keep = !briefingChanged && currentRequest.interpretation !== undefined
       if (keep) {
@@ -155,14 +158,18 @@ export function reviseEditorialRequestService(dependencies: {
       }
       if (answers !== undefined) {
         assertDomain(interpretation !== undefined, 'INVALID_ARGUMENT', 'There is no interpretation to answer')
-        interpretation = answerBriefQuestions(interpretation!, nextText, answers as readonly { questionId: string; answer: string }[])
+        const typedAnswers = answers as readonly { questionId: string; answer?: string; choiceId?: string }[]
+        // A closed answer is the owner's statement and it decides the plan: it becomes the structured directive of this same revision.
+        chosen = directivesOfChoices(interpretation!, typedAnswers)
+        interpretation = answerBriefQuestions(interpretation!, nextText, typedAnswers)
         answered = (answers as readonly { questionId: string }[]).map((item) => item.questionId).toSorted()
       }
     } else {
       assertDomain(answers === undefined, 'INVALID_ARGUMENT', 'There is no briefing, so there is no question to answer')
     }
 
-    const directives = bodyDirectives ?? (Array.isArray(currentStructured.directives) ? (currentStructured.directives as readonly EditorialDirective[]) : [])
+    const baseDirectives = bodyDirectives ?? (Array.isArray(currentStructured.directives) ? (currentStructured.directives as readonly EditorialDirective[]) : [])
+    const directives = [...baseDirectives.filter((directive) => !chosen.some((item) => item.id === directive.id)), ...chosen]
     const variantOverrides = bodyOverrides ?? (isRecord(currentStructured.variantOverrides)
       ? (currentStructured.variantOverrides as Record<string, readonly EditorialDirective[]>) : {})
     const currentDesiredAction = parseDesiredAction(currentBrief.desiredAction, objective as StrategicObjectiveId)
@@ -277,7 +284,7 @@ export interface EditorialRequestView {
   /** `no-briefing`: nothing to read. `awaiting-interpretation`: a briefing with text nobody has read. `interpreted`. */
   state: 'no-briefing' | 'awaiting-interpretation' | 'interpreted'
   unsupported: readonly Readonly<{ id: string; source: 'interpretation' | 'directive'; reason: 'outside-vocabulary' | 'not-executable'; summary: string; excerpt: string | null }>[]
-  openQuestions: readonly Readonly<{ id: string; question: string; excerpt: string | null }>[]
+  openQuestions: readonly Readonly<{ id: string; question: string; excerpt: string | null; choices?: readonly Readonly<BriefQuestionChoice>[] }>[]
   /** True while the Director would refuse the request as it stands (an unread briefing, an unsupported item, an open question). */
   blocksDirector: boolean
   hashes: Readonly<{ requestHash: string; briefingSha256: string | null; interpretationHash: string | null; briefSnapshotId: string; briefSnapshotHash: string }>
@@ -303,7 +310,7 @@ export function describeRequestReading(request: Readonly<EditorialRequestV1>, au
     })),
   ]
   const openQuestions = (interpretation?.questions ?? []).filter((question) => question.status === 'open')
-    .map((question) => Object.freeze({ id: question.id, question: question.question, excerpt: (question.excerpt?.text ?? null) as string | null }))
+    .map((question) => Object.freeze({ id: question.id, question: question.question, excerpt: (question.excerpt?.text ?? null) as string | null, ...(question.choices ? { choices: question.choices } : {}) }))
   const state = request.briefing === undefined ? 'no-briefing' as const : interpretation === null ? 'awaiting-interpretation' as const : 'interpreted' as const
   return Object.freeze({
     request, interpretation, interpretationAudit: (isRecord(audit) ? audit : null) as Readonly<BriefInterpretationAudit> | null, state,

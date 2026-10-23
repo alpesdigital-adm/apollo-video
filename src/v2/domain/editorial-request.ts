@@ -94,12 +94,24 @@ export interface UnsupportedBriefItem {
   reason: 'outside-vocabulary' | 'not-executable'
 }
 
+/**
+ * One of the closed answers of a question whose answers the Apollo knows (the briefing says two things about one subject: which one is meant).
+ * Choosing it is the owner's own statement, and it becomes the structured directive of the same revision; nothing is chosen for them.
+ */
+export interface BriefQuestionChoice {
+  id: string
+  label: string
+  directive: Readonly<EditorialDirective>
+}
+
 export interface BriefQuestion {
   id: string
   question: string
   excerpt?: Readonly<BriefExcerpt>
   status: 'open' | 'answered'
   answer?: string
+  /** Present only when the answers are closed; a question without choices is answered in the owner's words. */
+  choices?: readonly Readonly<BriefQuestionChoice>[]
 }
 
 /** What a briefing may be said to state about itself, beyond directives: the production-brief coverage the interpreter (never a regex) answers. */
@@ -195,6 +207,17 @@ function parseDirectiveList(value: unknown, where: string, allowExcerpt = false)
   return Object.freeze(directives)
 }
 
+function parseQuestionChoices(value: unknown, questionId: string): readonly Readonly<BriefQuestionChoice>[] {
+  assertDomain(Array.isArray(value) && value.length >= 2 && value.length <= 8, 'INVALID_ARGUMENT', `question ${questionId}: closed answers are 2 to 8 choices`)
+  const choices = (value as unknown[]).map((item) => {
+    assertDomain(isRecord(item) && onlyKeys(item, ['id', 'label', 'directive']) && typeof item.id === 'string' && MAX_ID.test(item.id) &&
+      typeof item.label === 'string' && item.label.trim().length > 0 && item.label.length <= 200, 'INVALID_ARGUMENT', `question ${questionId}: a choice is malformed`)
+    return Object.freeze({ id: item.id, label: item.label, directive: parseEditorialDirective(item.directive, `question ${questionId} choice ${item.id}`) })
+  })
+  assertDomain(new Set(choices.map((item) => item.id)).size === choices.length, 'INVALID_ARGUMENT', `question ${questionId}: choices repeat`)
+  return Object.freeze(choices)
+}
+
 function parseExcerpt(value: unknown, briefing: string, where: string): Readonly<BriefExcerpt> {
   assertDomain(isRecord(value) && onlyKeys(value, ['start', 'end', 'text']), 'INVALID_ARGUMENT', `${where}: excerpt is malformed`)
   const { start, end, text } = value
@@ -241,15 +264,17 @@ export function parseBriefInterpretation(value: unknown, briefingText: string): 
   })
   assertDomain(Array.isArray(value.questions) && value.questions.length <= MAX_DIRECTIVES, 'INVALID_ARGUMENT', 'brief interpretation questions are not bounded')
   const questions = (value.questions as unknown[]).map((item) => {
-    assertDomain(isRecord(item) && onlyKeys(item, ['id', 'question', 'excerpt', 'status', 'answer']) && typeof item.id === 'string' && MAX_ID.test(item.id) &&
+    assertDomain(isRecord(item) && onlyKeys(item, ['id', 'question', 'excerpt', 'status', 'answer', 'choices']) && typeof item.id === 'string' && MAX_ID.test(item.id) &&
       typeof item.question === 'string' && item.question.trim().length > 0 && item.question.length <= 500 &&
       (item.status === 'open' || item.status === 'answered') &&
       (item.status === 'answered' ? typeof item.answer === 'string' && item.answer.trim().length > 0 && item.answer.length <= 500 : item.answer === undefined),
     'INVALID_ARGUMENT', 'brief question is malformed')
+    const choices = item.choices === undefined ? undefined : parseQuestionChoices(item.choices, item.id as string)
     return Object.freeze({
       id: item.id, question: item.question, status: item.status,
       ...(item.excerpt !== undefined ? { excerpt: parseExcerpt(item.excerpt, briefingText, `question ${item.id}`) } : {}),
       ...(item.answer !== undefined ? { answer: item.answer as string } : {}),
+      ...(choices !== undefined ? { choices } : {}),
     })
   })
   const ids = [...directives.map((item) => item.id), ...unsupported.map((item) => item.id), ...questions.map((item) => item.id)]
@@ -362,12 +387,14 @@ export function deriveEditorialRequestFromBrief(brief: Readonly<Record<string, u
 }
 
 export const BRIEF_INTERPRETATION_REQUIRED_REASON = 'brief-interpretation-required' as const
+/** A project with no output has no Version a revision can be made on: its briefing is read when it is created, and revised once it has an output. */
+export const EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON = 'editorial-request-needs-output' as const
 /** The Director refuses a request with an unsupported item or an open question (the details name them; the reason is the published code). */
 export const EDITORIAL_REQUEST_BLOCKED_REASON = 'editorial-request-blocked' as const
 /** No interpreter is configured on this deployment, so a briefing with text cannot be read. */
 export const BRIEF_INTERPRETER_UNAVAILABLE_REASON = 'brief-interpreter-unavailable' as const
 /** The `reason` codes the public error envelope publishes for the editorial request (PRECONDITION_REQUIRED). */
-export const EDITORIAL_REQUEST_PUBLISHED_REASONS = Object.freeze([BRIEF_INTERPRETATION_REQUIRED_REASON, EDITORIAL_REQUEST_BLOCKED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON] as const)
+export const EDITORIAL_REQUEST_PUBLISHED_REASONS = Object.freeze([BRIEF_INTERPRETATION_REQUIRED_REASON, EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON, EDITORIAL_REQUEST_BLOCKED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON] as const)
 
 /**
  * A briefing with text and no interpretation of exactly that text is NOT an empty briefing: it is a request nobody has read. The Director
@@ -389,14 +416,23 @@ export function assertBriefingInterpreted(request: Readonly<EditorialRequestV1>)
 export function answerBriefQuestions(
   interpretation: Readonly<BriefInterpretationV1>,
   briefingText: string,
-  answers: readonly Readonly<{ questionId: string; answer: string }>[],
+  answers: readonly Readonly<{ questionId: string; answer?: string; choiceId?: string }>[],
 ): Readonly<BriefInterpretationV1> {
   assertDomain(Array.isArray(answers) && answers.length >= 1 && answers.length <= MAX_DIRECTIVES, 'INVALID_ARGUMENT', 'answers must be a bounded, non-empty list')
   const byId = new Map<string, string>()
   for (const item of answers) {
-    assertDomain(isRecord(item) && onlyKeys(item, ['questionId', 'answer']) && typeof item.questionId === 'string' && typeof item.answer === 'string',
-      'INVALID_ARGUMENT', 'answer is malformed')
-    const answer = item.answer.replace(/\s+/gu, ' ').trim()
+    assertDomain(isRecord(item) && onlyKeys(item, ['questionId', 'answer', 'choiceId']) && typeof item.questionId === 'string' &&
+      (typeof item.answer === 'string') !== (typeof item.choiceId === 'string'), 'INVALID_ARGUMENT', 'answer is malformed: it is the owner\'s words or one of the choices, never both')
+    const question = interpretation.questions.find((candidate) => candidate.id === item.questionId)
+    let answer: string
+    if (typeof item.choiceId === 'string') {
+      const choice = question?.choices?.find((candidate) => candidate.id === item.choiceId)
+      assertDomain(choice !== undefined, 'INVALID_ARGUMENT', 'the choice is not one of the answers of this question', { questionId: item.questionId })
+      answer = choice!.label
+    } else {
+      assertDomain(question?.choices === undefined, 'INVALID_ARGUMENT', 'this question has closed answers: choose one', { questionId: item.questionId })
+      answer = (item.answer as string).replace(/\s+/gu, ' ').trim()
+    }
     assertDomain(answer.length >= 1 && answer.length <= 500, 'INVALID_ARGUMENT', 'answer must contain 1 to 500 characters')
     assertDomain(!byId.has(item.questionId), 'INVALID_ARGUMENT', 'a question is answered once')
     byId.set(item.questionId, answer)
@@ -411,4 +447,20 @@ export function answerBriefQuestions(
       ? Object.freeze({ ...question, status: 'answered' as const, answer: byId.get(question.id)! }) : question),
     ...(interpretation.coverage ? { coverage: interpretation.coverage } : {}),
   })
+}
+
+/**
+ * The structured directives the owner's choices stand for, one per answer that chose a closed answer. Read from the interpretation that asked
+ * (before the questions are marked answered), so the choice can only be one the Apollo offered.
+ */
+export function directivesOfChoices(
+  interpretation: Readonly<BriefInterpretationV1>,
+  answers: readonly Readonly<{ questionId: string; answer?: string; choiceId?: string }>[],
+): readonly Readonly<EditorialDirective>[] {
+  return Object.freeze(answers.flatMap((item) => {
+    if (typeof item.choiceId !== 'string') return []
+    const choice = interpretation.questions.find((question) => question.id === item.questionId)?.choices?.find((candidate) => candidate.id === item.choiceId)
+    assertDomain(choice !== undefined, 'INVALID_ARGUMENT', 'the choice is not one of the answers of this question', { questionId: item.questionId })
+    return [Object.freeze({ ...choice!.directive, id: `answer-${item.questionId}` })]
+  }))
 }

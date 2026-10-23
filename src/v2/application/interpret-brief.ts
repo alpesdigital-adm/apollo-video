@@ -5,6 +5,7 @@ import {
   BRIEF_COVERAGE_TOPICS,
   EDITORIAL_DIRECTIVE_KINDS,
   EDITORIAL_DIRECTIVE_VOCABULARY,
+  EDITORIAL_EXECUTABLE_VALUES,
   createBriefInterpretation,
   parseEditorialDirective,
   type BriefCoverageItem,
@@ -289,9 +290,18 @@ export function interpretationFromModelText(input: Readonly<{
     if (distinct.length === 1) directives.push(distinct[0]!)
     else if (distinct.length > 1) {
       withdrawn += distinct.length
+      // The answers are closed when the Apollo can do each of them: the owner chooses one, and the choice becomes the directive of the revision.
+      const doable = distinct.filter((directive) => EDITORIAL_EXECUTABLE_VALUES[kind].includes(directive.value))
+      const choices = doable.length >= 2 && doable.length === distinct.length
+        ? doable.map((directive, index) => Object.freeze({
+          id: `c${index + 1}`, label: shortText(describeDirective(kind, directive.value, directive.param), 'questions.choices.label'),
+          directive: Object.freeze({ id: `c${index + 1}`, kind, value: directive.value, ...(directive.param !== undefined ? { param: directive.param } : {}) }),
+        }))
+        : undefined
       questions.push(Object.freeze({
         id: nextId('q', questions), status: 'open' as const, excerpt: distinct[0]!.excerpt,
         question: shortText(`The briefing says more than one thing about "${kind}" (${distinct.map((directive) => describeDirective(kind, directive.value, directive.param)).join(' / ')}). Which one is meant?`, 'questions.question'),
+        ...(choices !== undefined ? { choices } : {}),
       }))
     }
   }

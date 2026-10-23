@@ -10,7 +10,7 @@ import type {
 import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
 import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
-import { deriveEditorialRequestFromBrief } from '../../domain/editorial-request.ts'
+import { EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON, deriveEditorialRequestFromBrief } from '../../domain/editorial-request.ts'
 import {
   createEditorialRequestRevisionInvalidations,
   parseEditorialRequestRevisionImpact,
@@ -159,7 +159,12 @@ export class PrismaEditorialRequestRepository implements EditorialRequestReposit
     if (!parent) return null
     const editPlan = parseRecord(operationalBundlePlanV3(parent).contentJson, 'editorial request EditPlan')
     const currentDurationFrames = Number(editPlan.durationFrames)
-    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames < 0 || parent.state.document.entries.length === 0) {
+    // A revision is a child Command, and a child Command needs an explicit output variant (the sealed Version machinery): a project with none is
+    // refused with its own reason. Its briefing was read when it was created, and it can be revised as soon as it has an output.
+    if (parent.state.document.entries.length === 0) {
+      throw new DomainError('PRECONDITION_REQUIRED', 'A project with no output cannot have its editorial request revised yet', { reason: EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON })
+    }
+    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames < 0) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial request render context is incomplete')
     }
     const currentVersionId = parent.version.id

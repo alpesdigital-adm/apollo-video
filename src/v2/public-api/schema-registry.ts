@@ -8650,6 +8650,34 @@ const batchEditorialRequestSchema = {
     }] },
   },
 }
+// ---- ADR-160 (editorial request v2). A question whose answers are closed carries them as choices; choosing one is the owner's answer and becomes the
+// directive of the same revision. Every shape is a superset of the v1 shape.
+const briefQuestionChoiceSchema = {
+  type: 'object', additionalProperties: false, required: ['id', 'label', 'directive'],
+  properties: { id: editorialDirectiveIdSchema, label: { type: 'string', minLength: 1, maxLength: 200 }, directive: editorialDirectiveSchema },
+}
+const briefQuestionChoicesSchema = { type: 'array', minItems: 2, maxItems: 8, items: briefQuestionChoiceSchema }
+const briefInterpretationSchemaV2 = {
+  ...briefInterpretationSchema,
+  properties: {
+    ...briefInterpretationSchema.properties,
+    questions: { type: 'array', maxItems: 64, items: {
+      ...briefInterpretationSchema.properties.questions.items,
+      properties: { ...briefInterpretationSchema.properties.questions.items.properties, choices: briefQuestionChoicesSchema },
+    } },
+  },
+}
+const currentEditorialRequestSchemaV2 = {
+  ...currentEditorialRequestSchema,
+  properties: {
+    ...currentEditorialRequestSchema.properties,
+    interpretation: { anyOf: [{ type: 'null' }, briefInterpretationSchemaV2] },
+    openQuestions: { type: 'array', maxItems: 64, items: {
+      ...currentEditorialRequestSchema.properties.openQuestions.items,
+      properties: { ...currentEditorialRequestSchema.properties.openQuestions.items.properties, choices: briefQuestionChoicesSchema },
+    } },
+  },
+}
 const editorialRequestRevisionImpactSchema = {
   ...projectPolicyOverridesImpactSchema,
   required: [
@@ -8694,6 +8722,10 @@ const editorialRequestRevisionResultSchema = {
     replayed: { type: 'boolean' },
   },
 }
+const editorialRequestRevisionResultSchemaV2 = {
+  ...editorialRequestRevisionResultSchema,
+  properties: { ...editorialRequestRevisionResultSchema.properties, interpretation: currentEditorialRequestSchemaV2.properties.interpretation, openQuestions: currentEditorialRequestSchemaV2.properties.openQuestions },
+}
 const editorialRequestReviseRequestSchema = {
   type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash'],
   properties: {
@@ -8709,6 +8741,26 @@ const editorialRequestReviseRequestSchema = {
     reason: { type: 'string', minLength: 1, maxLength: 1000 },
   },
   anyOf: ['briefing', 'directives', 'variantOverrides', 'desiredAction', 'answers'].map((field) => ({ required: [field], properties: { [field]: {} } })),
+}
+const editorialRequestReviseRequestSchemaV2 = {
+  ...editorialRequestReviseRequestSchema,
+  properties: {
+    ...editorialRequestReviseRequestSchema.properties,
+    answers: { type: 'array', minItems: 1, maxItems: 64, items: {
+      type: 'object', additionalProperties: false, required: ['questionId'],
+      description: 'The owner answers a question in words (answer) or chooses one of its closed answers (choiceId): exactly one of the two.',
+      properties: { questionId: editorialDirectiveIdSchema, answer: { type: 'string', minLength: 1, maxLength: 500 }, choiceId: editorialDirectiveIdSchema },
+      oneOf: [{ required: ['answer'] }, { required: ['choiceId'] }],
+    } },
+  },
+}
+const batchEditorialRequestSchemaV2 = {
+  ...batchEditorialRequestSchema,
+  properties: {
+    ...batchEditorialRequestSchema.properties,
+    interpretation: currentEditorialRequestSchemaV2.properties.interpretation,
+    openQuestions: currentEditorialRequestSchemaV2.properties.openQuestions,
+  },
 }
 
 function currentProjectVersionResultSchema(snapshotRefNames: readonly string[]) {
@@ -27183,6 +27235,10 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
   defineSchema('project-policy-overrides-response', 1, 'Current version-bound project policy values, overrides and resolved origins', successSchema(currentProjectPolicyOverridesSchema)),
   defineSchema('project-policy-overrides-applied', 1, 'Applied project policy EditCommand, immutable Policy Snapshot and deferred render impact', successSchema(projectPolicyOverridesResultSchema)),
   defineSchema('batch-editorial-request-response', 1, 'The editorial request of one production batch: the briefing as written and how it was read, with what is unsupported and what is still a question', successSchema(batchEditorialRequestSchema)),
+  defineSchema('batch-editorial-request-response', 2, 'The editorial request of one production batch: the briefing as written and how it was read, with what is unsupported, what is still a question and the closed answers a question offers', successSchema(batchEditorialRequestSchemaV2)),
+  defineSchema('editorial-request-revise-request', 2, 'Replace the parts of the editorial request of a video that the body names; a question is answered in words or by choosing one of its closed answers, and a choice becomes the directive of the same revision', editorialRequestReviseRequestSchemaV2),
+  defineSchema('editorial-request-response', 2, 'The editorial request of the current Version: what was asked, how the briefing was read, what is unsupported and what is still a question, with the closed answers a question offers', successSchema(currentEditorialRequestSchemaV2)),
+  defineSchema('editorial-request-revised', 2, 'A revised editorial request: the EditCommand, the new Brief Snapshot state and the deferred render impact, with the closed answers a question offers', successSchema(editorialRequestRevisionResultSchemaV2)),
   defineSchema('editorial-request-revision-impact', 1, 'Content-addressed deferred impact of a revised editorial request', editorialRequestRevisionImpactSchema),
   defineSchema('editorial-request-revise-request', 1, 'Replace the parts of the editorial request of a video that the body names, through an immutable EditCommand that reads the briefing', editorialRequestReviseRequestSchema),
   defineSchema('editorial-request-response', 1, 'The editorial request of the current Version: what was asked, how the briefing was read, what is unsupported and what is still a question', successSchema(currentEditorialRequestSchema)),

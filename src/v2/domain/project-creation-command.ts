@@ -102,6 +102,7 @@ import { DomainError } from './errors.ts'
 import { createDesiredAction, parseDesiredAction, parseDesiredActionInput, type DesiredActionInput, type DesiredAction } from './desired-action.ts'
 import { normalizeProjectName } from './project.ts'
 import { createProductionBrief } from './production-brief.ts'
+import { parseBriefInterpretation } from './editorial-request.ts'
 import { resolveStrategicObjective, type StrategicObjectiveId } from './strategic-objective.ts'
 import { createProjectSnapshot, type ProjectSnapshot } from './project-snapshot.ts'
 import { stableSerialize } from './canonical-hash.ts'
@@ -115,6 +116,27 @@ import { FORK_IDENTITY_KINDS_V2, indexForkIdentityBijectionV2, createV2Renderabl
   createForkRenderablePlanCandidate, forkOwnedIdentities, forkSourceSnapshotFacts, remapForkSnapshotDocument, materializeForkEditPlan } from './project-fork-derivation.ts'
 export { FORK_IDENTITY_KINDS_V2, indexForkIdentityBijectionV2, createV2RenderablePlanSnapshotFacts } from './project-fork-derivation.ts'
 export type { ForkIdentityKindV2, ForkIdentityRemapV2, V2RenderablePlanSnapshotFacts, ForkRenderablePlanMaterializationV2 } from './project-fork-derivation.ts'
+
+/**
+ * The brief a creation Command carries is the one its caller intent states, and nothing else. The one thing it may add is the READING of that same
+ * briefing (ADR-160: the interpretation belongs to the text): an interpretation that is bound to the exact text (its hash and every citation are
+ * checked against it) and the audit of the call that made it. A reading of other words, or any other extra content, is refused.
+ */
+function creationBriefMatchesIntent(contentJson: string, intent: Readonly<{ objective: StrategicObjectiveId; desiredAction: unknown; briefing: string | null }>, createdAt: string): boolean {
+  const base = { schemaVersion: 1, objective: intent.objective, desiredAction: intent.desiredAction,
+    productionBrief: createProductionBrief({ ...(intent.briefing === null ? {} : { ownerText: intent.briefing }) }), createdAt }
+  if (contentJson === stableSerialize(base)) return true
+  const document = JSON.parse(contentJson) as Record<string, unknown>
+  const reading = document.editorialRequest as Record<string, unknown> | undefined
+  if (intent.briefing === null || reading === undefined || reading === null || typeof reading !== 'object' || Array.isArray(reading) ||
+    Object.keys(reading).sort().join('|') !== 'interpretation|interpretationAudit') return false
+  const briefingText = createProductionBrief({ ownerText: intent.briefing }).ownerInput?.text
+  if (briefingText === undefined) return false
+  const interpretation = parseBriefInterpretation(reading.interpretation, briefingText)
+  return contentJson === stableSerialize({ ...base,
+    productionBrief: createProductionBrief({ ownerText: intent.briefing, interpretedCoverage: (interpretation.coverage ?? []).map((item) => item.topic) }),
+    editorialRequest: { interpretation, interpretationAudit: reading.interpretationAudit } })
+}
 
 export type ProjectCreationCallerIntentV2 = Readonly<
   { schemaVersion: 'project-creation-intent/v2'; kind: 'initialize-empty'; name: string;
@@ -280,9 +302,7 @@ export function createProjectCreationCommandV2(input: OutputCanonicalPolicy & Re
       ['markers', 'protectedElements', 'transitions', 'localeVariantRefs', 'formatVariantRefs', 'lineageRefs'].every((key) =>
         editDocument[key] === undefined || Array.isArray(editDocument[key]) && (editDocument[key] as unknown[]).length === 0),
     'INVALID_COMMAND', 'Creation V2 empty intent cannot hide source content')
-    assertDomain(snapshots.find((s) => s.kind === 'brief')!.contentJson === stableSerialize({ schemaVersion: 1,
-      objective: intent.objective, desiredAction: intent.desiredAction,
-      productionBrief: createProductionBrief({ ...(intent.briefing === null ? {} : { ownerText: intent.briefing }) }), createdAt: input.createdAt }) &&
+    assertDomain(creationBriefMatchesIntent(snapshots.find((s) => s.kind === 'brief')!.contentJson, intent, input.createdAt) &&
       snapshots.find((s) => s.kind === 'policies')!.contentJson === stableSerialize({ schemaVersion: 1, workspaceId: input.workspaceId,
         state: 'unconfigured', brandKitMode: 'inherit', guardrails: [], createdAt: input.createdAt }),
     'INVALID_COMMAND', 'Creation V2 snapshots contradict its caller intent')

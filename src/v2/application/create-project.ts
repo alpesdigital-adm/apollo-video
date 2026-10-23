@@ -1,7 +1,9 @@
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { createProject } from '../domain/project.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
-import { createProductionBrief } from '../domain/production-brief.ts'
+import { createProductionBrief, normalizeBriefingText } from '../domain/production-brief.ts'
+import { coveredTopicsOf, type BriefInterpretationAudit, type InterpretBrief } from './interpret-brief.ts'
+import type { BriefInterpretationV1 } from '../domain/editorial-request.ts'
 import { createProjectCreationOutputCommandV2, normalizeProjectCreationIntentV2 } from '../domain/project-creation-command.ts'
 import { createOutputVariantCommand } from '../domain/output-variant-command.ts'
 import { createOutputSpecRevisionBody, type OutputSpecRevisionBody } from '../domain/output-spec-revision.ts'
@@ -84,7 +86,15 @@ function snapshot(workspaceId: string, projectId: string, id: string, kind: 'bri
 
 /** Public creation has no implicit OutputSpec. The independent variant Command
  * is the only admission to the existing operational ingest path. */
-export function createProjectService(dependencies: ClockAndIds & { repository: CreationOutputBundleRepositoryV2 }) {
+export function createProjectService(dependencies: ClockAndIds & {
+  repository: CreationOutputBundleRepositoryV2
+  /**
+   * ADR-160. The interpretation belongs to the TEXT of the briefing, not to a render, so a briefing is read when the project is created and the
+   * reading is sealed in the brief the creation Command carries. Absent, or when the reading cannot be made (no interpreter configured, a refused
+   * answer), the briefing is kept as written and unread: the Director stays blocked with its reason, never an empty reading.
+   */
+  interpretBrief?: InterpretBrief
+}) {
   return async (request: { workspaceId: string; name: string; objective: StrategicObjectiveId; locale?: string;
     briefing?: string; desiredAction?: Readonly<DesiredActionInput>; actor: AuthenticatedExternalActor; idempotencyKey: string }) => {
     assertDomain(Object.keys(request).every(k => ['workspaceId', 'name', 'objective', 'locale', 'briefing',
@@ -96,13 +106,29 @@ export function createProjectService(dependencies: ClockAndIds & { repository: C
     assertDomain(callerIntent.kind === 'initialize-empty', 'INVALID_COMMAND', 'Public creation requires empty root intent')
     // All allocations are fixed before repository retries, including the plan's
     // independent identity. Caller intent/fingerprint contains none of them.
+    let reading: { interpretation: Readonly<BriefInterpretationV1>; audit: Readonly<BriefInterpretationAudit> } | null = null
+    const briefingText = callerIntent.briefing === null ? null : normalizeBriefingText(callerIntent.briefing)
+    if (briefingText !== null && dependencies.interpretBrief) {
+      try {
+        const read = await dependencies.interpretBrief({ briefing: briefingText })
+        reading = { interpretation: read.interpretation, audit: read.audit }
+      } catch (error) {
+        // Only a refusal of the reading (a DomainError: unavailable, invalid answer) keeps the project unread; anything else is a defect.
+        if (!(error instanceof DomainError)) throw error
+      }
+    }
     const createdAt = dependencies.clock().toISOString(), projectId = dependencies.createId('project'),
       versionId = dependencies.createId('project-version'), stateId = dependencies.createId('project-output-state'),
       commandId = dependencies.createId('project-creation-command')
     const snapshots = [
       snapshot(request.workspaceId, projectId, dependencies.createId('project-snapshot'), 'brief', {
         schemaVersion: 1, objective: callerIntent.objective, desiredAction: callerIntent.desiredAction,
-        productionBrief: createProductionBrief({ ...(callerIntent.briefing === null ? {} : { ownerText: callerIntent.briefing }) }), createdAt,
+        productionBrief: createProductionBrief({
+          ...(callerIntent.briefing === null ? {} : { ownerText: callerIntent.briefing }),
+          ...(reading ? { interpretedCoverage: coveredTopicsOf(reading.interpretation) } : {}),
+        }),
+        ...(reading ? { editorialRequest: { interpretation: reading.interpretation, interpretationAudit: reading.audit } } : {}),
+        createdAt,
       }, createdAt),
       snapshot(request.workspaceId, projectId, dependencies.createId('project-snapshot'), 'edit-plan', {
         schemaVersion: 2, state: 'uncompiled', id: dependencies.createId('edit-plan'), projectVersionId: versionId,

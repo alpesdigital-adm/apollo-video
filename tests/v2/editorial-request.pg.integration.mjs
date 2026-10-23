@@ -189,6 +189,37 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     assert.equal(redirected.run.requestHash, revised.payload.data.hashes.requestHash)
     assert.equal(admitDirectorQualityForFinal(redirected.run.qualityReport, { currentRequestHash: redirected.run.requestHash, sealedRequestHash: redirected.run.requestHash, sealedPolicyResolutionHash: redirected.run.policyResolution.policyResolutionHash }).admitted, true)
 
+    // 6b. The reading of a briefing belongs to the text, not to a render: a project is read WHEN IT IS CREATED (the reading is sealed in the brief the
+    // creation Command carries), with no output and no montage to speak of. With no interpreter the briefing is kept unread (step 1 above: the first project).
+    interpreter.script.set(BRIEFING, { directives: [{ kind: 'layout', value: 'source-native', param: null, quote: 'alpha' }], unsupported: [], questions: [{ question: 'Which of the two is meant?', quote: 'beta' }], coverage: [{ topic: 'tone', quote: 'gamma' }] })
+    const rootCallsBefore = interpreter.calls.length
+    const rootCreated = await callRoute(NextRequest, projectsRoute, { method: 'POST', path: '/v1/projects', authorization, idempotencyKey: `f6req-${run}-create-root`,
+      body: { name: 'Root read at creation', objective: 'discovery', briefing: BRIEFING } })
+    assert.equal(rootCreated.status, 201, JSON.stringify(rootCreated.payload))
+    assert.equal(interpreter.calls.length, rootCallsBefore + 1, 'the briefing was read once, at creation')
+    const rootId = rootCreated.payload.data.projectAtCreation.id
+    const rootPath = `/v1/projects/${rootId}/editorial-request`
+    const rootGet = () => callRoute(NextRequest, route, { method: 'GET', path: rootPath, params: { projectId: rootId }, authorization })
+    const rootRead = await rootGet()
+    assert.equal(rootRead.status, 200, JSON.stringify(rootRead.payload))
+    assert.equal(rootRead.payload.data.state, 'interpreted', 'a project just created has its briefing read')
+    assert.equal(rootRead.payload.data.blocksDirector, true)
+    assert.deepEqual(rootRead.payload.data.openQuestions.map((question) => [question.id, question.excerpt]), [['q1', 'beta']])
+    assert.equal(rootRead.payload.data.interpretation.directives[0].excerpt.text, 'alpha')
+    assert.equal(rootRead.payload.data.interpretationAudit.provider, 'openai')
+    // Revising it needs an output (a revision is a child Command): its own published reason says so, and nothing is written.
+    const rootRow = await db.v2ProjectVersion.findFirstOrThrow({ where: { projectId: rootId } })
+    const refused = await callRoute(NextRequest, route, { method: 'POST', path: rootPath, params: { projectId: rootId }, authorization, idempotencyKey: `f6req-${run}-root-revise`,
+      body: { baseVersionId: rootRow.id, baseHash: rootRow.baseHash, answers: [{ questionId: 'q1', answer: 'The first.' }] } })
+    assert.equal(refused.status, 428, JSON.stringify(refused.payload))
+    assert.deepEqual(refused.payload.error.details, { reason: 'editorial-request-needs-output' })
+    assert.equal(await db.v2ProjectVersion.count({ where: { projectId: rootId } }), 1)
+    // A replay of the creation never gives another reading to the project.
+    const replay = await callRoute(NextRequest, projectsRoute, { method: 'POST', path: '/v1/projects', authorization, idempotencyKey: `f6req-${run}-create-root`,
+      body: { name: 'Root read at creation', objective: 'discovery', briefing: BRIEFING } })
+    assert.equal(replay.status, 200, JSON.stringify(replay.payload))
+    assert.equal(replay.payload.data.projectAtCreation.id, rootId)
+
     // 7. A project that states no language (no locale is assumed) is read by the repositories that judge rights under the undetermined locale; none
     // of them stops on the missing one any more, and none answers with another error for it.
     const { UNDETERMINED_LOCALE } = await import('../../src/v2/domain/asset-rights.ts')
