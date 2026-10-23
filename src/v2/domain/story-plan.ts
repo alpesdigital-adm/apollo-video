@@ -2,7 +2,8 @@ import { calculateCanonicalHash } from './canonical-hash.ts'
 import { createDesiredActionReference, type DesiredActionReference } from './desired-action.ts'
 import { DomainError } from './errors.ts'
 
-export type StoryRole = 'hook' | 'context' | 'argument' | 'proof' | 'cta'
+/** `segment`: a stretch of the source kept in its place, with no narrative role claimed for it (the role a plan has when the request names no structure). */
+export type StoryRole = 'hook' | 'context' | 'argument' | 'proof' | 'cta' | 'segment'
 export type StoryPresentation =
   | 'source-video'
   | 'voiceover'
@@ -46,7 +47,8 @@ export interface StoryBlock {
   presentation: StoryPresentation
   sourceRangeId?: string
 }
-export interface StoryAct { id: string; role: 'opening' | 'development' | 'resolution'; blockIds: readonly string[] }
+/** `sequence`: one act holding the whole timeline in source order, with no act claimed for any part of it. */
+export interface StoryAct { id: string; role: 'opening' | 'development' | 'resolution' | 'sequence'; blockIds: readonly string[] }
 export interface TreatmentPlanReference { id: string; schemaVersion: number; contentHash: string }
 export interface StoryPlan {
   schemaVersion: 1 | 2 | 3 | 4

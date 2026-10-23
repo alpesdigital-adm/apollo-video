@@ -216,7 +216,16 @@ test('W66 PostgreSQL proxy render and final export consume one persisted verdict
       renderer: { async render() { renders += 1; throw new Error('W66_RENDER_REACHED') }, async cleanup() {} },
       renderElementMaps: { async persistOrReplay() { throw new Error('nothing may be mapped') } },
       perceptionTimelines: { async findLatest() { return null } },
-      luts: { async materialize() { return { selectionId: 'selection-w66cpf', selectionHash: sha('selection'), lutPaths: {} } }, async cleanup() {} },
+      // The worker refuses a grade other than the one its source was read with (W70 readiness R2, 8e63d11a): the materialization this test stands in for
+      // is the REAL effective LUT selection of the Version (the explicit 'none' the seeded chain carries), read the way the materializer reads it.
+      luts: {
+        async materialize(input) {
+          const effective = await new PrismaProjectLutSelectionRepository(db).readEffectiveForVersion(input)
+          assert.ok(effective, 'the seeded chain carries an explicit project LUT selection')
+          return { selectionId: effective.selection.id, selectionHash: effective.selection.selectionHash, lutPaths: {} }
+        },
+        async cleanup() {},
+      },
       sources: { async materialize(input) { return { path: `${process.cwd()}/.w66cpf-not-read/${input.artifactKey}`, sha256: input.sha256, byteSize: input.byteSize } }, async cleanup() {} },
       clock: () => new Date(), leaseDurationMs: 60_000, heartbeatIntervalMs: 5_000, retryBaseDelayMs: 1, retryMaxDelayMs: 1,
     })

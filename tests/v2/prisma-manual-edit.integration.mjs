@@ -57,6 +57,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
   const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
   const { commitSealedChild, persistRecording } = await import('./helpers/pg-output-world.mjs')
+  const { startBriefInterpreterStandIn } = await import('./helpers/brief-interpreter-stand-in.mjs')
+  const { reviseEditorialRequestService } = await import('../../src/v2/application/revise-editorial-request.ts')
+  const { PrismaEditorialRequestRepository } = await import('../../src/v2/infrastructure/prisma/editorial-request-repository.ts')
+  const { createInterpretBrief } = await import('../../src/v2/infrastructure/brief/create-interpret-brief.ts')
   const { recordingNames } = await import('./helpers/operational-editorial-fixture.mjs')
   const { seedReviewProject } = await import('./helpers/review-edit-world.mjs')
   const { resetDisposableDatabase } = await import('./helpers/disposable-database.mjs')
@@ -84,6 +88,9 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   let server
   let browser
   let authenticatedActor
+  // The provider stand-in the briefing is read with: a local server, never the real Codex or a real account, in an automated test (ADR-160 F6).
+  let fakeCodex
+  let interpreterEnvironment = {}
   const colorCompilations = new Map()
 
   const execute = (request) => applyManualEditService({
@@ -108,7 +115,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const brief = {
       desiredAction: createDesiredAction({
         objective: 'discovery',
-        desiredAction: { visualCta: 'Continue assistindo', disclosures: [] },
+        desiredAction: { disclosures: [] },
       }),
     }
     const editPlan = {
@@ -207,9 +214,26 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     // The project is the sealed world the product builds: the creation Command (with its briefing and desired action), one
     // explicit 9:16 output variant, the two recordings' persisted ingests, and a child Command that adopts the first one and plays it.
-    await seedReviewProject(client, { workspaceId, actor: authenticatedActor, prefix: 'manual', ids: { project: projectId, 'output-variant': '9:16' },
+    const seeded = await seedReviewProject(client, { workspaceId, actor: authenticatedActor, prefix: 'manual', ids: { project: projectId, 'output-variant': '9:16' },
       name: 'Manual Project', objective: 'discovery', aspectRatio: '9:16', status: 'reviewing-proxy', briefing,
-      desiredAction: { visualCta: 'Continue assistindo', disclosures: [] } })
+      desiredAction: { disclosures: [] } })
+    // A briefing with text that nobody has read is refused by the Director (brief-interpretation-required). The owner reads it right after creating
+    // the project, as the product asks: through the real interpreter adapter, against the local stand-in of the provider. The stand-in answers that the
+    // briefing asks for no decision the Apollo makes, which is the point: the plan below is made from what the request says, here nothing.
+    fakeCodex = await startBriefInterpreterStandIn()
+    interpreterEnvironment = fakeCodex.environment
+    const briefingRead = await reviseEditorialRequestService({
+      repository: new PrismaEditorialRequestRepository(client),
+      interpretBrief: createInterpretBrief({ ...process.env, ...interpreterEnvironment }),
+      createId: (kind) => `manual-editorial-request-${kind}-${randomUUID()}`,
+      createEventId: randomUUID,
+      clock: () => new Date(),
+    })({
+      workspaceId, projectId, baseVersionId: seeded.head.version.id, baseHash: seeded.head.version.baseHash,
+      body: { briefing }, actor: authenticatedActor, idempotencyKey: `manual-read-briefing-${suffix}`,
+    })
+    assert.equal(briefingRead.command.payload.interpreted, true, 'the stand-in interpreter read the briefing')
+    assert.equal(fakeCodex.calls.length, 1, 'the briefing was read once')
     for (const [slug, artifactId] of [[slugA, sourceA], [slugB, sourceB]]) {
       // Both recordings are 6 s at 30 fps; their source grants are the ones this test writes below, through the production service.
       await persistRecording(client, { workspaceId, projectId, actor: authenticatedActor, slug, durationFrames: 180, rights: { source: false } })
@@ -689,6 +713,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(uiPassword, `manual-salt-${suffix}`),
         APOLLO_UI_SESSION_SECRET: uiSessionSecret,
         APOLLO_UI_API_CLIENT_ID: issued.client.id,
+        // The server reads briefings with the same stand-in, never with a real account.
+        ...interpreterEnvironment,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -1336,7 +1362,7 @@ ${editorialDiagnostic}`)
     })
     const directorResponse = await runDirector()
     const directorApplied = await directorResponse.json()
-    assert.equal(directorResponse.status, 201, JSON.stringify(directorApplied))
+    assert.equal(directorResponse.status, 201, JSON.stringify(directorApplied) + ' --- server log tail --- ' + serverLogs.slice(-3000))
     assert.equal(directorApplied.data.version.sequence, rev(15))
     assert.equal(directorApplied.data.directorRun.impact.schemaVersion, 'director-run-impact/v1')
     assert.equal(directorApplied.data.directorRun.impact.sourceTranscriptId, replacementTranscriptId)
@@ -1649,10 +1675,9 @@ ${editorialDiagnostic}`)
     assert.equal(storedStoryPlan.desiredActionRef.actionHash.length, 64)
     assert.equal(storedEditPlan.desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
     assert.equal(storedEditPlan.subtitleTracks[0].desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
-    assert.equal(storedEditPlan.overlayTracks.length, 1)
-    assert.equal(storedEditPlan.overlayTracks[0].desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
-    assert.equal(storedEditPlan.overlayTracks[0].text, currentDesiredAction.visualCta)
-    assert.equal(currentDesiredAction.visualCta, 'Continue assistindo')
+    // The project asked for no visual call to action (ADR-160: one is drawn only where a request or the speech places it), so none is drawn.
+    assert.equal(storedEditPlan.overlayTracks.length, 0)
+    assert.equal(currentDesiredAction.visualCta, undefined)
     const storedAsyncVersion = await client.v2ProjectVersion.findUniqueOrThrow({
       where: { id: allocatedResultVersionId },
       include: { briefSnapshot: true },
@@ -1690,18 +1715,19 @@ ${editorialDiagnostic}`)
     assert.equal(qualityRead.data.qualityReport.objective, 'discovery')
     assert.equal(qualityRead.data.qualityReport.objectiveVersion, 1)
     assert.equal(qualityRead.data.qualityReport.rubricRef, 'awareness-discovery/v1')
-    assert.equal(qualityRead.data.qualityReport.qualitySnapshot.contentSchemaVersion, 4)
+    assert.equal(qualityRead.data.qualityReport.qualitySnapshot.contentSchemaVersion, 5)
     assert.match(qualityRead.data.qualityReport.qualitySnapshot.contentHash, /^[a-f0-9]{64}$/)
-    assert.equal(qualityRead.data.qualityReport.report.schemaVersion, 'director-quality-report/v4')
+    assert.equal(qualityRead.data.qualityReport.report.schemaVersion, 'director-quality-report/v5')
     assert.equal(qualityRead.data.qualityReport.report.status, 'review-required')
-    assert.equal(qualityRead.data.qualityReport.report.hardChecks.subtitlesFaceSafe, false)
+    assert.equal(qualityRead.data.qualityReport.report.hardChecks.every((check) => check.passed), true)
+    assert.equal(qualityRead.data.qualityReport.report.hardChecks.find((check) => check.id === 'subtitlesFaceSafe'), undefined, 'face safety is claimed by nobody: no check of the v5 list says it, the faceSafety object does')
     assert.deepEqual(qualityRead.data.qualityReport.report.faceSafety, {
       status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [],
     })
     const persistedQualitySnapshot = await client.v2ProjectSnapshot.findUniqueOrThrow({
       where: { id: storedAsyncOperation.projectDirectorRun.directorRun.qualitySnapshotId },
     })
-    assert.equal(persistedQualitySnapshot.schemaVersion, 4)
+    assert.equal(persistedQualitySnapshot.schemaVersion, 5)
     assert.equal(JSON.parse(persistedQualitySnapshot.contentJson).status, 'review-required')
     assert.equal(
       qualityRead.data.qualityReport.report.desiredActionRef.id,
@@ -1716,15 +1742,12 @@ ${editorialDiagnostic}`)
       qualityRead.data.qualityReport.report.strategic.evidence.map((item) => ({
         criterionId: item.criterionId, weight: item.weight,
       })),
-      [
-        { criterionId: 'hook-clarity', weight: .35 },
-        { criterionId: 'problem-recognition', weight: .25 },
-        { criterionId: 'trust-building', weight: .10 },
-        { criterionId: 'narrative-integrity', weight: .15 },
-        { criterionId: 'legibility', weight: .10 },
-        { criterionId: 'rights-compliance', weight: .05 },
-      ],
+      // ADR-160 F5: the request asked for neither a hook nor a call to action, so those criteria are not scored and the rest keep their proportions.
+      (await import('../../src/v2/domain/strategic-rubric.ts')).effectiveRubricCriteria(
+        (await import('../../src/v2/domain/strategic-rubric.ts')).resolveStrategicRubric('discovery'), ['hook-clarity', 'cta-clarity', 'friction-reduction'])
+        .map((criterion) => ({ criterionId: criterion.id, weight: criterion.weight })),
     )
+    assert.equal(qualityRead.data.qualityReport.report.strategic.evidence.some((item) => item.criterionId === 'hook-clarity'), false)
     const projectAfterSameDirection = await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })
     assert.equal(projectAfterSameDirection.currentVersionId, allocatedResultVersionId)
     assert.equal(projectAfterSameDirection.objective, 'discovery')
@@ -1827,17 +1850,18 @@ ${editorialDiagnostic}`)
     const briefingCases = [
       {
         label: 'completo',
-        briefing: 'Público: gestores de produto. Oferta: guia prático. Tom: direto.',
-        coverage: { audience: true, offer: true, tone: true },
-        assumptions: [],
-        trustLabel: 'Owner autorizado',
+        // Creation reads the briefing (the server has the provider stand-in, which maps nothing): what a briefing covers is what the reading found.
+        briefing: 'alpha beta gamma',
+        coverage: { audience: false, offer: false, tone: false },
+        assumptions: ['audience-not-specified', 'offer-not-specified', 'tone-not-specified'],
+        trustLabel: 'Texto do dono',
       },
       {
-        label: 'parcial',
-        briefing: 'Público: equipes clínicas.',
-        coverage: { audience: true, offer: false, tone: false },
-        assumptions: ['offer-not-specified', 'tone-not-specified'],
-        trustLabel: 'Owner autorizado',
+        label: 'curto',
+        briefing: 'alpha',
+        coverage: { audience: false, offer: false, tone: false },
+        assumptions: ['audience-not-specified', 'offer-not-specified', 'tone-not-specified'],
+        trustLabel: 'Texto do dono',
       },
       {
         label: 'ausente',
@@ -1849,7 +1873,7 @@ ${editorialDiagnostic}`)
           'offer-not-specified',
           'tone-not-specified',
         ],
-        trustLabel: 'Media-only',
+        trustLabel: 'Só a mídia',
       },
     ]
 
@@ -1912,6 +1936,7 @@ ${editorialDiagnostic}`)
       server.kill()
       await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
     }
+    await fakeCodex?.close()
     await client.$disconnect()
   }
 })

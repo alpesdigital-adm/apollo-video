@@ -366,3 +366,124 @@ test('T-FR-083 rejects stale/missing contexts and detects aggregate tampering', 
   )
   assert.deepEqual(hydrateCompatibilityGraph(graph), graph)
 })
+
+// ---- ADR-160 F8. A context the requester did not state is unspecified; the check that needs it is not evaluable; nothing is guessed. ----
+
+function bareContext(take) {
+  return {
+    takeId: take.id,
+    expectedTakeHash: take.takeHash,
+    claims: [],
+    continuityProvides: [`role-${take.assignment.role}`, ...(take.assignment.role === 'body' ? ['mecanismo-explicado'] : [])],
+    continuityRequires: [],
+    evidenceRefs: [take.takeHash, take.sourceHash],
+  }
+}
+
+function graphOf(library, contexts, id = 'compatibility-graph-unspecified') {
+  return createCompatibilityGraph({
+    id, workspaceId: library.workspaceId, projectId: library.projectId, batchId: library.batchId, takeLibrary: library,
+    contexts, createdByClientId: 'client-fixture', createdAt: '2026-07-28T01:02:00.000Z',
+  })
+}
+
+test('F8 a request that states nothing about the semantics yields unspecified contexts, no check and no dimension invented', () => {
+  const library = libraryFixture()
+  const takes = library.takes.filter((take) => ['primary', 'alternate'].includes(take.status))
+  const graph = graphOf(library, takes.map(bareContext))
+  assert.equal(graph.schemaVersion, 'compatibility-graph/v2')
+  for (const node of graph.nodes) {
+    assert.deepEqual(node.unspecified, ['audienceTags', 'desiredAction', 'energy', 'experiment', 'locale', 'narrativeTags', 'offerId', 'personaId', 'tone', 'visual'])
+    assert.equal(node.offerId, 'unspecified')
+    assert.equal(node.personaId, 'unspecified')
+    assert.equal(node.locale, 'und')
+    assert.deepEqual(node.audienceTags, ['unspecified'])
+    assert.deepEqual(node.narrativeTags, ['unspecified'])
+    assert.equal('desiredAction' in node, false)
+    for (const field of ['tone', 'energy', 'visual', 'experiment']) assert.equal(node[field], null, `${field} is not 0.5 or any other number: it was not stated`)
+  }
+  for (const edge of graph.edges) {
+    // Nothing that could not be checked is reported as passed or as failed.
+    assert.deepEqual(edge.hardFailures, [])
+    const checks = edge.notEvaluable.map((item) => item.check).sort()
+    assert.deepEqual(checks, ['AUDIENCE_CONFLICT', 'LOCALE_MISMATCH', 'OFFER_MISMATCH', 'PERSONA_MISMATCH', ...(edge.relation.endsWith('cta') ? ['CTA_ACTION_MISMATCH'] : [])].sort())
+    assert.ok(edge.reasonCodes.includes('CONTEXT_NOT_EVALUABLE'))
+    // The duration alone does not carry a decision: the link is left to the owner, neither approved nor blocked by the Apollo.
+    assert.equal(edge.decision, 'borderline')
+    assert.equal(edge.eligible, false)
+    assert.ok(edge.reasonCodes.includes('CONTEXT_REQUIRED_FOR_DECISION'))
+    assert.equal(edge.reasonCodes.includes('LOW_SOFT_SCORE') || edge.reasonCodes.includes('COMPATIBLE'), false)
+    // Only the duration (read from the takes themselves) is scored, and it carries the whole weight.
+    const scored = edge.softScores.filter((score) => score.score !== null)
+    assert.deepEqual(scored.map((score) => score.dimension), ['duration'])
+    assert.equal(edge.softScores.filter((score) => score.score === null).every((score) => score.weight === 0 && score.reasonCode.endsWith('_NOT_EVALUABLE')), true)
+    assert.equal(edge.softScore, Number((scored[0].score * 100).toFixed(3)))
+  }
+  assert.equal(graph.summary.notEvaluableEdgeCount, graph.edges.length)
+  assert.equal(hydrateCompatibilityGraph(JSON.parse(JSON.stringify(graph))).runHash, graph.runHash)
+})
+
+test('F8 a check is made as soon as both takes state what it needs, and only that check', () => {
+  const library = libraryFixture()
+  const takes = library.takes.filter((take) => ['primary', 'alternate'].includes(take.status))
+  const graph = graphOf(library, takes.map((take) => ({
+    ...bareContext(take),
+    offerId: 'offer-apollo',
+    locale: take.assignment.role === 'cta' ? 'en-US' : 'pt-BR',
+  })), 'compatibility-graph-partial')
+  const toCta = graph.edges.filter((edge) => edge.relation.endsWith('cta'))
+  assert.ok(toCta.length > 0)
+  for (const edge of graph.edges) {
+    assert.equal(edge.notEvaluable.some((item) => item.check === 'OFFER_MISMATCH'), false, 'both state the offer: the check is made')
+    assert.equal(edge.notEvaluable.some((item) => item.check === 'LOCALE_MISMATCH'), false)
+    assert.equal(edge.notEvaluable.some((item) => item.check === 'PERSONA_MISMATCH'), true)
+  }
+  assert.ok(toCta.every((edge) => edge.hardFailures.some((failure) => failure.code === 'LOCALE_MISMATCH') && edge.decision === 'blocked'))
+  assert.ok(graph.nodes.every((node) => !node.unspecified.includes('offerId') && !node.unspecified.includes('locale')))
+})
+
+test('F8 a graph with every context stated scores exactly as before and carries no not-evaluable entry', () => {
+  const library = libraryFixture()
+  const graph = graphOf(library, goldenContexts(library), 'compatibility-graph-all-stated')
+  for (const edge of graph.edges) {
+    assert.deepEqual(edge.notEvaluable, [])
+    assert.equal(edge.softScores.every((score) => score.score !== null && score.weight > 0), true)
+    assert.equal(edge.reasonCodes.includes('CONTEXT_NOT_EVALUABLE'), false)
+    const expected = Number((edge.softScores.reduce((sum, score) => sum + score.score * score.weight, 0) * 100).toFixed(3))
+    assert.equal(edge.softScore, expected)
+  }
+  assert.equal(graph.summary.notEvaluableEdgeCount, 0)
+})
+
+test('F8 the unspecified list, the sentinels and the not-evaluable entries are sealed: tampering is refused', () => {
+  const library = libraryFixture()
+  const takes = library.takes.filter((take) => ['primary', 'alternate'].includes(take.status))
+  const wire = JSON.parse(JSON.stringify(graphOf(library, takes.map(bareContext))))
+  const lie = structuredClone(wire)
+  lie.nodes[0].unspecified = lie.nodes[0].unspecified.filter((field) => field !== 'tone')
+  assert.throws(() => hydrateCompatibilityGraph(lie), (error) => error.code === 'INVALID_ARGUMENT')
+  const invented = structuredClone(wire)
+  invented.nodes[0].tone = 0.5
+  assert.throws(() => hydrateCompatibilityGraph(invented), (error) => error.code === 'INVALID_ARGUMENT')
+  const dropped = structuredClone(wire)
+  dropped.edges[0].notEvaluable = []
+  assert.throws(() => hydrateCompatibilityGraph(dropped), (error) => error.code === 'INVALID_ARGUMENT')
+})
+
+test('ADR-160: what was stated carries a decision only from the weight of the strongest single signal; below it the owner decides', () => {
+  const library = libraryFixture()
+  const takes = library.takes.filter((take) => ['primary', 'alternate'].includes(take.status))
+  const withOnly = (patch) => graphOf(library, takes.map((take) => ({ ...bareContext(take), ...patch })), 'compatibility-graph-one-signal')
+  // experiment alone (weight 0.10) does not carry it; the edges stay with the owner.
+  const weak = withOnly({ experiment: 0.5 })
+  assert.ok(weak.edges.every((edge) => edge.decision === 'borderline' && edge.reasonCodes.includes('CONTEXT_REQUIRED_FOR_DECISION')))
+  // narrative alone (0.30), or tone + energy (0.15 + 0.15), does: the thresholds apply and no owner-only code is added.
+  for (const patch of [{ narrativeTags: ['clareza'] }, { tone: 0.6, energy: 0.6 }]) {
+    const graph = withOnly(patch)
+    assert.ok(graph.edges.every((edge) => !edge.reasonCodes.includes('CONTEXT_REQUIRED_FOR_DECISION')), JSON.stringify(patch))
+    assert.ok(graph.edges.every((edge) => edge.decision === 'blocked' || edge.decision === 'accepted' || edge.decision === 'borderline'))
+  }
+  // A hard failure is still a block, with or without context.
+  const clash = graphOf(library, takes.map((take) => ({ ...bareContext(take), locale: take.assignment.role === 'cta' ? 'en-US' : 'pt-BR' })), 'compatibility-graph-clash')
+  assert.ok(clash.edges.filter((edge) => edge.hardFailures.length > 0).every((edge) => edge.decision === 'blocked'))
+})

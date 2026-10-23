@@ -3,6 +3,8 @@ import test from 'node:test'
 
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { createProjectService } from '../../src/v2/application/create-project.ts'
+import { interpretBriefService } from '../../src/v2/application/interpret-brief.ts'
+import { deriveEditorialRequestFromBrief } from '../../src/v2/domain/editorial-request.ts'
 import { applyEditorialCutCommandService } from '../../src/v2/application/apply-editorial-cut-command.ts'
 import { duplicateProjectService } from '../../src/v2/application/duplicate-project.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
@@ -36,6 +38,10 @@ class InMemoryProjectCreationRepository {
     this.records = new Map()
     this.events = new Map()
     this.lastBundle = undefined
+  }
+
+  async hasCompletedCreation(input) {
+    return this.records.has([input.workspaceId, input.clientId, input.idempotencyKey].join(':'))
   }
 
   async persist(input) {
@@ -136,7 +142,7 @@ class InMemoryProjectDuplicationRepository {
   }
 }
 
-function createFixture() {
+function createFixture(extraDependencies = {}) {
   const workspace = createWorkspace({
     id: 'workspace-1',
     slug: 'alpes-digital',
@@ -148,6 +154,7 @@ function createFixture() {
   const counters = new Map()
   let eventCounter = 0
   const service = createProjectService({
+    ...extraDependencies,
     repository,
     clock: () => new Date('2026-07-12T13:01:00.000Z'),
     createId: (kind) => {
@@ -210,7 +217,7 @@ async function createDuplicationFixture({editorialSource=false}={}) {
     bundle: prepared?.bundle??source.bundle,
     projectFacts:{id:currentProject.id,workspaceId:currentProject.workspaceId,currentVersionId:currentVersion.id,name:currentProject.name,
       status:'draft',format:null,ownerId:currentProject.ownerId,administrationRevision:1,updatedAt:currentVersion.createdAt,
-      objective:currentProject.objective,locale:currentProject.locale,createdByType:currentProject.createdBy.type,createdById:currentProject.createdBy.id,createdAt:currentProject.createdAt},
+      objective:currentProject.objective,locale:currentProject.locale ?? null,createdByType:currentProject.createdBy.type,createdById:currentProject.createdBy.id,createdAt:currentProject.createdAt},
     renderablePlanSnapshot:null,
     snapshots: prepared?.bundle.snapshots??creation.repository.lastBundle.snapshots,
     media: prepared?.refs??[{
@@ -257,7 +264,7 @@ function request(overrides = {}) {
     workspaceId: 'workspace-1',
     name: '  Campanha   Julho  ',
     objective: 'discovery',
-    briefing: 'Público: gestores. Oferta: conteúdo. Tom: direto e natural.',
+    briefing: 'alpha beta gamma',
     actor: actor(),
     idempotencyKey: idempotency?.key ?? 'create-project-1',
     ...fields,
@@ -282,7 +289,7 @@ test('create project persists an initial version and immutable snapshots', async
   assert.equal(project.status, 'draft')
   assert.equal(project.objective, 'discovery')
   assert.equal(project.format, undefined)
-  assert.equal(project.locale, 'pt-BR')
+  assert.equal(project.locale, undefined, 'no language is assumed when the request states none (ADR-160)')
   assert.equal(project.currentVersionId, undefined)
   assert.equal(version.sequence, 1)
   assert.equal(version.outputContractVersion, 2)
@@ -298,10 +305,13 @@ test('create project persists an initial version and immutable snapshots', async
   assert.equal(version.snapshotRefs.editPlan, repository.lastBundle.snapshots[1].id)
   const brief = JSON.parse(repository.lastBundle.snapshots[0].contentJson)
   assert.equal(brief.productionBrief.ownerInput.trust, 'owner-authorized')
+  // Creation reads nothing of the briefing: what it covers is answered by the interpretation (revise-editorial-request), so the brief makes no
+  // claim about audience, offer or tone until a reading exists.
   assert.deepEqual(brief.productionBrief.summary.coverage, {
-    audience: true, offer: true, tone: true,
+    audience: false, offer: false, tone: false,
   })
   assert.deepEqual(brief.productionBrief.assumptions, [])
+  assert.equal(brief.editorialRequest, undefined)
   assert.equal(brief.outputSpec, undefined)
   assert.equal(brief.objective, 'discovery')
   assert.deepEqual(
@@ -327,20 +337,18 @@ test('create project persists an initial version and immutable snapshots', async
   assert.equal(repository.lastBundle.auditCommand.commandHash.length, 64)
 })
 
-test('create project persists partial and absent briefing as explicit non-generating states', async () => {
+test('create project persists an unread and an absent briefing as explicit non-generating states', async () => {
   const partialFixture = createFixture()
   await partialFixture.service(request({
-    briefing: 'Público: equipes de marketing.',
+    briefing: 'alpha',
   }))
   const partial = JSON.parse(
     partialFixture.repository.lastBundle.snapshots[0].contentJson,
   ).productionBrief
   assert.deepEqual(partial.summary.coverage, {
-    audience: true, offer: false, tone: false,
+    audience: false, offer: false, tone: false,
   })
-  assert.deepEqual(partial.assumptions, [
-    'offer-not-specified', 'tone-not-specified',
-  ])
+  assert.deepEqual(partial.assumptions, [])
   assert.equal(partial.readyForExpensiveGeneration, false)
 
   const absentFixture = createFixture()
@@ -674,4 +682,166 @@ test('snapshot rebinding changes only owner-binding fields and recomputes the ca
     () => rebindSnapshotContentForDuplicate({ kind: 'brief', contentJson: '{', contentHash: 'f'.repeat(64), source, copy }),
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
   )
+})
+
+test('a language the request states is kept, canonicalized, and none is invented when it is absent', async () => {
+  const stated = await createFixture().service({ ...request(), locale: 'en-us' })
+  assert.equal(stated.projectAtCreation.locale, 'en-US')
+  const absent = await createFixture().service(request())
+  assert.equal(absent.bundle.command.payload.callerIntent.locale, null)
+  assert.equal('locale' in absent.projectAtCreation, false)
+})
+
+test('ADR-160: the briefing is read when the project is created, the reading is sealed with the exact text, and a failed reading keeps it unread', async () => {
+  const BRIEFING = 'alpha beta gamma delta'
+  const answer = { directives: [{ kind: 'layout', value: 'source-native', param: null, quote: 'beta' }], unsupported: [], questions: [{ question: 'Which one?', quote: 'alpha' }], coverage: [{ topic: 'tone', quote: 'gamma' }] }
+  const model = (text) => ({ provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', async interpret() { return { text } } })
+  const brief = (fixture) => JSON.parse(fixture.repository.lastBundle.snapshots[0].contentJson)
+
+  const read = createFixture({ interpretBrief: interpretBriefService({ model: model(JSON.stringify(answer)) }) })
+  const created = await read.service(request({ briefing: BRIEFING }))
+  const content = brief(read)
+  const seen = deriveEditorialRequestFromBrief({ ...content, objective: content.objective })
+  assert.equal(seen.interpretation.directives[0].excerpt.text, 'beta')
+  assert.equal(seen.interpretation.questions[0].status, 'open')
+  assert.equal(content.editorialRequest.interpretationAudit.provider, 'test-double')
+  assert.deepEqual(content.productionBrief.summary.coverage, { audience: false, offer: false, tone: true }, 'the coverage is the reading, never a word list')
+  assert.equal(created.replayed, false)
+
+  // No interpreter: the briefing is kept as written and unread. A refused reading (the model cites words that are not in the briefing) is the same.
+  for (const interpretBrief of [undefined, interpretBriefService({ model: null }), interpretBriefService({ model: model(JSON.stringify({ ...answer, questions: [{ question: 'x', quote: 'words that are nowhere' }] })) })]) {
+    const unread = createFixture(interpretBrief ? { interpretBrief } : {})
+    await unread.service(request({ briefing: BRIEFING }))
+    const unreadContent = brief(unread)
+    assert.equal(unreadContent.editorialRequest, undefined)
+    assert.equal(deriveEditorialRequestFromBrief({ ...unreadContent, objective: unreadContent.objective }).interpretation, undefined)
+    assert.equal(deriveEditorialRequestFromBrief({ ...unreadContent, objective: unreadContent.objective }).briefing.text, BRIEFING)
+  }
+  // No briefing, no reading, no call.
+  let calls = 0
+  const none = createFixture({ interpretBrief: async () => { calls += 1; throw new Error('must not be called') } })
+  await none.service(request({ briefing: undefined }))
+  assert.equal(calls, 0)
+  // A reading of other words than the briefing the project states is never sealed: the briefing stays unread.
+  const forged = createFixture({ interpretBrief: async () => ({ ...(await interpretBriefService({ model: model(JSON.stringify(answer)) })({ briefing: 'other words altogether' })) }) })
+  await forged.service(request({ briefing: BRIEFING }))
+  assert.equal(brief(forged).editorialRequest, undefined)
+})
+
+test('ADR-160: no failure of the reading loses the project; a replay never calls the model', async () => {
+  const BRIEFING = 'alpha beta gamma delta'
+  const brief = (fixture) => JSON.parse(fixture.repository.lastBundle.snapshots[0].contentJson)
+  // A timeout (DOMException), an abort, a plain provider error and a non-DomainError all keep the project, unread, with a reason.
+  const failures = [
+    new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+    new DOMException('aborted', 'AbortError'),
+    new Error('provider exploded'),
+    new TypeError('fetch failed'),
+  ]
+  for (const failure of failures) {
+    const fixture = createFixture({ interpretBrief: async () => { throw failure } })
+    const created = await fixture.service(request({ briefing: BRIEFING }))
+    assert.equal(brief(fixture).editorialRequest, undefined, 'the briefing is kept unread')
+    assert.deepEqual(created.briefReading, { status: 'unread', reason: 'brief-interpretation-failed' })
+    assert.equal(brief(fixture).productionBrief.summary !== undefined, true)
+  }
+  const unavailable = createFixture({ interpretBrief: interpretBriefService({ model: null }) })
+  assert.deepEqual((await unavailable.service(request({ briefing: BRIEFING }))).briefReading, { status: 'unread', reason: 'brief-interpreter-unavailable' })
+  const absent = createFixture()
+  assert.deepEqual((await absent.service(request({ briefing: BRIEFING }))).briefReading, { status: 'unread', reason: 'brief-interpreter-unavailable' })
+  assert.deepEqual((await createFixture().service(request({ briefing: undefined }))).briefReading, { status: 'none' })
+
+  // The replay of a completed creation does not spend a reading.
+  let calls = 0
+  const answer = { directives: [], unsupported: [], questions: [], coverage: [] }
+  const model = { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', async interpret() { calls += 1; return { text: JSON.stringify(answer) } } }
+  const replaying = createFixture({ interpretBrief: interpretBriefService({ model }) })
+  const first = await replaying.service(request({ briefing: BRIEFING }))
+  assert.equal(calls, 1)
+  const again = await replaying.service(request({ briefing: BRIEFING }))
+  assert.equal(calls, 1, 'the replay did not call the model')
+  assert.equal(again.replayed, true)
+  assert.equal(again.briefReading.status, 'replay')
+  assert.equal(again.bundle.version.id, first.bundle.version.id)
+})
+
+test('the service waits longer than the provider: its default timeout is the adapter timeout plus a margin', async () => {
+  const waits = []
+  const original = AbortSignal.timeout
+  AbortSignal.timeout = (ms) => { waits.push(ms); return original.call(AbortSignal, ms) }
+  try {
+    const empty = JSON.stringify({ directives: [], unsupported: [], questions: [], coverage: [] })
+    const codexLike = { provider: 'test-double', model: 'stub-1', costBasis: 'subscription', timeoutMs: 180_000, async interpret() { return { text: empty } } }
+    const bare = { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', async interpret() { return { text: empty } } }
+    await interpretBriefService({ model: codexLike })({ briefing: 'alpha beta' })
+    await interpretBriefService({ model: bare })({ briefing: 'alpha beta' })
+    await interpretBriefService({ model: codexLike, timeoutMs: 5_000 })({ briefing: 'alpha beta' })
+  } finally { AbortSignal.timeout = original }
+  assert.equal(waits[0] > 180_000 + 2 * 30_000, true, 'the backstop outlasts a 180 s provider AND the two 30 s checks the Codex adapter makes before it (strictly, never a tie)')
+  assert.equal(waits[1] > 120_000, true)
+  assert.equal(waits[2], 5_000, 'an explicit deployment timeout is kept as stated')
+})
+
+test('ADR-160: the audit sealed with a reading is checked against the text and the interpretation it audits', async () => {
+  const BRIEFING = 'alpha beta gamma delta'
+  const answer = { directives: [], unsupported: [], questions: [], coverage: [{ topic: 'tone', quote: 'gamma' }] }
+  const model = { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', async interpret() { return { text: JSON.stringify(answer) } } }
+  const real = await interpretBriefService({ model })({ briefing: BRIEFING })
+  const sealed = async (audit) => {
+    const fixture = createFixture({ interpretBrief: async () => ({ interpretation: real.interpretation, audit }) })
+    const created = await fixture.service(request({ briefing: BRIEFING }))
+    return { fixture, created, brief: JSON.parse(fixture.repository.lastBundle.snapshots[0].contentJson) }
+  }
+  // The genuine audit is sealed.
+  const genuine = await sealed(real.audit)
+  assert.deepEqual(genuine.brief.editorialRequest.interpretationAudit, JSON.parse(JSON.stringify(real.audit)))
+  assert.deepEqual(genuine.created.briefReading, { status: 'read' })
+  // Each tampering makes it no reading at all: the project is created, the briefing is kept as written and unread, and nothing false is sealed.
+  const tampered = {
+    'another text': { ...real.audit, inputHash: 'a'.repeat(64) },
+    'another model': { ...real.audit, model: 'another-model' },
+    'another prompt version': { ...real.audit, promptVersion: 'brief-interpreter/v9' },
+    'a hash that is not SHA-256': { ...real.audit, responseHash: 'not-a-hash' },
+    'a field nobody defined': { ...real.audit, verdict: 'approved' },
+    'a missing field': Object.fromEntries(Object.entries(real.audit).filter(([key]) => key !== 'promptHash')),
+    'a cost on a subscription': { ...real.audit, costBasis: 'subscription', costMinorUnits: 5 },
+    'negative usage': { ...real.audit, usage: { inputTokens: -1, outputTokens: 1 } },
+    'a signal that is not a fact': { ...real.audit, signals: ['Approved by the Apollo!'] },
+    'nothing at all': null,
+  }
+  for (const [name, audit] of Object.entries(tampered)) {
+    const result = await sealed(audit)
+    assert.equal(result.brief.editorialRequest, undefined, `${name}: a reading with a bad audit is not sealed`)
+    assert.deepEqual(result.created.briefReading, { status: 'unread', reason: 'brief-interpretation-failed' }, name)
+  }
+  // The Command itself refuses a brief that carries such an audit, wherever it came from.
+  const { parseBriefInterpretationAudit } = await import('../../src/v2/domain/editorial-request.ts')
+  assert.throws(() => parseBriefInterpretationAudit({ ...real.audit, inputHash: 'b'.repeat(64) }, BRIEFING, real.interpretation), (error) => error.code === 'INVALID_ARGUMENT')
+  assert.deepEqual(parseBriefInterpretationAudit(real.audit, BRIEFING, real.interpretation), real.audit)
+})
+
+test('ADR-160: the objective is optional; with none the Apollo presumes none, and a desired action (which belongs to an objective) is refused', async () => {
+  const none = createFixture()
+  const created = await none.service(request({ objective: undefined, briefing: 'alpha beta gamma' }))
+  assert.equal('objective' in created.projectAtCreation, false, 'the project states no objective')
+  const intent = created.bundle.command.payload.callerIntent
+  assert.equal(intent.objective, null)
+  assert.equal(intent.desiredAction, null, 'the kind of action is the objective\'s: there is none to give')
+  const brief = JSON.parse(none.repository.lastBundle.snapshots[0].contentJson)
+  assert.equal(brief.objective, null)
+  assert.equal(brief.desiredAction, null)
+  assert.equal(brief.productionBrief.ownerInput.text, 'alpha beta gamma', 'the briefing is kept as written')
+  // null and absent are the same request; a replay returns the stored result.
+  const replay = await none.service(request({ objective: null, briefing: 'alpha beta gamma' }))
+  assert.equal(replay.replayed, true)
+  // A desired action without an objective is refused, whatever it holds.
+  await assert.rejects(createFixture().service(request({ objective: undefined, desiredAction: { verbalCta: 'um texto' } })), (error) => error.code === 'INVALID_COMMAND')
+  // An empty desired action is no desired action.
+  assert.equal((await createFixture().service(request({ objective: undefined, desiredAction: {} }))).bundle.command.payload.callerIntent.desiredAction, null)
+  // With an objective everything is as it was.
+  const withObjective = await createFixture().service(request())
+  assert.equal(withObjective.projectAtCreation.objective, 'discovery')
+  assert.equal(withObjective.bundle.command.payload.callerIntent.desiredAction.kind, 'continue-viewing')
+  // The request hash of "none" differs from the request of any objective.
+  assert.notEqual(created.bundle.command.requestFingerprint, withObjective.bundle.command.requestFingerprint)
 })

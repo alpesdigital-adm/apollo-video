@@ -7,6 +7,7 @@ import { calculateVersionHash } from '../../application/version-hash.ts'
 import { evaluateAssetUse } from '../../domain/asset-rights.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { parseEditorialPolicyResolution, POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION } from '../../domain/editorial-policy-resolution.ts'
 import type { OutputConsumptionPurpose } from '../../domain/output-consumption.ts'
 import { INHERITING_COMMAND_TYPES, type DirectorRunInheritance } from '../../domain/director-run-inheritance.ts'
 import { requirePersistedOutputConsumptionV3 } from './output-state-consumption.ts'
@@ -89,7 +90,7 @@ function findProxySourceProject(client: PrismaClient | Prisma.TransactionClient,
         take: 1,
         include: {
           editPlanSnapshot: true,
-          directorRunAsResult: { include: { qualitySnapshot: true, perceptionSnapshot: true } },
+          directorRunAsResult: { include: { qualitySnapshot: true, perceptionSnapshot: true, policySnapshot: true } },
           command: {
             include: {
               artifactInvalidations: {
@@ -268,8 +269,21 @@ export function hydrateProxySource(
     originalFileName: media.originalFileName,
     uploadReceivedAt: (media.upload?.createdAt ?? media.createdAt).toISOString(),
     criticIssues: parseProxySourceCriticIssues(directed?.run.qualitySnapshot.contentJson),
+    ...(policyResolutionOf(directed) ? { policyResolution: policyResolutionOf(directed)! } : {}),
     ...(directed?.inheritance ? { directorInheritance: directed.inheritance } : {}),
   })
+}
+
+/**
+ * The sealed policy resolution of a DirectorRun, when it has one this reader understands. A run born under an earlier resolution schema has
+ * none to judge a plan by (it is never admitted to a final export either); a resolution of the current schema that does not verify is a defect.
+ */
+export function policyResolutionOf(directed: ReturnType<typeof effectiveDirectorRunOf>) {
+  const snapshot = directed?.run.policySnapshot
+  if (!snapshot || snapshot.kind !== 'policy-resolution' || snapshot.schemaVersion !== POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION) return null
+  const resolution = parseEditorialPolicyResolution(parseProxySourceRecord(snapshot.contentJson, 'Director policy resolution'))
+  if (resolution.requestHash !== directed.run.requestHash) throw new DomainError('PERSISTENCE_CONFLICT', 'The policy resolution does not belong to the request the DirectorRun names')
+  return resolution
 }
 
 export function hydrateProxyRenderSources(project: NonNullable<Awaited<ReturnType<typeof queryProxySourceProject>>>,

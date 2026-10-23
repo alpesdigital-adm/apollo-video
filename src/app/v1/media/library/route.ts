@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     const actor = await authenticateExternalRequest(request)
     requireScope(actor, 'artifacts:read')
     const params = request.nextUrl.searchParams
-    assertAllowlistedPublicQuery(params, new Set(['limit', 'after', 'kind', 'person', 'topic', 'rightsStatus']))
+    assertAllowlistedPublicQuery(params, new Set(['limit', 'after', 'kind', 'person', 'topic', 'rightsStatus', 'locale']))
     const page = await listMediaLibraryService({ repository: createMediaLibraryRepository() })({
       workspaceId: actor.workspaceId,
       ...(params.has('limit') ? { limit: Number(params.get('limit')) } : {}),
@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
       ...(params.has('person') ? { person: params.get('person') ?? '' } : {}),
       ...(params.has('topic') ? { topic: params.get('topic') ?? '' } : {}),
       ...(params.has('rightsStatus') ? { rightsStatus: params.get('rightsStatus') as LibraryRightsStatus } : {}),
+      ...(params.has('locale') ? { locale: params.get('locale') ?? '' } : {}),
     })
     return NextResponse.json(presentSuccess(page), { headers: publicApiHeaders(requestId) })
   } catch (error) {

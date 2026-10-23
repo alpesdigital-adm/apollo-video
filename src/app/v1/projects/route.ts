@@ -14,6 +14,7 @@ import {
   createProjectCreationRepository,
   createProjectQueryRepository,
 } from '@/v2/infrastructure/repository-factory'
+import { createInterpretBrief } from '@/v2/infrastructure/brief/create-interpret-brief'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { assertAllowlistedPublicQuery } from '@/v2/public-api/conventions'
 import {
@@ -96,7 +97,8 @@ export async function POST(request: NextRequest) {
     if (typeof body.name !== 'string') {
       throw new DomainError('INVALID_ARGUMENT', 'name must be a string')
     }
-    if (typeof body.objective !== 'string') {
+    // The objective is optional (ADR-160): the Apollo presumes none. When it is given it is one of the strategic objectives.
+    if (body.objective !== undefined && typeof body.objective !== 'string') {
       throw new DomainError('INVALID_ARGUMENT', 'objective must be a string')
     }
     for (const field of ['locale', 'briefing'] as const) {
@@ -113,6 +115,8 @@ export async function POST(request: NextRequest) {
 
     const createProject = createProjectService({
       repository: createProjectCreationRepository(),
+      // The briefing is read when the project is created (the reading is a property of the text); no interpreter, or a refused reading, keeps it unread.
+      interpretBrief: createInterpretBrief(),
       clock: () => new Date(),
       createId: (kind) => `${kind}-${randomUUID()}`,
       createEventId: randomUUID,
@@ -120,7 +124,7 @@ export async function POST(request: NextRequest) {
     const result = await createProject({
       workspaceId: actor.workspaceId,
       name: body.name,
-      objective: body.objective as StrategicObjectiveId,
+      ...(body.objective !== undefined ? { objective: body.objective as StrategicObjectiveId } : {}),
       ...(locale ? { locale } : {}),
       ...(briefing ? { briefing } : {}),
       ...(desiredAction ? { desiredAction } : {}),

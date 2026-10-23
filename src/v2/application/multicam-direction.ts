@@ -1,11 +1,13 @@
 import type { CaptureSession, CaptureTrack, CaptureTrackPart } from '../domain/capture-session.ts'
 import {
   validateDirectedEditPlan,
+  type DirectedCtaOverlay,
   validateDirectorDecisions,
   type DirectedEditPlan,
   type DirectedTransition,
   type DirectorDecisionInput,
 } from '../domain/director-run.ts'
+import { assertPlanHonorsResolution, type EditorialPolicyResolutionV1 } from '../domain/editorial-policy-resolution.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import {
   compileShotsToSourceRanges,
@@ -899,6 +901,90 @@ function isDirected(plan: MulticamDirectionCommandContext['currentPlan']): plan 
 }
 
 /**
+ * Where a frame of the plan the direction replaces falls on the timeline the direction produced, or `null` when that moment is not on it.
+ *
+ * The moment is followed through what the recorders share: the base clip under the frame names a recording and a frame of it; that frame is a
+ * tick of the recording's own clock; the session's clock map turns it into a session tick; the compiled shot that covers that session tick says
+ * where it lies on the new timeline. Nothing is assumed about which camera shows it now.
+ */
+export function locateBasePlanFrameOnMulticamTimeline(input: {
+  base: Readonly<DirectedEditPlan>
+  session: Readonly<CaptureSession>
+  clockMaps: readonly Readonly<PiecewiseClockMap>[]
+  compilation: Readonly<MulticamShotCompilation>
+  frame: number
+}): number | null {
+  const baseClip = input.base.videoTracks.flatMap((track) => track.clips)
+    .find((clip) => input.frame >= clip.timelineInFrame && input.frame < clip.timelineOutFrame)
+  if (!baseClip) return null
+  const found = locateArtifact(input.session, baseClip.sourceArtifactId)
+  if (!found) return null
+  const planFrames = createTimebase(rational(BigInt(input.compilation.planFps.den), BigInt(input.compilation.planFps.num)))
+  const sourceFrame = baseClip.sourceInFrame + Math.round((input.frame - baseClip.timelineInFrame) * baseClip.rate)
+  const sourceTick = found.part.coverage.start + convertTick({ tick: BigInt(sourceFrame), from: planFrames, to: found.part.timebase })
+  let sessionTick: bigint
+  const map = input.clockMaps.find((entry) => entry.sourceId === found.track.sourceAssetId) ?? null
+  if (map) {
+    const resolved = resolveSourceTick(map, sourceTick)
+    if (resolved.status !== 'resolved') return null
+    sessionTick = resolved.tick
+  } else if (found.track.trackId === input.session.referenceTrackId) {
+    sessionTick = rationalEquals(found.track.timebase.secondsPerTick, input.session.clock.timebase.secondsPerTick)
+      ? sourceTick
+      : convertTick({ tick: sourceTick, from: found.track.timebase, to: input.session.clock.timebase, rounding: input.session.clock.rounding })
+  } else {
+    return null
+  }
+  const clip = input.compilation.clips.find((entry) => sessionTick >= entry.sessionRange.start && sessionTick < entry.sessionRange.end)
+  if (!clip) return null
+  const offset = Number(convertTick({ tick: sessionTick - clip.sessionRange.start, from: input.session.clock.timebase, to: planFrames }))
+  return Math.min(clip.timelineOutFrame - 1, clip.timelineInFrame + offset)
+}
+
+/**
+ * The call to action of the plan the direction replaces, placed on the timeline the direction produced - where the editorial policy says it goes.
+ *
+ * A window that runs to the end of the video (the call is spoken and stays, or the video closes on it) starts where the call is said and ends with
+ * the new timeline; a window that closes with the call ends where the call ends. A moment the directed range does not contain cannot be honoured:
+ * the direction is refused with the reason, never given a call to action somewhere else.
+ */
+export function placeOverlaysOnMulticamTimeline(input: {
+  base: Readonly<DirectedEditPlan>
+  session: Readonly<CaptureSession>
+  clockMaps: readonly Readonly<PiecewiseClockMap>[]
+  compilation: Readonly<MulticamShotCompilation>
+  policyResolution?: Readonly<EditorialPolicyResolutionV1>
+}): readonly Readonly<DirectedCtaOverlay>[] {
+  const policy = input.policyResolution?.policies.ctaOverlay.value
+  // Under a resolution that draws no call to action, none is carried over; the check that follows holds the plan to it.
+  if (policy?.mode === 'none') return Object.freeze([])
+  const fps = input.base.fps
+  return Object.freeze(input.base.overlayTracks.map((overlay) => {
+    // A placement the requester gave in seconds of the video is a second of THIS video: it is not followed through the recordings.
+    if (policy?.mode === 'window' && (policy.anchoredTo === 'whole-video' || policy.anchoredTo === 'requested-seconds')) {
+      const start = policy.anchoredTo === 'whole-video' ? 0 : Math.round(policy.startSeconds * fps)
+      if (start >= input.compilation.durationFrames) {
+        throw new DomainError('PRECONDITION_REQUIRED', `The call to action is requested from ${policy.startSeconds} s and the directed video lasts ${(input.compilation.durationFrames / fps).toFixed(2)} s`, { overlayId: overlay.id })
+      }
+      return Object.freeze({ ...overlay, startFrame: start, endFrame: input.compilation.durationFrames })
+    }
+    const locate = (frame: number) => locateBasePlanFrameOnMulticamTimeline({ ...input, frame })
+    const start = locate(overlay.startFrame)
+    const toEnd = policy !== undefined ? policy.anchoredTo !== 'spoken-cta' : overlay.endFrame >= input.base.durationFrames
+    const lastFrame = toEnd ? null : locate(overlay.endFrame - 1)
+    if (start === null || (!toEnd && lastFrame === null)) {
+      throw new DomainError(
+        'PRECONDITION_REQUIRED',
+        `The call to action sits at ${(overlay.startFrame / fps).toFixed(2)} s of the plan this direction replaces, a moment the directed range does not contain; widen the range or direct the project again`,
+        { overlayId: overlay.id, startFrame: overlay.startFrame, endFrame: overlay.endFrame },
+      )
+    }
+    const end = toEnd ? input.compilation.durationFrames : lastFrame! + 1
+    return Object.freeze({ ...overlay, startFrame: start, endFrame: Math.max(start + 1, end) })
+  }))
+}
+
+/**
  * The compiled shots as the single `base-video` track of a Director EditPlan.
  *
  * One shot is one clip; nothing composes, overlays or retimes. The seams are
@@ -921,6 +1007,8 @@ export function buildMulticamEditPlan(input: {
   compilation: Readonly<MulticamShotCompilation>
   decisions: readonly Readonly<DirectorDecisionInput>[]
   assumptions: readonly string[]
+  /** The call to action, already placed on THIS timeline (`placeOverlaysOnMulticamTimeline`). */
+  overlayTracks: readonly Readonly<DirectedCtaOverlay>[]
   createdAt: string
 }): Readonly<DirectedEditPlan> {
   const clips: Readonly<EditorialCutClip>[] = input.compilation.clips.map((clip) => Object.freeze({
@@ -970,14 +1058,9 @@ export function buildMulticamEditPlan(input: {
       kind: 'base-video' as const,
       clips: Object.freeze(clips),
     })]),
-    overlayTracks: Object.freeze(input.base.overlayTracks.map((overlay) => Object.freeze({
-      ...overlay,
-      // The CTA keeps its length and is re-anchored to the end of the timeline
-      // this direction produced. A frame index from the timeline it replaced
-      // would point at a different moment, or past the end.
-      startFrame: Math.max(0, durationFrames - Math.max(1, overlay.endFrame - overlay.startFrame)),
-      endFrame: durationFrames,
-    }))),
+    // A frame index from the timeline this one replaced would point at a different moment, or past the end: the call to action was placed on this
+    // timeline by where it is said (`placeOverlaysOnMulticamTimeline`), not by its old frame numbers.
+    overlayTracks: Object.freeze(input.overlayTracks.map((overlay) => Object.freeze({ ...overlay }))),
     // Dropped rather than carried: the cues were timed against the timeline
     // this direction replaced, and a caption that lands on the wrong angle is
     // worse than no caption. `assumptions` says so out loud, and re-running the
@@ -1012,10 +1095,8 @@ export function buildMulticamEditPlan(input: {
       decisions: validateDirectorDecisions(input.decisions),
       assumptions: Object.freeze([...input.assumptions]),
     }),
-    movementPolicy: Object.freeze({
-      automaticZoom: false as const,
-      protectedOpeningFrames: Math.max(input.base.movementPolicy.protectedOpeningFrames, Math.round(fps * 4)),
-    }),
+    // The multicam direction adds no movement of its own: the plan states the movement of the plan it directs, as it is.
+    movementPolicy: Object.freeze({ ...input.base.movementPolicy }),
     audioTimelineHash: createEditorialAudioTimelineHash({ fps, clips }),
     lineageRefs: Object.freeze([...new Set([
       ...input.base.lineageRefs,
@@ -1374,6 +1455,10 @@ export function directMulticamSessionService(dependencies: DirectMulticamSession
     const versionId = dependencies.createId('project-version')
     const snapshotId = dependencies.createId('project-snapshot')
     const stateId = dependencies.createId('project-output-state')
+    const overlayTracks = placeOverlaysOnMulticamTimeline({
+      base, session, clockMaps, compilation,
+      ...(context.policyResolution ? { policyResolution: context.policyResolution } : {}),
+    })
     const editPlan = buildMulticamEditPlan({
       base,
       planId: `edit-plan-${versionId}`,
@@ -1381,8 +1466,12 @@ export function directMulticamSessionService(dependencies: DirectMulticamSession
       compilation,
       decisions: angles.decisions,
       assumptions: angles.assumptions,
+      overlayTracks,
       createdAt,
     })
+    // The re-cut plan is held to the resolution its Director run was sealed under, as the render workers hold it later: movement, opening and the
+    // call to action. A plan this direction made that the resolution does not recognise is refused here, before it becomes a Version.
+    assertPlanHonorsResolution(editPlan, context.policyResolution)
     const built = buildDirectMulticamSessionCommand({
       commandId,
       workspaceId,

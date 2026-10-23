@@ -24,7 +24,7 @@ function fixture() {
     workspaceId: 'retry-workspace',
     projectId: 'retry-project',
     name: 'Mixed retry fixture',
-    objective: 'conversion',
+    objective: 'sale',
     sourceGroups: [{
       id: 'retry-sources',
       name: 'Approved source',

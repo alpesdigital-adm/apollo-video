@@ -1,6 +1,7 @@
 import {
   evaluateAssetUse,
   normalizeAssetUseContext,
+  UNDETERMINED_LOCALE,
 } from '../domain/asset-rights.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import { renderInputLineageMatches } from '../domain/media-artifact.ts'
@@ -170,7 +171,7 @@ export function materializeAuthorizedRenderInputService(dependencies: {
       revalidationFailure('COMPOSITION_UNAVAILABLE')
     }
     if (
-      input.output.locale !== authorization.locale ||
+      (input.output.locale ?? UNDETERMINED_LOCALE) !== authorization.locale ||
       authorization.decisions.length !== input.assets.length
     ) {
       revalidationFailure('AUTHORIZATION_CONTEXT_CHANGED')

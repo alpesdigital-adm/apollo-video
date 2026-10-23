@@ -118,6 +118,12 @@ export const ASSET_USE_DENIAL_CODES = [
 ] as const
 export type AssetUseDenialCode = (typeof ASSET_USE_DENIAL_CODES)[number]
 
+/**
+ * The locale rights are judged under when no locale was stated (BCP 47 `und`, undetermined). It is not a language: a rights snapshot that
+ * restricts its locales does not allow it, so an unstated locale is never read as a permissive one (and never as a particular language).
+ */
+export const UNDETERMINED_LOCALE = 'und'
+
 export interface AssetUseContext {
   workspaceId: string
   use: string

@@ -169,20 +169,20 @@ function parseContext(
       64,
       64,
     ),
-    offerId: string(context.offerId, `${field}.offerId`, 3, 128),
-    audienceTags: tokens(
-      context.audienceTags,
-      `${field}.audienceTags`,
-      1,
-    ),
+    // ADR-160 F8. Every semantic field may be left out: what the requester does not state is unspecified, never a default.
+    ...(context.offerId !== undefined
+      ? { offerId: string(context.offerId, `${field}.offerId`, 3, 128) }
+      : {}),
+    ...(context.audienceTags !== undefined
+      ? { audienceTags: tokens(context.audienceTags, `${field}.audienceTags`) }
+      : {}),
     claims: parseClaims(context.claims, `${field}.claims`),
-    personaId: string(
-      context.personaId,
-      `${field}.personaId`,
-      3,
-      128,
-    ),
-    locale: string(context.locale, `${field}.locale`, 2, 16),
+    ...(context.personaId !== undefined
+      ? { personaId: string(context.personaId, `${field}.personaId`, 3, 128) }
+      : {}),
+    ...(context.locale !== undefined
+      ? { locale: string(context.locale, `${field}.locale`, 2, 16) }
+      : {}),
     ...(context.desiredAction !== undefined
       ? {
           desiredAction: string(
@@ -201,18 +201,15 @@ function parseContext(
       context.continuityRequires,
       `${field}.continuityRequires`,
     ),
-    narrativeTags: tokens(
-      context.narrativeTags,
-      `${field}.narrativeTags`,
-      1,
-    ),
-    tone: unit(context.tone, `${field}.tone`),
-    energy: unit(context.energy, `${field}.energy`),
-    visual: unit(context.visual, `${field}.visual`),
-    experiment: unit(
-      context.experiment,
-      `${field}.experiment`,
-    ),
+    ...(context.narrativeTags !== undefined
+      ? { narrativeTags: tokens(context.narrativeTags, `${field}.narrativeTags`) }
+      : {}),
+    ...(context.tone !== undefined ? { tone: unit(context.tone, `${field}.tone`) } : {}),
+    ...(context.energy !== undefined ? { energy: unit(context.energy, `${field}.energy`) } : {}),
+    ...(context.visual !== undefined ? { visual: unit(context.visual, `${field}.visual`) } : {}),
+    ...(context.experiment !== undefined
+      ? { experiment: unit(context.experiment, `${field}.experiment`) }
+      : {}),
     evidenceRefs: tokens(
       context.evidenceRefs,
       `${field}.evidenceRefs`,

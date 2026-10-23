@@ -116,7 +116,7 @@ test('the review and proxy-review reads take an optional stable variantId; the w
   assert.equal(capability('apollo.projects.proxy-reviews.read').version, '2.3.0')
   assert.equal(capability('apollo.projects.proxy-reviews.read').outputSchemaRef, 'apollo://schemas/project-proxy-review-response/v4')
   for (const id of ['apollo.projects.workspace.read', 'apollo.projects.workspace.current.read']) {
-    assert.equal(capability(id).outputSchemaRef, 'apollo://schemas/project-workspace/v15', id)
+    assert.equal(capability(id).outputSchemaRef, 'apollo://schemas/project-workspace/v16', id)
   }
 })
 

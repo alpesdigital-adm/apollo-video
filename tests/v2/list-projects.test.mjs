@@ -189,7 +189,7 @@ test('T-FR-236 projects every persisted project phase into a fail-closed public 
   assert.equal(capabilities.get('apollo.projects.list').outputSchemaRef, 'apollo://schemas/project-list/v9')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v5').ref, 'apollo://schemas/project-list/v5')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v4').ref, 'apollo://schemas/project-list/v4')
-  assert.equal(capabilities.get('apollo.projects.create').version, '6.0.0')
+  assert.equal(capabilities.get('apollo.projects.create').version, '8.0.0')
   assert.equal(capabilities.get('apollo.projects.create').outputSchemaRef, 'apollo://schemas/project-created/v5')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v3').ref, 'apollo://schemas/project-list/v3')
   assert.equal(getPublicSchema('apollo://schemas/project-created/v2').ref, 'apollo://schemas/project-created/v2')
@@ -208,7 +208,7 @@ test('T-FR-236 projects every persisted project phase into a fail-closed public 
 
 test('T-FR-236 preserves historical create/duplicate visible states and exposes new creation as a sealed receipt', () => {
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
-  assert.equal(capabilities.get('apollo.projects.create').version, '6.0.0')
+  assert.equal(capabilities.get('apollo.projects.create').version, '8.0.0')
   assert.equal(capabilities.get('apollo.projects.create').outputSchemaRef, 'apollo://schemas/project-created/v5')
   assert.equal(capabilities.get('apollo.projects.duplicates.create').version, '2.0.0')
   assert.equal(capabilities.get('apollo.projects.duplicates.create').outputSchemaRef, 'apollo://schemas/project-duplicated/v2')
@@ -272,11 +272,11 @@ test('T-FR-236 aligns both workspace capabilities on visible project and operati
 
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
   for (const [id, version] of [
-    ['apollo.projects.workspace.read', '13.2.0'],
-    ['apollo.projects.workspace.current.read', '12.2.0'],
+    ['apollo.projects.workspace.read', '14.0.0'],
+    ['apollo.projects.workspace.current.read', '13.0.0'],
   ]) {
     assert.equal(capabilities.get(id).version, version)
-    assert.equal(capabilities.get(id).outputSchemaRef, 'apollo://schemas/project-workspace/v15')
+    assert.equal(capabilities.get(id).outputSchemaRef, 'apollo://schemas/project-workspace/v16')
   }
   assert.equal(getPublicSchema('apollo://schemas/project-workspace/v6').ref, 'apollo://schemas/project-workspace/v6')
   const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))

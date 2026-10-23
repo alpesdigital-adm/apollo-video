@@ -7,13 +7,14 @@ import {
 import { DomainError } from '../../src/v2/domain/errors.ts'
 
 test('briefing complete, partial and absent all advance with explicit assumptions', () => {
-  const complete = createProductionBrief({ ownerText: 'Público: gestores. Oferta: guia. Tom: direto.', ingestedContextRef: 'transcript:asset-1' })
+  // What a briefing covers is what its INTERPRETATION found (never a word list); the briefings are synthetic.
+  const complete = createProductionBrief({ ownerText: 'alpha beta gamma', ingestedContextRef: 'transcript:asset-1', interpretedCoverage: ['audience', 'offer', 'tone'] })
   assert.deepEqual(complete.assumptions, [])
   assert.deepEqual(complete.summary.coverage, { audience: true, offer: true, tone: true })
   assert.equal(complete.ownerInput.trust, 'owner-authorized')
   assert.equal(complete.ingestedContext.trust, 'untrusted-media-derived')
   assert.equal('text' in complete.ingestedContext, false)
-  const partial = createProductionBrief({ ownerText: 'Público: donos de clínica.' })
+  const partial = createProductionBrief({ ownerText: 'alpha', interpretedCoverage: ['audience'] })
   assert.deepEqual(partial.assumptions, ['offer-not-specified', 'tone-not-specified'])
   assert.deepEqual(partial.summary.coverage, { audience: true, offer: false, tone: false })
   const absent = createProductionBrief({})
@@ -24,14 +25,15 @@ test('briefing complete, partial and absent all advance with explicit assumption
   assert.ok(Object.isFrozen(absent.summary.coverage))
 })
 
-test('briefing preserves paragraphs, normalizes accents and parses only canonical trust boundaries', () => {
+test('briefing preserves paragraphs, normalizes whitespace and parses only canonical trust boundaries', () => {
   const brief = createProductionBrief({
-    ownerText: '  AUDIÊNCIA: médicas.\n\nProduto: guia.   Linguagem: clara.  ',
+    ownerText: '  alpha: one.\n\nbeta: two.   gamma: three.  ',
     ingestedContextRef: 'transcript:artifact-1',
+    interpretedCoverage: ['audience', 'offer', 'tone'],
   })
   assert.equal(
     brief.ownerInput.text,
-    'AUDIÊNCIA: médicas.\n\nProduto: guia. Linguagem: clara.',
+    'alpha: one.\n\nbeta: two. gamma: three.',
   )
   assert.deepEqual(brief.assumptions, [])
   assert.deepEqual(parseProductionBrief(JSON.parse(JSON.stringify(brief))), brief)
@@ -50,7 +52,8 @@ test('briefing preserves paragraphs, normalizes accents and parses only canonica
 
 test('published V2 brief snapshots without additive coverage hydrate canonically', () => {
   const current = createProductionBrief({
-    ownerText: 'Público: gestoras. Oferta: treinamento. Tom: direto.',
+    ownerText: 'alpha beta gamma',
+    interpretedCoverage: ['audience', 'offer', 'tone'],
   })
   const persistedBeforeCoverage = JSON.parse(JSON.stringify(current))
   delete persistedBeforeCoverage.summary.coverage
@@ -59,7 +62,7 @@ test('published V2 brief snapshots without additive coverage hydrate canonically
   assert.throws(
     () => parseProductionBrief({
       ...persistedBeforeCoverage,
-      assumptions: ['tone-not-specified'],
+      assumptions: ['tone-not-specified', 'a-claim-the-brief-never-makes'],
     }),
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
   )

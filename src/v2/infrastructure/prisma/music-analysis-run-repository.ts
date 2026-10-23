@@ -7,7 +7,7 @@ import type {
   MusicAnalysisRunRepository,
 } from "../../application/ports/music-led-montage.ts";
 import { DomainError } from "../../domain/errors.ts";
-import { evaluateAssetUse } from "../../domain/asset-rights.ts";
+import { evaluateAssetUse, UNDETERMINED_LOCALE } from "../../domain/asset-rights.ts";
 import { hydrateAssetRights } from "./asset-rights-repository.ts";
 import {
   batchActorAuditData,
@@ -66,11 +66,12 @@ export class PrismaMusicAnalysisRunRepository implements MusicAnalysisRunReposit
     });
     const artifact = link?.artifact,
       rights = artifact?.currentRightsSnapshot;
-    if (!project || !project.locale)
-      throw new DomainError(
-        "VERSION_CONFLICT",
-        "Music analysis requires the current localized project version",
-      );
+    if (!project) {
+      // No project at the version asked for: a project that is not there is one thing, a version that is no longer the current one is another.
+      const exists = await this.prisma.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { id: true } });
+      if (!exists) throw new DomainError("PROJECT_NOT_FOUND", "Music analysis requires an existing project");
+      throw new DomainError("VERSION_CONFLICT", "Music analysis requires the current project version");
+    }
     if (
       !artifact ||
       artifact.status !== "available" ||
@@ -88,7 +89,7 @@ export class PrismaMusicAnalysisRunRepository implements MusicAnalysisRunReposit
           {
             workspaceId: input.workspaceId,
             use: "music-led-montage",
-            locale: project.locale,
+            locale: project.locale ?? UNDETERMINED_LOCALE,
           },
           new Date(input.at),
         )
@@ -108,7 +109,7 @@ export class PrismaMusicAnalysisRunRepository implements MusicAnalysisRunReposit
       sha256: artifact.sha256,
       byteSize: Number(artifact.byteSize),
       rightsSnapshotId: rights.id,
-      locale: project.locale,
+      locale: project.locale ?? UNDETERMINED_LOCALE,
     });
   }
   async findRequestReplay(

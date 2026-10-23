@@ -66,7 +66,7 @@ function realRequester(db) {
 
 /** The persisted run, read back and re-derived. Returns what the assertions of each scenario then read. */
 async function oracle(db, { workspaceId, projectId, runId }) {
-  const row = await db.v2DirectorRun.findUniqueOrThrow({ where: { id: runId }, include: { perceptionSnapshot: true, qualitySnapshot: true, command: true } })
+  const row = await db.v2DirectorRun.findUniqueOrThrow({ where: { id: runId }, include: { perceptionSnapshot: true, qualitySnapshot: true, policySnapshot: true, command: true } })
   assert.equal(row.workspaceId, workspaceId)
   const perception = JSON.parse(row.perceptionSnapshot.contentJson)
   const quality = JSON.parse(row.qualitySnapshot.contentJson)
@@ -75,8 +75,12 @@ async function oracle(db, { workspaceId, projectId, runId }) {
   const payload = JSON.parse(row.command.payloadJson)
   assert.equal(payload.snapshotRefs.perception, row.perceptionSnapshotId)
   assert.equal(payload.snapshotRefs.quality, row.qualitySnapshotId)
-  assert.equal(row.qualitySnapshot.schemaVersion, 4)
-  assert.equal(quality.schemaVersion, 'director-quality-report/v4')
+  assert.equal(row.qualitySnapshot.schemaVersion, 5)
+  assert.equal(quality.schemaVersion, 'director-quality-report/v5')
+  // ADR-160: the run names the request it answers and seals the resolution it was judged against, in the very rows the report names
+  assert.equal(row.requestHash, quality.requestHash)
+  assert.equal(row.policySnapshot.kind, 'policy-resolution')
+  assert.equal(JSON.parse(row.policySnapshot.contentJson).policyResolutionHash, quality.policyResolutionHash)
   assert.equal(calculateCanonicalHash(quality), row.qualitySnapshot.contentHash)
   const report = parseDirectorPerceptionEvidenceReport(quality.perceptionEvidence)
   assert.equal(report.policy.bandPolicy.policyHash, CONFIDENCE_BAND_POLICY_V2_SHA256)
@@ -181,7 +185,7 @@ test('W64 PostgreSQL Director: complete OCR and partial face give PARTIAL decisi
       // the critic: face is the partial, unverified warning (not the "unavailable" one), still never approved, face safety unknown
       assert.equal(stored.quality.status, 'review-required')
       assert.deepEqual(stored.quality.faceSafety, { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] })
-      assert.equal(stored.quality.hardChecks.subtitlesFaceSafe, false)
+      assert.equal(stored.quality.hardChecks.find((check) => check.id === 'subtitlesFaceSafe'), undefined, 'face safety is claimed by nobody: no check of the v5 list says it, the faceSafety object does')
       const codes = stored.quality.issues.map((issue) => issue.code)
       assert.ok(codes.includes('FACE_EVIDENCE_PARTIAL_REVIEW_REQUIRED') && !codes.includes('FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED'))
       assert.equal(stored.quality.issues.filter((issue) => issue.severity === 'hard').length, 0)

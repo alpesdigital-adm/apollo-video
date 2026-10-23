@@ -1,3 +1,4 @@
+import { UNDETERMINED_LOCALE } from '../../domain/asset-rights.ts'
 import { randomUUID } from 'node:crypto'
 
 import type { Prisma, PrismaClient, V2MediaArtifact, V2ReviewAnnotation } from '../../../../generated/prisma-v2/index.js'
@@ -382,7 +383,7 @@ async function locateReviewPreview<Admission>(
     height: probe.height,
     durationFrames,
     stale: selectedVersion.id !== project.currentVersionId || candidate.projectVersionId !== selectedVersion.id,
-    localeId: project.locale ?? 'pt-BR',
+    localeId: project.locale ?? UNDETERMINED_LOCALE,
     recipeIds,
     scopeCounts: Object.freeze({
       frame: durationFrames,

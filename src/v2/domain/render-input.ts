@@ -292,7 +292,8 @@ export function createRenderInputSpec(input: CreateRenderInputSpecInput): Render
     'composition.propsSchemaRef is invalid',
   )
   assertDomain(
-    typeof input.output.locale === 'string' && LOCALE_PATTERN.test(input.output.locale),
+    // The language of an output is stated or absent (ADR-160): a render input of an output with no stated language carries none.
+    input.output.locale === undefined || (typeof input.output.locale === 'string' && LOCALE_PATTERN.test(input.output.locale)),
     'INVALID_RENDER_INPUT',
     'output.locale is invalid',
   )
@@ -322,7 +323,7 @@ export function createRenderInputSpec(input: CreateRenderInputSpecInput): Render
 
   const output = createOutputSpec({
     id: input.output.id,
-    locale: input.output.locale,
+    ...(input.output.locale !== undefined ? { locale: input.output.locale } : {}),
     aspectRatio: input.output.aspectRatio,
     width: input.output.width,
     height: input.output.height,
@@ -400,7 +401,7 @@ export function assertRenderInputSpec(spec: RenderInputSpecV1): void {
     plan: spec.plan,
     output: {
       id: spec.output.id,
-      locale: spec.output.locale,
+      ...(spec.output.locale !== undefined ? { locale: spec.output.locale } : {}),
       aspectRatio: spec.output.aspectRatio,
       width: spec.output.width,
       height: spec.output.height,

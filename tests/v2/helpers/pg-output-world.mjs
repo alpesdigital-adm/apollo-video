@@ -74,14 +74,14 @@ export async function ensureWorkspaceActor(client, { workspaceId, actor, created
  */
 export async function seedSealedProject(client, {
   workspaceId, actor, prefix = 'world', ids = {}, name = 'Sealed world project', objective = 'discovery',
-  locale = 'pt-BR', variant = {}, at = () => new Date(),
+  locale = 'pt-BR', briefing, variant = {}, at = () => new Date(),
 }) {
   const allocate = uniqueRun(prefix)
   await ensureWorkspaceActor(client, { workspaceId, actor })
   const createId = (kind) => ids[kind] ?? allocate.id(kind)
   const dependencies = (repository) => ({ repository, clock: at, createId, createEventId: randomUUID })
   const created = await createProjectService(dependencies(new PrismaCreationOutputBundleRepositoryV2(client)))({
-    workspaceId, name, objective, locale, actor, idempotencyKey: allocate.id('root-request'),
+    workspaceId, name, ...(objective === null ? {} : { objective }), locale, ...(briefing === undefined ? {} : { briefing }), actor, idempotencyKey: allocate.id('root-request'),
   })
   const projectId = created.projectAtCreation.id
   const root = created.bundle

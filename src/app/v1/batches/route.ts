@@ -24,6 +24,7 @@ import {
   presentProductionBatchPageV2,
 } from '@/v2/public-api/production-batch-contract'
 import { presentSuccess } from '@/v2/public-api/presenters'
+import { createInterpretBrief } from '@/v2/infrastructure/brief/create-interpret-brief'
 
 export const dynamic = 'force-dynamic'
 
@@ -70,6 +71,7 @@ export async function POST(request: NextRequest) {
     const body = parseCreateProductionBatchBody(rawBody)
     const result = await createProductionBatchService({
       repository: createProductionBatchRepository(),
+      interpretBrief: createInterpretBrief(),
       clock: () => new Date(),
       createBatchId: () => `production-batch-${randomUUID()}`,
       createItemId: () => `production-batch-item-${randomUUID()}`,

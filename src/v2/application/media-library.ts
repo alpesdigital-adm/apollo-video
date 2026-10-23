@@ -1,4 +1,4 @@
-import { normalizeMediaLibraryQuery } from '../domain/media-library.ts'
+import { normalizeLibraryLocale, normalizeMediaLibraryQuery } from '../domain/media-library.ts'
 import { DomainError } from '../domain/errors.ts'
 import type { MediaLibraryRepository } from './ports/media-library-repository.ts'
 import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
@@ -11,11 +11,12 @@ export function listMediaLibraryService(dependencies: { repository: MediaLibrary
 }
 
 export function readMediaLibraryItemService(dependencies: { repository: MediaLibraryRepository; clock?: () => Date }) {
-  return async (rawWorkspaceId: string, rawItemId: string) => {
+  return async (rawWorkspaceId: string, rawItemId: string, rawLocale?: string) => {
     const workspaceId = normalizeMediaLibraryQuery({ workspaceId: rawWorkspaceId }).workspaceId
     const itemId = rawItemId.trim()
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(itemId)) throw new DomainError('INVALID_ARGUMENT', 'Media library item id is invalid')
-    const item = await dependencies.repository.findById(workspaceId, itemId, dependencies.clock?.() ?? new Date())
+    const locale = normalizeLibraryLocale(rawLocale)
+    const item = await dependencies.repository.findById(workspaceId, itemId, dependencies.clock?.() ?? new Date(), ...(locale ? [locale] : []))
     if (!item) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Media library item was not found')
     return item
   }

@@ -240,6 +240,9 @@ export function buildEditorialCompositionPrefix(input: Readonly<PreparedEditoria
   if (composeEachClip) {
     // every clip is already a canvas-sized frame
     filters.push('[joinedv]null[composed]')
+  } else if (input.compositionLayout?.layout === 'source-native') {
+    // The source has the frame shape of the output (the policy resolved it): it is used as it is, with no backdrop behind it.
+    filters.push(`[joinedv]scale=${width}:${height},setsar=1,format=yuv420p[composed]`)
   } else {
     filters.push(`[joinedv]split=2[background0][foreground0]`)
     filters.push(`[background0]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=28[background]`)

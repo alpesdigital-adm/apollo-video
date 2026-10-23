@@ -66,7 +66,9 @@ const copy = (value) => JSON.parse(JSON.stringify(value))
 test('historical renderable authority extraction preserves the independent pre-extraction golden', () => {
   // Astra recorded this value before moving the authority. Receipt SHA256:
   // 8b390c3f6f2e6dd0ee67e5dc1a21a3a88a716385d1ca89685bac7622228e9548.
-  const expected = 'f19d60a735a979ef7d221776d948e2025632886cdd70a33d78afd11fdb3a9885'
+  // Re-recorded in ADR-160 F3: the compiled plan's caption capacity is now the preset's (it was a fixed 32), so the document - and its hash - changed.
+  // Re-recorded again by F4/F5 when the movement, opening and composition envelope came from the resolution.
+  const expected = 'df420d685df92ed9e54f53ccb436d693e81657c451ed0a76064adf78984abc4c'
   assert.equal(domainRenderableHash(plan()), expected)
   assert.equal(calculateRenderablePlanHash(plan()), expected)
   assert.equal(domainRenderableHash(plan({ createdAt: '2030-01-01T00:00:00.000Z' })), expected)
@@ -157,4 +159,16 @@ test('T-F4.015 the same cut compiled on two days is one row, not a conflict', ()
     calculateRenderablePlanHash(plan()),
     calculateRenderablePlanHash(plan({ projectVersionId: 'version-hash-2' })),
   )
+})
+
+test('a compiler that knows the geometry gets the layout the geometry asks for: the source as it is where the shapes agree, a backdrop where they differ', () => {
+  const unknown = assembleDirectedEditPlan(PLAN)
+  assert.equal(unknown.composition.background, 'blurred-source', 'geometry unknown: the whole frame stays visible over a backdrop')
+  const same = assembleDirectedEditPlan({ ...PLAN, geometry: { sourceAspectRatio: '16:9', outputAspectRatios: ['16:9'] } })
+  assert.equal(same.composition.layout, 'source-native')
+  assert.equal(same.composition.background, 'none')
+  const differs = assembleDirectedEditPlan({ ...PLAN, geometry: { sourceAspectRatio: '16:9', outputAspectRatios: ['9:16'] } })
+  assert.equal(differs.composition.background, 'blurred-source')
+  const partial = assembleDirectedEditPlan({ ...PLAN, geometry: { outputAspectRatios: ['16:9'] } })
+  assert.equal(partial.composition.background, 'blurred-source', 'a source of unknown shape is not assumed equal to the output')
 })

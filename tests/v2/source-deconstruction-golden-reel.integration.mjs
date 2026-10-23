@@ -128,7 +128,7 @@ test('T-FR-120 Golden Reel deconstruction removes wrapper, body, CTA and tail wh
       manifest.expectedHookDeconstruction.desiredRole,
     validationScope: 'full',
     targetComposition: {
-      objective: 'content-distribution',
+      objective: 'discovery',
       outputSpecId: '9:16',
       targetDurationMs: 15_000,
     },

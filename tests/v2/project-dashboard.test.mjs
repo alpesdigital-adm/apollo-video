@@ -20,13 +20,15 @@ const dashboardSource = readFileSync(
   'utf8',
 )
 
-test('T-FR-012 project creation previews canonical briefing coverage before submission', () => {
-  assert.match(dashboardSource, /createProductionBrief\(\{ ownerText: briefing \}\)/)
-  assert.match(dashboardSource, /data-testid="production-brief-preview"/)
-  assert.match(dashboardSource, /data-testid="production-brief-preview-summary"/)
-  assert.match(dashboardSource, /data-testid="production-brief-preview-coverage"/)
-  assert.match(dashboardSource, /data-testid="production-brief-preview-assumptions"/)
-  assert.match(dashboardSource, /Geração ainda não iniciada/)
+test('T-FR-012 project creation asks for the briefing, guides it by topics, and says what the Apollo understood only after reading it (ADR-160 F7)', () => {
+  // The briefing is required and any text is valid; the help is the topics component, never a sentence.
+  assert.match(dashboardSource, /<BriefingGuidance id="project-briefing-guidance" \/>/)
+  assert.match(dashboardSource, /normalizeBriefingInput\(briefing\)/)
+  assert.match(dashboardSource, /BRIEFING_REQUIRED_MESSAGE/)
+  // What the Apollo understood is read from the API after the project is saved, never guessed from the text in the browser.
+  assert.match(dashboardSource, /<EditorialRequestPanel answersNeedOutput projectId=\{createdProject\.id\} \/>/)
+  assert.doesNotMatch(dashboardSource, /createProductionBrief/)
+  assert.doesNotMatch(dashboardSource, /production-brief-preview/)
 })
 
 test('T-FR-236 dashboard consumes the public visible-state contract without inferring legacy statuses', () => {

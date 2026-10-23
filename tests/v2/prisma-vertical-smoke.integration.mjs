@@ -157,6 +157,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
   const storage = s3 ? new S3VerifiedMediaStorage(localStorage, s3) : localStorage
   const operations = new PrismaPublicOperationRepository(prisma)
   const observedIngestFailures = []
+  const transcribeRequests = []
   const diagnosticOperations = new Proxy(operations, {
     get(target, property) {
       if (property === 'failOrRetry') return async (input) => {
@@ -217,9 +218,12 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
       inspector: { inspect: inspectUploadedMedia },
       providers: {
         resolveTranscription() {
-          return { create() { return { async transcribe() {
+          return { create() { return { async transcribe(input) {
+            transcribeRequests.push(input)
             return createMediaTranscript({
+            // The project states no language, so the provider is asked to detect it and reports what it heard.
             language: 'pt-BR',
+            languageBasis: 'detected-from-media',
             text: 'Apollo transforma uma gravação em uma história clara e segura.',
             provider: 'controlled',
             model: 'vertical-smoke/v1',
@@ -267,7 +271,8 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
         waitSeconds: 60,
         objective: 'discovery',
         format: '9:16',
-        locale: 'pt-BR',
+        // The project states no language; only the output variant, whose contract requires one, does.
+        outputLocale: 'pt-BR',
       },
       environment: {
         ...process.env,
@@ -294,6 +299,9 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     assert.equal(ingestOutcome.status, 'succeeded')
     assert.equal(seed.ingestOperation.status, 'succeeded')
     assert.deepEqual(observedIngestFailures, [])
+    // The project stated no language: ingest did not fail for it, and the provider was asked to detect the language (none was sent).
+    assert.ok(transcribeRequests.length >= 1)
+    assert.ok(transcribeRequests.every((request) => request.language === undefined), `a project without a language must not send one: ${JSON.stringify(transcribeRequests.map((request) => request.language))}`)
 
     const projectStatusBeforeLibrary = (await prisma.v2Project.findUniqueOrThrow({
       where: { id: seed.project.id }, select: { status: true },

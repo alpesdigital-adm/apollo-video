@@ -330,7 +330,7 @@ export function runNextMediaIngestOperationService(dependencies: {
       const transcriber = dependencies.providers
         .resolveTranscription(claimed.authenticationAudit)
         .create()
-      const transcribe = () => transcriber.transcribe({ audioPath: normalized.audioPath, language: project.locale, signal: abortController.signal })
+      const transcribe = () => transcriber.transcribe({ audioPath: normalized.audioPath, ...(project.locale ? { language: project.locale } : {}), signal: abortController.signal })
       const transcript = dependencies.telemetry
         ? await runPublicOperationSpan({
             telemetry: dependencies.telemetry,

@@ -17,7 +17,7 @@ function resultFromReceipt(bundle: CreationOutputVersionBundleV2, replayed: bool
   const c=bundle.command, fork=c.payload.forkDerivation
   if(fork?.schemaVersion!=='project-fork-derivation/v3')throw new DomainError('PERSISTENCE_CONFLICT','Duplication receipt is not a content fork3')
   const metadata=creationProjectMetadataV2(c)
-  const project=createProject({id:c.projectId,workspaceId:c.workspaceId,name:metadata.name,status:'draft',objective:metadata.objective,locale:metadata.locale,
+  const project=createProject({id:c.projectId,workspaceId:c.workspaceId,name:metadata.name,status:'draft',...(metadata.objective!==null?{objective:metadata.objective}:{}),...(metadata.locale!==null?{locale:metadata.locale}:{}),
     ownerId:c.author.id,duplicatedFromProjectId:fork.document.kernel.document.source.version.projectId,createdBy:c.author,createdAt:c.createdAt})
   return Object.freeze({project,version:bundle.version,bundle,sharedArtifactIds:Object.freeze([...new Set(fork.document.sourceReferences.map(r=>r.artifactId))]),copiedBytes:0,replayed})
 }
@@ -62,9 +62,9 @@ export class PrismaProjectDuplicationRepository implements ProjectDuplicationRep
       .filter(r=>r!==null).map(r=>createProjectSnapshot({id:r.id,workspaceId:r.workspaceId,projectId:r.projectId,kind:r.kind as Parameters<typeof createProjectSnapshot>[0]['kind'],
         contentSchemaVersion:r.schemaVersion,contentJson:r.contentJson,contentHash:r.contentHash,createdAt:r.createdAt.toISOString()}))
     const projectFacts={id:row.id,workspaceId:row.workspaceId,currentVersionId:row.currentVersion.id,name:row.name,status:row.status,format:row.format,ownerId:row.ownerId,
-      administrationRevision:row.administrationRevision,updatedAt:row.updatedAt.toISOString(),objective:row.objective!,locale:row.locale!,createdByType:row.createdByType,
+      administrationRevision:row.administrationRevision,updatedAt:row.updatedAt.toISOString(),objective:row.objective!,locale:row.locale ?? null,createdByType:row.createdByType,
       createdById:row.createdById,createdAt:row.createdAt.toISOString()}
-    const project=createProject({id:row.id,workspaceId:row.workspaceId,name:row.name,status:row.status as ProjectStatus,objective:row.objective!,locale:row.locale!,
+    const project=createProject({id:row.id,workspaceId:row.workspaceId,name:row.name,status:row.status as ProjectStatus,objective:row.objective!,...(row.locale?{locale:row.locale}:{}),
       ...(row.ownerId?{ownerId:row.ownerId}:{}),currentVersionId:row.currentVersion.id,createdBy:{type:row.createdByType as CommandActor['type'],id:row.createdById},createdAt:row.createdAt.toISOString()})
     let renderablePlanSnapshot:Readonly<V2RenderablePlanSnapshotFacts>|null=null
     if(bundle.state.document.schemaVersion==='project-output-state/v3'&&bundle.state.document.renderablePlan!==null) {

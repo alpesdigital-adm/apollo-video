@@ -9,6 +9,7 @@ import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { operationalBundlePlanV3 } from '../../src/v2/domain/output-version-bundle.ts'
 import { childCommandOf } from '../../src/v2/domain/project-output-state-transition.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
+import { readByInterpreter } from './helpers/editorial-request-fixture.mjs'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import {
   createSourceTranscriptArtifactInvalidations,
@@ -456,7 +457,10 @@ class DirectorRepository {
         objective: 'discovery',
         desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
         productionBrief: createProductionBrief({ ownerText: 'Tom: direto, natural e sem efeitos gratuitos.' }),
+        editorialRequest: readByInterpreter('Tom: direto, natural e sem efeitos gratuitos.'),
       },
+      // No remove-spoken-content request in this world: stated, never left to the port's default.
+      requestedSpeechRemovals: [],
       policies: { automaticZoom: false, faceProtection: true, guardrails: [] },
       editPlan: this.editPlan,
       currentDurationFrames: this.editPlan.durationFrames,

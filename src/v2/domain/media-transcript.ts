@@ -15,9 +15,19 @@ export interface TranscriptSegment {
   confidence?: number
 }
 
+/**
+ * Where the language of a transcript comes from (ADR-160): `detected-from-media` - the provider was asked without a language and reported the one
+ * it heard; `declared-not-verified` - the provider was told the language (the project's) and transcribed under it, so the speech was not checked
+ * against it. A transcript with neither mark (made before it existed) is read as declared and not verified.
+ */
+export type TranscriptLanguageBasis = 'detected-from-media' | 'declared-not-verified'
+export const TRANSCRIPT_LANGUAGE_BASES: readonly TranscriptLanguageBasis[] = Object.freeze(['detected-from-media', 'declared-not-verified'] as const)
+
 export interface MediaTranscript {
   schemaVersion: 'media-transcript/v1'
   language: string
+  /** Absent on a transcript made before the basis was recorded. */
+  languageBasis?: TranscriptLanguageBasis
   text: string
   words: readonly TranscriptWord[]
   segments: readonly TranscriptSegment[]
@@ -31,6 +41,7 @@ const TOKEN = /^[a-z0-9][a-z0-9._/-]{0,127}$/
 export function createMediaTranscript(input: Omit<MediaTranscript, 'schemaVersion' | 'transcriptHash'>): Readonly<MediaTranscript> {
   const language = Intl.getCanonicalLocales(input.language.trim())[0]
   assertDomain(Boolean(language), 'INVALID_ARGUMENT', 'Transcript language is invalid')
+  assertDomain(input.languageBasis === undefined || TRANSCRIPT_LANGUAGE_BASES.includes(input.languageBasis), 'INVALID_ARGUMENT', 'Transcript language basis is invalid')
   const text = input.text.trim()
   assertDomain(text.length > 0 && text.length <= 2_000_000, 'INVALID_ARGUMENT', 'Transcript text is invalid')
   assertDomain(TOKEN.test(input.provider) && TOKEN.test(input.model), 'INVALID_ARGUMENT', 'Transcript provider identity is invalid')
@@ -56,6 +67,7 @@ export function createMediaTranscript(input: Omit<MediaTranscript, 'schemaVersio
   const body = {
     schemaVersion: 'media-transcript/v1' as const,
     language,
+    ...(input.languageBasis !== undefined ? { languageBasis: input.languageBasis } : {}),
     text,
     words: Object.freeze(words),
     segments: Object.freeze(segments),

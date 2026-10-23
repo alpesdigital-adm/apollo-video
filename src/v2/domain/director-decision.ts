@@ -112,6 +112,12 @@ function planNodesForDecision(decision: PlannedDirectorDecision, storyPlan: Read
   return Object.freeze([...selected])
 }
 
+/** The summary is a one-line view of the decision (at most 500 characters); the full reason is stored whole in `reason`. */
+function boundedSummary(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length <= 500 ? flat : `${flat.slice(0, 499)}…`
+}
+
 export function createDirectorDecisionLog(input: {
   workspaceId: string
   projectId: string
@@ -140,7 +146,7 @@ export function createDirectorDecisionLog(input: {
     confidence: decision.confidence,
     score: decision.confidence,
     cost: { estimated: 0, actual: 0, currency: 'credits', source: 'deterministic-local' },
-    summary: `${decision.choice}: ${decision.reason}`,
+    summary: boundedSummary(`${decision.choice}: ${decision.reason}`),
     createdAt: input.createdAt,
   }))
   if (new Set(entries.map((entry) => entry.id)).size !== entries.length) throw new DomainError('INVALID_COMMAND', 'Director decision log identities must be unique')

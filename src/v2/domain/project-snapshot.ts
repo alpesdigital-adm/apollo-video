@@ -8,6 +8,8 @@ export const PROJECT_SNAPSHOT_KINDS = [
   'edit-plan',
   'quality-report',
   'policies',
+  // ADR-160. The sealed editorial policy resolution a Director run was planned and judged against.
+  'policy-resolution',
 ] as const
 
 export type ProjectSnapshotKind = (typeof PROJECT_SNAPSHOT_KINDS)[number]

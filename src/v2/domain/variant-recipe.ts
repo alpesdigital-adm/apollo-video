@@ -10,6 +10,7 @@ import {
   type CompatibilityNode,
   type CompatibilityRole,
 } from './compatibility-graph.ts'
+import { OPTIONAL_PROOF_OBJECTIVES, ownerConfirmedLinkCode } from './recipe-path-policy.ts'
 import { assertDomain } from './errors.ts'
 import {
   validateStoryPlan,
@@ -17,6 +18,8 @@ import {
   type StoryBlock,
   type StoryPlan,
 } from './story-plan.ts'
+
+export { ownerConfirmedLinkCode }
 
 export const VARIANT_RECIPE_SCHEMA_VERSION =
   'variant-recipe/v1' as const
@@ -244,18 +247,6 @@ export interface CreateVariantRecipeInput {
 const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
 const REASON = /^[A-Z][A-Z0-9_]{2,79}$/
-const OPTIONAL_PROOF_OBJECTIVES = new Set([
-  'awareness',
-  'content-discovery',
-  'content-distribution',
-  'download',
-  'education',
-  'lead-capture',
-  'lead-generation',
-  'schedule',
-  'warming',
-  'whatsapp',
-])
 
 function identity(value: unknown, field: string): string {
   assertDomain(
@@ -402,18 +393,28 @@ function nodeForRole(
   return node
 }
 
-function acceptedEdge(
+/**
+ * A link of the path is either accepted by the graph, or borderline and CONFIRMED BY THE OWNER (an assumption that names the edge). A link the
+ * graph blocked is never usable; a borderline one is never taken without that confirmation, and the Apollo never confirms it alone.
+ */
+function pathEdge(
   graph: Readonly<CompatibilityGraphRun>,
   from: Readonly<CompatibilityNode>,
   to: Readonly<CompatibilityNode>,
+  confirmations: readonly Readonly<VariantRecipeAssumption>[],
 ): Readonly<CompatibilityEdge> {
   const edge = graph.edges.find((candidate) =>
     candidate.fromNodeId === from.id &&
     candidate.toNodeId === to.id)
+  if (edge?.decision === 'accepted' && edge.eligible) return edge
+  const confirmed = edge?.decision === 'borderline' && confirmations.some((item) =>
+    item.code === ownerConfirmedLinkCode(from.role, to.role) && item.evidenceRefs.includes(edge.id))
   assertDomain(
-    edge?.decision === 'accepted' && edge.eligible,
+    edge !== undefined && confirmed,
     'PRECONDITION_REQUIRED',
-    `Compatibility edge ${from.role}-${to.role} is not accepted`,
+    edge?.decision === 'borderline'
+      ? `Compatibility edge ${from.role}-${to.role} is borderline: the owner must confirm it (assumption ${ownerConfirmedLinkCode(from.role, to.role)} naming ${edge.id})`
+      : `Compatibility edge ${from.role}-${to.role} is not accepted`,
   )
   return edge
 }
@@ -1023,14 +1024,15 @@ export function createVariantRecipe(
     'PRECONDITION_REQUIRED',
     'Recipe requires proof for the current objective and policy',
   )
+  const callerAssumptions = Object.freeze((input.assumptions ?? []).map(assumption))
   const acceptedEdges = Object.freeze([
-    acceptedEdge(graph, hook, body),
+    pathEdge(graph, hook, body, callerAssumptions),
     ...(proof
       ? [
-          acceptedEdge(graph, body, proof),
-          acceptedEdge(graph, proof, cta),
+          pathEdge(graph, body, proof, callerAssumptions),
+          pathEdge(graph, proof, cta, callerAssumptions),
         ]
-      : [acceptedEdge(graph, body, cta)]),
+      : [pathEdge(graph, body, cta, callerAssumptions)]),
   ])
   const primarySegments = selectedNodes.map((node) =>
     sourceSegment(recipeId, node, 'primary'))

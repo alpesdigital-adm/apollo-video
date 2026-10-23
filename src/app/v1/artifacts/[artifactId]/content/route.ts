@@ -18,7 +18,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ art
       artifacts: createMediaArtifactQueryRepository(),
       storage: createArtifactContentStorage(),
       library: createMediaLibraryRepository(),
-    })({ workspaceId: actor.workspaceId, artifactId, rangeHeader: request.headers.get('range') })
+    })({ workspaceId: actor.workspaceId, artifactId, rangeHeader: request.headers.get('range'), ...(request.nextUrl.searchParams.has('locale') ? { locale: request.nextUrl.searchParams.get('locale') ?? '' } : {}) })
     return new Response(content.body, {
       status: content.partial ? 206 : 200,
       headers: {

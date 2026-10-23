@@ -54,7 +54,7 @@ function fixture() {
     workspaceId: 'batch-operation-workspace',
     projectId: 'batch-operation-project',
     name: 'Independent item operations',
-    objective: 'content-distribution',
+    objective: 'discovery',
     sourceGroups: [{
       id: 'batch-operation-sources',
       name: 'Approved sources',

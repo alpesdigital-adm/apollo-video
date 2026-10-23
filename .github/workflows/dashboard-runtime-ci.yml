@@ -52,6 +52,7 @@ jobs:
           printf 'APOLLO_DASHBOARD_CFT157_LINUX_ROOT=%s\n' "$APOLLO_DASHBOARD_CFT157_LINUX_ROOT" >> "$GITHUB_ENV"
       - name: Provision an isolated bounded database role
         run: |
+          bash scripts/validation/use-canonical-apt-mirror.sh
           sudo apt-get update -qq
           sudo apt-get install -y postgresql-client python3 build-essential
           mkdir -p "$APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT" "$APOLLO_V2_ARTIFACT_ROOT"

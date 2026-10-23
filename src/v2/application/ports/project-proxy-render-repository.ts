@@ -1,5 +1,6 @@
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
+import type { EditorialPolicyResolutionV1 } from '../../domain/editorial-policy-resolution.ts'
 import type { FormatSubjectEvidenceV1 } from '../../domain/format-quality-critic.ts'
 import type { DirectorRunInheritance } from '../../domain/director-run-inheritance.ts'
 import type { RenderColorGradeV1 } from '../../domain/render-color-grade.ts'
@@ -98,6 +99,12 @@ export interface ProjectProxyRenderSource {
   originalFileName: string
   uploadReceivedAt: string
   criticIssues: readonly Readonly<ProxyQualityIssue>[]
+  /**
+   * ADR-160. The sealed policy resolution of the DirectorRun whose plan this is (its own, or the ancestor's reached through exception Commands).
+   * Absent for a plan no Director made (a cut of the source, a compile of an aggregate) and for a run born under an earlier resolution schema.
+   * The render worker checks the plan against it (`assertPlanHonorsResolution`), and the render's identity names it.
+   */
+  policyResolution?: Readonly<EditorialPolicyResolutionV1>
   /**
    * W70 readiness. Present when `criticIssues` are the issues of a DirectorRun of an ANCESTOR Version, reached through exception Commands
    * only (a subtitle segment exception, a manual reframe): the Versions and Commands the Director's quality went through. Absent when the
