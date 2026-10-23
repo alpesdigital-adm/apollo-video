@@ -37,6 +37,8 @@ import type { BriefInterpreterModel } from './ports/brief-interpreter-model.ts'
 export const BRIEF_INTERPRETER_PROMPT_VERSION = 'brief-interpreter/v1'
 export const BRIEF_INTERPRETATION_AUDIT_SCHEMA = 'brief-interpretation-audit/v1' as const
 export { BRIEF_INTERPRETER_UNAVAILABLE_REASON }
+/** The service waits this much longer than the adapter's own timeout (its preflight calls included) before it gives up on the model. */
+const BRIEF_INTERPRETER_BACKSTOP_MARGIN_MS = 60_000
 const MAX_ITEMS = 64
 const MAX_TEXT = 200
 /** A quote must stand on words: at least this many letters or digits. A space, a letter or a punctuation mark is not a citation. */
@@ -361,7 +363,8 @@ export function interpretBriefService(dependencies: InterpretBriefDependencies) 
     }
     const promptVersion = dependencies.promptVersion ?? BRIEF_INTERPRETER_PROMPT_VERSION
     assertDomain(promptVersion === BRIEF_INTERPRETER_PROMPT_VERSION, 'INVALID_ARGUMENT', 'Unsupported brief interpreter prompt version')
-    const timeout = AbortSignal.timeout(dependencies.timeoutMs ?? 120_000)
+    // The service's wait is a backstop: it outlasts the provider's own timeout (and the adapter's preflight calls), never cuts it short.
+    const timeout = AbortSignal.timeout(dependencies.timeoutMs ?? (model.timeoutMs ?? 120_000) + BRIEF_INTERPRETER_BACKSTOP_MARGIN_MS)
     const response = await model.interpret({
       promptVersion,
       system: BRIEF_INTERPRETER_SYSTEM_PROMPT,

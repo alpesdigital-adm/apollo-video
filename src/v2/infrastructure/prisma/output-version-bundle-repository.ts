@@ -179,6 +179,11 @@ function assertDomainHistoricalSource(source: import('../../domain/output-versio
 export class PrismaCreationOutputBundleRepositoryV2 implements CreationOutputBundleRepositoryV2 {
   private readonly client: PrismaClient
   constructor(client: PrismaClient) { this.client=client }
+  async hasCompletedCreation(input: Readonly<{workspaceId:string;clientId:string;idempotencyKey:string}>): Promise<boolean> {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(input.idempotencyKey)) return false
+    const existing=await this.client.v2IdempotencyRecord.findUnique({where:{workspaceId_clientId_key:{workspaceId:input.workspaceId,clientId:input.clientId,key:input.idempotencyKey}}})
+    return existing!==null
+  }
   async read(input: Readonly<{workspaceId:string;projectId:string;versionId:string}>) {
     const anchor=await readPersistedOperationalOutputBundleV3(this.client,input)
     if(!anchor)return null

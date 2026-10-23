@@ -393,6 +393,8 @@ export const EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON = 'editorial-request-needs-ou
 export const EDITORIAL_REQUEST_BLOCKED_REASON = 'editorial-request-blocked' as const
 /** No interpreter is configured on this deployment, so a briefing with text cannot be read. */
 export const BRIEF_INTERPRETER_UNAVAILABLE_REASON = 'brief-interpreter-unavailable' as const
+/** An interpreter is configured but the reading was not made (timeout, abort, provider failure, a reply the Apollo refused): the briefing stays unread. */
+export const BRIEF_INTERPRETATION_FAILED_REASON = 'brief-interpretation-failed' as const
 /** The `reason` codes the public error envelope publishes for the editorial request (PRECONDITION_REQUIRED). */
 export const EDITORIAL_REQUEST_PUBLISHED_REASONS = Object.freeze([BRIEF_INTERPRETATION_REQUIRED_REASON, EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON, EDITORIAL_REQUEST_BLOCKED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON] as const)
 

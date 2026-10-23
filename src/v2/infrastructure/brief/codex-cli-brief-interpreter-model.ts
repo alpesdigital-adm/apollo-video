@@ -204,7 +204,7 @@ export class CodexCliBriefInterpreterModel implements BriefInterpreterModel {
   readonly model: string
   readonly costBasis = 'subscription' as const
   private readonly start: Readonly<{ command: string; prefix: readonly string[] }>
-  private readonly timeoutMs: number
+  readonly timeoutMs: number
   private readonly workRoot: string
   private readonly codexHome: string
   private readonly environment: NodeJS.ProcessEnv

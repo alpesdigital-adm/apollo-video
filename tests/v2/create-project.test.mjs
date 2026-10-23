@@ -40,6 +40,10 @@ class InMemoryProjectCreationRepository {
     this.lastBundle = undefined
   }
 
+  async hasCompletedCreation(input) {
+    return this.records.has([input.workspaceId, input.clientId, input.idempotencyKey].join(':'))
+  }
+
   async persist(input) {
     const c = input.proposal
     const workspace = this.workspaces.get(c.workspaceId)
@@ -722,4 +726,58 @@ test('ADR-160: the briefing is read when the project is created, the reading is 
   const forged = createFixture({ interpretBrief: async () => ({ ...(await interpretBriefService({ model: model(JSON.stringify(answer)) })({ briefing: 'other words altogether' })) }) })
   await forged.service(request({ briefing: BRIEFING }))
   assert.equal(brief(forged).editorialRequest, undefined)
+})
+
+test('ADR-160: no failure of the reading loses the project; a replay never calls the model', async () => {
+  const BRIEFING = 'alpha beta gamma delta'
+  const brief = (fixture) => JSON.parse(fixture.repository.lastBundle.snapshots[0].contentJson)
+  // A timeout (DOMException), an abort, a plain provider error and a non-DomainError all keep the project, unread, with a reason.
+  const failures = [
+    new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+    new DOMException('aborted', 'AbortError'),
+    new Error('provider exploded'),
+    new TypeError('fetch failed'),
+  ]
+  for (const failure of failures) {
+    const fixture = createFixture({ interpretBrief: async () => { throw failure } })
+    const created = await fixture.service(request({ briefing: BRIEFING }))
+    assert.equal(brief(fixture).editorialRequest, undefined, 'the briefing is kept unread')
+    assert.deepEqual(created.briefReading, { status: 'unread', reason: 'brief-interpretation-failed' })
+    assert.equal(brief(fixture).productionBrief.summary !== undefined, true)
+  }
+  const unavailable = createFixture({ interpretBrief: interpretBriefService({ model: null }) })
+  assert.deepEqual((await unavailable.service(request({ briefing: BRIEFING }))).briefReading, { status: 'unread', reason: 'brief-interpreter-unavailable' })
+  const absent = createFixture()
+  assert.deepEqual((await absent.service(request({ briefing: BRIEFING }))).briefReading, { status: 'unread', reason: 'brief-interpreter-unavailable' })
+  assert.deepEqual((await createFixture().service(request({ briefing: undefined }))).briefReading, { status: 'none' })
+
+  // The replay of a completed creation does not spend a reading.
+  let calls = 0
+  const answer = { directives: [], unsupported: [], questions: [], coverage: [] }
+  const model = { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', async interpret() { calls += 1; return { text: JSON.stringify(answer) } } }
+  const replaying = createFixture({ interpretBrief: interpretBriefService({ model }) })
+  const first = await replaying.service(request({ briefing: BRIEFING }))
+  assert.equal(calls, 1)
+  const again = await replaying.service(request({ briefing: BRIEFING }))
+  assert.equal(calls, 1, 'the replay did not call the model')
+  assert.equal(again.replayed, true)
+  assert.equal(again.briefReading.status, 'replay')
+  assert.equal(again.bundle.version.id, first.bundle.version.id)
+})
+
+test('the service waits longer than the provider: its default timeout is the adapter timeout plus a margin', async () => {
+  const waits = []
+  const original = AbortSignal.timeout
+  AbortSignal.timeout = (ms) => { waits.push(ms); return original.call(AbortSignal, ms) }
+  try {
+    const empty = JSON.stringify({ directives: [], unsupported: [], questions: [], coverage: [] })
+    const codexLike = { provider: 'test-double', model: 'stub-1', costBasis: 'subscription', timeoutMs: 180_000, async interpret() { return { text: empty } } }
+    const bare = { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', async interpret() { return { text: empty } } }
+    await interpretBriefService({ model: codexLike })({ briefing: 'alpha beta' })
+    await interpretBriefService({ model: bare })({ briefing: 'alpha beta' })
+    await interpretBriefService({ model: codexLike, timeoutMs: 5_000 })({ briefing: 'alpha beta' })
+  } finally { AbortSignal.timeout = original }
+  assert.equal(waits[0] > 180_000, true, 'the backstop outlasts a 180 s provider')
+  assert.equal(waits[1] > 120_000, true)
+  assert.equal(waits[2], 5_000, 'an explicit deployment timeout is kept as stated')
 })

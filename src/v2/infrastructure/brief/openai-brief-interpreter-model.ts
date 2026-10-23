@@ -95,7 +95,7 @@ export class OpenAiBriefInterpreterModel implements BriefInterpreterModel {
   readonly pricing?: BriefInterpreterModel['pricing']
   private readonly apiKey: string
   private readonly baseUrl: string
-  private readonly timeoutMs: number
+  readonly timeoutMs: number
   private readonly maxCompletionTokens: number
   private readonly maxResponseBytes: number
   private readonly request: FetchLike

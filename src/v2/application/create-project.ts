@@ -3,7 +3,7 @@ import { createProject } from '../domain/project.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createProductionBrief, normalizeBriefingText } from '../domain/production-brief.ts'
 import { coveredTopicsOf, type BriefInterpretationAudit, type InterpretBrief } from './interpret-brief.ts'
-import { parseBriefInterpretation, type BriefInterpretationV1 } from '../domain/editorial-request.ts'
+import { BRIEF_INTERPRETATION_FAILED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON, parseBriefInterpretation, type BriefInterpretationV1 } from '../domain/editorial-request.ts'
 import { createProjectCreationOutputCommandV2, normalizeProjectCreationIntentV2 } from '../domain/project-creation-command.ts'
 import { createOutputVariantCommand } from '../domain/output-variant-command.ts'
 import { createOutputSpecRevisionBody, type OutputSpecRevisionBody } from '../domain/output-spec-revision.ts'
@@ -84,6 +84,13 @@ function snapshot(workspaceId: string, projectId: string, id: string, kind: 'bri
     contentJson: stableSerialize(document), contentHash: calculateVersionHash(document), createdAt })
 }
 
+/** What became of the briefing's reading at creation (for the caller and the tests; the sealed brief is the authority). */
+export type BriefReadingAtCreation =
+  | Readonly<{ status: 'none' }>
+  | Readonly<{ status: 'read' }>
+  | Readonly<{ status: 'replay' }>
+  | Readonly<{ status: 'unread'; reason: typeof BRIEF_INTERPRETER_UNAVAILABLE_REASON | typeof BRIEF_INTERPRETATION_FAILED_REASON }>
+
 /** Public creation has no implicit OutputSpec. The independent variant Command
  * is the only admission to the existing operational ingest path. */
 export function createProjectService(dependencies: ClockAndIds & {
@@ -107,15 +114,28 @@ export function createProjectService(dependencies: ClockAndIds & {
     // All allocations are fixed before repository retries, including the plan's
     // independent identity. Caller intent/fingerprint contains none of them.
     let reading: { interpretation: Readonly<BriefInterpretationV1>; audit: Readonly<BriefInterpretationAudit> } | null = null
+    let briefReading: BriefReadingAtCreation = { status: 'none' }
     const briefingText = callerIntent.briefing === null ? null : normalizeBriefingText(callerIntent.briefing)
-    if (briefingText !== null && dependencies.interpretBrief) {
-      try {
-        const read = await dependencies.interpretBrief({ briefing: briefingText })
-        // The reading is sealed only if it is of THIS text (hash and every citation checked again); any other reading is no reading.
-        reading = { interpretation: parseBriefInterpretation(JSON.parse(JSON.stringify(read.interpretation)), briefingText), audit: read.audit }
-      } catch (error) {
-        // Only a refusal of the reading (a DomainError: unavailable, invalid answer) keeps the project unread; anything else is a defect.
-        if (!(error instanceof DomainError)) throw error
+    if (briefingText !== null) {
+      // A replay answers with the first creation and never spends a reading; the persist step still checks that the request is the same one.
+      const replay = dependencies.repository.hasCompletedCreation
+        ? await dependencies.repository.hasCompletedCreation({ workspaceId: request.workspaceId, clientId: audit.clientId, idempotencyKey })
+        : false
+      if (replay) briefReading = { status: 'replay' }
+      else if (!dependencies.interpretBrief) briefReading = { status: 'unread', reason: BRIEF_INTERPRETER_UNAVAILABLE_REASON }
+      else {
+        try {
+          const read = await dependencies.interpretBrief({ briefing: briefingText })
+          // The reading is sealed only if it is of THIS text (hash and every citation checked again); any other reading is no reading.
+          reading = { interpretation: parseBriefInterpretation(JSON.parse(JSON.stringify(read.interpretation)), briefingText), audit: read.audit }
+          briefReading = { status: 'read' }
+        } catch (error) {
+          // The project is the owner's and must not be lost to the interpreter: ANY failure of the reading (no interpreter, a timeout, an abort, a
+          // provider error, a reply the Apollo refused) leaves the briefing as written and unread. The Director then blocks with its reason; the
+          // briefing is never read as empty and never read in silence.
+          const unavailable = error instanceof DomainError && error.details?.reason === BRIEF_INTERPRETER_UNAVAILABLE_REASON
+          briefReading = { status: 'unread', reason: unavailable ? BRIEF_INTERPRETER_UNAVAILABLE_REASON : BRIEF_INTERPRETATION_FAILED_REASON }
+        }
       }
     }
     const createdAt = dependencies.clock().toISOString(), projectId = dependencies.createId('project'),
@@ -155,7 +175,7 @@ export function createProjectService(dependencies: ClockAndIds & {
     const projectAtCreation = createProject({ id: c.projectId, workspaceId: c.workspaceId, name: intent.name, status: 'draft',
       objective: intent.objective, ...(intent.locale !== null ? { locale: intent.locale } : {}), ownerId: c.author.id,
       createdBy: c.author, createdAt: c.createdAt })
-    return Object.freeze({ projectAtCreation, creationVersion: result.bundle.version, bundle: result.bundle, replayed: result.replayed })
+    return Object.freeze({ projectAtCreation, creationVersion: result.bundle.version, bundle: result.bundle, replayed: result.replayed, briefReading })
   }
 }
 

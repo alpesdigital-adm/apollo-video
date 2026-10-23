@@ -33,6 +33,11 @@ export interface BriefInterpreterModel {
    * per-call cost to record, and the audit says so instead of writing zero).
    */
   readonly costBasis: 'api-metered' | 'subscription'
+  /**
+   * How long the adapter itself waits for its provider. The service that calls the model waits LONGER than this (plus a margin), so the adapter's
+   * own, typed failure always arrives before the service's backstop gives up.
+   */
+  readonly timeoutMs?: number
   /** Minor units of cost per million tokens, when the deployment states a price; absent means the cost is unknown, never zero. */
   readonly pricing?: Readonly<{ inputMinorUnitsPerMillionTokens: number; outputMinorUnitsPerMillionTokens: number }>
   interpret(request: Readonly<BriefInterpreterRequest>): Promise<Readonly<BriefInterpreterResponse>>
