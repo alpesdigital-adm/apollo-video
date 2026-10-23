@@ -408,6 +408,11 @@ test('F8 a request that states nothing about the semantics yields unspecified co
     const checks = edge.notEvaluable.map((item) => item.check).sort()
     assert.deepEqual(checks, ['AUDIENCE_CONFLICT', 'LOCALE_MISMATCH', 'OFFER_MISMATCH', 'PERSONA_MISMATCH', ...(edge.relation.endsWith('cta') ? ['CTA_ACTION_MISMATCH'] : [])].sort())
     assert.ok(edge.reasonCodes.includes('CONTEXT_NOT_EVALUABLE'))
+    // The duration alone does not carry a decision: the link is left to the owner, neither approved nor blocked by the Apollo.
+    assert.equal(edge.decision, 'borderline')
+    assert.equal(edge.eligible, false)
+    assert.ok(edge.reasonCodes.includes('CONTEXT_REQUIRED_FOR_DECISION'))
+    assert.equal(edge.reasonCodes.includes('LOW_SOFT_SCORE') || edge.reasonCodes.includes('COMPATIBLE'), false)
     // Only the duration (read from the takes themselves) is scored, and it carries the whole weight.
     const scored = edge.softScores.filter((score) => score.score !== null)
     assert.deepEqual(scored.map((score) => score.dimension), ['duration'])
@@ -463,4 +468,22 @@ test('F8 the unspecified list, the sentinels and the not-evaluable entries are s
   const dropped = structuredClone(wire)
   dropped.edges[0].notEvaluable = []
   assert.throws(() => hydrateCompatibilityGraph(dropped), (error) => error.code === 'INVALID_ARGUMENT')
+})
+
+test('ADR-160: what was stated carries a decision only from the weight of the strongest single signal; below it the owner decides', () => {
+  const library = libraryFixture()
+  const takes = library.takes.filter((take) => ['primary', 'alternate'].includes(take.status))
+  const withOnly = (patch) => graphOf(library, takes.map((take) => ({ ...bareContext(take), ...patch })), 'compatibility-graph-one-signal')
+  // experiment alone (weight 0.10) does not carry it; the edges stay with the owner.
+  const weak = withOnly({ experiment: 0.5 })
+  assert.ok(weak.edges.every((edge) => edge.decision === 'borderline' && edge.reasonCodes.includes('CONTEXT_REQUIRED_FOR_DECISION')))
+  // narrative alone (0.30), or tone + energy (0.15 + 0.15), does: the thresholds apply and no owner-only code is added.
+  for (const patch of [{ narrativeTags: ['clareza'] }, { tone: 0.6, energy: 0.6 }]) {
+    const graph = withOnly(patch)
+    assert.ok(graph.edges.every((edge) => !edge.reasonCodes.includes('CONTEXT_REQUIRED_FOR_DECISION')), JSON.stringify(patch))
+    assert.ok(graph.edges.every((edge) => edge.decision === 'blocked' || edge.decision === 'accepted' || edge.decision === 'borderline'))
+  }
+  // A hard failure is still a block, with or without context.
+  const clash = graphOf(library, takes.map((take) => ({ ...bareContext(take), locale: take.assignment.role === 'cta' ? 'en-US' : 'pt-BR' })), 'compatibility-graph-clash')
+  assert.ok(clash.edges.filter((edge) => edge.hardFailures.length > 0).every((edge) => edge.decision === 'blocked'))
 })

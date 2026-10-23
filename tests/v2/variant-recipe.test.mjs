@@ -23,6 +23,7 @@ import {
 import {
   createVariantRecipe,
   hydrateVariantRecipe,
+  resolveVariantRecipeProofPolicy,
 } from '../../src/v2/domain/variant-recipe.ts'
 import {
   parseCreateVariantRecipeBody,
@@ -67,6 +68,7 @@ const lines = {
 function graphFixture(
   id = 'recipe-graph-fixture',
   configuredBlocks,
+  bare = false,
 ) {
   const blocks = configuredBlocks ?? [
     { role: 'hook', text: lines.hook },
@@ -160,7 +162,17 @@ function graphFixture(
     projectId: library.projectId,
     batchId: library.batchId,
     takeLibrary: library,
-    contexts: eligible.map((take) => ({
+    contexts: eligible.map((take) => bare ? {
+      // ADR-160: the requester stated nothing about the semantics of the takes.
+      takeId: take.id,
+      expectedTakeHash: take.takeHash,
+      claims: [],
+      continuityProvides: [`role-${take.assignment.role}`],
+      continuityRequires: [],
+      ...(bare === 'cta-in-another-language' && take.assignment.role === 'cta' ? { locale: 'en-US' } : {}),
+      ...(bare === 'cta-in-another-language' && take.assignment.role !== 'cta' ? { locale: 'pt-BR' } : {}),
+      evidenceRefs: [take.takeHash, take.sourceHash],
+    } : ({
       takeId: take.id,
       expectedTakeHash: take.takeHash,
       offerId: 'offer-apollo',
@@ -700,4 +712,58 @@ test('T-FR-084 application service binds graph hash, batch objective, actor and 
     }),
     /different variant recipe request/,
   )
+})
+
+test('ADR-160: with no context stated every link is left to the owner, and a recipe takes it only with the owner confirming of that exact link', () => {
+  const graph = graphFixture('recipe-graph-bare', undefined, true)
+  assert.ok(graph.edges.length > 0)
+  for (const edge of graph.edges) {
+    assert.equal(edge.hardFailures.length, 0)
+    assert.equal(edge.decision, 'borderline', 'neither approved nor blocked by the Apollo alone')
+    assert.equal(edge.eligible, false)
+    assert.ok(edge.reasonCodes.includes('CONTEXT_REQUIRED_FOR_DECISION'))
+    assert.ok(edge.reasonCodes.includes('CONTEXT_NOT_EVALUABLE'))
+  }
+  const path = selection(graph)
+  const edgeOf = (a, b) => graph.edges.find((edge) => edge.fromNodeId === path.selection[a] && edge.toNodeId === path.selection[b])
+  const links = [['hookNodeId', 'bodyNodeId', 'HOOK', 'BODY'], ['bodyNodeId', 'proofNodeId', 'BODY', 'PROOF'], ['proofNodeId', 'ctaNodeId', 'PROOF', 'CTA']]
+  const confirm = (from, to) => ({ code: `OWNER_CONFIRMED_LINK_${from}_${to}`, statement: 'O dono confirmou esta ligacao na tela.', evidenceRefs: [edgeOf(...links.find((l) => l[2] === from && l[3] === to).slice(0, 2)).id] })
+  assert.throws(() => createVariantRecipe(createInput(graph, { assumptions: [] })), /borderline: the owner must confirm it/)
+  // Confirming two of the three links is not enough; a confirmation that names another edge is not a confirmation.
+  assert.throws(() => createVariantRecipe(createInput(graph, { assumptions: [confirm('HOOK', 'BODY'), confirm('BODY', 'PROOF')] })), /proof-cta is borderline/)
+  assert.throws(() => createVariantRecipe(createInput(graph, { assumptions: [
+    confirm('HOOK', 'BODY'), confirm('BODY', 'PROOF'), { ...confirm('PROOF', 'CTA'), evidenceRefs: [edgeOf('hookNodeId', 'bodyNodeId').id] }] })), /proof-cta is borderline/)
+  const recipe = createVariantRecipe(createInput(graph, { assumptions: [confirm('HOOK', 'BODY'), confirm('BODY', 'PROOF'), confirm('PROOF', 'CTA')] }))
+  assert.equal(recipe.compatibilityEdgeIds.length, 3)
+  assert.equal(recipe.assumptions.filter((item) => item.code.startsWith('OWNER_CONFIRMED_LINK_')).length, 3, 'the confirmation is part of the sealed recipe')
+  assert.equal(hydrateVariantRecipe(JSON.parse(JSON.stringify(recipe))).runHash, recipe.runHash)
+})
+
+test('ADR-160: a link the graph BLOCKED is never taken, confirmed or not', () => {
+  const graph = graphFixture('recipe-graph-blocked-link', undefined, 'cta-in-another-language')
+  const path = selection(graph)
+  const edge = graph.edges.find((candidate) => candidate.fromNodeId === path.selection.proofNodeId && candidate.toNodeId === path.selection.ctaNodeId)
+  assert.equal(edge.decision, 'blocked')
+  assert.ok(edge.hardFailures.some((failure) => failure.code === 'LOCALE_MISMATCH'))
+  const confirmations = graph.edges.filter((candidate) => ['hook-body', 'body-proof', 'proof-cta'].includes(candidate.relation)).map((candidate) => ({
+    code: `OWNER_CONFIRMED_LINK_${candidate.relation.split('-').map((role) => role.toUpperCase()).join('_')}`,
+    statement: 'O dono confirmou esta ligacao na tela.', evidenceRefs: [candidate.id] }))
+  assert.throws(() => createVariantRecipe(createInput(graph, { assumptions: confirmations })), /proof-cta is not accepted/)
+})
+
+test('the proof policy knows the REAL objective ids: the objectives that may skip the proof, and sale that may not', () => {
+  const graph = graphFixture('recipe-graph-objective-ids')
+  for (const objective of ['awareness', 'discovery', 'warming', 'lead-generation', 'whatsapp', 'booking', 'download']) {
+    assert.equal(resolveVariantRecipeProofPolicy(objective).effectiveRequirement, 'optional', objective)
+    const recipe = createVariantRecipe(createInput(graph, { id: `variant-recipe-${objective}`, objective, ...selection(graph, false) }))
+    assert.equal(recipe.summary.includesProof, false, objective)
+  }
+  assert.equal(resolveVariantRecipeProofPolicy('sale').effectiveRequirement, 'required')
+  assert.equal(resolveVariantRecipeProofPolicy('sale', false).reasonCode, 'PROOF_REQUIRED_BY_OBJECTIVE')
+  // The owner's choice prevails when the objective allows it: asking for proof makes it required, and it is then enforced.
+  assert.equal(resolveVariantRecipeProofPolicy('discovery', true).effectiveRequirement, 'required')
+  // The ids that were never objectives are not treated as such.
+  for (const never of ['content-discovery', 'schedule', 'education', 'lead-capture', 'content-distribution']) {
+    assert.equal(resolveVariantRecipeProofPolicy(never).effectiveRequirement, 'required', never)
+  }
 })

@@ -23,7 +23,10 @@ import {
   EMPTY_PICKS,
   buildCompatibilityContexts,
   describeUnevaluated,
+  linksKeepingRecipeBack,
+  ownerConfirmationAssumptions,
   pathFromPicks,
+  pathLinks,
   resolveContextStatements,
   type OwnerCompatibilityContext,
   type PathPicks,
@@ -31,6 +34,7 @@ import {
   type ProofChoice,
 } from '@/v2/ui/compatibility-context'
 import { LOCALE_OPTIONS } from '@/v2/ui/locale-options'
+import { objectiveRequiresProof } from '@/v2/domain/recipe-path-policy'
 
 type BatchStatus =
   | 'queued'
@@ -902,6 +906,8 @@ export default function BatchesPage() {
   const [ownerContext, setOwnerContext] = useState<OwnerCompatibilityContext>({ ...EMPTY_OWNER_CONTEXT })
   const [recipePicks, setRecipePicks] = useState<PathPicks>(EMPTY_PICKS)
   const [proofChoice, setProofChoice] = useState<ProofChoice>('')
+  // The links of the path the Apollo left for the owner (a borderline edge) and that the owner confirmed on the screen: ids of edges.
+  const [confirmedLinks, setConfirmedLinks] = useState<ReadonlySet<string>>(() => new Set())
   const idempotencyKey = useRef<string | null>(null)
   const [detailView, setDetailView] =
     useState<'script' | 'outputs'>('script')
@@ -1131,6 +1137,7 @@ export default function BatchesPage() {
     setOwnerContext({ ...EMPTY_OWNER_CONTEXT })
     setRecipePicks(EMPTY_PICKS)
     setProofChoice('')
+    setConfirmedLinks(new Set())
     if (!selectedBatchIdForRequest) return
     const controller = new AbortController()
     setBatchRequestLoading(true)
@@ -1594,6 +1601,16 @@ export default function BatchesPage() {
     () => pathFromPicks(recipePicks, proofChoice),
     [recipePicks, proofChoice],
   )
+  // The links of that path: the ones the map left to the owner are confirmed on the screen; a blocked or missing one can never be.
+  const variantRecipeLinks = useMemo(
+    () => (activeCompatibilityGraph ? pathLinks(recipePicks, proofChoice, activeCompatibilityGraph) : []),
+    [activeCompatibilityGraph, recipePicks, proofChoice],
+  )
+  const variantRecipeLinksKeepingBack = useMemo(
+    () => linksKeepingRecipeBack(variantRecipeLinks, confirmedLinks),
+    [variantRecipeLinks, confirmedLinks],
+  )
+  const batchObjectiveRequiresProof = objectiveRequiresProof(selectedBatch?.objective)
   const compatibilityEligibleTakes = useMemo(
     () => (activeTakeLibrary?.takes ?? []).filter((take) =>
       (take.status === 'primary' || take.status === 'alternate') &&
@@ -2402,6 +2419,9 @@ export default function BatchesPage() {
             selection: variantRecipePath.selection,
             orderedNodeIds: variantRecipePath.orderedNodeIds,
             requireProof: variantRecipePath.requireProof,
+            ...(ownerConfirmationAssumptions(variantRecipeLinks, confirmedLinks).length > 0
+              ? { assumptions: ownerConfirmationAssumptions(variantRecipeLinks, confirmedLinks) }
+              : {}),
           }),
         },
       )
@@ -4116,9 +4136,13 @@ export default function BatchesPage() {
                                   <button
                                     className="h-9 rounded-lg border border-[#c09a5a]/30 bg-[#c09a5a]/10 px-3 text-[10px] font-bold text-[#dfbd83] transition hover:bg-[#c09a5a]/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c09a5a] disabled:cursor-not-allowed disabled:opacity-40"
                                     data-testid="create-variant-recipe"
-                                    disabled={busy || !variantRecipePath}
+                                    disabled={busy || !variantRecipePath || variantRecipeLinksKeepingBack.length > 0}
                                     onClick={() => void createVariantRecipe()}
-                                    title={variantRecipePath ? undefined : 'Escolha, abaixo, a prova (sim ou não) e um take para cada etapa do caminho.'}
+                                    title={!variantRecipePath
+                                      ? 'Escolha, abaixo, a prova (sim ou não) e um take para cada etapa do caminho.'
+                                      : variantRecipeLinksKeepingBack.length > 0
+                                        ? 'Há ligações do caminho que você ainda precisa confirmar, ou que estão bloqueadas.'
+                                        : undefined}
                                     type="button"
                                   >
                                     {activeVariantRecipe ? 'Compilar outra' : 'Compilar receita'}
@@ -4130,10 +4154,13 @@ export default function BatchesPage() {
                                 <RecipePathPicker
                                   graph={activeCompatibilityGraph}
                                   idPrefix="recipe-path"
+                                  confirmed={confirmedLinks}
+                                  onConfirm={(edgeId: string, checked: boolean) => { setConfirmedLinks((current) => { const next = new Set(current); if (checked) next.add(edgeId); else next.delete(edgeId); return next }); variantRecipeIdempotencyKey.current = null }}
                                   onPick={(role: PickRole, nodeId: string) => { setRecipePicks((current) => ({ ...current, [role]: nodeId })); variantRecipeIdempotencyKey.current = null }}
                                   onProof={(choice: ProofChoice) => { setProofChoice(choice); setRecipePicks((current) => choice === 'with-proof' ? current : { ...current, proof: '' }); variantRecipeIdempotencyKey.current = null; resetVariantPortfolio() }}
                                   picks={recipePicks}
                                   proof={proofChoice}
+                                  proofRequired={batchObjectiveRequiresProof}
                                   takes={activeTakeLibrary?.takes ?? []}
                                 />
                               ) : null}
@@ -4254,6 +4281,11 @@ export default function BatchesPage() {
                                   <p className="mt-1 max-w-2xl text-[10px] leading-4 text-[#746f67]">
                                     O preflight conta todas as possibilidades, elimina incompatibilidades e monta um top-N diverso dentro da qualidade, cobertura e orçamento. Nenhum render começa aqui.
                                   </p>
+                                  {activeCompatibilityGraph && activeCompatibilityGraph.summary.acceptedCount === 0 && activeCompatibilityGraph.summary.borderlineCount > 0 ? (
+                                    <p className="mt-1 max-w-2xl text-[10px] leading-4 text-[#c79b42]" data-testid="portfolio-needs-owner-links" role="status">
+                                      Nenhuma ligação foi aceita sozinha pelo Apollo, então o portfólio automático não tem o que combinar. Informe o contexto que falta e recalcule o mapa, ou monte as receitas uma a uma confirmando as ligações acima.
+                                    </p>
+                                  ) : null}
                                 </div>
                                 <div className="flex shrink-0 flex-wrap items-end gap-2">
                                   {activeVariantPortfolioPreflights.length > 1 && activeVariantPortfolioPreflight ? (
@@ -4287,7 +4319,7 @@ export default function BatchesPage() {
                                     >
                                       <option value="">Escolha</option>
                                       <option value="with-proof">Com prova</option>
-                                      <option value="without-proof">Sem prova</option>
+                                      <option disabled={batchObjectiveRequiresProof} value="without-proof">{batchObjectiveRequiresProof ? 'Sem prova (este objetivo exige uma prova)' : 'Sem prova'}</option>
                                     </select>
                                   </label>
                                   <label>

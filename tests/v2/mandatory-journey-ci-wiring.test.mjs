@@ -750,10 +750,12 @@ const W69_PINNED_TOOLCHAIN = 'W69 subtitle clock proof that needs an externally 
  */
 const F6_EDITORIAL_REQUEST_PG = 'ADR-160 F6 PostgreSQL + public API proof of the editorial request (route handlers with bearer authentication, real repositories, the child-Command database guard, the real interpreter adapter against a local stand-in for the provider, the real Director); it needs a supervised disposable cluster with the revise_editorial_request_v1 migration applied; no hosted counterpart yet'
 const F7_F8_BRIEFING_SCREENS = 'ADR-160 F7/F8 browser proof of the screens that take the request of a video (project creation and Lotes): nothing pre-filled, the briefing required, the reading shown, an open question blocking the Director; production build, bearer-authenticated API, a disposable PostgreSQL and the Codex stand-in executable; no hosted counterpart yet'
+const F8_RECIPE_PATH = 'ADR-160 F8 browser proof of the path selector of the recipe (Lotes): with no context stated every link is left to the owner, the screen names the missing context and asks for the confirmation, the server refuses the same path without it, and an objective that requires a proof says so before "no proof" can be picked; production build, bearer-authenticated API, a disposable PostgreSQL, no interpreter. It needs a Chromium executable and an isolated database, so it runs under the supervised harness (APOLLO_RECIPE_PATH_E2E=1) and not in the default `npm test`.'
 
 const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/editorial-request.pg.integration.mjs', reason: F6_EDITORIAL_REQUEST_PG, citedBy: [] },
   { file: 'tests/v2/briefing-screens-browser.e2e.mjs', reason: F7_F8_BRIEFING_SCREENS, citedBy: [] },
+  { file: 'tests/v2/recipe-path-browser.e2e.mjs', reason: F8_RECIPE_PATH, citedBy: [] },
   { file: 'tests/v2/prisma-face-window.integration.mjs', reason: W62_SUPERVISED_PG, citedBy: ['docs/quality/w62-v9-runtime.md', 'docs/quality/w65-caption-placement-v3.md', 'docs/quality/w65b-source-keyed-face-evidence.md'] },
   { file: 'tests/v2/face-window-composition.integration.mjs', reason: W62_TSX_COMPOSITION, citedBy: ['docs/quality/w62-v9-runtime.md', 'docs/quality/w65b-source-keyed-face-evidence.md'] },
   { file: 'tests/v2/prisma-caption-placement.integration.mjs', reason: W65_SUPERVISED_PG, citedBy: ['docs/quality/w65-caption-placement-v3.md', 'docs/quality/w65b-source-keyed-face-evidence.md'] },

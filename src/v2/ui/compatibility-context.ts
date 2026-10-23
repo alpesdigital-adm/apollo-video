@@ -12,6 +12,7 @@
 
 import { sha256 } from '@noble/hashes/sha256'
 import { bytesToHex } from '@noble/hashes/utils'
+import { ownerConfirmedLinkCode } from '../domain/recipe-path-policy.ts'
 
 export type ContextField = 'audience' | 'offer' | 'persona' | 'action' | 'locale' | 'tone'
 
@@ -183,4 +184,84 @@ export function edgeBetween(
 ): { verdict: EdgeVerdict; notEvaluable: boolean } {
   const edge = graph.edges.find((item) => item.fromNodeId === fromNodeId && item.toNodeId === toNodeId)
   return edge ? { verdict: edge.decision, notEvaluable: (edge.notEvaluable?.length ?? 0) > 0 } : { verdict: 'absent', notEvaluable: false }
+}
+
+// ---- The links of the path the owner picked: which ones the Apollo left for them to confirm. ----
+
+export const PICK_ROLE_NAMES: Readonly<Record<PickRole, string>> = Object.freeze({ hook: 'abertura', body: 'corpo', proof: 'prova', cta: 'chamada final' })
+
+export const SOFT_DIMENSION_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  narrative: 'temas da narrativa', tone: 'tom', energy: 'energia', visual: 'visual', experiment: 'variação', duration: 'duração',
+})
+
+type EdgeForPath = {
+  id: string
+  fromNodeId: string
+  toNodeId: string
+  decision: 'accepted' | 'borderline' | 'blocked'
+  reasonCodes?: readonly string[]
+  softScores?: readonly { dimension: string; score: number | null }[]
+}
+
+/** One link between two consecutive picks, as the graph computed it. */
+export interface PathLink {
+  fromRole: PickRole
+  toRole: PickRole
+  fromNodeId: string
+  toNodeId: string
+  /** Null when the graph has no edge between the two picks. */
+  edgeId: string | null
+  verdict: EdgeVerdict
+  /** True when the Apollo left THIS link to the owner for lack of context (it never approves or blocks it alone). */
+  needsOwner: boolean
+  /** The context that was not stated and kept the Apollo from deciding, in plain words (empty when it is not the cause). */
+  missingContext: readonly string[]
+}
+
+/** The links of the path in order, for the picks made so far; a link exists only between two consecutive roles that are both picked. */
+export function pathLinks(picks: Readonly<PathPicks>, proof: ProofChoice, graph: Readonly<{ edges: readonly EdgeForPath[] }>): readonly PathLink[] {
+  const roles: PickRole[] = proof === 'with-proof' ? ['hook', 'body', 'proof', 'cta'] : ['hook', 'body', 'cta']
+  const links: PathLink[] = []
+  for (let index = 1; index < roles.length; index += 1) {
+    const fromRole = roles[index - 1]!
+    const toRole = roles[index]!
+    const from = picks[fromRole]
+    const to = picks[toRole]
+    if (!from || !to) continue
+    const edge = graph.edges.find((item) => item.fromNodeId === from && item.toNodeId === to)
+    const needsOwner = edge?.decision === 'borderline' && (edge.reasonCodes ?? []).includes('CONTEXT_REQUIRED_FOR_DECISION')
+    links.push({
+      fromRole, toRole, fromNodeId: from, toNodeId: to,
+      edgeId: edge?.id ?? null,
+      verdict: edge ? edge.decision : 'absent',
+      needsOwner,
+      missingContext: needsOwner
+        ? (edge.softScores ?? []).filter((score) => score.score === null).map((score) => SOFT_DIMENSION_NAMES[score.dimension] ?? score.dimension)
+        : [],
+    })
+  }
+  return Object.freeze(links)
+}
+
+/** "faltou contexto: tom, energia": the reason the Apollo shows beside a link it left for the owner. */
+export function describeMissingContext(link: Readonly<Pick<PathLink, 'missingContext'>>): string {
+  return link.missingContext.length > 0 ? `faltou contexto: ${link.missingContext.join(', ')}` : 'faltou contexto'
+}
+
+/** The links that still keep the recipe from being compiled: blocked or missing ones can never be, borderline ones until the owner confirms. */
+export function linksKeepingRecipeBack(links: readonly Readonly<PathLink>[], confirmedEdgeIds: ReadonlySet<string>): readonly Readonly<PathLink>[] {
+  return links.filter((link) => link.verdict === 'blocked' || link.verdict === 'absent' ||
+    (link.verdict === 'borderline' && !(link.edgeId !== null && confirmedEdgeIds.has(link.edgeId))))
+}
+
+/**
+ * The `assumptions` of `create-variant-recipe-request/1` that carry the owner's confirmation of each borderline link they confirmed. The server
+ * takes a borderline link only with one of these naming the edge; the Apollo never writes one the owner did not tick.
+ */
+export function ownerConfirmationAssumptions(links: readonly Readonly<PathLink>[], confirmedEdgeIds: ReadonlySet<string>) {
+  return links.filter((link) => link.verdict === 'borderline' && link.edgeId !== null && confirmedEdgeIds.has(link.edgeId)).map((link) => ({
+    code: ownerConfirmedLinkCode(link.fromRole, link.toRole),
+    statement: `O dono confirmou na tela a ligação entre ${PICK_ROLE_NAMES[link.fromRole]} e ${PICK_ROLE_NAMES[link.toRole]}${link.needsOwner ? ` (${describeMissingContext(link)})` : ''}.`,
+    evidenceRefs: [link.edgeId!],
+  }))
 }

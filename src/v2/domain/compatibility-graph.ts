@@ -247,6 +247,8 @@ const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
 const LOCALE = /^[a-z]{2,3}(?:-[A-Z][A-Za-z0-9]{1,7})?$/
 const REASON = /^[A-Z][A-Z0-9_]{2,79}$/
+/** The weight of the context (everything but the duration) that must be evaluated for the Apollo to decide a link by itself: the strongest single signal. */
+export const MIN_CONTEXT_WEIGHT_FOR_DECISION = 0.3
 const SOFT_WEIGHTS: Readonly<
   Record<CompatibilitySoftDimension, number>
 > = Object.freeze({
@@ -830,9 +832,17 @@ function compatibilityEdge(
   ).toFixed(3))
   const contextNotEvaluable = notEvaluable.length > 0 ||
     softScores.some((score) => score.score === null)
+  // The length of two takes is read from the takes themselves, but it says little about whether one leads to the other. When what was stated
+  // about the takes does not carry a decision (no more than the duration, or less than the weight of the strongest single signal), the Apollo
+  // neither approves nor blocks the link on its own: it is left for the owner to confirm, with the missing context named.
+  const contextWeight = softScores.reduce((sum, score) =>
+    sum + (score.dimension === 'duration' ? 0 : score.weight), 0)
+  const needsOwner = hardFailures.length === 0 && contextWeight + 1e-9 < MIN_CONTEXT_WEIGHT_FOR_DECISION
   const decision: CompatibilityEdgeDecision = hardFailures.length > 0
     ? 'blocked'
-    : weighted >= acceptThreshold
+    : needsOwner
+      ? 'borderline'
+      : weighted >= acceptThreshold
       ? 'accepted'
       : weighted >= reviewThreshold
         ? 'borderline'
@@ -841,7 +851,9 @@ function compatibilityEdge(
     ...hardFailures.map((failure) => failure.code),
     ...(hardFailures.length === 0
       ? [
-          decision === 'accepted'
+          needsOwner
+            ? 'CONTEXT_REQUIRED_FOR_DECISION'
+            : decision === 'accepted'
             ? 'COMPATIBLE'
             : decision === 'borderline'
               ? 'BORDERLINE_SOFT_SCORE'

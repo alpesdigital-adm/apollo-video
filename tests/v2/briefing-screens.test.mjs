@@ -15,9 +15,13 @@ import {
   EMPTY_PICKS,
   buildCompatibilityContexts,
   contextToken,
+  describeMissingContext,
   describeUnevaluated,
   edgeBetween,
+  linksKeepingRecipeBack,
+  ownerConfirmationAssumptions,
   pathFromPicks,
+  pathLinks,
   resolveContextStatements,
 } from '../../src/v2/ui/compatibility-context.ts'
 import {
@@ -199,6 +203,44 @@ test('the recipe path is the one the owner picked, and incomplete until the proo
   assert.deepEqual(edgeBetween(graph, 'n1', 'n2'), { verdict: 'accepted', notEvaluable: false })
   assert.deepEqual(edgeBetween(graph, 'n2', 'n4'), { verdict: 'borderline', notEvaluable: true })
   assert.deepEqual(edgeBetween(graph, 'n1', 'n4'), { verdict: 'absent', notEvaluable: false })
+})
+
+test('a link the map left to the owner is named with the context that is missing, confirmed on the screen, and written as an assumption the server reads', () => {
+  const picks = { hook: 'n1', body: 'n2', proof: '', cta: 'n4' }
+  const owner = ['CONTEXT_NOT_EVALUABLE', 'CONTEXT_REQUIRED_FOR_DECISION']
+  const dims = [{ dimension: 'narrative', score: null }, { dimension: 'tone', score: null }, { dimension: 'duration', score: 0.5 }]
+  const graph = { edges: [
+    { id: 'e12', fromNodeId: 'n1', toNodeId: 'n2', decision: 'accepted', reasonCodes: ['COMPATIBLE'], softScores: dims },
+    { id: 'e24', fromNodeId: 'n2', toNodeId: 'n4', decision: 'borderline', reasonCodes: owner, softScores: dims },
+  ] }
+  const links = pathLinks(picks, 'without-proof', graph)
+  assert.deepEqual(links.map((link) => [link.fromRole, link.toRole, link.verdict, link.needsOwner]), [['hook', 'body', 'accepted', false], ['body', 'cta', 'borderline', true]])
+  assert.deepEqual(links[1].missingContext, ['temas da narrativa', 'tom'])
+  assert.equal(describeMissingContext(links[1]), 'faltou contexto: temas da narrativa, tom')
+  // Until the owner confirms it, the link keeps the recipe back; a blocked or absent link keeps it back for good.
+  assert.deepEqual(linksKeepingRecipeBack(links, new Set()).map((link) => link.edgeId), ['e24'])
+  assert.deepEqual(linksKeepingRecipeBack(links, new Set(['e24'])), [])
+  assert.equal(linksKeepingRecipeBack(pathLinks(picks, 'without-proof', { edges: [{ ...graph.edges[0], decision: 'blocked' }, graph.edges[1]] }), new Set(['e12', 'e24'])).length, 1)
+  assert.equal(linksKeepingRecipeBack(pathLinks({ ...picks, cta: 'n9' }, 'without-proof', graph), new Set(['e24'])).length, 1, 'no edge between the picks')
+  // The confirmation is exactly the assumption the server reads: the code of the roles and the edge it names.
+  assert.deepEqual(ownerConfirmationAssumptions(links, new Set()), [])
+  const assumptions = ownerConfirmationAssumptions(links, new Set(['e24', 'e12']))
+  assert.equal(assumptions.length, 1, 'an accepted link needs no confirmation')
+  assert.equal(assumptions[0].code, 'OWNER_CONFIRMED_LINK_BODY_CTA')
+  assert.deepEqual(assumptions[0].evidenceRefs, ['e24'])
+  assert.match(assumptions[0].statement, /corpo e chamada final/)
+})
+
+test('the path picker announces that the objective requires a proof BEFORE the owner picks "no proof", and offers the confirmation of a borderline link', () => {
+  const picker = source('src/components/RecipePathPicker.tsx')
+  for (const piece of ['proofRequired ? (', 'este objetivo exige uma prova', '<option disabled={proofRequired} value="without-proof">', 'data-testid={`recipe-confirm-${role}`}', 'Eu confirmo que estes dois takes combinam']) {
+    assert.ok(picker.includes(piece), piece)
+  }
+  const batch = source('src/app/batches/page.tsx')
+  for (const piece of ['proofRequired={batchObjectiveRequiresProof}', 'ownerConfirmationAssumptions(variantRecipeLinks, confirmedLinks)', 'disabled={busy || !variantRecipePath || variantRecipeLinksKeepingBack.length > 0}', 'data-testid="portfolio-needs-owner-links"']) {
+    assert.ok(batch.includes(piece), piece)
+  }
+  assert.match(batch, /data-testid="portfolio-needs-owner-links"/)
 })
 
 test('a briefing that cannot be read yet says why in plain words and keeps the text', () => {
