@@ -4,14 +4,16 @@ import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 const readJson = (relativePath) => JSON.parse(readFileSync(new URL(`../../${relativePath}`, import.meta.url), 'utf8'))
-const patched = '16.4.0'
+const patched = '16.4.2'
 const forkVersion = '16.3.6-apollo.2'
 const forkTarball = 'tools/vendor/next-eslint-plugin-next-16.3.6-apollo.2.tgz'
 // Current audit findings GHSA-3w37-wq28-93x7 and GHSA-4jqv-mc3x-m676,
 // GHSA-39w2-rjm5-chcv, GHSA-f87g-xv8r-7p7x, GHSA-mcj8-r9mp-w47p,
 // GHSA-cjq9-62q9-8jv4 report 16.3.x through 16.3.7 as affected. This checks
-// the current 16.3 advisory range and the exact 16.4.0 pin, not exploitation
-// or arbitrary historical Next versions. The vendor fork is versioned apart.
+// the 16.3 advisory range and the exact 16.4.2 pin, not exploitation or
+// arbitrary historical Next versions. GHSA-2464-fhr4-w9xw, GHSA-673q-mjm6-r5xr
+// and GHSA-p3m5-59mp-jv5r report 16.0.0 through 16.4.0 as affected. The vendor
+// fork is versioned apart.
 const parts = (version) => version.split('.').map(Number)
 const compare = (left, right) => {
   const a = parts(left)
@@ -20,11 +22,17 @@ const compare = (left, right) => {
   return 0
 }
 const affectedIn16_3 = (version) => compare(version, '16.3.0') >= 0 && compare(version, '16.3.7') <= 0
+const affectedThrough16_4_0 = (version) => compare(version, '16.0.0') >= 0 && compare(version, '16.4.0') <= 0
 
 test('Next 16.3.7 is in the current advisory range; patched baseline is outside', () => {
   assert.equal(affectedIn16_3('16.3.0'), true)
   assert.equal(affectedIn16_3('16.3.7'), true)
   assert.equal(affectedIn16_3(patched), false)
+})
+
+test('Next 16.4.0 is in the 23 October 2026 advisory range; patched baseline is outside', () => {
+  assert.equal(affectedThrough16_4_0('16.4.0'), true)
+  assert.equal(affectedThrough16_4_0(patched), false)
 })
 
 test('platform and paired Next/eslint-config-next manifests use the patched exact pin', () => {
@@ -34,6 +42,7 @@ test('platform and paired Next/eslint-config-next manifests use the patched exac
   assert.equal(pkg.dependencies.next, patched)
   assert.equal(pkg.devDependencies['eslint-config-next'], patched)
   assert.equal(affectedIn16_3(pkg.dependencies.next), false)
+  assert.equal(affectedThrough16_4_0(pkg.dependencies.next), false)
 })
 
 test('npm lock root and resolved Next/eslint-config-next use patched pair', () => {
