@@ -9,7 +9,6 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
-import { STRATEGIC_OBJECTIVES } from '../../src/v2/domain/strategic-objective.ts'
 import { assertIsolatedDatabase } from './helpers/capture-journey.mjs'
 import { startBriefInterpreterStandIn } from './helpers/brief-interpreter-stand-in.mjs'
 
@@ -99,6 +98,7 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
   try {
     // A clean workspace with an API client, and in it a project that has a briefing and a montage (the Version a briefing is read on).
     const { createWorkspaceRow, issueApiClient } = await import('./helpers/capture-journey.mjs')
+    const { STRATEGIC_OBJECTIVES } = await import('../../src/v2/domain/strategic-objective.ts')
     const { seedSealedProject, testActor } = await import('./helpers/pg-output-world.mjs')
     const { seedDirectedProject } = await import('./helpers/dashboard-w34-35-fixtures.mjs')
     const suffix = randomUUID().replaceAll('-', '').slice(0, 12)

@@ -238,6 +238,43 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     // A version that is no longer the current one is a conflict (409); only a project that does not exist is "not found".
     await assert.rejects(authority({ projectVersionId: 'f6-an-old-version' }), (error) => error.code === 'VERSION_CONFLICT')
     await assert.rejects(authority({ projectId: 'f6-no-such-project' }), (error) => error.code === 'PROJECT_NOT_FOUND')
+
+    // 8. A project made without an objective: the Director waits for one (published reason), the owner gives it in a revision (closed catalog, a new
+    // Version, projects.objective written in the same transaction), and the Director then runs; a second Director run closes the revision path.
+    const bare = await seedSealedProject(db, { workspaceId, actor: seedActor, prefix: 'f6bare', name: 'A project with no objective', objective: null })
+    await seedDirectedProject(db, { workspaceId, clientId, credentialId: `${clientId}-cred`, environment: 'production', projectId: bare.projectId, suffix: `f6bare${run}`, directed: false,
+      words: [{ word: 'Segunda', start: 0.2, end: 0.7 }, { word: 'fala', start: 0.7, end: 1.1 }, { word: 'sem', start: 1.1, end: 1.4 }, { word: 'objetivo.', start: 1.4, end: 2.0 }] })
+    assert.equal((await db.v2Project.findUniqueOrThrow({ where: { id: bare.projectId } })).objective, null)
+    const barePath = `/v1/projects/${bare.projectId}/editorial-request`
+    const bareHead = async () => {
+      const row = await db.v2ProjectVersion.findUniqueOrThrow({ where: { id: (await db.v2Project.findUniqueOrThrow({ where: { id: bare.projectId } })).currentVersionId } })
+      return { baseVersionId: row.id, baseHash: row.baseHash }
+    }
+    const bareRevise = async (body, key) => callRoute(NextRequest, route, { method: 'POST', path: barePath, params: { projectId: bare.projectId }, authorization, idempotencyKey: `f6req-${run}-${key}`, body: { ...(await bareHead()), ...body } })
+    const bareDirector = async (key) => runProjectDirectorService({
+      repository: new PrismaDirectorRunRepository(db), clock: () => new Date(), createEventId: randomUUID, compileBrief: createEvidenceBoundBriefCompiler(),
+      createId: (kind) => `f6req-${run}-${key}-${kind}-${randomUUID().slice(0, 8)}`,
+    })({ workspaceId, projectId: bare.projectId, ...(await bareHead()), actor: seedActor, idempotency: { key: `f6req-${run}-${key}` }, reason: 'Director over a project that gets its objective.' })
+    await assert.rejects(bareDirector('bare-before'), (error) => error.code === 'PRECONDITION_REQUIRED' && error.details?.reason === 'director-objective-required')
+    const versionsBefore = await db.v2ProjectVersion.count({ where: { projectId: bare.projectId } })
+    const unknownObjective = await bareRevise({ objective: 'content-distribution' }, 'bare-unknown')
+    assert.equal(unknownObjective.status, 422, JSON.stringify(unknownObjective.payload))
+    assert.equal(await db.v2ProjectVersion.count({ where: { projectId: bare.projectId } }), versionsBefore, 'a refused objective writes nothing')
+    const defined = await bareRevise({ objective: 'awareness', reason: 'O dono escolheu o objetivo.' }, 'bare-define')
+    assert.equal(defined.status, 201, JSON.stringify(defined.payload))
+    assert.equal(defined.payload.data.change.objective, 'set')
+    assert.equal(defined.payload.data.request.objective, 'awareness')
+    assert.equal((await db.v2Project.findUniqueOrThrow({ where: { id: bare.projectId } })).objective, 'awareness', 'the project row carries the objective the revision set')
+    assert.equal(await db.v2ProjectVersion.count({ where: { projectId: bare.projectId } }), versionsBefore + 1, 'a new Version, the old one kept')
+    const bareRead = await callRoute(NextRequest, route, { method: 'GET', path: barePath, params: { projectId: bare.projectId }, authorization })
+    assert.equal(bareRead.payload.data.request.objective, 'awareness')
+    const same = await bareRevise({ objective: 'awareness' }, 'bare-same')
+    assert.equal(same.status, 422, 'the project already has this objective')
+    const bareDirected = await bareDirector('bare-after')
+    assert.equal(bareDirected.run.objective, 'awareness', 'the Director judges against the objective the owner gave')
+    const afterDirector = await bareRevise({ objective: 'warming' }, 'bare-after-director')
+    assert.equal(afterDirector.status, 422, JSON.stringify(afterDirector.payload))
+    assert.equal((await db.v2Project.findUniqueOrThrow({ where: { id: bare.projectId } })).objective, 'awareness')
   } finally {
     await interpreter.close()
     for (const name of CONFIGURATION) {
