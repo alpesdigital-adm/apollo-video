@@ -19,6 +19,7 @@ import {
   type MaterializationAuthorizationIssue,
 } from '../../domain/materialization-authorization.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
+import { pauseBeforeLostRaceRetry } from './idempotency-record-persistence.ts'
 
 type StoredAuthorization = Prisma.V2MaterializationAuthorizationGetPayload<{
   include: { decisions: { include: { rightsSnapshot: true } } }
@@ -366,7 +367,7 @@ export class PrismaMaterializationAuthorizationRepository
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (isSerializationConflict(error)) {
-        if (serializationAttempt < 3) {
+        if (await pauseBeforeLostRaceRetry(serializationAttempt)) {
           return this.createOrReplay(input, serializationAttempt + 1)
         }
         throw new DomainError(

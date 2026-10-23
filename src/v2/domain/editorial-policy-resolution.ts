@@ -76,7 +76,7 @@ export interface EditorialPolicies {
   transitions: ResolvedPolicy<{ type: 'straight-cut'; audioFadeMs: number }>
   inserts: ResolvedPolicy<{ mode: 'use-selected-insert' | 'no-insert' }>
   cta: ResolvedPolicy<{ required: boolean; evaluation: CtaEvaluation }>
-  ctaOverlay: ResolvedPolicy<{ mode: 'none' } | { mode: 'window'; startSeconds: number; endSeconds: number; anchoredTo: 'spoken-cta' | 'spoken-cta-to-end' | 'closing-sentence' }>
+  ctaOverlay: ResolvedPolicy<{ mode: 'none' } | { mode: 'window'; startSeconds: number; endSeconds: number; anchoredTo: 'spoken-cta' | 'spoken-cta-to-end' | 'closing-sentence' | 'requested-seconds' | 'whole-video' }>
   layout: ResolvedPolicy<{ mode: 'fit-with-backdrop' | 'source-native' }>
   language: ResolvedPolicy<{ captionLanguage: string | null }>
   captions: ResolvedPolicy<CaptionPolicyValue>
@@ -146,8 +146,16 @@ export interface EditorialPolicyResolutionV1 {
 /** What the observed media contributes. Nothing here is a preference: it is what the source shows. */
 export interface EditorialMediaContext {
   transcriptId?: string
-  /** BCP-47 language of the observed transcript (absent: unknown). */
+  /** BCP-47 language of the transcript (absent: unknown, or the undetermined language). */
   transcriptLanguage?: string
+  /**
+   * How the transcript's language was found: `detected-from-media` - the provider heard it; `declared-not-verified` - the provider was told the
+   * project's language and the speech was not checked against it (a transcript that records no basis is read this way). Only the first is an
+   * observation of the media.
+   */
+  transcriptLanguageBasis?: 'detected-from-media' | 'declared-not-verified'
+  /** The language the project declares, when it declares one. */
+  declaredLocale?: string
   /** True when the compiled timeline already contains a rights-approved selected insert. */
   hasSelectedInsert: boolean
   /** Source frame aspect, `W:H` (absent: unknown). */
@@ -183,6 +191,12 @@ export interface EditorialOutputSpec {
 
 // The caption style the renderer registry designates for an output that must draw captions when nothing else names one (rule `renderer-baseline`).
 export const RENDERER_BASELINE_CAPTION_PRESET: SubtitlePresetId = 'clean-color'
+/**
+ * The look the renderer draws a montage in when nothing names one (rule `renderer-baseline`): its colours and its style preset are the renderer's own,
+ * not a choice of the requester. A caller that has a palette or a style states it; these are what is drawn otherwise.
+ */
+export const RENDERER_BASELINE_PALETTE = Object.freeze({ primary: '#4ECDC4', secondary: '#2457A7', accent: '#FFB800', text: '#FFFFFF', background: '#07111F' })
+export const RENDERER_BASELINE_STYLE_PRESET = 'creator-clean'
 // Not editorial: a click guard at an audio seam.
 const AUDIO_SEAM_FADE_MS = 24
 
@@ -416,7 +430,7 @@ export function resolveEditorialPolicies(
   const visualText = action?.visualCta?.trim()
   const spoken = mediaContext.spokenCta
   const overlayWanted = ctaSelection !== undefined
-    ? ctaSelection.directive.value === 'overlay-closing' || ctaSelection.directive.value === 'overlay-at-spoken-cta'
+    ? ['overlay-closing', 'overlay-at-spoken-cta', 'overlay-whole-video', 'overlay-from-seconds'].includes(ctaSelection.directive.value)
     : Boolean(visualText)
   const noOverlay = { mode: 'none' as const }
   let ctaOverlay: EditorialPolicies['ctaOverlay']
@@ -426,11 +440,34 @@ export function resolveEditorialPolicies(
         ctaSelection.directive.value === 'verbal-only' && visualText ? 'The call to action is only spoken: the visual call to action text of the desired action is not drawn' : 'No visual call to action is drawn', noOverlay)
       : silent(request, 'ctaOverlay', noOverlay, 'minimal-intervention', 'The request gives no visual call to action text, so none is drawn.')
   } else {
-    const toEnd = ctaSelection?.directive.value === 'overlay-closing'
+    // The structured placement says where the call is drawn without the speech having to show one: from a second the requester names, or throughout.
+    const structuredPlacement = ctaSelection?.directive.value === 'overlay-whole-video' || ctaSelection?.directive.value === 'overlay-from-seconds'
+    const toEnd = ctaSelection?.directive.value === 'overlay-closing' || structuredPlacement
     let value: EditorialPolicies['ctaOverlay']['value'] = noOverlay
     let effect = 'No visual call to action is drawn until the question is answered'
     if (!visualText) {
       openQuestions.push(Object.freeze({ id: 'cta-overlay-text-missing', question: 'The request asks for a visual call to action and the desired action has no visual text. What should it say?', source: 'resolution' as const }))
+    } else if (structuredPlacement) {
+      const fromSeconds = ctaSelection!.directive.value === 'overlay-from-seconds'
+      const startSeconds = fromSeconds ? Number(ctaSelection!.directive.param) : 0
+      if (mediaContext.timelineDurationSeconds === undefined) {
+        openQuestions.push(Object.freeze({
+          id: 'cta-overlay-timeline-unknown',
+          question: 'The request places the visual call to action on the video, and the length of the compiled video is not known yet. Direct the video again once its timeline exists.',
+          source: 'resolution' as const,
+        }))
+      } else if (startSeconds >= mediaContext.timelineDurationSeconds) {
+        openQuestions.push(Object.freeze({
+          id: 'cta-overlay-after-end',
+          question: `The request draws the visual call to action from ${startSeconds} s, and the video lasts ${mediaContext.timelineDurationSeconds} s. From which second should it be drawn?`,
+          source: 'resolution' as const,
+        }))
+      } else {
+        value = { mode: 'window' as const, startSeconds, endSeconds: mediaContext.timelineDurationSeconds, anchoredTo: fromSeconds ? 'requested-seconds' as const : 'whole-video' as const }
+        effect = fromSeconds
+          ? `The visual call to action is drawn from the second the request names (${startSeconds} s) to the end of the video (${mediaContext.timelineDurationSeconds} s)`
+          : `The visual call to action is drawn throughout the video (0 s to ${mediaContext.timelineDurationSeconds} s)`
+      }
     } else if (spoken === undefined && !(toEnd && mediaContext.closingSentenceStartSeconds !== undefined)) {
       openQuestions.push(Object.freeze({
         id: 'cta-overlay-placement-unknown',
@@ -502,16 +539,30 @@ export function resolveEditorialPolicies(
     if (mediaContext.transcriptLanguage !== undefined && primaryLanguage(requestedLanguage) !== primaryLanguage(mediaContext.transcriptLanguage)) {
       openQuestions.push(Object.freeze({
         id: 'caption-language-translation',
-        question: `Captions were requested in ${requestedLanguage}, but the observed speech is in ${mediaContext.transcriptLanguage} and the Apollo has no translation here. Should the captions stay in ${mediaContext.transcriptLanguage}?`,
+        question: `Captions were requested in ${requestedLanguage}, but the speech is in ${mediaContext.transcriptLanguage} (${mediaContext.transcriptLanguageBasis === 'detected-from-media' ? 'detected from the media' : 'the language declared for the project, not verified against the speech'}) and the Apollo has no translation here. Should the captions stay in ${mediaContext.transcriptLanguage}?`,
         source: 'resolution' as const,
       }))
     }
   } else if (mediaContext.transcriptLanguage !== undefined) {
+    // Only a language the provider detected is an observation of the media. A language the project declared is the requester's word, and the
+    // transcript made under it did not check the speech against it.
+    const detected = mediaContext.transcriptLanguageBasis === 'detected-from-media'
     language = Object.freeze({
-      key: 'language' as const, status: 'applied' as const, value: Object.freeze({ captionLanguage: mediaContext.transcriptLanguage }), origin: 'media-context' as const, rule: 'source-observation' as const,
-      reason: `The request does not name a caption language. The observed transcript is in ${mediaContext.transcriptLanguage}, and the captions are its own words.`,
-      evidenceRefs: Object.freeze([requestRef(request), ...(mediaContext.transcriptId ? [`transcript:${mediaContext.transcriptId}`] : [])]),
+      key: 'language' as const, status: 'applied' as const, value: Object.freeze({ captionLanguage: mediaContext.transcriptLanguage }),
+      origin: detected ? 'media-context' as const : 'request-field' as const, rule: detected ? 'source-observation' as const : 'explicit-request' as const,
+      reason: detected
+        ? `The request does not name a caption language. The speech recognition detected the language of the media: ${mediaContext.transcriptLanguage}. The captions are the transcript's own words.`
+        : `The request does not name a caption language. The project declares ${mediaContext.transcriptLanguage} and the transcript was made under that language: it is the declared language, not verified against the speech. The captions are the transcript's own words.`,
+      evidenceRefs: Object.freeze([requestRef(request), ...(mediaContext.transcriptId ? [`transcript:${mediaContext.transcriptId}`] : []),
+        detected ? 'transcript-language:detected-from-media' : 'transcript-language:declared-not-verified']),
     })
+    if (detected && mediaContext.declaredLocale !== undefined && primaryLanguage(mediaContext.declaredLocale) !== primaryLanguage(mediaContext.transcriptLanguage)) {
+      openQuestions.push(Object.freeze({
+        id: 'declared-language-differs-from-speech',
+        question: `The project declares ${mediaContext.declaredLocale}, and the speech recognition detected ${mediaContext.transcriptLanguage} in the media. Which language are the captions in?`,
+        source: 'resolution' as const,
+      }))
+    }
   } else {
     language = silent(request, 'language', { captionLanguage: null }, 'minimal-intervention',
       'The request does not name a caption language and the transcript does not state one. No language is assumed.')
@@ -746,6 +797,8 @@ export interface PlanMovementDeclaration {
   fps: number
   movementPolicy: Readonly<{ automaticZoom: boolean; protectedOpeningFrames: number }>
   effectTracks?: readonly unknown[]
+  /** The overlays the plan draws; their frames belong to the plan's own timeline, so only their presence is judged here. */
+  overlayTracks?: readonly Readonly<{ kind: string }>[]
 }
 
 /**
@@ -767,6 +820,12 @@ export function assertPlanHonorsResolution(plan: Readonly<PlanMovementDeclaratio
   assertDomain(!resolution.blocked, 'INVALID_RENDER_INPUT', 'The editorial policy resolution of this EditPlan is blocked: nothing may be rendered from it')
   assertDomain(movementMatchesPolicy(facts, resolution.policies.movement) && openingMatchesPolicy(facts, resolution.policies.opening),
     'INVALID_RENDER_INPUT', 'The EditPlan does not honour the editorial policy resolution it was made from')
+  if (Array.isArray(plan.overlayTracks)) {
+    // A call to action is drawn exactly when the resolution says so: where it sits is the timeline's own business (a re-cut of the timeline moves it).
+    const drawn = plan.overlayTracks.filter((overlay) => overlay.kind === 'cta').length
+    assertDomain(resolution.policies.ctaOverlay.value.mode === 'window' ? drawn >= 1 : drawn === 0,
+      'INVALID_RENDER_INPUT', 'The EditPlan does not draw the call to action the editorial policy resolution asks for')
+  }
 }
 
 // ---- Parsing a stored resolution (a Director run is read back from persisted JSON: fail closed on anything that is not what was written).

@@ -22,6 +22,7 @@ import { reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../.
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
+import { pauseBeforeLostRaceRetry } from './idempotency-record-persistence.ts'
 
 type LibraryMetadata = V2MediaLibraryEntry & {
   thumbnailArtifact: { id: string; status: string } | null
@@ -68,6 +69,7 @@ function queryFingerprint(query: MediaLibraryQuery): string {
     kind: query.kind ?? null,
     person: query.person ?? null,
     topic: query.topic ?? null,
+    ...(query.locale ? { locale: query.locale } : {}),
     rightsStatus: query.rightsStatus ?? null,
   })
 }
@@ -239,8 +241,8 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
         }) as Promise<SegmentWithArtifact[]>,
       ])
       const candidates = [
-        ...assetRows.map((row) => ({ entity: 'asset' as const, id: row.artifactId, createdAt: row.createdAt, item: mapItem(row, now, 'pt-BR') })),
-        ...segmentRows.map((row) => ({ entity: 'segment' as const, id: row.id, createdAt: row.createdAt, item: mapSegmentItem(row, now, 'pt-BR') })),
+        ...assetRows.map((row) => ({ entity: 'asset' as const, id: row.artifactId, createdAt: row.createdAt, item: mapItem(row, now, query.locale ?? UNDETERMINED_LOCALE) })),
+        ...segmentRows.map((row) => ({ entity: 'segment' as const, id: row.id, createdAt: row.createdAt, item: mapSegmentItem(row, now, query.locale ?? UNDETERMINED_LOCALE) })),
       ].sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || cursorKey(right.entity, right.id).localeCompare(cursorKey(left.entity, left.id))).slice(0, 100)
       if (candidates.length === 0) break
       for (const candidate of candidates) {
@@ -258,7 +260,7 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
     })
   }
 
-  async findById(workspaceId: string, itemId: string, now: Date, locale = 'pt-BR') {
+  async findById(workspaceId: string, itemId: string, now: Date, locale: string = UNDETERMINED_LOCALE) {
     const [row, segment] = await Promise.all([
       this.client.v2MediaLibraryEntry.findFirst({ where: { workspaceId, artifactId: itemId, artifact: { automaticCatalogRecords: { none: { outputKind: 'deepfake-raw' } } } }, include }) as Promise<EntryWithArtifact | null>,
       this.client.v2MediaSegment.findFirst({ where: { workspaceId, id: itemId, artifact: { libraryEntry: { isNot: null } } }, include: segmentInclude }) as Promise<SegmentWithArtifact | null>,
@@ -280,7 +282,7 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
       commandId: row.commandId, baseVersionId: row.baseVersionId, resultVersionId: row.resultVersionId, resultVersionHash: row.resultVersionHash,
       role: 'selected-insert' as const, bytesDuplicated: false as const, replayed, createdAt: row.createdAt.toISOString(),
     })
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (let attempt = 1; ; attempt += 1) {
       try {
         return await this.client.$transaction(async (transaction) => {
           const existing = await transaction.v2MediaLibraryAttachment.findUnique({ where: { workspaceId_projectId_idempotencyKey: { workspaceId: input.workspaceId, projectId: input.projectId, idempotencyKey: input.idempotencyKey } } })
@@ -328,10 +330,12 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
         }, { isolationLevel: 'Serializable' as Prisma.TransactionIsolationLevel, timeout: 30_000 })
       } catch (error) {
         const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : ''
-        if (attempt < 3 && (code === 'P2034' || code === 'P2002')) continue
+        if (code === 'P2034' || code === 'P2002') {
+          if (await pauseBeforeLostRaceRetry(attempt)) continue
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Media library attachment could not be serialized')
+        }
         throw error
       }
     }
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Media library attachment could not be serialized')
   }
 }

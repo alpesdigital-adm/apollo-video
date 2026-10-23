@@ -459,6 +459,8 @@ class DirectorRepository {
         productionBrief: createProductionBrief({ ownerText: 'Tom: direto, natural e sem efeitos gratuitos.' }),
         editorialRequest: readByInterpreter('Tom: direto, natural e sem efeitos gratuitos.'),
       },
+      // No remove-spoken-content request in this world: stated, never left to the port's default.
+      requestedSpeechRemovals: [],
       policies: { automaticZoom: false, faceProtection: true, guardrails: [] },
       editPlan: this.editPlan,
       currentDurationFrames: this.editPlan.durationFrames,

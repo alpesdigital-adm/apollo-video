@@ -18,6 +18,7 @@ import { createProjectLutSelectionInvalidations, parseProjectLutSelectionImpact 
 import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
 import { createApiAccessAuditContext, type ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 const selectionInclude = Prisma.validator<Prisma.V2ProjectLutSelectionInclude>()({
   command: { include: { artifactInvalidations: true } },
@@ -393,13 +394,16 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
         return hydrate(row, false)
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const replay = await this.findIdempotent({ workspaceId: command.workspaceId, projectId: command.projectId, idempotencyKey: command.idempotencyKey })
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && serializationAttempt < 3) return this.commitOrReplay(input, serializationAttempt + 1)
+      if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === 'P2002' || error.code === 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({ workspaceId: command.workspaceId, projectId: command.projectId, idempotencyKey: command.idempotencyKey }),
+        )
         if (replay?.requestFingerprint === requestFingerprint) return replay.result
         if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with another project LUT selection')
         throw new DomainError('VERSION_CONFLICT', 'Project LUT selection conflicted with another write')
       }
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && serializationAttempt < 3) return this.commitOrReplay(input, serializationAttempt + 1)
       throw error
     }
   }

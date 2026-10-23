@@ -3,6 +3,7 @@ import { basename } from 'node:path'
 
 import type { MediaTranscriber } from '../../application/ports/media-ingest.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { normalizeDetectedLanguage, primaryLanguageSubtag } from '../../domain/language-detection.ts'
 import { createMediaTranscript } from '../../domain/media-transcript.ts'
 
 interface GroqVerboseTranscript {
@@ -25,7 +26,7 @@ export class GroqMediaTranscriber implements MediaTranscriber {
     this.options = options
   }
 
-  async transcribe(input: { audioPath: string; language: string; signal?: AbortSignal }) {
+  async transcribe(input: { audioPath: string; language?: string; signal?: AbortSignal }) {
     const bytes = await readFile(input.audioPath)
     if (bytes.length <= 0 || bytes.length > 100 * 1024 * 1024) throw new DomainError('INVALID_ARGUMENT', 'Transcription audio must contain at most 100 MB')
     const form = new FormData()
@@ -35,7 +36,8 @@ export class GroqMediaTranscriber implements MediaTranscriber {
     form.append('timestamp_granularities[]', 'word')
     form.append('timestamp_granularities[]', 'segment')
     form.append('temperature', '0')
-    form.append('language', input.language.split('-')[0]!.toLowerCase())
+    // Told the project's language the provider transcribes under it (and cannot check it); asked for none it detects the language itself.
+    if (input.language) form.append('language', primaryLanguageSubtag(input.language))
     const response = await (this.options.fetchImplementation ?? fetch)('https://api.groq.com/openai/v1/audio/transcriptions', {
       method: 'POST',
       headers: { authorization: `Bearer ${this.options.apiKey}` },
@@ -75,8 +77,13 @@ export class GroqMediaTranscriber implements MediaTranscriber {
         ...(confidence !== undefined ? { confidence } : {}),
       }
     })
+    // The language the provider reports (an English name like "portuguese", or a code) resolved deterministically; one that cannot be resolved is
+    // the undetermined language, never a guess. With a declared language the transcript keeps it and says it was not verified.
+    const detected = normalizeDetectedLanguage(payload.language)
+    const contradicted = input.language !== undefined && detected !== null && primaryLanguageSubtag(detected) !== primaryLanguageSubtag(input.language)
     return createMediaTranscript({
-      language: input.language,
+      language: contradicted ? detected : input.language ?? detected ?? 'und',
+      languageBasis: input.language && !contradicted ? 'declared-not-verified' : 'detected-from-media',
       text: payload.text,
       words,
       segments,

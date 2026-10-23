@@ -113,13 +113,19 @@ test('the admission is bound to the request now in the brief and to the resoluti
   refused(quality({ policyResolutionHash: 'short' }), BOUND, /does not name/)
 })
 
-test('only the v5 report with critic v4 or later is admitted: older reports and critics are never inherited', () => {
+test('only the v5 report with critic v5 or later is admitted: older reports and critics are never inherited', () => {
   assert.equal(MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION, 5)
   assert.equal(ADMITTED_DIRECTOR_QUALITY_REPORT_SCHEMA, 'director-quality-report/v5')
-  for (const criticVersion of ['apollo-director-critic/v1', 'apollo-director-critic/v2', 'apollo-director-critic/v3', 'apollo-director-critic/v4', 'critic-e2e-1.0.0', 'project-director-critic/v2', '', undefined]) {
+  for (const criticVersion of ['apollo-director-critic/v1', 'apollo-director-critic/v2', 'apollo-director-critic/v3', 'apollo-director-critic/v4']) {
     const verdict = admitDirectorQualityForFinal(quality({ criticVersion }), BOUND)
     assert.equal(verdict.admitted, false, String(criticVersion))
     assert.match(verdict.reason, /superseded/)
+  }
+  // a critic the Apollo does not name at all is refused for that reason (allow-list), never read as an older Apollo critic
+  for (const criticVersion of ['critic-e2e-1.0.0', 'project-director-critic/v2', '', undefined]) {
+    const verdict = admitDirectorQualityForFinal(quality({ criticVersion }), BOUND)
+    assert.equal(verdict.admitted, false, String(criticVersion))
+    assert.match(verdict.reason, /not a critic the Apollo admits/)
   }
   for (const schemaVersion of ['director-quality-report/v3', 'director-quality-report/v4', undefined]) {
     const verdict = admitDirectorQualityForFinal(quality({ schemaVersion }), BOUND)
@@ -130,6 +136,21 @@ test('only the v5 report with critic v4 or later is admitted: older reports and 
   assert.deepEqual(admitDirectorQualityForFinal(quality({ criticVersion: 'apollo-director-critic/v10' }), BOUND), { admitted: true, basis: 'per-cue-caption-certification' })
   // the required checks carry no editorial name
   assert.deepEqual([...REQUIRED_HARD_CHECKS], ['requestHonored', 'timelineContinuous', 'sourceRightsCertain'])
+})
+
+test('only a critic the Apollo names is admitted: any other name, or none, is refused (an allow-list, not a list of the superseded)', () => {
+  for (const criticVersion of [
+    'project-director-critic/v2', 'critic-e2e-1.0.0', 'apollo-director-critic/v3-beta', 'apollo-director-critic/v03',
+    'apollo-director-critic/v', 'apollo-director-critic/v-3', 'apollo-director-critic/v3 ', 'x-apollo-director-critic/v3', '',
+  ]) {
+    const verdict = admitDirectorQualityForFinal(quality({ criticVersion }))
+    assert.equal(verdict.admitted, false, criticVersion)
+    assert.match(verdict.reason, /not a critic the Apollo admits/, criticVersion)
+  }
+  const { criticVersion: _omitted, ...withoutCritic } = quality()
+  const verdict = admitDirectorQualityForFinal(withoutCritic)
+  assert.equal(verdict.admitted, false)
+  assert.match(verdict.reason, /not a critic the Apollo admits/)
 })
 
 test('every burned cue is placed in a free-certified band and confirmed in pixels; the receipt names how each band was certified', () => {

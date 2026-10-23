@@ -36,7 +36,12 @@ export const EDITORIAL_DIRECTIVE_VOCABULARY: Readonly<Record<EditorialDirectiveK
   movement: Object.freeze({ values: Object.freeze(['none', 'punch-in', 'zoom-in', 'zoom-out', 'pan', 'tilt', 'parallax']), params: Object.freeze({}) }),
   opening: Object.freeze({ values: Object.freeze(['none', 'protect-first-sentence', 'protect-seconds']), params: Object.freeze({ 'protect-seconds': 'seconds' as const }) }),
   structure: Object.freeze({ values: Object.freeze(['source-order', 'hook-first']), params: Object.freeze({}) }),
-  cta: Object.freeze({ values: Object.freeze(['none', 'verbal-only', 'overlay-closing', 'overlay-at-spoken-cta']), params: Object.freeze({}) }),
+  // `overlay-whole-video` and `overlay-from-seconds` are the structured placement of the visual call to action: where the requester says it goes,
+  // for a speech that shows no call to say it (they run to the end of the video; the second is counted on the video's own timeline).
+  cta: Object.freeze({
+    values: Object.freeze(['none', 'verbal-only', 'overlay-closing', 'overlay-at-spoken-cta', 'overlay-whole-video', 'overlay-from-seconds']),
+    params: Object.freeze({ 'overlay-from-seconds': 'seconds' as const }),
+  }),
   layout: Object.freeze({ values: Object.freeze(['source-native', 'fit-with-backdrop', 'fill-crop']), params: Object.freeze({}) }),
   'caption-language': Object.freeze({ values: Object.freeze(['set']), params: Object.freeze({ set: 'language' as const }) }),
   'caption-style': Object.freeze({ values: Object.freeze([...SUBTITLE_PRESET_IDS]), params: Object.freeze({}) }),
@@ -53,7 +58,7 @@ export const EDITORIAL_EXECUTABLE_VALUES: Readonly<Record<EditorialDirectiveKind
   movement: Object.freeze(['none']),
   opening: Object.freeze(['none', 'protect-first-sentence', 'protect-seconds']),
   structure: Object.freeze(['source-order']),
-  cta: Object.freeze(['none', 'verbal-only', 'overlay-closing', 'overlay-at-spoken-cta']),
+  cta: Object.freeze(['none', 'verbal-only', 'overlay-closing', 'overlay-at-spoken-cta', 'overlay-whole-video', 'overlay-from-seconds']),
   layout: Object.freeze(['fit-with-backdrop', 'source-native']),
   'caption-language': Object.freeze(['set']),
   'caption-style': Object.freeze([...SUBTITLE_PRESET_IDS]),
@@ -165,7 +170,9 @@ export function parseEditorialDirective(value: unknown, where: string, allowExce
   if (paramKind === undefined) {
     assertDomain(param === undefined, 'INVALID_ARGUMENT', `${where}: ${kind} ${directiveValue} takes no parameter`)
   } else if (paramKind === 'seconds') {
-    assertDomain(typeof param === 'number' && Number.isFinite(param) && param > 0 && param <= 30, 'INVALID_ARGUMENT', `${where}: ${kind} ${directiveValue} needs seconds between 0 and 30`)
+    // An opening window is a few seconds; the second a call to action starts at is a second of the whole video.
+    const maxSeconds = directiveValue === 'overlay-from-seconds' ? 3_600 : 30
+    assertDomain(typeof param === 'number' && Number.isFinite(param) && param > 0 && param <= maxSeconds, 'INVALID_ARGUMENT', `${where}: ${kind} ${directiveValue} needs seconds between 0 and ${maxSeconds}`)
   } else if (paramKind === 'language') {
     assertDomain(typeof param === 'string' && LANGUAGE_TAG.test(param), 'INVALID_ARGUMENT', `${where}: ${kind} ${directiveValue} needs a language tag`)
   } else {

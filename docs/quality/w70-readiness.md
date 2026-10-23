@@ -173,3 +173,28 @@ Leitura, com o limite de cada uma:
   laudo que não foi carregado. Fica em aberto.
 - Depois do merge a falha é outra (o cartão do projeto não aparece) e `main` 4df3fc6f reprova igual neste host; o host estava carregado (build de 725 s contra ~100 s antes;
   carry 243 s contra 47 s). Não separei carga de host de mudança de `main`.
+
+## 10. Seguimento da revisão do Opus sobre a PR #95 (ramo `claude/w70r-followups`)
+
+- **A - identidade da política.** `PROXY_REVIEW_POLICY_IDENTITY` copiava à mão `'proxy-review/v1'` e `'format-quality-report/v3'` e não via os limiares de
+  `evaluateRenderedProxy` (tolerância de duração) nem os de `critiqueOutputFormat` (limite de densidade). Agora as constantes reais
+  (`PROXY_REVIEW_SCHEMA_VERSION`, `FORMAT_QUALITY_REPORT_SCHEMA_VERSION`) e os objetos de política que as funções leem (`PROXY_REVIEW_POLICY`,
+  `FORMAT_QUALITY_POLICY`) são exportados, as funções os leem, e a identidade é o hash deles (mais o hash do registro de formatos, as especificações de proxy e as políticas de
+  âncora). Prova: mudar cada limiar (sem trocar versão de esquema) muda o digest da política e o endereço de conteúdo
+  (`proxy-render-content-hash.test.mjs`). Limite: a regra de status (bloqueio duro / ressalva sem reconhecimento) é código, não dado; continua fixada pela versão do esquema.
+- **B - repetição após conflito P2002.** `findDecisionReplay` agora passa por `withCarriedFrom`; a resposta repetida traz `carriedFrom`. Teste em
+  `proxy-review-carried-reads.test.mjs` (reprova sem a correção).
+- **C - a linha guarda o carry automático.** O carry deixou de copiar o reconhecimento da pessoa de origem: grava `acknowledgedByType='automatic-carry'`,
+  `acknowledgedById` = decisão `carry-over-approval`, `acknowledgedAt` = hora dela. Migração `20261021130000` relaxa `proxy_reviews_acknowledgement_check` e reescreve, a partir da
+  própria decisão, as linhas feitas pelo carry anterior. A leitura publica a linha como está (e recusa, `PERSISTENCE_CONFLICT`, uma aprovação carregada cuja linha não nomeia
+  a decisão); a pessoa é lida da revisão de origem por `carriedFromReviewId` (segue uma cadeia de carries, limite 64) e só aparece em `carriedFrom.acknowledgedBy`. Contrato público
+  inalterado (baseline e paridade não mudaram). Provas: teste com cliente simulado (cadeia, linhas adulteradas recusadas) e, na jornada de carry em PostgreSQL, a linha crua da revisão
+  carregada e a conferência de que a pessoa de V0 é reconhecedora só da revisão que reconheceu.
+- **D - corrida do teste do editor.** `waitForEditorSettle` parava no primeiro marcador presente e `proxy-review-gate` (sempre desenhado) vem antes do `<video>`. Agora cada
+  chamada declara o que precisa (`project-preview` para as aberturas que usam o preview; `review-unavailable` para a fase de recusa; qualquer marcador para as demais); uma recusa
+  ainda encerra a espera quando o preview não virá. O tempo (8 s) não mudou; um fracasso informa o que estava presente e o que faltou.
+
+Execuções (harness `run-local-pg-s2d.mjs`, árvore limpa, cabeça `HEAD` do ramo; plano com 3x `editor-reliability`, `proxy-carry-over`, `issue-override-ui`): `w70r-fu2`: 5 de 5 passos
+verdes (editor-reliability 3/3, carry 1/1 com a migração nova aplicada, W68 1/1). Uma execução anterior (`w70r-fu`) falhou no `next build` por erro de tipo introduzido por mim
+e corrigido antes (o carry, que roda sem checagem de tipos, passou). N=3 para o editor: indício de que a corrida sumiu, não prova de taxa; sem execução do mesmo teste antes da correção
+neste host nesta rodada.

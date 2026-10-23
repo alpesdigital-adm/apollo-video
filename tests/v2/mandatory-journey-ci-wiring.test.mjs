@@ -859,6 +859,7 @@ const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/output-consumption-readers.pg.integration.mjs', reason: W66_SUPERVISED_PG },
   { file: 'tests/v2/prisma-deferred-commit-semantics.pg.integration.mjs', reason: W66_SUPERVISED_PG },
   { file: 'tests/v2/project-child-adoption.pg.integration.mjs', reason: W66_SUPERVISED_PG, citedBy: ['docs/quality/w66-version-overlay-integration-v1.md'] },
+  { file: 'tests/v2/observed-probe-assertion.pg.integration.mjs', reason: W66_SUPERVISED_PG, citedBy: ['docs/quality/w66-version-overlay-integration-v1.md'] },
   { file: 'tests/v2/project-creation-output-bundle.pg.integration.mjs', reason: W66_SUPERVISED_PG },
   { file: 'tests/v2/project-list-format-facet.pg.integration.mjs', reason: W66_SUPERVISED_PG, citedBy: ['docs/quality/w66-version-overlay-integration-v1.md'] },
   { file: 'tests/v2/project-operational-output-bundle.pg.integration.mjs', reason: W66_SUPERVISED_PG, citedBy: ['docs/quality/w66-version-overlay-integration-v1.md'] },

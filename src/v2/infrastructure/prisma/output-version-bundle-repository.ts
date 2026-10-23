@@ -10,7 +10,9 @@ import { evaluateAssetUse, UNDETERMINED_LOCALE } from '../../domain/asset-rights
 import { createPublicEvent } from '../../domain/public-event.ts'
 import { PrismaAssetRightsRepository } from './asset-rights-repository.ts'
 import { readPersistedCreationOutputBundleV2, readPersistedForkCreationOutputBundleV3 } from './output-state-consumption.ts'
-import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
+import { readCompletedIdempotencyResponse,
+  pauseBeforeLostRaceRetry,
+} from './idempotency-record-persistence.ts'
 import { normalizeProjectName, projectStatusTransitionPath } from '../../domain/project.ts'
 
 type Tx = Prisma.TransactionClient
@@ -202,7 +204,7 @@ export class PrismaCreationOutputBundleRepositoryV2 implements CreationOutputBun
       new Set(input.eventIds.map((id)=>id.toLowerCase())).size!==2)
       throw new DomainError('INVALID_ARGUMENT','Creation idempotency/event allocation invalid')
     let committed: {projectId:string;versionId:string;replayed:boolean} | undefined
-    for (let attempt=0;attempt<3;attempt++) {
+    for (let attempt=0;;attempt++) {
       try {
         committed=await this.client.$transaction(async(tx)=>{
           await tx.$executeRawUnsafe("SET LOCAL statement_timeout = '10000ms'")
@@ -300,7 +302,7 @@ export class PrismaCreationOutputBundleRepositoryV2 implements CreationOutputBun
         },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,maxWait:10000,timeout:30000})
         break
       } catch(error) {
-        if (retryable(error) && attempt<2) continue
+        if (retryable(error) && await pauseBeforeLostRaceRetry(attempt + 1)) continue
         if (retryable(error)) return conflict('Creation full bundle serialization retries exhausted')
         throw error
       }
@@ -560,7 +562,7 @@ export class PrismaOperationalOutputBundleRepositoryV3 implements OperationalOut
           actual.version.baseHash!==result.bundle.version.baseHash || actual.state.stateHash!==result.bundle.state.stateHash)
           return conflict('Operational committed bundle readback missing')
         return Object.freeze({bundle:actual,replayed:result.replayed})
-      } catch(error) {if(retryable(error)&&attempt<2)continue;throw error}
+      } catch(error) {if(retryable(error)&&await pauseBeforeLostRaceRetry(attempt + 1))continue;throw error}
     }
     return conflict('Operational serialization retry exhausted')
   }

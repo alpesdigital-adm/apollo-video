@@ -89,9 +89,13 @@ const refuse = (reason: string): FinalQualityAdmission => Object.freeze({ admitt
  * The oldest Director critic whose report names the request it answers. `apollo-director-critic/v4` judged the plan against a sealed policy
  * resolution whose caption width, opening window, structure roles and rubric were still values the planner carried; `v5` judges it against
  * a resolution derived from the request (ADR-160 F3-F5). A report born under an earlier critic is not inherited - the Director runs again.
+ *
+ * The admission is an ALLOW-LIST: only a report that names `apollo-director-critic/v<N>`, with N a plain positive integer ordered
+ * numerically at or above this minimum, is admitted. A report naming any other critic - or none - is refused, because nothing says
+ * what its hard checks mean; a list of the superseded would let an unknown name through.
  */
 export const MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION = 5
-const APOLLO_DIRECTOR_CRITIC_VERSION = /^apollo-director-critic\/v(\d+)$/
+const APOLLO_DIRECTOR_CRITIC_VERSION = /^apollo-director-critic\/v([1-9]\d*)$/
 /** The only report schema a final export admits. v3 and v4 stay readable and are never admitted. */
 export const ADMITTED_DIRECTOR_QUALITY_REPORT_SCHEMA = 'director-quality-report/v5'
 
@@ -114,7 +118,7 @@ export type AdmissibleDirectorQuality = Readonly<Pick<DirectorQualityReport, 'st
 }>
 
 /**
- * (a) of the policy. A report is admitted only when it is a v5 report of critic v4 or later, bound to the request now in the brief and to
+ * (a) of the policy. A report is admitted only when it is a v5 report of critic v5 or later (`MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION`), bound to the request now in the brief and to
  * the policy resolution sealed in its run, with every hard check holding. A verified face safety claim keeps its original basis; the
  * report the Director actually produces - `review-required` with an unknown face claim - is admitted when that claim is its only
  * reservation. Everything else (blocked, an older report, a request that moved, a failed check, a hard issue, an inconsistent claim) is
@@ -127,8 +131,11 @@ export function admitDirectorQualityForFinal(report: AdmissibleDirectorQuality, 
     return refuse(`Director quality report ${String(report.schemaVersion)} is superseded: it did not judge a sealed editorial request, so a new Director run is required`)
   }
   const criticVersion = APOLLO_DIRECTOR_CRITIC_VERSION.exec(report.criticVersion ?? '')
-  if (!criticVersion || Number(criticVersion[1]) < MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION) {
-    return refuse(`Director critic ${String(report.criticVersion)} is superseded: its hard checks did not evaluate the sealed editorial request`)
+  if (!criticVersion) {
+    return refuse(`Director critic ${JSON.stringify(report.criticVersion ?? null)} is not a critic the Apollo admits: only apollo-director-critic/v${MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION} or later is`)
+  }
+  if (Number(criticVersion[1]) < MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION) {
+    return refuse(`Director critic ${report.criticVersion} is superseded: its hard checks did not evaluate the sealed editorial request`)
   }
   if (!binding) return refuse('Director quality report cannot be bound to the editorial request now in the brief')
   if (!/^[a-f0-9]{64}$/.test(report.requestHash ?? '') || !/^[a-f0-9]{64}$/.test(report.policyResolutionHash ?? '')) {

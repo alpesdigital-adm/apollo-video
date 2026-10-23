@@ -160,3 +160,15 @@ test('T-F4.015 the same cut compiled on two days is one row, not a conflict', ()
     calculateRenderablePlanHash(plan({ projectVersionId: 'version-hash-2' })),
   )
 })
+
+test('a compiler that knows the geometry gets the layout the geometry asks for: the source as it is where the shapes agree, a backdrop where they differ', () => {
+  const unknown = assembleDirectedEditPlan(PLAN)
+  assert.equal(unknown.composition.background, 'blurred-source', 'geometry unknown: the whole frame stays visible over a backdrop')
+  const same = assembleDirectedEditPlan({ ...PLAN, geometry: { sourceAspectRatio: '16:9', outputAspectRatios: ['16:9'] } })
+  assert.equal(same.composition.layout, 'source-native')
+  assert.equal(same.composition.background, 'none')
+  const differs = assembleDirectedEditPlan({ ...PLAN, geometry: { sourceAspectRatio: '16:9', outputAspectRatios: ['9:16'] } })
+  assert.equal(differs.composition.background, 'blurred-source')
+  const partial = assembleDirectedEditPlan({ ...PLAN, geometry: { outputAspectRatios: ['16:9'] } })
+  assert.equal(partial.composition.background, 'blurred-source', 'a source of unknown shape is not assumed equal to the output')
+})

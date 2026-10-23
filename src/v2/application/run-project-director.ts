@@ -245,6 +245,14 @@ function buildPerception(input: {
   return Object.freeze({ perception, serverPerception })
 }
 
+/** The mean adjacent-frame change score of the shot observations, as a ratio. No observation, no measurement: 0. */
+function measuredVisualVariety(observations: readonly Readonly<{ kind: string; value: unknown }>[]): number {
+  const scores = observations.filter((item) => item.kind === 'shot').map((item) => (item.value as { changeScore?: unknown } | null)?.changeScore)
+    .filter((score): score is number => typeof score === 'number' && Number.isFinite(score))
+  if (scores.length === 0) return 0
+  return Number(Math.min(1, Math.max(0, scores.reduce((sum, score) => sum + score, 0) / scores.length)).toFixed(4))
+}
+
 /** What the Director itself carries of its input Version, for a context that has no store to read the rest of the evidence from. */
 function directorAssemblyInput(input: {
   workspaceId: string
@@ -990,6 +998,10 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     }
     const context = await dependencies.repository.readContext({ workspaceId, projectId })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Project with aligned media was not found')
+    // Fail closed: a context that does not state the speech the project asked to remove must not be read as "nothing was asked".
+    if (!Array.isArray(context.requestedSpeechRemovals)) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Director context does not state the speech the project asked to remove')
+    }
     if (context.currentVersion.id !== baseVersionId || context.currentVersion.baseHash !== request.baseHash) {
       throw new DomainError('VERSION_CONFLICT', 'Director base version is stale', { currentVersionId: context.currentVersion.id, currentBaseHash: context.currentVersion.baseHash })
     }
@@ -1090,7 +1102,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       (clip) => clip.sourceArtifactId !== context.transcript.sourceArtifactId,
     )
     // The spoken call is recognised by the words of the language of the speech (the observed transcript), never by a list of one language.
-    const transcriptLanguage = typeof context.transcript.language === 'string' ? context.transcript.language.trim() : ''
+    // The undetermined language is no language: it is the report of a provider that could not tell (ADR-160), not a value to write captions in.
+    const reportedLanguage = typeof context.transcript.language === 'string' ? context.transcript.language.trim() : ''
+    const transcriptLanguage = reportedLanguage.toLowerCase() === 'und' ? '' : reportedLanguage
     const ctaObservation = observeSpokenCta({
       action: desiredAction, spokenText: context.editPlan.retimedTranscript.words.map((word) => word.text).join(' '),
       ...(transcriptLanguage ? { language: transcriptLanguage } : {}),
@@ -1105,12 +1119,14 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const desiredActionRef = createDesiredActionReference(desiredAction)
     // ADR-160. Nothing below is fixed: the editorial request of the brief this run leaves behind (and the speech its Commands asked to
     // remove) resolves to the policies the plan is made from. A request the Apollo cannot execute, or a question it left open, stops here.
-    const requestedRemovalIds = (context.requestedSpeechRemovals ?? []).map((rule) => rule.id)
+    const requestedRemovalIds = context.requestedSpeechRemovals.map((rule) => rule.id)
     const editorialRequest = deriveEditorialRequestFromBrief({ ...context.brief, objective: objective.id, desiredAction }, requestedRemovalIds)
     // A briefing with text that nobody has interpreted is a request nobody read: refused here, never planned over as if it were empty.
     assertBriefingInterpreted(editorialRequest)
     const resolution = resolveEditorialPolicies(editorialRequest, {
-      transcriptId: context.transcript.id, ...(transcriptLanguage ? { transcriptLanguage } : {}), hasSelectedInsert,
+      transcriptId: context.transcript.id, ...(transcriptLanguage ? { transcriptLanguage, transcriptLanguageBasis: context.transcript.languageBasis ?? 'declared-not-verified' as const } : {}),
+      ...(context.project.locale ? { declaredLocale: context.project.locale } : {}),
+      hasSelectedInsert,
       ...(subtitleStyleOverrideOf(context.policies) ? { subtitleStyleOverride: subtitleStyleOverrideOf(context.policies)! } : {}),
       ...(spokenCta ? { spokenCta: { startSeconds: spokenCta.startSeconds, endSeconds: spokenCta.endSeconds } } : {}),
       timelineDurationSeconds: Math.round(context.editPlan.durationFrames / fpsOfPlan * 1_000) / 1_000,
@@ -1205,7 +1221,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         summaryHash: calculateVersionHash(perception.summary),
         confidence: perception.summary.confidence,
         speakerCoverage: perception.summary.speechCoverage,
-        visualVariety: 0,
+        // Measured, not declared: the mean adjacent-frame change the perception snapshot recorded over the timeline (0 where nothing was measured: the
+        // snapshot's own coverage says whether the kind was examined).
+        visualVariety: measuredVisualVariety(perception.timeline.observations),
         evidenceItemCount: perception.timeline.observations.length,
         durationMs: Math.round(context.editPlan.durationFrames / context.editPlan.fps * 1_000),
       },
@@ -1394,7 +1412,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       rightsVerdicts,
       decisions,
       perceptionEvidence: perceptionEvidenceReport,
-      requestedSpeechRemovals: context.requestedSpeechRemovals ?? [],
+      requestedSpeechRemovals: context.requestedSpeechRemovals,
       resolution,
       ...(transcriptLanguage ? { speechLanguage: transcriptLanguage } : {}),
     })
@@ -1409,7 +1427,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         gateFailures: qualityReport.strategic.gateFailures,
         requestedSpeechStillPresent: editorialRulesMatchingSpeech(
           editPlan.subtitleTracks.flatMap((track) => track.cues).map((cue) => cue.text).join(' '),
-          context.requestedSpeechRemovals ?? []),
+          context.requestedSpeechRemovals),
         blockedDecisions: decisions.filter((decision) => decision.perceptionEvidence !== undefined && decision.confidenceBand === 'block')
           .map((decision) => decision.id),
         uncertainRights: rightsVerdicts.filter((verdict) => !verdict.certain).map((verdict) => `${verdict.artifactId}:${verdict.reasonCode}`),

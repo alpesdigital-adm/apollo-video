@@ -37,6 +37,7 @@ import {
 import {
   calculateSpeakerDiarizationRequestFingerprint,
 } from '../../application/speaker-diarization.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type RunWithSegments = V2SpeakerDiarizationRun & {
   segments: V2SpeakerDiarizationSegment[]
@@ -801,12 +802,15 @@ implements SpeakerDiarizationRepository {
         isPrismaCode(error, 'P2002') ||
         isPrismaCode(error, 'P2034')
       ) {
-        const replay = await this.findReplay({
-          workspaceId: run.workspaceId,
-          workflowId: run.workflowId,
-          actorContextHash: run.authenticationAudit.contextHash,
-          idempotencyKey: run.idempotencyKey,
-        })
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findReplay({
+            workspaceId: run.workspaceId,
+            workflowId: run.workflowId,
+            actorContextHash: run.authenticationAudit.contextHash,
+            idempotencyKey: run.idempotencyKey,
+          }),
+        )
         if (
           replay &&
           replay.requestFingerprint === run.requestFingerprint

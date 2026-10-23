@@ -187,7 +187,7 @@ export function memoryDirections() {
   }
 }
 
-export function memoryCommands({ world, mediaLinks, offered = PERSISTED_RECEIPTS }) {
+export function memoryCommands({ world, mediaLinks, offered = PERSISTED_RECEIPTS, policyResolution, plan }) {
   const commands = new Map()
   const calls = { readContext: 0, commitOrReplay: 0, readAdoptableObservations: 0 }
   const requested = []
@@ -226,8 +226,9 @@ export function memoryCommands({ world, mediaLinks, offered = PERSISTED_RECEIPTS
         currentVersion,
         // The plan the direction re-cuts is the Director plan below, not the head's ingest plan: the world's head only
         // lends its sealed Version and State, and the cut is sealed on top of them by `sealOnObservedSource`.
-        currentPlan: baseDirectedPlan({ versionId: currentVersion.id }),
+        currentPlan: plan ?? baseDirectedPlan({ versionId: currentVersion.id }),
         currentDurationFrames: 900,
+        ...(policyResolution ? { policyResolution } : {}),
         variantIds: HEAD.state.document.entries.map((entry) => entry.variantId),
         outputReferences: Object.freeze([]),
         mediaLinks: Object.freeze(links),

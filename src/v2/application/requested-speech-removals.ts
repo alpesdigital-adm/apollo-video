@@ -1,5 +1,8 @@
 import { DomainError } from '../domain/errors.ts'
-import { defineEditorialPhraseRules, type EditorialPhraseRule } from './editorial-phrase-rules.ts'
+import {
+  resolveSubtitleOverridesForRender, type SubtitleOverrideRenderCue, type SubtitleSegmentOverride,
+} from '../domain/subtitle-segment-override.ts'
+import { defineEditorialPhraseRules, editorialRulesMatchingSpeech, type EditorialPhraseRule } from './editorial-phrase-rules.ts'
 
 /**
  * What the Apollo was ASKED to take out of a video's speech: the `rules` of the `remove-spoken-content` Commands that made the
@@ -9,6 +12,8 @@ export interface SpeechRemovalLineageVersion {
   id: string
   parentVersionId: string | null
   commandId: string | null
+  /** The type of the Command that made the Version (null: none). A `remove-spoken-content` Version must find its row in `commands`. */
+  commandType: string | null
   forkedFromProjectId: string | null
   forkedFromVersionId: string | null
 }
@@ -69,6 +74,10 @@ export async function collectRequestedSpeechRemovals(input: {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Director lineage names a Version that does not exist', { versionId })
     }
     const command = version.commandId === null ? undefined : project.commands.get(version.commandId)
+    // Fail closed: a Version the lineage says a removal made, whose Command row is not there, would silently drop a request.
+    if (version.commandType === REMOVAL_COMMAND && command?.type !== REMOVAL_COMMAND) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Director lineage names a remove-spoken-content Command that does not exist', { versionId, commandId: version.commandId })
+    }
     const restores = command?.type === MANUAL_EDIT_COMMAND ? command.payload.restoresVersionId : undefined
     if (typeof restores === 'string') {
       versionId = restores
@@ -86,4 +95,21 @@ export async function collectRequestedSpeechRemovals(input: {
     }
   }
   return Object.freeze(rules)
+}
+
+/**
+ * The requested removals that the captions a final would BURN say again. The Director checked the captions of its own plan; a text
+ * exception on a caption segment (`apply-subtitle-segment-override`) made afterwards can write a removed phrase back without the Director
+ * ever seeing it. So the check is repeated on what is actually drawn: the plan's cues with the output's exceptions applied (a hidden cue
+ * says nothing), judged with the same phrase tokens the cut used. Returns the ids of the rules whose phrase is present, in rule order.
+ */
+export function requestedSpeechReintroducedByCaptions(input: {
+  rules: readonly Readonly<EditorialPhraseRule>[]
+  cues: readonly Readonly<SubtitleOverrideRenderCue>[]
+  overrides: readonly Readonly<SubtitleSegmentOverride>[]
+  variantId: string
+}): readonly string[] {
+  if (input.rules.length === 0) return Object.freeze([])
+  const drawn = resolveSubtitleOverridesForRender({ cues: input.cues, overrides: input.overrides, variantId: input.variantId }).cues
+  return Object.freeze(editorialRulesMatchingSpeech(drawn.map((cue) => cue.text).join(' '), input.rules))
 }

@@ -306,6 +306,8 @@ são admitidos: exigem novo DirectorRun. Aprovação antiga nunca é herdada em 
    toda política com origem e razão.
 2. Varredura de literais editoriais proibidos fora do módulo de resolução, com baseline que só encolhe.
 3. Admissão recusa relatório v4/crítico v3 e relatório v5 com `requestHash` ou `policyResolutionHash` divergente.
+4. A varredura reconhece também o locale fixo em forma de atribuição (`|| 'pt-BR'`, `locale: 'pt-BR'`, argumento final de chamada, `setLocale`); o que resta no baseline é UI (F7/F8).
+5. Um transcript de idioma declarado nunca é registrado como idioma observado na mídia (`languageBasis`), e a colocação do CTA visual sem fala de CTA é um campo estruturado do pedido (`cta: overlay-whole-video | overlay-from-seconds`).
 
 ## 8. Rubric estratégica
 

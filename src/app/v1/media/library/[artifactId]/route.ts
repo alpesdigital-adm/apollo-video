@@ -15,7 +15,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ art
     const actor = await authenticateExternalRequest(request)
     requireScope(actor, 'artifacts:read')
     const { artifactId } = await context.params
-    const item = await readMediaLibraryItemService({ repository: createMediaLibraryRepository() })(actor.workspaceId, artifactId)
+    const item = await readMediaLibraryItemService({ repository: createMediaLibraryRepository() })(actor.workspaceId, artifactId, request.nextUrl.searchParams.get('locale') ?? undefined)
     return NextResponse.json(presentSuccess(item), { headers: publicApiHeaders(requestId) })
   } catch (error) {
     return respondPublicError(error, requestId)

@@ -8,6 +8,7 @@ import { resolveStrategicObjective } from '../../domain/strategic-objective.ts'
 import { validateTreatmentPlan, type TreatmentPlan } from '../../domain/treatment-plan.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 function policyEvidence(row: { id: string; kind: string; schemaVersion: number; contentJson: string; contentHash: string }) {
   try {
@@ -130,8 +131,11 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         return Object.freeze({ value: hydrate(row), replayed: false })
       } catch (error) {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 2) continue
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-          const replay = await this.findIdempotent({ workspaceId: value.workspaceId, projectId: value.projectId, createdByClientId: value.createdByClientId, idempotencyKey: value.idempotencyKey, actorContextHash: authenticationAudit.contextHash })
+        if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === 'P2002' || error.code === 'P2034')) {
+          const replay = await reconcileAfterConflict(
+            error,
+            () => this.findIdempotent({ workspaceId: value.workspaceId, projectId: value.projectId, createdByClientId: value.createdByClientId, idempotencyKey: value.idempotencyKey, actorContextHash: authenticationAudit.contextHash }),
+          )
           if (replay && replay.requestFingerprint === value.requestFingerprint) return Object.freeze({ value: replay, replayed: true })
         }
         throw error

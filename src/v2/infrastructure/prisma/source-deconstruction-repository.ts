@@ -32,6 +32,7 @@ import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import {
   hydrateStoredSpeechSegment,
 } from './speech-segment-catalog-repository.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 interface ReportWithProjection
 extends V2SourceDeconstructionReport {
@@ -461,9 +462,11 @@ async function assertCurrentSource(
 
 export class PrismaSourceDeconstructionRepository
 implements SourceDeconstructionRepository {
-  constructor(
-    private readonly prisma: PrismaClient = getV2PostgresClient(),
-  ) {}
+  private readonly prisma: PrismaClient
+
+  constructor(prisma: PrismaClient = getV2PostgresClient()) {
+    this.prisma = prisma
+  }
 
   async loadSourceContext(input: {
     workspaceId: string
@@ -655,14 +658,17 @@ implements SourceDeconstructionRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.create(record, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findCreateReplay({
-          workspaceId: record.report.workspaceId,
-          projectId: record.report.projectId,
-          actorClientId: record.report.createdByClientId,
-          actorContextHash: record.authenticationAudit.contextHash,
-          idempotencyKey: record.idempotencyKey,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findCreateReplay({
+            workspaceId: record.report.workspaceId,
+            projectId: record.report.projectId,
+            actorClientId: record.report.createdByClientId,
+            actorContextHash: record.authenticationAudit.contextHash,
+            idempotencyKey: record.idempotencyKey,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(

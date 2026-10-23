@@ -38,6 +38,7 @@ import {
 } from '../../domain/hybrid-search.ts'
 import { normalizeSpeechText } from '../../domain/speech-segment-catalog.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type SearchRow = V2SemanticSearchDocument & {
   sourceArtifact: {
@@ -1310,13 +1311,16 @@ implements SemanticSearchRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.persistDocument(document, vector, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotentDocument({
-          workspaceId: document.workspaceId,
-          projectId: document.projectId,
-          idempotencyKey: document.idempotencyKey,
-          actorContextHash: document.authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotentDocument({
+            workspaceId: document.workspaceId,
+            projectId: document.projectId,
+            idempotencyKey: document.idempotencyKey,
+            actorContextHash: document.authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (
             replay.requestFingerprint !== document.requestFingerprint
@@ -1632,13 +1636,16 @@ implements SemanticSearchRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.persistEvaluation(evaluation, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotentEvaluation({
-          workspaceId: evaluation.workspaceId,
-          projectId: evaluation.projectId,
-          idempotencyKey: evaluation.idempotencyKey,
-          actorContextHash: evaluation.authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotentEvaluation({
+            workspaceId: evaluation.workspaceId,
+            projectId: evaluation.projectId,
+            idempotencyKey: evaluation.idempotencyKey,
+            actorContextHash: evaluation.authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (
             replay.requestFingerprint !==
@@ -1781,13 +1788,16 @@ implements SemanticSearchRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.persistScaleEvaluation(evaluation, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotentScaleEvaluation({
-          workspaceId: evaluation.workspaceId,
-          projectId: evaluation.projectId,
-          idempotencyKey: evaluation.idempotencyKey,
-          actorContextHash: evaluation.authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotentScaleEvaluation({
+            workspaceId: evaluation.workspaceId,
+            projectId: evaluation.projectId,
+            idempotencyKey: evaluation.idempotencyKey,
+            actorContextHash: evaluation.authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (
             replay.requestFingerprint !==
@@ -1911,13 +1921,16 @@ implements SemanticSearchRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.persistReuseRun(run, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotentReuseRun({
-          workspaceId: run.workspaceId,
-          projectId: run.projectId,
-          idempotencyKey: run.idempotencyKey,
-          actorContextHash: run.authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotentReuseRun({
+            workspaceId: run.workspaceId,
+            projectId: run.projectId,
+            idempotencyKey: run.idempotencyKey,
+            actorContextHash: run.authenticationAudit.contextHash,
+          }),
+        )
         if (replay) {
           if (replay.requestFingerprint !== run.requestFingerprint) {
             throw new DomainError(

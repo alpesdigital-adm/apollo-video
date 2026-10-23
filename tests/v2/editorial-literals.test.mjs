@@ -27,6 +27,12 @@ const RESOLUTION_MODULES = Object.freeze([
 ])
 
 /**
+ * The published example payloads of the public contract are samples of a shape, not decisions: a locale in them is a value of the example. They are
+ * exempt from the locale pattern only (and from nothing else).
+ */
+const EXAMPLE_MODULES = Object.freeze({ 'src/v2/public-api/schema-examples.ts': Object.freeze(["a locale property set to 'pt-BR'"]) })
+
+/**
  * `id` is the label the baseline uses. Two patterns are narrower than the words of the design on purpose:
  *  - 'workspace-default' only as a list of one (`['workspace-default']`, the Lotes audience default); the subtitle and LUT selection
  *    MODES that spell the same word are values a requester names explicitly, which is a request, not a default;
@@ -45,6 +51,10 @@ const PATTERNS = Object.freeze([
   { id: 'placeholder="Ex.', regex: /placeholder="Ex\./ },
   { id: "('discovery') as an initial objective", regex: /(?:useState<[^>]*>|setObjective)\('discovery'\)/ },
   { id: "?? 'pt-BR'", regex: /\?\?\s*['"]pt-BR['"]/ },
+  { id: "|| 'pt-BR'", regex: /\|\|\s*['"]pt-BR['"]/ },
+  { id: "a locale property set to 'pt-BR'", regex: /\b\w*[lL]ocales?\s*:\s*['"]pt-BR['"]/ },
+  { id: "'pt-BR' as the last argument of a call", regex: /(?<!localeCompare\([^()]*),\s*['"]pt-BR['"]\s*\)/ },
+  { id: "setLocale('pt-BR')", regex: /\bset\w*Locale\(\s*['"]pt-BR['"]\s*\)/ },
   { id: "useState('pt-BR')", regex: /useState(?:<[^>]*>)?\(\s*['"]pt-BR['"]\s*\)/ },
   { id: "locale parameter defaulting to 'pt-BR'", regex: /\blocale\s*(?::\s*string\s*)?=\s*['"]pt-BR['"]/ },
   { id: "'clean-color' as a default style", regex: /(?:subtitleStyle|presetId)\s*:\s*['"]clean-color['"]|\?\?\s*['"]clean-color['"]/ },
@@ -55,20 +65,22 @@ const PATTERNS = Object.freeze([
  * (Never add one: fix the literal, or move the rule into the resolution module.)
  */
 const BASELINE = Object.freeze({
-  // Pending an API decision, not a UI one: the library listing has no consumer, so no locale to judge a rights snapshot under (it keeps the locale it always used).
-  "src/v2/infrastructure/prisma/media-library-repository.ts :: locale parameter defaulting to 'pt-BR'": 1,
   "src/app/ProjectsPageClient.tsx :: ('discovery') as an initial objective": 2,
   "src/app/ProjectsPageClient.tsx :: ?? 'pt-BR'": 1,
   "src/app/ProjectsPageClient.tsx :: placeholder=\"Ex.": 3,
   "src/app/ProjectsPageClient.tsx :: useState('pt-BR')": 1,
+  "src/app/ProjectsPageClient.tsx :: setLocale('pt-BR')": 1,
   "src/app/batches/page.tsx :: ['workspace-default'] (list of one)": 1,
   "src/app/batches/page.tsx :: placeholder=\"Ex.": 1,
   "src/app/batches/page.tsx :: useState('pt-BR')": 2,
+  "src/app/batches/page.tsx :: || 'pt-BR'": 1,
+  "src/app/batches/page.tsx :: setLocale('pt-BR')": 1,
   "src/app/localization/page.tsx :: placeholder=\"Ex.": 1,
   "src/app/projects/[id]/page.tsx :: ('discovery') as an initial objective": 2,
   "src/app/projects/[id]/page.tsx :: ?? 'pt-BR'": 1,
   "src/app/projects/[id]/page.tsx :: automaticZoom: false": 1,
   "src/app/projects/[id]/page.tsx :: placeholder=\"Ex.": 2,
+  "src/components/SyntheticPresentersManager.tsx :: a locale property set to 'pt-BR'": 4,
 })
 
 const keyOf = (file, patternId) => `${file} :: ${patternId}`
@@ -104,7 +116,7 @@ function scanProduct() {
     const file = relative(root, path).replaceAll('\\', '/')
     if (RESOLUTION_MODULES.includes(file)) continue
     scanned += 1
-    for (const id of findEditorialLiterals(readFileSync(path, 'utf8'))) counts.set(keyOf(file, id), (counts.get(keyOf(file, id)) ?? 0) + 1)
+    for (const id of findEditorialLiterals(readFileSync(path, 'utf8')).filter((id) => !(EXAMPLE_MODULES[file] ?? []).includes(id))) counts.set(keyOf(file, id), (counts.get(keyOf(file, id)) ?? 0) + 1)
   }
   return { counts, scanned }
 }
@@ -116,9 +128,12 @@ test('the scan recognises each forbidden editorial literal, and only as code', (
     "audienceTags: ['workspace-default']", '<input placeholder="Ex.: uma frase" />', "useState<StrategicObjectiveId>('discovery')",
     "setObjective('discovery')", "locale: request.locale ?? 'pt-BR'", 'const x = { automaticZoom:false }', 'automaticZoom: { const: false },',
     "useState('pt-BR')", "async find(id: string, locale = 'pt-BR')", "subtitleStyle: 'clean-color',", 'const p = preset ?? "clean-color"', 'x ?? "pt-BR"',
+    "setScriptLocale(project?.locale || 'pt-BR')", "{ workspaceId: job.workspaceId, locale: 'pt-BR', now: new Date() }", "defaultLocale: 'pt-BR', disclosure: 'x'",
+    "consentLocales: 'pt-BR'", "mapItem(row, now, 'pt-BR')", "setLocale('pt-BR')",
   ]
   for (const sample of samples) assert.ok(findEditorialLiterals(sample).length === 1, `the scan missed: ${sample}`)
   for (const sample of [
+    "a.localeCompare(b, 'pt-BR')", "new Intl.NumberFormat('pt-BR', {})", "text.toLocaleLowerCase('pt-BR')", "new Date().toLocaleString('pt-BR')",
     '// automaticZoom: false', ' * maxCharactersPerBlock: 42', "tags.push('discovery')", "mode: 'workspace-default'",
     "['workspace-default', 'lut-version', 'none']", 'maxCharactersPerBlock: policy.captions.maxCharactersPerBlock', 'fps * 40', 'const fps4 = 4',
   ]) assert.deepEqual(findEditorialLiterals(sample), [], `the scan flagged innocent text: ${sample}`)

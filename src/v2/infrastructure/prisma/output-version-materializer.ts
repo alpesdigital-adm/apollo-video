@@ -75,7 +75,7 @@ export async function assertAdoptedObservationsCurrentV3(tx:Prisma.TransactionCl
   }
 }
 
-import { evaluateAssetUse } from '../../domain/asset-rights.ts'
+import { evaluateAssetUse, UNDETERMINED_LOCALE } from '../../domain/asset-rights.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import type { OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
 /** This narrow publication guard uses the existing asset-use policy. Its
@@ -87,7 +87,9 @@ export async function assertCurrentOutputSourceUseV3(tx:Prisma.TransactionClient
   const byId=new Map(facts.map(f=>[f.artifactId,f]))
   if(!byId.size)return
   const project=await tx.v2Project.findFirst({where:{id:bundle.version.projectId,workspaceId:bundle.version.workspaceId},select:{locale:true}})
-  if(!project?.locale)throw new DomainError('PERSISTENCE_CONFLICT','Output source locale missing')
+  // A project that states no language judges the rights of its sources under the undetermined locale: a snapshot that restricts its locales denies it.
+  if(!project)throw new DomainError('PERSISTENCE_CONFLICT','Output source project missing')
+  const locale=project.locale??UNDETERMINED_LOCALE
   const sources=await tx.v2MediaArtifact.findMany({where:{workspaceId:bundle.version.workspaceId,id:{in:[...byId.keys()]}},include:{currentRightsSnapshot:true}})
   const links=await tx.v2ProjectMediaAsset.findMany({where:{workspaceId:bundle.version.workspaceId,projectId:bundle.version.projectId,artifactId:{in:[...byId.keys()]}}})
   // Clock follows ALL reads, immediately before synchronous policy evaluation.
@@ -114,7 +116,7 @@ export async function assertCurrentOutputSourceUseV3(tx:Prisma.TransactionClient
         throw new DomainError('ASSET_RIGHTS_BLOCKED','Music source no longer has its approved current pinned rights')
     } else {
       const rights=artifact.currentRightsSnapshot?hydrateAssetRights(artifact.currentRightsSnapshot):null
-      if(evaluateAssetUse(rights,{workspaceId:bundle.version.workspaceId,use,locale:project.locale},now).outcome!=='allow')
+      if(evaluateAssetUse(rights,{workspaceId:bundle.version.workspaceId,use,locale},now).outcome!=='allow')
         throw new DomainError('ASSET_RIGHTS_BLOCKED','Output source current rights/consent deny use')
     }
   }
@@ -148,7 +150,7 @@ export async function readEditorialSourceBindingV1(tx:Prisma.TransactionClient,b
     throw new DomainError('PERSISTENCE_CONFLICT','Editorial exact target inventory differs')
   const artifacts=await tx.v2MediaArtifact.findMany({where:{workspaceId:d.workspaceId,id:{in:ids}},include:{currentRightsSnapshot:true}})
   const project=await tx.v2Project.findFirst({where:{id:d.projectId,workspaceId:d.workspaceId},select:{locale:true,status:true}})
-  if(!project?.locale||options.currentRights&&project.status==='archived'||artifacts.length!==ids.length)throw new DomainError('PERSISTENCE_CONFLICT','Editorial target lifecycle/locale differs')
+  if(!project||options.currentRights&&project.status==='archived'||artifacts.length!==ids.length)throw new DomainError('PERSISTENCE_CONFLICT','Editorial target lifecycle/locale differs')
   const rights=options.currentRights?await new PrismaAssetRightsRepository(tx).findCurrentForArtifacts(d.workspaceId,ids):null
   const decisions:{snapshot:ReturnType<typeof hydrateAssetRights>|null;use:'rendering'|'editorial-reuse';artifactId:string}[]=[]
   for(const i of d.inventory) {
@@ -178,7 +180,7 @@ export async function readEditorialSourceBindingV1(tx:Prisma.TransactionClient,b
   if(options.currentRights) {
     const rows=await tx.$queryRawUnsafe<Array<{now:Date}>>('SELECT clock_timestamp() AS now'),now=rows[0]?.now
     if(rows.length!==1||!(now instanceof Date)||Number.isNaN(now.getTime()))throw new DomainError('PERSISTENCE_CONFLICT','Editorial rights clock unavailable')
-    for(const x of decisions)if(evaluateAssetUse(x.snapshot,{workspaceId:d.workspaceId,use:x.use,locale:project.locale},now).outcome!=='allow')
+    for(const x of decisions)if(evaluateAssetUse(x.snapshot,{workspaceId:d.workspaceId,use:x.use,locale:project.locale??UNDETERMINED_LOCALE},now).outcome!=='allow')
       throw new DomainError('ASSET_RIGHTS_BLOCKED','Editorial target rights deny actual reused source',{artifactId:x.artifactId})
   }
   return fresh

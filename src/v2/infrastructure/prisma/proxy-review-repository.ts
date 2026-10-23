@@ -26,6 +26,7 @@ import { mp4EvidenceSealMismatches, type Mp4EvidenceSealV1 } from '../../domain/
 import { projectStatusTransitionSources } from '../../domain/project.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 type StoredProxyReview = Prisma.V2ProxyReviewGetPayload<Record<string, never>>
 type StoredProxyReviewDecision = Prisma.V2ProxyReviewDecisionGetPayload<Record<string, never>>
@@ -190,9 +191,13 @@ export function hydrateProxyReview(row: StoredProxyReview): Readonly<PersistedPr
   if (calculateProxyReviewHash(review) !== row.reviewHash) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review hash is inconsistent')
   }
-  const acknowledgedBy = row.acknowledgedByType && row.acknowledgedById && row.acknowledgedAt
+  const acknowledgementKind = row.acknowledgedByType ?? null
+  if (acknowledgementKind !== null && acknowledgementKind !== 'api-client' && acknowledgementKind !== 'automatic-carry') {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review acknowledgement has an unknown kind')
+  }
+  const acknowledgedBy = acknowledgementKind && row.acknowledgedById && row.acknowledgedAt
     ? Object.freeze({
-        type: row.acknowledgedByType as 'api-client',
+        type: acknowledgementKind,
         id: row.acknowledgedById,
         at: row.acknowledgedAt.toISOString(),
       })
@@ -245,34 +250,76 @@ async function readCarry(
   })
 }
 
+/** How many carries back the person who acknowledged the original review is searched for; a longer chain is not a history anyone made. */
+const MAX_CARRY_CHAIN = 64
+
+/**
+ * The person who acknowledged the review a carry started from. A carry stores the automatic carry as the acknowledger of the carried review
+ * (it never copies the person), so the person is on the source review row - or, when that review was itself carried, on the review it came
+ * from, and so on until a review a person acknowledged.
+ */
+async function originalAcknowledgement(
+  client: Pick<Prisma.TransactionClient, 'v2ProxyReview' | 'v2ProjectProxyRenderOperation'>,
+  workspaceId: string,
+  sourceReviewId: string,
+): Promise<Readonly<{ type: 'api-client'; id: string; at: string }>> {
+  let reviewId = sourceReviewId
+  for (let step = 0; step < MAX_CARRY_CHAIN; step += 1) {
+    const row = await client.v2ProxyReview.findFirst({
+      where: { id: reviewId, workspaceId },
+      select: { operationId: true, warningsAcknowledged: true, acknowledgedByType: true, acknowledgedById: true, acknowledgedAt: true },
+    })
+    if (!row || !row.warningsAcknowledged || !row.acknowledgedById || !row.acknowledgedAt) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review carry-over approval has no acknowledged source review')
+    }
+    if (row.acknowledgedByType === 'api-client') {
+      return Object.freeze({ type: 'api-client' as const, id: row.acknowledgedById, at: row.acknowledgedAt.toISOString() })
+    }
+    if (row.acknowledgedByType !== 'automatic-carry') {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review acknowledgement has an unknown kind')
+    }
+    const operation = await client.v2ProjectProxyRenderOperation.findFirst({
+      where: { operationId: row.operationId, workspaceId }, select: { carriedFromReviewId: true },
+    })
+    if (!operation?.carriedFromReviewId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review carry-over approval names no earlier review')
+    }
+    reviewId = operation.carriedFromReviewId
+  }
+  throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review carry-over chain is too long')
+}
+
 /**
  * A hydrated review with the carry it came from, when it came from one.
  *
- * W70 readiness (Opus validation, note 3). The row of a review whose approval the carry re-bound holds the acknowledgement of the person who
- * acknowledged the SOURCE review (the database requires an acknowledged review to name an API client). That person did not acknowledge this
- * Version, so it is not published as the review's acknowledgement: it moves into `carriedFrom.acknowledgedBy`, and the review's own
- * acknowledgement is the automatic carry - its `carry-over-approval` decision and the time it was made. A person who acknowledged a carried
- * review that the carry did NOT approve did it on this Version, and stays the review's acknowledgement.
+ * W70 readiness. The row of a review whose approval the carry re-bound stores the AUTOMATIC CARRY as its acknowledger (the id of its
+ * `carry-over-approval` decision, at the time of that decision): it is read as it is stored, never rewritten here. The person who acknowledged
+ * the source review did not acknowledge this Version, so they appear only in `carriedFrom.acknowledgedBy`, read from the source review. A person
+ * who acknowledged a carried review that the carry did NOT approve did it on this Version, and stays the review's acknowledgement.
  */
 async function withCarriedFrom(
-  client: Pick<Prisma.TransactionClient, 'v2ProjectProxyRenderOperation' | 'v2ProxyReviewDecision'>,
+  client: Pick<Prisma.TransactionClient, 'v2ProjectProxyRenderOperation' | 'v2ProxyReviewDecision' | 'v2ProxyReview'>,
   row: StoredProxyReview,
 ): Promise<Readonly<PersistedProxyReview>> {
   const review = hydrateProxyReview(row)
   const carry = await readCarry(client, row)
-  if (!carry) return review
+  // An automatic-carry acknowledger exists only because a carry re-bound the approval: without the carry and its decision there is nothing
+  // the row can be checked against, so it is refused rather than published unverified.
+  const automatic = row.acknowledgedByType === 'automatic-carry'
+  if (!carry) {
+    if (automatic) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review names an automatic carry that has no carry-over')
+    return review
+  }
   if (carry.carriedFrom.decisionId === null || carry.decidedAt === null) {
+    if (automatic) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review names an automatic carry that has no carry-over approval')
     return Object.freeze({ ...review, carriedFrom: Object.freeze({ ...carry.carriedFrom, acknowledgedBy: null }) })
   }
-  const original = review.acknowledgedBy
-  if (!original || original.type !== 'api-client' || !review.warningsAcknowledged) {
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review carry-over approval names no acknowledgement')
+  const stored = review.acknowledgedBy
+  if (!review.warningsAcknowledged || stored?.type !== 'automatic-carry' || stored.id !== carry.carriedFrom.decisionId || stored.at !== carry.decidedAt.toISOString()) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review carry-over approval does not name its automatic carry')
   }
-  return Object.freeze({
-    ...review,
-    acknowledgedBy: Object.freeze({ type: 'automatic-carry' as const, id: carry.carriedFrom.decisionId, at: carry.decidedAt.toISOString() }),
-    carriedFrom: Object.freeze({ ...carry.carriedFrom, acknowledgedBy: original }),
-  })
+  const original = await originalAcknowledgement(client, row.workspaceId, carry.carriedFrom.reviewId)
+  return Object.freeze({ ...review, carriedFrom: Object.freeze({ ...carry.carriedFrom, acknowledgedBy: original }) })
 }
 
 function hydrateDecision(row: StoredProxyReviewDecision): Readonly<ProxyReviewDecision> {
@@ -538,7 +585,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
       where: { id: decision.proxyReviewId },
     })
     if (!review) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy review decision lost its review')
-    return Object.freeze({ review: hydrateProxyReview(review), decision: hydrateDecision(decision), replayed: true })
+    return Object.freeze({ review: await withCarriedFrom(this.client, review), decision: hydrateDecision(decision), replayed: true })
   }
 
   async acknowledgeWarnings(
@@ -720,8 +767,11 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
         return this.acknowledgeWarnings(input, serializationAttempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findDecisionReplay(input)
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findDecisionReplay(input),
+        )
         if (replay) return replay
         throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy review acknowledgement collided with persisted state')
       }

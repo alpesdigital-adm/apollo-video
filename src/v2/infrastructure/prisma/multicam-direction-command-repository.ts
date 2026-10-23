@@ -29,9 +29,12 @@ import { childCommandOf } from '../../domain/project-output-state-transition.ts'
 import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { rational, type Rational } from '../../domain/session-time.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { readEffectiveDirectorRun } from './director-run-inheritance.ts'
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { policyResolutionOf } from './proxy-source-authority.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 /**
  * The project side of `direct-multicam-session` against PostgreSQL (F4.012).
@@ -293,6 +296,8 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
     if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames <= 0) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan duration is invalid')
     }
+    const effectiveRun = await readEffectiveDirectorRun(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: versionRow.id })
+    const policyResolution = policyResolutionOf(effectiveRun)
     return Object.freeze({
       workspaceId: project.workspaceId,
       projectId: project.id,
@@ -301,6 +306,7 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
       currentVersion: parent.version,
       currentPlan: Object.freeze(currentPlan),
       currentDurationFrames,
+      ...(policyResolution ? { policyResolution } : {}),
       // A multicam direction is project-wide: its impact covers EVERY output the sealed State carries, each render attributed to its own.
       variantIds: Object.freeze(parent.state.document.entries.map((entry) => entry.variantId)),
       outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: versionRow.id, proxies: proxyOutputs, finals: finalOutputs }),
@@ -479,13 +485,16 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
         return this.commitOrReplay(input, serializationAttempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const existing = await this.findIdempotentResult({
-          workspaceId: bundle.command.workspaceId,
-          projectId: bundle.command.projectId,
-          idempotencyKey: bundle.command.idempotencyKey,
-          actorContextHash: bundle.authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const existing = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotentResult({
+            workspaceId: bundle.command.workspaceId,
+            projectId: bundle.command.projectId,
+            idempotencyKey: bundle.command.idempotencyKey,
+            actorContextHash: bundle.authenticationAudit.contextHash,
+          }),
+        )
         if (existing) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) {
             throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different multicam direction')

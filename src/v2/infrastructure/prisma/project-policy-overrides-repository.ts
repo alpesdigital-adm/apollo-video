@@ -32,6 +32,7 @@ import {
   editCommandExternalActorAuditData,
   hydrateEditCommandExternalActorAudit,
 } from './edit-command-actor-audit.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 const storedCommandInclude = Prisma.validator<Prisma.V2EditCommandInclude>()({
   resultVersion: { include: { policiesSnapshot: true } },
@@ -416,13 +417,16 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
         return this.commitOrReplay(input, serializationAttempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
-        const existing = await this.findIdempotent({
-          workspaceId: bundle.command.workspaceId,
-          projectId: bundle.command.projectId,
-          idempotencyKey: bundle.command.idempotencyKey,
-          actorContextHash: authenticationAudit.contextHash,
-        })
+      if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {
+        const existing = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({
+            workspaceId: bundle.command.workspaceId,
+            projectId: bundle.command.projectId,
+            idempotencyKey: bundle.command.idempotencyKey,
+            actorContextHash: authenticationAudit.contextHash,
+          }),
+        )
         if (existing?.requestFingerprint === bundle.requestFingerprint) return existing.result
         if (existing) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with different project overrides')
         throw new DomainError('PERSISTENCE_CONFLICT', 'Project policy override collided with immutable state')

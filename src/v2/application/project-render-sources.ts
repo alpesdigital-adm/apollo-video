@@ -8,7 +8,9 @@ import { CAPTION_BAND_TOLERANCE_PX, CAPTION_PIXEL_CODES } from '../domain/captio
 import { CAPTION_TEXT_LAYOUT_ID } from '../domain/caption-text-layout.ts'
 import { COLOR_CRITIC_REPORT_SCHEMA_VERSION, DEFAULT_COLOR_CRITIC_POLICY } from '../domain/color-critic-report.ts'
 import { FACE_EVIDENCE_POLICY_SHA256 } from '../domain/face-evidence-policy.ts'
-import { FORMAT_QUALITY_CODES } from '../domain/format-quality-critic.ts'
+import { FORMAT_QUALITY_CODES, FORMAT_QUALITY_POLICY, FORMAT_QUALITY_REPORT_SCHEMA_VERSION } from '../domain/format-quality-critic.ts'
+import { OUTPUT_FORMAT_REGISTRY } from '../domain/output-format-registry.ts'
+import { PROXY_OUTPUT_SPECS, PROXY_REVIEW_POLICY, PROXY_REVIEW_SCHEMA_VERSION } from './render-workflow.ts'
 import { MP4_PIXEL_CRITIC_POLICY_SHA256 } from '../domain/mp4-pixel-quality.ts'
 import { renderColorGradeContent } from '../domain/render-color-grade.ts'
 import { DEFAULT_SUBTITLE_ANCHOR_POLICY } from '../domain/subtitle-anchor-plan.ts'
@@ -158,6 +160,8 @@ export function projectProxyRenderInputHash(input: {
 export function projectProxyRenderContentHash(input: {
   source: Readonly<ProjectProxyRenderSource>
   colorPipelineBindings: readonly Readonly<RenderColorPipelineBinding>[]
+  /** The digest of the review policies the render is judged under; defaults to the live ones (a test passes another to prove it moves the address). */
+  reviewPolicySha256?: string
 }): string {
   const source = input.source
   const seal = source.outputConsumption?.seal
@@ -191,24 +195,77 @@ export function projectProxyRenderContentHash(input: {
     // W70 readiness (R2, Opus validation). What the colour grade does to the pixels (not the rows holding it), and the policies the review of
     // a render is judged under: another grade, or another critic, is another content.
     colorGrade: source.colorGrade ? renderColorGradeContent(source.colorGrade) : null,
-    reviewPolicySha256: PROXY_REVIEW_POLICY_SHA256,
+    reviewPolicySha256: input.reviewPolicySha256 ?? PROXY_REVIEW_POLICY_SHA256,
   })
 }
 
-/**
- * W70 readiness (R2). The policies a proxy's review is judged under, pinned by content. A carry keeps the verdict the earlier render had, so a
- * change of any of them (the format critic's codes, the caption pixel critic's tolerance, the caption layout, the MP4 critic's policy, the face
- * evidence policy, the colour critic's policy, the anchor policies) must make another content address, never carry an old verdict.
- */
-export const PROXY_REVIEW_POLICY_IDENTITY = Object.freeze({
-  proxyReview: 'proxy-review/v1',
-  formatQualityReport: 'format-quality-report/v3',
-  formatQualityCodes: calculateCanonicalHash(FORMAT_QUALITY_CODES),
-  captionPixel: Object.freeze({ codes: calculateCanonicalHash(CAPTION_PIXEL_CODES), bandTolerancePx: CAPTION_BAND_TOLERANCE_PX }),
-  captionTextLayout: CAPTION_TEXT_LAYOUT_ID,
+/** The policy objects a proxy's review is judged under; every field is the live object or constant the evaluation reads. */
+export interface ProxyReviewPolicyParts {
+  proxyReviewSchemaVersion: string
+  proxyReviewPolicy: unknown
+  proxyOutputSpecs: unknown
+  outputFormatRegistryHash: string
+  formatQualityReportSchemaVersion: string
+  formatQualityPolicy: unknown
+  formatQualityCodes: unknown
+  captionPixelCodes: unknown
+  captionBandTolerancePx: number
+  captionTextLayoutId: string
+  mp4PixelCriticPolicySha256: string
+  faceEvidencePolicySha256: string
+  colorCriticReportSchemaVersion: string
+  colorCriticPolicy: unknown
+  subtitleAnchorPolicy: unknown
+  finalCaptionAnchorPolicy: unknown
+}
+
+/** The live policies. */
+export const PROXY_REVIEW_POLICY_PARTS: Readonly<ProxyReviewPolicyParts> = Object.freeze({
+  proxyReviewSchemaVersion: PROXY_REVIEW_SCHEMA_VERSION,
+  proxyReviewPolicy: PROXY_REVIEW_POLICY,
+  proxyOutputSpecs: PROXY_OUTPUT_SPECS,
+  outputFormatRegistryHash: OUTPUT_FORMAT_REGISTRY.registryHash,
+  formatQualityReportSchemaVersion: FORMAT_QUALITY_REPORT_SCHEMA_VERSION,
+  formatQualityPolicy: FORMAT_QUALITY_POLICY,
+  formatQualityCodes: FORMAT_QUALITY_CODES,
+  captionPixelCodes: CAPTION_PIXEL_CODES,
+  captionBandTolerancePx: CAPTION_BAND_TOLERANCE_PX,
+  captionTextLayoutId: CAPTION_TEXT_LAYOUT_ID,
   mp4PixelCriticPolicySha256: MP4_PIXEL_CRITIC_POLICY_SHA256,
   faceEvidencePolicySha256: FACE_EVIDENCE_POLICY_SHA256,
-  colorCritic: Object.freeze({ report: COLOR_CRITIC_REPORT_SCHEMA_VERSION, policy: calculateCanonicalHash(DEFAULT_COLOR_CRITIC_POLICY) }),
-  anchorPolicies: Object.freeze({ subtitle: DEFAULT_SUBTITLE_ANCHOR_POLICY, finalCaption: FINAL_CAPTION_ANCHOR_POLICY }),
+  colorCriticReportSchemaVersion: COLOR_CRITIC_REPORT_SCHEMA_VERSION,
+  colorCriticPolicy: DEFAULT_COLOR_CRITIC_POLICY,
+  subtitleAnchorPolicy: DEFAULT_SUBTITLE_ANCHOR_POLICY,
+  finalCaptionAnchorPolicy: FINAL_CAPTION_ANCHOR_POLICY,
 })
-export const PROXY_REVIEW_POLICY_SHA256: string = calculateCanonicalHash(PROXY_REVIEW_POLICY_IDENTITY)
+
+/**
+ * W70 readiness (R2). The policies a proxy's review is judged under, pinned by content and DERIVED from the objects and constants the
+ * evaluation reads (never retyped literals): the review and report schema versions, the review's duration tolerance and output specs, the format
+ * critic's density policy, codes and the registry its safe areas come from, the caption pixel critic's codes and tolerance, the caption layout,
+ * the MP4 critic's policy, the face evidence policy, the colour critic's policy and the anchor policies. A carry keeps the verdict the earlier
+ * render had, so a change of any of them must make another content address, never carry an old verdict.
+ */
+export function buildProxyReviewPolicyIdentity(parts: Readonly<ProxyReviewPolicyParts> = PROXY_REVIEW_POLICY_PARTS) {
+  return Object.freeze({
+    proxyReview: Object.freeze({ schemaVersion: parts.proxyReviewSchemaVersion, policy: calculateCanonicalHash(parts.proxyReviewPolicy), outputSpecs: calculateCanonicalHash(parts.proxyOutputSpecs) }),
+    outputFormatRegistryHash: parts.outputFormatRegistryHash,
+    formatQuality: Object.freeze({
+      schemaVersion: parts.formatQualityReportSchemaVersion,
+      policy: calculateCanonicalHash(parts.formatQualityPolicy),
+      codes: calculateCanonicalHash(parts.formatQualityCodes),
+    }),
+    captionPixel: Object.freeze({ codes: calculateCanonicalHash(parts.captionPixelCodes), bandTolerancePx: parts.captionBandTolerancePx }),
+    captionTextLayout: parts.captionTextLayoutId,
+    mp4PixelCriticPolicySha256: parts.mp4PixelCriticPolicySha256,
+    faceEvidencePolicySha256: parts.faceEvidencePolicySha256,
+    colorCritic: Object.freeze({ report: parts.colorCriticReportSchemaVersion, policy: calculateCanonicalHash(parts.colorCriticPolicy) }),
+    anchorPolicies: Object.freeze({ subtitle: calculateCanonicalHash(parts.subtitleAnchorPolicy), finalCaption: calculateCanonicalHash(parts.finalCaptionAnchorPolicy) }),
+  })
+}
+
+export const PROXY_REVIEW_POLICY_IDENTITY = buildProxyReviewPolicyIdentity()
+export function calculateProxyReviewPolicySha256(parts: Readonly<ProxyReviewPolicyParts> = PROXY_REVIEW_POLICY_PARTS): string {
+  return calculateCanonicalHash(buildProxyReviewPolicyIdentity(parts))
+}
+export const PROXY_REVIEW_POLICY_SHA256: string = calculateProxyReviewPolicySha256()

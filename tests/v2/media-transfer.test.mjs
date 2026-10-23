@@ -257,7 +257,10 @@ test('project source seed arguments are explicit, bounded and deterministic', ()
   assert.equal(parsed.apiEnvironment, 'sandbox')
   assert.equal(parsed.objective, 'discovery')
   assert.equal(parsed.format, '9:16')
-  assert.equal(parsed.locale, 'pt-BR')
+  // No language is assumed: a seed that is not told one creates a project that states none (it is detected from the speech).
+  assert.equal(parsed.locale, undefined)
+  assert.equal(readSeedArguments(['--seed-id', 'welcome-v1', '--workspace-id', 'workspace-seed-1', '--client-id', 'client-seed-1', '--credential-id', 'credential-seed-1',
+    '--api-environment', 'sandbox', '--project-name', 'Projeto', '--source-file', './master.mp4', '--locale', 'en-US']).locale, 'en-US')
   assert.equal(parsed.sourceMime, 'video/mp4')
   assert.match(parsed.sourceFile, /master\.mp4$/)
   assert.throws(() => readSeedArguments(['--seed-id', 'x']), /3-80/)

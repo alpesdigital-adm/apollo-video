@@ -8,6 +8,7 @@ import { DomainError } from '../../domain/errors.ts'
 import { createWorkspaceLutVersion, type LutColorSpace, type LutLicensePolicy } from '../../domain/workspace-lut.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { reconcileAfterConflict } from './idempotency-record-persistence.ts'
 
 function json<T>(value: string, field: string): T {
   try {
@@ -206,12 +207,15 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
         }), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const replay = await this.findIdempotent({ workspaceId: item.workspaceId, createdByClientId: item.createdByClientId, idempotencyKey: input.value.idempotencyKey })
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && serializationAttempt < 3) return this.import(input, serializationAttempt + 1)
+      if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === 'P2002' || error.code === 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({ workspaceId: item.workspaceId, createdByClientId: item.createdByClientId, idempotencyKey: input.value.idempotencyKey }),
+        )
         if (replay && replay.requestFingerprint === input.value.requestFingerprint) return Object.freeze({ value: replay, replayed: true })
         if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with another LUT import')
       }
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && serializationAttempt < 3) return this.import(input, serializationAttempt + 1)
       throw error
     }
   }
@@ -257,13 +261,16 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
         }), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const replay = await this.findIdempotent({ workspaceId: item.workspaceId, createdByClientId: item.createdByClientId, idempotencyKey: input.value.idempotencyKey })
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && serializationAttempt < 3) return this.createVersion(input, serializationAttempt + 1)
+      if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === 'P2002' || error.code === 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findIdempotent({ workspaceId: item.workspaceId, createdByClientId: item.createdByClientId, idempotencyKey: input.value.idempotencyKey }),
+        )
         if (replay?.requestFingerprint === input.value.requestFingerprint) return Object.freeze({ value: replay, replayed: true })
         if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with another LUT mutation')
         throw new DomainError('VERSION_CONFLICT', 'Workspace LUT version was concurrently changed')
       }
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && serializationAttempt < 3) return this.createVersion(input, serializationAttempt + 1)
       throw error
     }
   }
@@ -367,13 +374,16 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
         return Object.freeze({ command: statusCommand(persisted), record: record(updated, version), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const replay = await this.findStatusIdempotent({ workspaceId: command.workspaceId, createdByClientId: command.createdByClientId, idempotencyKey: command.idempotencyKey })
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && serializationAttempt < 3) return this.setStatus(input, serializationAttempt + 1)
+      if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === 'P2002' || error.code === 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findStatusIdempotent({ workspaceId: command.workspaceId, createdByClientId: command.createdByClientId, idempotencyKey: command.idempotencyKey }),
+        )
         if (replay?.command.requestFingerprint === command.requestFingerprint) return Object.freeze({ ...replay, replayed: true })
         if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with another LUT status command')
         throw new DomainError('VERSION_CONFLICT', 'Workspace LUT status was concurrently changed')
       }
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && serializationAttempt < 3) return this.setStatus(input, serializationAttempt + 1)
       throw error
     }
   }
@@ -437,13 +447,16 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
         return Object.freeze({ value: defaultVersion(row, lutRow), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const replay = await this.findDefaultIdempotent({ workspaceId: value.workspaceId, createdByClientId: value.createdByClientId, idempotencyKey: value.idempotencyKey })
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && serializationAttempt < 3) return this.setDefault(input, serializationAttempt + 1)
+      if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === 'P2002' || error.code === 'P2034')) {
+        const replay = await reconcileAfterConflict(
+          error,
+          () => this.findDefaultIdempotent({ workspaceId: value.workspaceId, createdByClientId: value.createdByClientId, idempotencyKey: value.idempotencyKey }),
+        )
         if (replay?.requestFingerprint === value.requestFingerprint) return Object.freeze({ value: replay, replayed: true })
         if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with another workspace LUT default')
         throw new DomainError('VERSION_CONFLICT', 'Workspace LUT default was concurrently changed')
       }
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && serializationAttempt < 3) return this.setDefault(input, serializationAttempt + 1)
       throw error
     }
   }
