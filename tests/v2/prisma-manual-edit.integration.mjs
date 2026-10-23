@@ -222,7 +222,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     // briefing asks for no decision the Apollo makes, which is the point: the plan below is made from what the request says, here nothing.
     fakeCodex = installFakeCodex({})
     interpreterEnvironment = Object.freeze({
-      APOLLO_V2_BRIEF_INTERPRETER_PROVIDER: 'codex-cli', APOLLO_V2_CODEX_BIN: fakeCodex.binary, APOLLO_V2_BRIEF_INTERPRETER_MODEL: 'stand-in-model',
+      APOLLO_V2_BRIEF_INTERPRETER_PROVIDER: 'codex-cli', APOLLO_V2_CODEX_BIN: fakeCodex.binary, APOLLO_V2_CODEX_HOME: fakeCodex.codexHome, APOLLO_V2_BRIEF_INTERPRETER_MODEL: 'stand-in-model',
     })
     const briefingRead = await reviseEditorialRequestService({
       repository: new PrismaEditorialRequestRepository(client),

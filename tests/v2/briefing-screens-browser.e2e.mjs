@@ -128,6 +128,7 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
         // The briefing is read by the stand-in executable: a deterministic file, never the real Codex.
         APOLLO_V2_BRIEF_INTERPRETER_PROVIDER: 'codex-cli',
         APOLLO_V2_CODEX_BIN: fake.binary,
+        APOLLO_V2_CODEX_HOME: fake.codexHome,
         APOLLO_V2_BRIEF_INTERPRETER_MODEL: 'stand-in-model',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
