@@ -118,7 +118,7 @@ function parameterMap(operation) {
 }
 
 test('T-FR-241 every public operation has an executable, versioned contract test', async (t) => {
-  assert.equal(FOUNDATION_CAPABILITIES.length, 398)
+  assert.equal(FOUNDATION_CAPABILITIES.length, 399)
   assert.deepEqual(FOUNDATION_CAPABILITIES
     .filter((capability) => capability.id.startsWith('apollo.projects.perception-producer-operations.'))
     .map((capability) => capability.id).sort(), [

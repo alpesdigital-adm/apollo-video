@@ -57,6 +57,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
   const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
   const { commitSealedChild, persistRecording } = await import('./helpers/pg-output-world.mjs')
+  const { installFakeCodex } = await import('./helpers/install-fake-codex.mjs')
+  const { reviseEditorialRequestService } = await import('../../src/v2/application/revise-editorial-request.ts')
+  const { PrismaEditorialRequestRepository } = await import('../../src/v2/infrastructure/prisma/editorial-request-repository.ts')
+  const { createInterpretBrief } = await import('../../src/v2/infrastructure/brief/create-interpret-brief.ts')
   const { recordingNames } = await import('./helpers/operational-editorial-fixture.mjs')
   const { seedReviewProject } = await import('./helpers/review-edit-world.mjs')
   const { resetDisposableDatabase } = await import('./helpers/disposable-database.mjs')
@@ -84,6 +88,9 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   let server
   let browser
   let authenticatedActor
+  // The Codex stand-in the briefing is read with: a deterministic executable, never the real Codex, in an automated test (ADR-160 F6).
+  let fakeCodex
+  let interpreterEnvironment = {}
   const colorCompilations = new Map()
 
   const execute = (request) => applyManualEditService({
@@ -207,9 +214,28 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     // The project is the sealed world the product builds: the creation Command (with its briefing and desired action), one
     // explicit 9:16 output variant, the two recordings' persisted ingests, and a child Command that adopts the first one and plays it.
-    await seedReviewProject(client, { workspaceId, actor: authenticatedActor, prefix: 'manual', ids: { project: projectId, 'output-variant': '9:16' },
+    const seeded = await seedReviewProject(client, { workspaceId, actor: authenticatedActor, prefix: 'manual', ids: { project: projectId, 'output-variant': '9:16' },
       name: 'Manual Project', objective: 'discovery', aspectRatio: '9:16', status: 'reviewing-proxy', briefing,
       desiredAction: { disclosures: [] } })
+    // A briefing with text that nobody has read is refused by the Director (brief-interpretation-required). The owner reads it right after creating
+    // the project, as the product asks: through the real interpreter adapter, against the stand-in executable. The stand-in answers that the
+    // briefing asks for no decision the Apollo makes, which is the point: the plan below is made from what the request says, here nothing.
+    fakeCodex = installFakeCodex({})
+    interpreterEnvironment = Object.freeze({
+      APOLLO_V2_BRIEF_INTERPRETER_PROVIDER: 'codex-cli', APOLLO_V2_CODEX_BIN: fakeCodex.binary, APOLLO_V2_BRIEF_INTERPRETER_MODEL: 'stand-in-model',
+    })
+    const briefingRead = await reviseEditorialRequestService({
+      repository: new PrismaEditorialRequestRepository(client),
+      interpretBrief: createInterpretBrief({ ...process.env, ...interpreterEnvironment }),
+      createId: (kind) => `manual-editorial-request-${kind}-${randomUUID()}`,
+      createEventId: randomUUID,
+      clock: () => new Date(),
+    })({
+      workspaceId, projectId, baseVersionId: seeded.head.version.id, baseHash: seeded.head.version.baseHash,
+      body: { briefing }, actor: authenticatedActor, idempotencyKey: `manual-read-briefing-${suffix}`,
+    })
+    assert.equal(briefingRead.command.payload.interpreted, true, 'the stand-in interpreter read the briefing')
+    assert.equal(fakeCodex.executions().length, 1, 'the briefing was read once')
     for (const [slug, artifactId] of [[slugA, sourceA], [slugB, sourceB]]) {
       // Both recordings are 6 s at 30 fps; their source grants are the ones this test writes below, through the production service.
       await persistRecording(client, { workspaceId, projectId, actor: authenticatedActor, slug, durationFrames: 180, rights: { source: false } })
@@ -689,6 +715,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(uiPassword, `manual-salt-${suffix}`),
         APOLLO_UI_SESSION_SECRET: uiSessionSecret,
         APOLLO_UI_API_CLIENT_ID: issued.client.id,
+        // The server reads briefings with the same stand-in, never with a real account.
+        ...interpreterEnvironment,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -1910,6 +1938,7 @@ ${editorialDiagnostic}`)
       server.kill()
       await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
     }
+    fakeCodex?.remove()
     await client.$disconnect()
   }
 })

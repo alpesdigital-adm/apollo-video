@@ -726,7 +726,7 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                     Defina objetivo, entrega e contexto. O Apollo registra essas decisões na primeira versão e só então recebe o material bruto.
                   </p>
                 </div>
-                <button className="group flex h-12 shrink-0 items-center justify-center gap-3 rounded-xl bg-[#e0af37] px-5 text-sm font-bold text-[#171207] shadow-[0_12px_35px_rgba(224,175,55,.16)] transition hover:-translate-y-0.5 hover:bg-[#efc34f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f5d77f]" onClick={() => { setNotice(null); setComposerOpen(true) }} type="button">
+                <button className="group flex h-12 shrink-0 items-center justify-center gap-3 rounded-xl bg-[#e0af37] px-5 text-sm font-bold text-[#171207] shadow-[0_12px_35px_rgba(224,175,55,.16)] transition hover:-translate-y-0.5 hover:bg-[#efc34f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f5d77f]" onClick={() => { setNotice(null); if (createdProject) resetComposer(); setComposerOpen(true) }} type="button">
                   <span className="text-xl font-light leading-none">＋</span>
                   Novo projeto
                   <span className="transition-transform group-hover:translate-x-0.5">→</span>
@@ -848,7 +848,7 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                     </div>
                     <h3 className="mt-5 text-lg font-semibold text-[#e8e3da]">Nenhuma produção ainda</h3>
                     <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-[#77736c]">Crie o projeto para registrar a direção editorial. O envio dos vídeos vem na etapa seguinte.</p>
-                    <button className="mt-5 rounded-xl border border-[#d9aa38]/30 px-4 py-2.5 text-sm font-medium text-[#dab455] transition hover:bg-[#d9aa38]/10" onClick={() => setComposerOpen(true)} type="button">Criar primeiro projeto</button>
+                    <button className="mt-5 rounded-xl border border-[#d9aa38]/30 px-4 py-2.5 text-sm font-medium text-[#dab455] transition hover:bg-[#d9aa38]/10" onClick={() => { if (createdProject) resetComposer(); setComposerOpen(true) }} type="button">Criar primeiro projeto</button>
                   </div>
                 </div>
               ) : !hasProjects ? (

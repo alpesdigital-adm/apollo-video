@@ -4584,7 +4584,7 @@ export default function BatchesPage() {
       {composerOpen ? (
         <div aria-labelledby="batch-composer-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 backdrop-blur-sm sm:p-5" role="dialog">
           <button aria-label="Fechar planejamento do lote" className="absolute inset-0 cursor-default" disabled={busy} onClick={() => setComposerOpen(false)} type="button" />
-          <form className="relative max-h-[96vh] w-full max-w-[1180px] overflow-y-auto rounded-[24px] border border-white/[0.1] bg-[#0d0d0d] shadow-[0_30px_110px_rgba(0,0,0,.78)]" onSubmit={createBatch}>
+          <form className="relative max-h-[96vh] w-full max-w-[1180px] overflow-y-auto rounded-[24px] border border-white/[0.1] bg-[#0d0d0d] shadow-[0_30px_110px_rgba(0,0,0,.78)]" noValidate onSubmit={createBatch}>
             <div className="sticky top-0 z-10 flex items-start justify-between border-b border-white/[0.07] bg-[#0d0d0d]/95 px-5 py-5 backdrop-blur-xl sm:px-7">
               <div>
                 <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b89034]"><span className="h-px w-6 bg-[#b89034]" /> Matriz de produção</div>
@@ -4755,9 +4755,10 @@ export default function BatchesPage() {
                   </div>
                 </div>
 
+                {notice ? <p className="mt-5 rounded-lg border border-[#d9a43a]/25 bg-[#d9a43a]/[0.07] px-3 py-2 text-xs leading-5 text-[#dbc88f]" data-testid="batch-composer-notice" role="alert">{notice}</p> : null}
                 <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <button className="h-11 rounded-xl border border-white/[0.08] px-4 text-xs font-medium text-[#8e8980] transition hover:text-white disabled:opacity-40" disabled={busy} onClick={() => setComposerOpen(false)} type="button">Cancelar</button>
-                  <button className="h-11 rounded-xl bg-[#dfae38] px-5 text-xs font-bold text-[#171207] transition hover:bg-[#efc34f] disabled:cursor-not-allowed disabled:opacity-45" disabled={busy || selectedCells.length === 0 || sourceIds.size === 0} type="submit">
+                  <button className="h-11 rounded-xl bg-[#dfae38] px-5 text-xs font-bold text-[#171207] transition hover:bg-[#efc34f] disabled:cursor-not-allowed disabled:opacity-45" disabled={busy} type="submit">
                     {busy ? 'Registrando pela API…' : `Criar ${selectedCells.length} saída${selectedCells.length === 1 ? '' : 's'}`}
                   </button>
                 </div>
