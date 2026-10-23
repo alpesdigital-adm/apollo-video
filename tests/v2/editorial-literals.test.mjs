@@ -39,6 +39,12 @@ const EXAMPLE_MODULES = Object.freeze({ 'src/v2/public-api/schema-examples.ts': 
  *  - 'discovery' only as the initial value of a state hook or the objective setter (`useState<...>('discovery')`, `setObjective('discovery')`),
  *    never as an analysis tag.
  */
+/**
+ * The words of a screen's own view machine (what the screen is doing, not what the owner asked for): a state hook that starts as one of these
+ * is not a pre-filled value. Every other non-empty literal in a state hook of a screen is listed in the baseline, with its reason.
+ */
+const VIEW_STATE_WORDS = Object.freeze(['loading', 'idle', 'ready', 'error', 'info', 'switching', 'all'])
+
 const PATTERNS = Object.freeze([
   { id: "automaticZoom: false", regex: /automaticZoom\s*:\s*false\b/ },
   { id: "automaticZoom: { const: false } (public schema)", regex: /automaticZoom\s*:\s*\{\s*const\s*:\s*false\s*\}/ },
@@ -58,13 +64,40 @@ const PATTERNS = Object.freeze([
   { id: "useState('pt-BR')", regex: /useState(?:<[^>]*>)?\(\s*['"]pt-BR['"]\s*\)/ },
   { id: "locale parameter defaulting to 'pt-BR'", regex: /\blocale\s*(?::\s*string\s*)?=\s*['"]pt-BR['"]/ },
   { id: "'clean-color' as a default style", regex: /(?:subtitleStyle|presetId)\s*:\s*['"]clean-color['"]|\?\?\s*['"]clean-color['"]/ },
+  // ---- The generic shapes of a pre-filled screen (only in the screens: src/app and src/components, .tsx). A field that opens with a value, or
+  // with a sentence to copy, decides for the owner. ----
+  { id: "useState('<non-empty literal>') in a screen", screensOnly: true,
+    regex: new RegExp(String.raw`useState(?:<[^>]*>)?\(\s*(?!['"` + '`' + String.raw`](?:${VIEW_STATE_WORDS.join('|')})['"` + '`' + String.raw`]\s*\))(?:'[^']+'|"[^"]+"|` + '`[^`$]+`' + String.raw`)\s*\)`) },
+  { id: 'placeholder= with a phrase (3+ words) in a screen', screensOnly: true,
+    regex: /placeholder=(?:"[^"]*\s[^"]*\s[^"]*"|'[^']*\s[^']*\s[^']*'|\{\s*['"`][^'"`]*\s[^'"`]*\s[^'"`]*['"`]\s*\})/ },
+  { id: 'new Set([<literal>]) in a screen', screensOnly: true, regex: /new Set(?:<[^>]*>)?\(\s*\[\s*['"]/ },
+  { id: 'defaultValue=<literal> in a screen', screensOnly: true, regex: /defaultValue=(?:"[^"]+"|\{\s*['"`][^'"`]+['"`]\s*\})/ },
 ])
 
 /**
  * Violations that existed when the rule was adopted, by `file :: pattern`. Only ever lower a count or delete an entry.
  * (Never add one: fix the literal, or move the rule into the resolution module.)
  */
-const BASELINE = Object.freeze({})
+const BASELINE = Object.freeze({
+  // Screen shapes (added with the round-3 sweep). Each entry is TECHNICAL, not an editorial decision for the owner, and says why:
+  // a placeholder that only NAMES the format of a filter field (an id, one entry per line); no value, no sentence to copy.
+  'src/app/ProjectsPageClient.tsx :: placeholder= with a phrase (3+ words) in a screen': 1, // "ID do responsável"
+  'src/app/batches/page.tsx :: placeholder= with a phrase (3+ words) in a screen': 1, // "ID do CTA, estilo ou snapshot"
+  'src/app/localization/page.tsx :: placeholder= with a phrase (3+ words) in a screen': 2, // "Uma entrada por linha", "URL ou destino aprovado"
+  'src/app/projects/[id]/page.tsx :: placeholder= with a phrase (3+ words) in a screen': 1, // "Explique a mudança..." (names what the reason is for)
+  'src/components/MediaLibraryWorkspace.tsx :: placeholder= with a phrase (3+ words) in a screen': 1, // "Idioma dos direitos" (names the filter)
+  'src/components/WorkspaceLutLibrary.tsx :: placeholder= with a phrase (3+ words) in a screen': 1, // "Restrições territoriais ou de uso" (names the field)
+  // the first tab / the strictest apply mode of a screen's own tools, which carry no request value
+  'src/app/batches/page.tsx :: useState(\'<non-empty literal>\') in a screen': 2, // 'script' (tab that opens first), 'all-or-nothing' (batch edit applies transactionally)
+  'src/app/projects/[id]/page.tsx :: useState(\'<non-empty literal>\') in a screen': 4, // 'point', 'scene', 'split', 'after': review marker scope and compare view
+  // neutral values of numeric controls and indexes
+  'src/app/color-match/page.tsx :: useState(\'<non-empty literal>\') in a screen': 3, // '0', '1', '1': brightness, contrast and saturation with no adjustment
+  'src/app/playback-map/page.tsx :: useState(\'<non-empty literal>\') in a screen': 1, // '0': index of the first anchor
+  // technical descriptions of a file or of an operation
+  'src/components/IssueOverridePanel.tsx :: new Set([<literal>]) in a screen': 1, // the terminal states of an operation
+  'src/components/TransformationReviewPanel.tsx :: useState(\'<non-empty literal>\') in a screen': 1, // 'static': the tracking status of a region the reviewer has not touched
+  'src/components/WorkspaceLutLibrary.tsx :: useState(\'<non-empty literal>\') in a screen': 2, // 'rec709' twice: the colour spaces the .cube file is declared in
+})
 
 const keyOf = (file, patternId) => `${file} :: ${patternId}`
 
@@ -81,12 +114,14 @@ function productFiles() {
   return roots.flatMap((name) => walk(join(root, name)))
 }
 
-/** The editorial literals in `text`, as `patternId` per hit (comment lines are prose, not code). */
-export function findEditorialLiterals(text) {
+const isScreenFile = (file) => /^src\/(?:app|components)\/.*\.tsx$/.test(file)
+
+/** The editorial literals in `text`, as `patternId` per hit (comment lines are prose, not code). The screen-only patterns need `file` to be a screen. */
+export function findEditorialLiterals(text, file = '') {
   const found = []
   for (const line of text.split(/\r?\n/)) {
     if (isCommentLine(line)) continue
-    for (const pattern of PATTERNS) if (pattern.regex.test(line)) found.push(pattern.id)
+    for (const pattern of PATTERNS) if ((!pattern.screensOnly || isScreenFile(file)) && pattern.regex.test(line)) found.push(pattern.id)
   }
   return found
 }
@@ -99,7 +134,7 @@ function scanProduct() {
     const file = relative(root, path).replaceAll('\\', '/')
     if (RESOLUTION_MODULES.includes(file)) continue
     scanned += 1
-    for (const id of findEditorialLiterals(readFileSync(path, 'utf8')).filter((id) => !(EXAMPLE_MODULES[file] ?? []).includes(id))) counts.set(keyOf(file, id), (counts.get(keyOf(file, id)) ?? 0) + 1)
+    for (const id of findEditorialLiterals(readFileSync(path, 'utf8'), file).filter((id) => !(EXAMPLE_MODULES[file] ?? []).includes(id))) counts.set(keyOf(file, id), (counts.get(keyOf(file, id)) ?? 0) + 1)
   }
   return { counts, scanned }
 }
@@ -120,6 +155,22 @@ test('the scan recognises each forbidden editorial literal, and only as code', (
     '// automaticZoom: false', ' * maxCharactersPerBlock: 42', "tags.push('discovery')", "mode: 'workspace-default'",
     "['workspace-default', 'lut-version', 'none']", 'maxCharactersPerBlock: policy.captions.maxCharactersPerBlock', 'fps * 40', 'const fps4 = 4',
   ]) assert.deepEqual(findEditorialLiterals(sample), [], `the scan flagged innocent text: ${sample}`)
+})
+
+test('the generic shapes of a pre-filled screen are recognised in a screen, and only there', () => {
+  const screen = 'src/app/x/page.tsx'
+  for (const sample of [
+    "const [locale, setLocale] = useState('en-US')", 'const [market, setMarket] = useState("US")', "const [mode, setMode] = useState<Mode>('subtitles-only')",
+    "const [name, setName] = useState('Uso próprio')", '<input placeholder="Uma frase de exemplo para copiar" />', "placeholder={'HOOK 1: Uma abertura completa.'}",
+    "const ids = new Set(['a', 'b'])", '<textarea defaultValue="texto pronto" />', "<input defaultValue={'x'} />",
+  ]) assert.equal(findEditorialLiterals(sample, screen).length, 1, `the scan missed in a screen: ${sample}`)
+  for (const sample of [
+    "const [state, setState] = useState<'loading' | 'ready'>('loading')", "const [phase, setPhase] = useState('idle')", "const [filter, setFilter] = useState<'all' | Status>('all')",
+    "const [value, setValue] = useState('')", 'const [ids, setIds] = useState<Set<string>>(() => new Set())', '<input placeholder="Nome" />', '<input placeholder="Buscar projeto" />',
+    '<input defaultValue={value} />',
+  ]) assert.deepEqual(findEditorialLiterals(sample, screen), [], `the scan flagged innocent text in a screen: ${sample}`)
+  // Outside the screens the screen-only shapes are not applied (a script or a domain module has its own rules).
+  assert.deepEqual(findEditorialLiterals("const [locale, setLocale] = useState('en-US')", 'src/v2/domain/x.ts'), [])
 })
 
 test('the resolution modules are the only exemption, and they exist', () => {

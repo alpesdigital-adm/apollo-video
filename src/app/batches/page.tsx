@@ -2003,17 +2003,7 @@ export default function BatchesPage() {
       activeAlignment?.document.title ||
       `Roteiro · ${selectedBatch.name}`,
     )
-    if (!scriptRawText) {
-      setScriptRawText([
-        'HOOK 1: ',
-        '',
-        'CORPO 1: ',
-        '',
-        'PROVA 1: ',
-        '',
-        'CTA 1: ',
-      ].join('\n'))
-    }
+    // The script is the owner's: the field opens empty, with no skeleton and no sentence to copy (ADR-160).
     setScriptComposerOpen(true)
     scriptIdempotencyKey.current = null
   }
@@ -4552,7 +4542,7 @@ export default function BatchesPage() {
                 <label className="block">
                   <span className="text-xs font-semibold text-[#c8c2b8]">Texto planejado</span>
                   <span className="ml-2 text-[10px] text-[#77736c]">um marcador por bloco</span>
-                  <textarea className="mt-2 min-h-[390px] min-w-0 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 font-mono text-[12px] leading-6 text-[#eee8de] outline-hidden placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={500000} onChange={(event) => { setScriptRawText(event.target.value); scriptIdempotencyKey.current = null }} placeholder={'HOOK 1: Uma abertura completa.\nCORPO 1: O argumento principal.\nPROVA 1: A evidência.\nCTA 1: A chamada para ação.'} required spellCheck value={scriptRawText} />
+                  <textarea className="mt-2 min-h-[390px] min-w-0 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 font-mono text-[12px] leading-6 text-[#eee8de] outline-hidden placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={500000} onChange={(event) => { setScriptRawText(event.target.value); scriptIdempotencyKey.current = null }} required spellCheck value={scriptRawText} />
                 </label>
                 <p className="text-[9px] leading-4 text-[#656159]">Marcadores aceitos: HOOK/GANCHO, BODY/CORPO, PROOF/PROVA, OBJECTION/OBJEÇÃO, BRIDGE/PONTE, OFFER/OFERTA e CTA.</p>
               </div>

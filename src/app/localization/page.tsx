@@ -217,14 +217,16 @@ export default function LocalizationPage() {
   const [profileId, setProfileId] = useState("");
   const [sources, setSources] = useState<SourceMedia[]>([]);
   const [sourceArtifactId, setSourceArtifactId] = useState("");
-  const [newProfileLocale, setNewProfileLocale] = useState("en-US");
-  const [newProfileMarket, setNewProfileMarket] = useState("US");
-  const [newProfileModes, setNewProfileModes] = useState<LocalizedAudioMode[]>([
-    "subtitles-only",
-  ]);
+  // Nothing is chosen for the owner: the language, the market and the modes of a new profile start empty (ADR-160).
+  const [newProfileLocale, setNewProfileLocale] = useState("");
+  const [newProfileMarket, setNewProfileMarket] = useState("");
+  const [newProfileModes, setNewProfileModes] = useState<LocalizedAudioMode[]>(
+    [],
+  );
   const [variantId, setVariantId] = useState("");
-  const [requestedMode, setRequestedMode] =
-    useState<LocalizedAudioMode>("subtitles-only");
+  const [requestedMode, setRequestedMode] = useState<LocalizedAudioMode | "">(
+    "",
+  );
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reviewTexts, setReviewTexts] = useState<Record<string, string>>({});
@@ -400,8 +402,9 @@ export default function LocalizationPage() {
   useEffect(() => {
     const allowed =
       profiles.find((item) => item.id === profileId)?.allowedModes ?? [];
-    if (!allowed.includes(requestedMode) && allowed[0])
-      setRequestedMode(allowed[0]);
+    // A mode the profile does not allow is dropped; the Apollo does not pick another one for the owner.
+    if (requestedMode !== "" && !allowed.includes(requestedMode))
+      setRequestedMode("");
   }, [profileId, profiles, requestedMode]);
   useEffect(() => {
     if (!candidate) {
@@ -520,7 +523,8 @@ export default function LocalizationPage() {
   async function createVariant() {
     const profile = profiles.find((item) => item.id === profileId);
     const source = sources.find((item) => item.artifactId === sourceArtifactId);
-    if (!projectId || !canonical || !profile || !source) return;
+    if (!projectId || !canonical || !profile || !source || requestedMode === "")
+      return;
     setBusy(true);
     setNotice(null);
     const intent = `create:${projectId}:${canonical.id}:${profile.id}:${source.artifactId}:${source.sha256}:${requestedMode}`;
@@ -985,24 +989,22 @@ export default function LocalizationPage() {
                   <div className="grid gap-2">
                     <div className="grid grid-cols-2 gap-2">
                       <label className="text-[11px] text-[#918c84]">
-                        Novo locale
+                        Idioma do novo perfil (código do idioma)
                         <input
                           className="mt-1 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-sm text-white"
                           onChange={(event) =>
                             setNewProfileLocale(event.target.value)
                           }
-                          placeholder="en-US"
                           value={newProfileLocale}
                         />
                       </label>
                       <label className="text-[11px] text-[#918c84]">
-                        Mercado
+                        Mercado (opcional)
                         <input
                           className="mt-1 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-sm text-white"
                           onChange={(event) =>
                             setNewProfileMarket(event.target.value)
                           }
-                          placeholder="US"
                           value={newProfileMarket}
                         />
                       </label>
@@ -1096,6 +1098,7 @@ export default function LocalizationPage() {
                       }
                       value={requestedMode}
                     >
+                      <option value="">Escolha o modo</option>
                       {LOCALIZED_AUDIO_MODES.filter((mode) =>
                         profiles
                           .find((item) => item.id === profileId)
@@ -1110,7 +1113,11 @@ export default function LocalizationPage() {
                   <button
                     className="mt-1 min-h-10 rounded-lg bg-[#d8a93a] px-3 text-xs font-semibold text-black disabled:opacity-40"
                     disabled={
-                      busy || !canonical || !profileId || !sourceArtifactId
+                      busy ||
+                      !canonical ||
+                      !profileId ||
+                      !sourceArtifactId ||
+                      requestedMode === ""
                     }
                     onClick={() => void createVariant()}
                     type="button"

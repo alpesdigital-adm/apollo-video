@@ -97,8 +97,8 @@ export default function WorkspaceLutLibrary() {
   const [file, setFile] = useState<File | null>(null)
   const [name, setName] = useState('')
   const [owner, setOwner] = useState('')
-  const [licensePolicy, setLicensePolicy] = useState<LicensePolicy>('owned')
-  const [licenseName, setLicenseName] = useState('Uso próprio')
+  const [licensePolicy, setLicensePolicy] = useState<LicensePolicy | ''>('')
+  const [licenseName, setLicenseName] = useState('')
   const [usageNotes, setUsageNotes] = useState('')
   const [tags, setTags] = useState('')
   const [inputColorSpace, setInputColorSpace] = useState<ColorSpace>('rec709')
@@ -176,7 +176,7 @@ export default function WorkspaceLutLibrary() {
         body: JSON.stringify({
           lutId: `lut-${globalThis.crypto.randomUUID()}`,
           name: name.trim(), owner: owner.trim(),
-          license: { policy: licensePolicy, name: licenseName.trim(), ...(usageNotes.trim() ? { usageNotes: usageNotes.trim() } : {}) },
+          license: { policy: licensePolicy as LicensePolicy, name: licenseName.trim(), ...(usageNotes.trim() ? { usageNotes: usageNotes.trim() } : {}) },
           tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
           compatibility: { inputColorSpace, outputColorSpace }, intensity: intensity / 100, cubeContent,
         }),
@@ -268,14 +268,14 @@ export default function WorkspaceLutLibrary() {
           <label className="xl:col-span-2"><span className="mb-1.5 block text-[9px] uppercase tracking-[0.14em] text-[#716b62]">Arquivo .cube</span><input accept=".cube,text/plain" className={`${inputClass} file:mr-3 file:border-0 file:bg-[#211c13] file:px-2 file:py-1 file:text-[10px] file:text-[#d2b56f]`} id="workspace-lut-file" onChange={(event) => { const selected = event.target.files?.[0] ?? null; setFile(selected); if (selected && !name) setName(selected.name.replace(/\.cube$/i, '')) }} required type="file" /></label>
           <label><span className="mb-1.5 block text-[9px] uppercase tracking-[0.14em] text-[#716b62]">Nome</span><input className={inputClass} maxLength={160} onChange={(event) => setName(event.target.value)} required value={name} /></label>
           <label><span className="mb-1.5 block text-[9px] uppercase tracking-[0.14em] text-[#716b62]">Owner</span><input className={inputClass} maxLength={240} onChange={(event) => setOwner(event.target.value)} required value={owner} /></label>
-          <label><span className="mb-1.5 block text-[9px] uppercase tracking-[0.14em] text-[#716b62]">Licença</span><select className={inputClass} onChange={(event) => setLicensePolicy(event.target.value as LicensePolicy)} value={licensePolicy}><option value="owned">Própria</option><option value="licensed">Licenciada</option><option value="restricted">Uso restrito</option></select></label>
+          <label><span className="mb-1.5 block text-[9px] uppercase tracking-[0.14em] text-[#716b62]">Licença</span><select className={inputClass} onChange={(event) => setLicensePolicy(event.target.value as LicensePolicy | '')} value={licensePolicy}><option value="">Escolha</option><option value="owned">Própria</option><option value="licensed">Licenciada</option><option value="restricted">Uso restrito</option></select></label>
           <label><span className="mb-1.5 block text-[9px] uppercase tracking-[0.14em] text-[#716b62]">Nome da licença</span><input className={inputClass} maxLength={240} onChange={(event) => setLicenseName(event.target.value)} required value={licenseName} /></label>
           <label><span className="mb-1.5 block text-[9px] uppercase tracking-[0.14em] text-[#716b62]">Entrada</span><select className={inputClass} onChange={(event) => setInputColorSpace(event.target.value as ColorSpace)} value={inputColorSpace}>{Object.entries(COLOR_SPACE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label><span className="mb-1.5 block text-[9px] uppercase tracking-[0.14em] text-[#716b62]">Saída</span><select className={inputClass} onChange={(event) => setOutputColorSpace(event.target.value as ColorSpace)} value={outputColorSpace}>{Object.entries(COLOR_SPACE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label><span className="mb-1.5 block text-[9px] uppercase tracking-[0.14em] text-[#716b62]">Intensidade padrão · {intensity}%</span><input className="mt-2 w-full accent-[#c6a15a]" max={100} min={0} onChange={(event) => setIntensity(Number(event.target.value))} type="range" value={intensity} /></label>
-          <label><span className="mb-1.5 block text-[9px] uppercase tracking-[0.14em] text-[#716b62]">Tags separadas por vírgula</span><input className={inputClass} onChange={(event) => setTags(event.target.value)} placeholder="cinema, pele, noturno" value={tags} /></label>
+          <label><span className="mb-1.5 block text-[9px] uppercase tracking-[0.14em] text-[#716b62]">Tags separadas por vírgula</span><input className={inputClass} onChange={(event) => setTags(event.target.value)} value={tags} /></label>
           <label className="md:col-span-2"><span className="mb-1.5 block text-[9px] uppercase tracking-[0.14em] text-[#716b62]">Notas de uso</span><input className={inputClass} maxLength={2000} onChange={(event) => setUsageNotes(event.target.value)} placeholder="Restrições territoriais ou de campanha" value={usageNotes} /></label>
-          <div className="flex items-end md:col-span-2"><button className={`${buttonClass} w-full`} disabled={busy !== '' || !file || !name.trim() || !owner.trim() || !licenseName.trim()} type="submit">Validar e adicionar LUT</button></div>
+          <div className="flex items-end md:col-span-2"><button className={`${buttonClass} w-full`} disabled={busy !== '' || !file || !name.trim() || !owner.trim() || !licensePolicy || !licenseName.trim()} type="submit">Validar e adicionar LUT</button></div>
         </form>
       </details>
     </section>
