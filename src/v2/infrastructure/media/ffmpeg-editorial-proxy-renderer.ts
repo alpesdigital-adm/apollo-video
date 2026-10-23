@@ -22,7 +22,7 @@ import { deriveCaptionGeometry, layoutBurnedCaption } from '../../domain/caption
 import { canonicalCaptionText } from '../../domain/caption-text-layout.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
-import { FfmpegColorPipelineProcessor } from './ffmpeg-color-pipeline-processor.ts'
+import { buildFfmpegColorPipelineFilter, FfmpegColorPipelineProcessor } from './ffmpeg-color-pipeline-processor.ts'
 import { buildEditorialCompositionPrefix, buildPreLibassClockStage } from './ffmpeg-editorial-composition-graph.ts'
 export { buildReframeCropFilter, buildPlacementOverlayFilters, atempoFactors } from './ffmpeg-editorial-composition-graph.ts'
 import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
@@ -376,15 +376,91 @@ export function sliceRenderRange(input: EditorialRenderInput, range: {
   })
 }
 
+/** A colour-normalized source one operation already produced, with the stat that proves the file is still that one. */
+type NormalizedSourceEntry = Readonly<{ path: string; directory: string; byteSize: number; mtimeMs: number }>
+
 export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
   private readonly workRoot: string
   private readonly ffmpegPath: string
-  private readonly colorProcessor: FfmpegColorPipelineProcessor
+  private readonly colorProcessor: Pick<FfmpegColorPipelineProcessor, 'process'>
+  /**
+   * Colour-normalized sources, per normalization scope (the operation whose controls re-render the same input): scope -> content key ->
+   * the file. The scope is an operation id, so the entries die with the operation (`cleanup`) or with the directory that holds the file;
+   * nothing is shared across operations and nothing outlives the process.
+   */
+  private readonly normalized = new Map<string, Map<string, Promise<NormalizedSourceEntry>>>()
+  private ffmpegSha256: Promise<string> | undefined
 
-  constructor(options: { workRoot: string; ffmpegPath?: string }) {
+  constructor(options: { workRoot: string; ffmpegPath?: string; colorProcessor?: Pick<FfmpegColorPipelineProcessor, 'process'> }) {
     this.workRoot = resolve(options.workRoot)
     this.ffmpegPath = resolveFfmpegBinary(options.ffmpegPath)
-    this.colorProcessor = new FfmpegColorPipelineProcessor({ ffmpegPath: this.ffmpegPath })
+    this.colorProcessor = options.colorProcessor ?? new FfmpegColorPipelineProcessor({ ffmpegPath: this.ffmpegPath })
+  }
+
+  /**
+   * The colour-normalized copy of a source. Without a scope this is exactly one `process` per call (the behaviour of every direct caller).
+   * With a scope, the first render of the scope normalizes and the controls of the same operation reuse that file when EVERYTHING that
+   * decides its bytes is equal: the sha256 of the source content, the whole filter (LUT paths included) plus the sha256 of each LUT file,
+   * the output metadata and the sha256 of the ffmpeg binary. The file must still be the one that was written (size and mtime).
+   */
+  private async normalizedSource(input: Readonly<{
+    scopeId: string | undefined
+    sourcePath: string
+    outputPath: string
+    directory: string
+    compilation?: Parameters<FfmpegColorPipelineProcessor['process']>[0]['compilation']
+    execution?: Parameters<FfmpegColorPipelineProcessor['process']>[0]['execution']
+    lutPaths: Readonly<Record<string, string>>
+    signal?: AbortSignal
+  }>): Promise<string> {
+    const colorInput = input.execution ? { execution: input.execution } : { compilation: input.compilation! }
+    const produce = async (): Promise<NormalizedSourceEntry> => {
+      await rm(input.outputPath, { force: true })
+      await this.colorProcessor.process({ sourcePath: input.sourcePath, outputPath: input.outputPath, ...colorInput, lutPaths: input.lutPaths, signal: input.signal })
+      const written = await stat(input.outputPath)
+      return Object.freeze({ path: input.outputPath, directory: input.directory, byteSize: written.size, mtimeMs: written.mtimeMs })
+    }
+    if (!input.scopeId) return (await produce()).path
+    const compiled = buildFfmpegColorPipelineFilter({ ...colorInput, lutPaths: input.lutPaths })
+    this.ffmpegSha256 ??= calculateFileSha256(this.ffmpegPath)
+    const [sourceSha256, ffmpegSha256, lutSha256s] = await Promise.all([
+      calculateFileSha256(input.sourcePath),
+      this.ffmpegSha256,
+      Promise.all(Object.entries(input.lutPaths).map(async ([lutKey, path]) => [lutKey, await calculateFileSha256(path)] as const)),
+    ])
+    const key = calculateCanonicalHash({
+      sourceSha256, filter: compiled.filter, outputMetadata: compiled.outputMetadata, ffmpegSha256,
+      lutSha256s: lutSha256s.toSorted(([left], [right]) => left.localeCompare(right)),
+    })
+    const scope = this.normalized.get(input.scopeId) ?? new Map<string, Promise<NormalizedSourceEntry>>()
+    this.normalized.set(input.scopeId, scope)
+    const candidate = scope.get(key)
+    if (candidate) {
+      try {
+        const entry = await candidate
+        const current = await stat(entry.path)
+        if (current.isFile() && current.size === entry.byteSize && current.mtimeMs === entry.mtimeMs) return entry.path
+      } catch { /* the entry is gone or stale: normalize again below */ }
+    }
+    const created = produce()
+    scope.set(key, created)
+    try {
+      return (await created).path
+    } catch (error) {
+      if (scope.get(key) === created) scope.delete(key)
+      throw error
+    }
+  }
+
+  /** Drops the scope an operation owned and every normalized entry that lives in a directory about to be removed. */
+  private async forgetNormalized(operationId: string, directory: string): Promise<void> {
+    this.normalized.delete(operationId)
+    for (const scope of this.normalized.values()) {
+      for (const [key, pending] of [...scope]) {
+        const entry = await pending.catch(() => null)
+        if (entry?.directory === directory && scope.get(key) === pending) scope.delete(key)
+      }
+    }
   }
 
   private directory(operationId: string): string {
@@ -478,10 +554,8 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
           calculateCanonicalHash(pipeline.outputMetadata) !== calculateCanonicalHash(source.colorPipelineCompilation!.pipeline.outputMetadata)
         ) throw new DomainError('INVALID_RENDER_INPUT', 'ColorPlan pipeline diverges from trusted source colorimetry')
         const outputPath = join(directory, `color-source-${String(sourceOrdinal).padStart(3, '0')}-${String(pipelineOrdinal).padStart(3, '0')}.mp4`)
-        await rm(outputPath, { force: true })
-        await this.colorProcessor.process({
-          sourcePath: source.path,
-          outputPath,
+        const normalizedPath = await this.normalizedSource({
+          scopeId: input.normalizationScopeId, sourcePath: source.path, outputPath, directory,
           ...(colorPlan
             ? { execution: { pipeline, executionHash: colorPlan.compiled.manifestHash } }
             : { compilation: source.colorPipelineCompilation! }),
@@ -489,7 +563,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
           signal: input.signal,
         })
         const index = renderSources.length
-        renderSources.push(Object.freeze({ ...source, path: outputPath, colorPipelineHash: pipeline.pipelineHash }))
+        renderSources.push(Object.freeze({ ...source, path: normalizedPath, colorPipelineHash: pipeline.pipelineHash }))
         if (!sourceIndex.has(source.artifactId)) sourceIndex.set(source.artifactId, index)
         for (const clip of clipsForSource) {
           const target = colorPlan ? colorTargetByKey.get(colorTargetKey(clip)) : null
@@ -886,7 +960,9 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
   }
 
   async cleanup(operationId: string): Promise<void> {
-    await rm(this.directory(operationId), { recursive: true, force: true })
+    const directory = this.directory(operationId)
+    await this.forgetNormalized(operationId, directory)
+    await rm(directory, { recursive: true, force: true })
   }
 }
 

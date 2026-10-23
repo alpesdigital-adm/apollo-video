@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { mkdir, rm, stat } from 'node:fs/promises'
+import { mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Readable } from 'node:stream'
 import { promisify } from 'node:util'
@@ -70,6 +70,19 @@ async function* rawFrames(stdout: Readable, frameBytes: number): AsyncGenerator<
   if (size !== 0) throw new DomainError('RENDER_OUTPUT_INVALID', 'The MP4 critic decoded a partial frame')
 }
 
+/** `select` filter graph for the ascending, de-duplicated frames; runs of 3+ become one `between`, so a dense request stays short. */
+export function selectExpression(frames: readonly number[]): string {
+  const terms: string[] = []
+  for (let index = 0; index < frames.length;) {
+    let end = index
+    while (end + 1 < frames.length && frames[end + 1] === frames[end]! + 1) end += 1
+    if (!Number.isSafeInteger(frames[index]) || frames[index]! < 0) throw new DomainError('RENDER_OUTPUT_INVALID', 'The MP4 critic was asked for an invalid frame')
+    terms.push(end - index >= 2 ? `between(n\\,${frames[index]}\\,${frames[end]})` : [...Array(end - index + 1).keys()].map((offset) => `eq(n\\,${frames[index]! + offset})`).join('+'))
+    index = end + 1
+  }
+  return `select=${terms.join('+')}`
+}
+
 type Decoder = Readonly<{ frames: AsyncGenerator<Buffer>; child: ChildProcess; stderr: () => string; closed: Promise<number | null> }>
 
 export type FfmpegMp4PixelCriticOptions = Readonly<{
@@ -84,6 +97,8 @@ export type FfmpegMp4PixelCriticOptions = Readonly<{
   overlays?: Readonly<{ captions: boolean; cta: boolean }>
   /** Sampling parameters other than the policy's (a long output measured with a coarser stride, or a test); recorded in the report. */
   sampling?: Readonly<{ allFramesUpTo: number; strideFrames: number }>
+  /** Called with the argument vector of every ffmpeg process the critic starts (a test counts the passes; production leaves it unset). */
+  onFfmpegSpawn?: (args: readonly string[]) => void
 }>
 
 export class FfmpegMp4PixelCritic implements Mp4PixelCritic {
@@ -125,9 +140,12 @@ export class FfmpegMp4PixelCritic implements Mp4PixelCritic {
     })
   }
 
-  private decoder(path: string, width: number, height: number, signal?: AbortSignal): Decoder {
-    const child = spawn(this.ffmpegPath, ['-hide_banner', '-v', 'error', '-i', path, '-map', '0:v:0', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'],
-      { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+  private decoder(path: string, width: number, height: number, signal?: AbortSignal, selectScript?: string): Decoder {
+    // A selection is read from a script file: the expression of a long list of frames outgrows the command line.
+    const args = ['-hide_banner', '-v', 'error', '-i', path, '-map', '0:v:0',
+      ...(selectScript ? ['-filter_script:v', selectScript, '-fps_mode', 'passthrough'] : []), '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1']
+    this.options.onFfmpegSpawn?.(args)
+    const child = spawn(this.ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
     let stderr = ''
     child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 64_000) stderr += chunk.toString('utf8') })
     const closed = new Promise<number | null>((resolve) => { child.once('error', () => resolve(-1)); child.once('close', resolve) })
@@ -135,24 +153,28 @@ export class FfmpegMp4PixelCritic implements Mp4PixelCritic {
     return { frames: rawFrames(child.stdout, width * height * 3), child, stderr: () => stderr, closed }
   }
 
-  /** Specific frames of a file (decode order index), as RGB24, through the select filter. */
-  private async decodeFrames(path: string, frames: readonly number[], width: number, height: number, signal?: AbortSignal): Promise<readonly Buffer[]> {
-    const frameBytes = width * height * 3
-    const out: Buffer[] = []
-    for (let offset = 0; offset < frames.length; offset += 48) {
-      const chunk = frames.slice(offset, offset + 48)
-      const select = chunk.map((frame) => `eq(n\\,${frame})`).join('+')
-      const { stdout } = await execFileAsync(this.ffmpegPath, ['-hide_banner', '-v', 'error', '-i', path, '-map', '0:v:0', '-vf', `select=${select}`, '-fps_mode', 'passthrough',
-        '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'], {
-        encoding: 'buffer', maxBuffer: frameBytes * chunk.length + 4096, windowsHide: true, ...(signal ? { signal } : {}),
-      })
-      if (stdout.byteLength !== frameBytes * chunk.length) throw new DomainError('RENDER_OUTPUT_INVALID', 'The MP4 critic could not decode every requested frame')
-      // The select filter emits frames in decode order, not in the order of the request.
-      const ordered = [...chunk.entries()].toSorted((left, right) => left[1] - right[1])
-      const byFrame = new Map(ordered.map(([, frame], position) => [frame, Buffer.from(stdout.subarray(position * frameBytes, (position + 1) * frameBytes))]))
-      for (const frame of chunk) out.push(byFrame.get(frame)!)
+  /**
+   * Specific frames of a file (decode order index) as RGB24, in ASCENDING frame order, from ONE decoding pass of the file through the
+   * select filter. Frames are handed over one at a time as the pipe delivers them (never all in memory); the select filter emits in
+   * decode order, so the n-th buffer is the n-th smallest requested frame. Throws when the pass ends before every frame arrived or
+   * with an error on stderr. The ffmpeg process is registered in `decoders` so the caller's cleanup also kills an abandoned pass.
+   */
+  private async *selectedFrames(
+    path: string, frames: readonly number[], width: number, height: number, script: string, decoders: Decoder[], signal?: AbortSignal,
+  ): AsyncGenerator<Buffer> {
+    await writeFile(script, selectExpression(frames), 'utf8')
+    const decoder = this.decoder(path, width, height, signal, script)
+    decoders.push(decoder)
+    let produced = 0
+    for await (const frame of decoder.frames) {
+      if (produced >= frames.length) throw new DomainError('RENDER_OUTPUT_INVALID', 'The MP4 critic decoded more frames than requested')
+      produced += 1
+      yield frame
     }
-    return out
+    const code = await decoder.closed
+    if (produced !== frames.length || code !== 0 || decoder.stderr().length > 0) {
+      throw new DomainError('RENDER_OUTPUT_INVALID', 'The MP4 critic could not decode every requested frame')
+    }
   }
 
   async verify(request: Mp4PixelCriticRequest): Promise<Readonly<Mp4PixelVerification>> {
@@ -238,11 +260,23 @@ export class FfmpegMp4PixelCritic implements Mp4PixelCritic {
       const inkFrames = new Set([...captures].filter(([, entry]) => entry.caption.pixels > 0 || entry.cta.pixels > 0).map(([frame]) => frame))
       const extra = planMp4SampleFrames({ totalFrames, cutFrames, inkFrames, policy: planning }).filter((frame) => !sampled.has(frame))
       if (extra.length > 0 && decodeComplete) {
-        const [dd, c1, c2, c3] = await Promise.all([request.deliveredPath, noCaptions, noCta, bare].map((path) => this.decodeFrames(path, extra, width, height, request.signal)))
-        for (const [position, frame] of extra.entries()) {
-          captures.set(frame, await capture(frame, dd![position]!, c1![position]!, c2![position]!, c3![position]!, true))
+        // One pass per distinct file (the overlay-free controls can be the delivered file itself), each frame handed over as it arrives.
+        const extraSorted = [...new Set(extra)].toSorted((left, right) => left - right)
+        const passes = new Map<string, AsyncGenerator<Buffer>>()
+        const passOf = (path: string) => {
+          if (!passes.has(path)) passes.set(path, this.selectedFrames(path, extraSorted, width, height, join(work, `select-extra-${passes.size}.txt`), decoders, request.signal))
+          return passes.get(path)!
+        }
+        const streams = [request.deliveredPath, noCaptions, noCta, bare].map(passOf)
+        for (const frame of extraSorted) {
+          const stepped = await Promise.all([...passes.values()].map((pass) => pass.next()))
+          const byPass = new Map([...passes.keys()].map((path, position) => [path, stepped[position]!] as const))
+          const [dd, c1, c2, c3] = [request.deliveredPath, noCaptions, noCta, bare].map((path) => byPass.get(path)!)
+          if (!dd || !c1 || !c2 || !c3 || dd.done || c1.done || c2.done || c3.done) throw new DomainError('RENDER_OUTPUT_INVALID', 'The MP4 critic could not decode every requested frame')
+          captures.set(frame, await capture(frame, dd.value, c1.value, c2.value, c3.value, true))
           sampled.add(frame)
         }
+        for (const pass of new Set(streams)) if (!(await pass.next()).done) throw new DomainError('RENDER_OUTPUT_INVALID', 'The MP4 critic decoded more frames than requested')
       }
       const sampleFrames = [...sampled].filter((frame) => captures.get(frame)?.png).toSorted((left, right) => left - right)
       // ---- source frames ----
@@ -264,13 +298,18 @@ export class FfmpegMp4PixelCritic implements Mp4PixelCritic {
         const sourceProbe = await this.probe(source.path, false)
         sourceDims.set(artifactId, { width: sourceProbe.width, height: sourceProbe.height })
         const ordered = wanted.toSorted((left, right) => left - right)
-        const buffers = await this.decodeFrames(source.path, ordered, sourceProbe.width, sourceProbe.height, request.signal)
-        for (const [position, sourceFrame] of ordered.entries()) {
+        // ONE decoding pass of the source for every wanted frame; each frame goes to disk as it arrives.
+        const pass = this.selectedFrames(source.path, ordered, sourceProbe.width, sourceProbe.height, join(work, `select-source-${[...sourceNeeds.keys()].indexOf(artifactId)}.txt`), decoders, request.signal)
+        for (const sourceFrame of ordered) {
+          const stepped = await pass.next()
+          if (stepped.done) throw new DomainError('RENDER_OUTPUT_INVALID', 'The MP4 critic could not decode every requested frame')
+          const buffer = stepped.value
           const id = `s-${[...sourceNeeds.keys()].indexOf(artifactId)}-${String(sourceFrame).padStart(6, '0')}`
           const file = `${id}.png`
-          await sharp(buffers[position]!, { raw: { width: sourceProbe.width, height: sourceProbe.height, channels: 3 } }).png({ compressionLevel: 1 }).toFile(join(work, file))
-          sourcePng.set(`${artifactId}:${sourceFrame}`, { id, file, sha256: createHash('sha256').update(buffers[position]!).digest('hex') })
+          await sharp(buffer, { raw: { width: sourceProbe.width, height: sourceProbe.height, channels: 3 } }).png({ compressionLevel: 1 }).toFile(join(work, file))
+          sourcePng.set(`${artifactId}:${sourceFrame}`, { id, file, sha256: createHash('sha256').update(buffer).digest('hex') })
         }
+        if (!(await pass.next()).done) throw new DomainError('RENDER_OUTPUT_INVALID', 'The MP4 critic decoded more frames than requested')
       }
       // ---- the oracle, in batches that keep every registration's two frames together ----
       const analyses: PixelOracleAnalysis[] = []

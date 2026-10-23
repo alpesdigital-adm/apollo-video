@@ -310,6 +310,8 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const renderRequest: Parameters<typeof dependencies.renderer.render>[0] = {
         operationId: operation.id,
         renderKind: 'proxy',
+        // The verification controls re-render this same input: each source is colour-normalized once for the whole operation.
+        ...(dependencies.captionPixelCritic || dependencies.mp4PixelCritic ? { normalizationScopeId: operation.id } : {}),
         sources: source.renderSources.map((asset, index) => ({
           artifactId: asset.artifactId,
           path: materializedSources[index]!.path,

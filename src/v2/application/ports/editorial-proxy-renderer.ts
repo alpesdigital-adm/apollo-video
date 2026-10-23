@@ -72,6 +72,12 @@ export interface EditorialProxyRenderResult {
 export interface EditorialProxyRenderer {
   render(input: {
     operationId: string
+    /**
+     * Renders of the same input that differ only in what is drawn on top (the verification controls) name the operation that owns them
+     * here, and the renderer then colour-normalizes each source ONCE for the whole scope (see `FfmpegEditorialProxyRenderer`). Absent:
+     * every render normalizes for itself.
+     */
+    normalizationScopeId?: string
     renderKind: 'proxy' | 'final'
     sources: readonly Readonly<{
       artifactId: string
