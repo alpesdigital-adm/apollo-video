@@ -95,6 +95,16 @@ export function readByInterpreter(ownerText, found = {}) {
   }
 }
 
+/**
+ * The interpreter a project creation reads its briefing with (`createProjectService({ interpretBrief })`), over a model that always gives
+ * `answer`: for the worlds whose briefing is context for something else, so the Director finds it read, the way the product leaves it.
+ * `answer.coverage` quotes the briefing literally (the service refuses a citation the text does not hold).
+ */
+export async function briefInterpreterDouble(answer = { directives: [], unsupported: [], questions: [], coverage: [] }) {
+  const { interpretBriefService } = await import('../../../src/v2/application/interpret-brief.ts')
+  return interpretBriefService({ model: { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', async interpret() { return { text: JSON.stringify(answer) } } } })
+}
+
 /** The contentJson of a Brief Snapshot as the project creation writes it, for a given objective and (optional) free briefing. */
 export function controlledBriefJson({ objective = 'discovery', ownerText, readByDefault = true } = {}) {
   return stableSerialize({

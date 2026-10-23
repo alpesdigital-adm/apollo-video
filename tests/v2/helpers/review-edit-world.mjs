@@ -32,13 +32,14 @@ const { variantBodyFor } = await import('./explicit-project-http.mjs')
  */
 export async function seedReviewProject(client, {
   workspaceId, actor, prefix = 'review', ids = {}, name = 'Review project', objective = 'discovery', locale = 'pt-BR',
-  briefing, desiredAction, aspectRatio = '9:16', status, at = () => new Date(),
+  briefing, desiredAction, aspectRatio = '9:16', status, at = () => new Date(), interpretBrief,
 }) {
   const allocate = uniqueRun(prefix)
   await ensureWorkspaceActor(client, { workspaceId, actor })
   const createId = (kind) => ids[kind] ?? allocate.id(kind)
   const dependencies = (repository) => ({ repository, clock: at, createId, createEventId: randomUUID })
-  const created = await createProjectService(dependencies(new PrismaCreationOutputBundleRepositoryV2(client)))({
+  // `interpretBrief` reads the briefing when the project is created, as the product does; without one the briefing stays as written and unread.
+  const created = await createProjectService({ ...dependencies(new PrismaCreationOutputBundleRepositoryV2(client)), ...(interpretBrief ? { interpretBrief } : {}) })({
     workspaceId, name, objective, locale, actor, idempotencyKey: allocate.id('root-request'),
     ...(briefing === undefined ? {} : { briefing }), ...(desiredAction === undefined ? {} : { desiredAction }),
   })
