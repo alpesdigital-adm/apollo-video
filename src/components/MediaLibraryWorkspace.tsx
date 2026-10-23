@@ -31,7 +31,7 @@ function byteSize(value: string) {
 }
 
 /** The language the rights are judged under is the one the person states; none stated is read as undetermined by the API (it assumes no language). */
-function localeQuery(locale: string) { return locale.trim() ? `?locale=${encodeURIComponent(locale.trim())}` : '' }
+function localeParams(locale: string) { return locale.trim() ? new URLSearchParams({ locale: locale.trim() }).toString() : '' }
 
 export default function MediaLibraryWorkspace() {
   const [items, setItems] = useState<LibraryItem[]>([])
@@ -114,7 +114,7 @@ export default function MediaLibraryWorkspace() {
     const generation = ++details.current.generation
     setDetail(null); setDetailState('loading'); setMessage('')
     try {
-      const response = await fetch(`/v1/media/library/${encodeURIComponent(item.id)}${localeQuery(applied.locale)}`, { signal: controller.signal, cache: 'no-store' })
+      const response = await fetch(`/v1/media/library/${encodeURIComponent(item.id)}?${localeParams(applied.locale)}`, { signal: controller.signal, cache: 'no-store' })
       const payload = await response.json() as ApiEnvelope<LibraryItem>
       if (controller.signal.aborted || generation !== details.current.generation) return
       if (response.status === 401 || response.status === 403) clearPrivateState()
@@ -252,7 +252,7 @@ function LibraryPreview({ itemId, kind, locale, onAuthorizationLost }: { itemId:
   useEffect(() => {
     const controller = new AbortController(); let objectUrl = ''
     setUrl(''); setFailed(false)
-    void fetch(`/v1/media/library/${encodeURIComponent(itemId)}/previews/${kind}${localeQuery(locale)}`, { signal: controller.signal, cache: 'no-store' }).then(async (response) => {
+    void fetch(`/v1/media/library/${encodeURIComponent(itemId)}/previews/${kind}?${localeParams(locale)}`, { signal: controller.signal, cache: 'no-store' }).then(async (response) => {
       if (controller.signal.aborted) return
       if (response.status === 401 || response.status === 403) { onAuthorizationLost(); return }
       if (!response.ok) throw new Error('Preview unavailable')
