@@ -8583,14 +8583,14 @@ const briefInterpretationSchema = {
 }
 const briefInterpretationAuditSchema = {
   type: 'object', additionalProperties: false,
-  required: ['schemaVersion', 'provider', 'model', 'resolvedModel', 'providerVersion', 'promptVersion', 'promptHash', 'inputHash', 'responseHash', 'usage', 'costBasis', 'costMinorUnits', 'signals', 'directivesMovedToUnsupported', 'directivesWithdrawnAsAmbiguous'],
+  required: ['schemaVersion', 'provider', 'model', 'resolvedModel', 'providerVersion', 'promptVersion', 'promptHash', 'inputHash', 'modelInputHash', 'responseHash', 'usage', 'costBasis', 'costMinorUnits', 'signals', 'directivesMovedToUnsupported', 'directivesWithdrawnAsAmbiguous'],
   properties: {
     schemaVersion: { const: 'brief-interpretation-audit/v1' },
     provider: { type: 'string', minLength: 1, maxLength: 128 }, model: { type: 'string', minLength: 1, maxLength: 128 },
     resolvedModel: { anyOf: [{ type: 'string', minLength: 1, maxLength: 128 }, { type: 'null' }] },
     providerVersion: { anyOf: [{ type: 'string', minLength: 1, maxLength: 128 }, { type: 'null' }] },
     costBasis: { enum: ['api-metered', 'subscription'] },
-    promptVersion: { type: 'string', minLength: 1, maxLength: 128 }, promptHash: sha256Schema, inputHash: sha256Schema, responseHash: sha256Schema,
+    promptVersion: { type: 'string', minLength: 1, maxLength: 128 }, promptHash: sha256Schema, inputHash: sha256Schema, modelInputHash: { anyOf: [sha256Schema, { type: 'null' }] }, responseHash: sha256Schema,
     usage: { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['inputTokens', 'outputTokens'], properties: { inputTokens: { type: 'integer', minimum: 0 }, outputTokens: { type: 'integer', minimum: 0 } } }] },
     costMinorUnits: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
     signals: { type: 'array', maxItems: 16, items: { type: 'string', minLength: 1, maxLength: 128 } },

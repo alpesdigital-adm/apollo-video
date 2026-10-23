@@ -41,7 +41,7 @@ test('what the model maps is kept with the words it stands on, found literally i
     directives: [
       { kind: 'movement', value: 'none', param: null, quote: 'two three' },
       { kind: 'opening', value: 'protect-seconds', param: 3, quote: 'five' },
-      { kind: 'avoid', value: 'subject', param: 'omega', quote: 'six' },
+      { kind: 'avoid', value: 'subject', param: 'six', quote: 'six' },
     ],
     unsupported: [{ summary: 'something outside the vocabulary', quote: 'four' }],
     questions: [{ question: 'Which of the two is meant?', quote: 'one' }],
@@ -50,7 +50,7 @@ test('what the model maps is kept with the words it stands on, found literally i
   assert.deepEqual(interpretation.directives.map((item) => [item.id, item.kind, item.value, item.param ?? null, item.excerpt.text, briefing.slice(item.excerpt.start, item.excerpt.end)]), [
     ['d1', 'movement', 'none', null, 'two three', 'two three'],
     ['d2', 'opening', 'protect-seconds', 3, 'five', 'five'],
-    ['d3', 'avoid', 'subject', 'omega', 'six', 'six'],
+    ['d3', 'avoid', 'subject', 'six', 'six', 'six'],
   ])
   assert.equal(interpretation.unsupported[0].excerpt.text, 'four')
   assert.equal(interpretation.unsupported[0].reason, 'outside-vocabulary')
@@ -208,4 +208,45 @@ test('interpretationFromModelText is the one place a model answer becomes an int
   })
   // The same topic twice is one topic.
   assert.deepEqual(result.interpretation.coverage.map((item) => item.excerpt.text), ['one'])
+})
+
+test('a citation that cites nothing, or cites everything, is refused: it does not stand on words', async () => {
+  const briefing = 'one two three'
+  for (const quote of [' ', 'e', '-', '.', ',']) {
+    await assert.rejects(interpret(model({ ...empty, directives: [{ kind: 'movement', value: 'zoom-in', param: null, quote }] }), 'a b e - . , one two three'), refusedAs('RENDER_OUTPUT_INVALID'), JSON.stringify(quote))
+  }
+  const long = `${'alpha beta gamma delta epsilon. '.repeat(6)}omega`
+  assert.ok(long.length > 120)
+  await assert.rejects(interpret(model({ ...empty, directives: [{ kind: 'cta', value: 'overlay-closing', param: null, quote: long }] }), long), refusedAs('RENDER_OUTPUT_INVALID'))
+  await assert.rejects(interpret(model({ ...empty, coverage: [{ topic: 'tone', quote: long.slice(0, 150) }] }), long), refusedAs('RENDER_OUTPUT_INVALID'))
+  // A short briefing is one request: its whole text may be the citation. A long one is cited by the words a directive stands on.
+  const whole = await interpret(model({ ...empty, directives: [{ kind: 'movement', value: 'none', param: null, quote: briefing }] }), briefing)
+  assert.equal(whole.interpretation.directives.length, 1)
+  const specific = await interpret(model({ ...empty, directives: [{ kind: 'cta', value: 'overlay-closing', param: null, quote: 'omega' }] }), long)
+  assert.equal(specific.interpretation.directives[0].excerpt.text, 'omega')
+})
+
+test('the subject kept or avoided is a name of the briefing; the same subject both kept and avoided is a question', async () => {
+  const briefing = 'keep the gamma part and avoid the delta part, and avoid gamma too'
+  const { interpretation, audit } = await interpret(model({ ...empty, directives: [
+    { kind: 'keep', value: 'subject', param: 'Gamma', quote: 'keep the gamma' },
+    { kind: 'avoid', value: 'subject', param: 'delta', quote: 'avoid the delta' },
+    { kind: 'avoid', value: 'subject', param: 'gamma', quote: 'avoid gamma' },
+    { kind: 'avoid', value: 'subject', param: 'the secret plans', quote: 'part' },
+  ] }), briefing)
+  assert.deepEqual(interpretation.directives.map((item) => [item.kind, item.param]), [['avoid', 'delta']])
+  assert.equal(interpretation.questions.length, 1)
+  assert.match(interpretation.questions[0].question, /keep and to avoid "Gamma"/)
+  assert.equal(interpretation.unsupported.length, 1, 'a subject the briefing never names is not a directive')
+  assert.equal(audit.directivesMovedToUnsupported, 1)
+})
+
+test('free text the model writes is short and carries no data the briefing could not have given', async () => {
+  const briefing = 'one two three'
+  for (const summary of [String.raw`see C:\Users\someone\secret.txt`, 'see C:/Users/someone/secret.txt', String.raw`share \\host\share`,'read /etc/passwd please', 'at https://example.invalid/x', 'file://host/share', `blob ${'QUJD'.repeat(12)}`, 'bell\u0007char']) {
+    await assert.rejects(interpret(model({ ...empty, unsupported: [{ summary, quote: 'two' }] }), briefing), refusedAs('RENDER_OUTPUT_INVALID'), summary)
+    await assert.rejects(interpret(model({ ...empty, questions: [{ question: summary, quote: 'two' }] }), briefing), refusedAs('RENDER_OUTPUT_INVALID'), summary)
+  }
+  const { interpretation } = await interpret(model({ ...empty, unsupported: [{ summary: `a ${'long '.repeat(80)}summary`, quote: 'two' }] }), briefing)
+  assert.ok(interpretation.unsupported[0].summary.length <= 200)
 })

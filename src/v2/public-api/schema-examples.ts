@@ -5651,7 +5651,7 @@ const editorialRequestInterpretationExample = createBriefInterpretation({
 })
 const editorialRequestAuditExample = {
   schemaVersion: 'brief-interpretation-audit/v1', provider: '<provedor>', model: '<modelo>', resolvedModel: null,
-  promptVersion: 'brief-interpreter/v1', providerVersion: null, costBasis: 'api-metered', promptHash: '6'.repeat(64), inputHash: '7'.repeat(64), responseHash: '8'.repeat(64),
+  promptVersion: 'brief-interpreter/v1', providerVersion: null, costBasis: 'api-metered', promptHash: '6'.repeat(64), inputHash: '7'.repeat(64), modelInputHash: null, responseHash: '8'.repeat(64),
   usage: null, costMinorUnits: null, signals: [], directivesMovedToUnsupported: 0, directivesWithdrawnAsAmbiguous: 0,
 }
 const editorialRequestViewExample = describeEditorialRequest({

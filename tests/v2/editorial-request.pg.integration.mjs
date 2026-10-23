@@ -3,13 +3,14 @@ import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
-import { installFakeCodex } from './helpers/install-fake-codex.mjs'
+import { startBriefInterpreterStandIn } from './helpers/brief-interpreter-stand-in.mjs'
 import { seedDirectedProject } from './helpers/dashboard-w34-35-fixtures.mjs'
 import { seedSealedProject, testActor } from './helpers/pg-output-world.mjs'
 
 /**
  * ADR-160 F6 against a real PostgreSQL, through the published routes: a project is created with a briefing, the briefing is read by the
- * interpreter (the real Codex CLI adapter - the primary provider - running a stand-in executable that this suite scripts: no account, no network, no real model),
+ * interpreter (the real OpenAI API adapter, pointed at a local stand-in that this suite scripts: no network, no credential, no real model; the Codex CLI adapter
+ * - the primary provider - refuses to start on a machine whose system-wide Codex folder has hooks, so its proof is the unit suite with a stand-in executable),
  * and the Director plans from what was read.
  *
  *   1. The briefing of the project is a request nobody has read: the read says so, and the Director refuses it with the published reason.
@@ -24,19 +25,7 @@ import { seedSealedProject, testActor } from './helpers/pg-output-world.mjs'
 const enabled = process.env.APOLLO_EDITORIAL_REQUEST_PG === '1'
 
 const BRIEFING = 'alpha beta gamma delta'
-const CONFIGURATION = ['APOLLO_V2_BRIEF_INTERPRETER_PROVIDER', 'APOLLO_V2_CODEX_BIN', 'APOLLO_V2_BRIEF_INTERPRETER_MODEL', 'OPENAI_API_KEY', 'APOLLO_V2_BRIEF_INTERPRETER_BASE_URL']
-
-/** The stand-in Codex, scripted per briefing: `script.set(briefing, answer)` changes what it answers; `calls` is what it was asked. */
-function scriptedCodex() {
-  const answers = {}
-  const fake = installFakeCodex({ answers })
-  return Object.freeze({
-    binary: fake.binary,
-    script: { set: (briefing, answer) => { answers[briefing] = answer; fake.configure({ answers }) } },
-    get calls() { return fake.executions() },
-    close: async () => fake.remove(),
-  })
-}
+const CONFIGURATION = ['APOLLO_V2_BRIEF_INTERPRETER_PROVIDER', 'APOLLO_V2_CODEX_BIN', 'APOLLO_V2_CODEX_HOME', 'APOLLO_V2_BRIEF_INTERPRETER_MODEL', 'OPENAI_API_KEY', 'APOLLO_V2_BRIEF_INTERPRETER_BASE_URL']
 
 async function callRoute(NextRequest, module, { method, path, params = {}, body, authorization, idempotencyKey }) {
   const headers = new Headers()
@@ -52,7 +41,7 @@ async function callRoute(NextRequest, module, { method, path, params = {}, body,
 test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Director plans from what was read', { skip: !enabled, timeout: 600_000 }, async () => {
   const saved = Object.fromEntries(CONFIGURATION.map((name) => [name, process.env[name]]))
   for (const name of CONFIGURATION) delete process.env[name]
-  const interpreter = scriptedCodex()
+  const interpreter = await startBriefInterpreterStandIn({ fallback: undefined })
   const run = randomUUID().replaceAll('-', '').slice(0, 10)
   const workspaceId = `f6req-${run}-ws`, clientId = `f6req-${run}-client`
   const seedActor = testActor({ workspaceId, clientId, credentialId: `${clientId}-cred`, environment: 'production', scopes: ['projects:write', 'projects:read', 'media:write'] })
@@ -112,9 +101,7 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     assert.deepEqual(unavailable.payload.error.details, { reason: 'brief-interpreter-unavailable' })
     assert.equal(await versionCount(), before)
 
-    process.env.APOLLO_V2_BRIEF_INTERPRETER_PROVIDER = 'codex-cli'
-    process.env.APOLLO_V2_BRIEF_INTERPRETER_MODEL = 'stand-in-model'
-    process.env.APOLLO_V2_CODEX_BIN = interpreter.binary
+    Object.assign(process.env, interpreter.environment)
 
     // 3a. A reading that cites words the briefing does not contain is refused whole; nothing is written.
     interpreter.script.set(BRIEFING, { directives: [{ kind: 'cta', value: 'none', param: null, quote: 'words that are nowhere in the briefing' }], unsupported: [], questions: [], coverage: [] })
@@ -132,14 +119,15 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     assert.equal(asked.payload.data.state, 'interpreted')
     assert.equal(asked.payload.data.blocksDirector, true)
     assert.deepEqual(asked.payload.data.openQuestions.map((question) => [question.id, question.excerpt]), [['q1', 'alpha']])
-    assert.equal(asked.payload.data.interpretationAudit.provider, 'codex-cli')
-    assert.equal(asked.payload.data.interpretationAudit.providerVersion, 'codex-cli 0.0.0-fake')
-    assert.equal(asked.payload.data.interpretationAudit.costBasis, 'subscription')
+    assert.equal(asked.payload.data.interpretationAudit.provider, 'openai')
+    assert.equal(asked.payload.data.interpretationAudit.resolvedModel, 'stand-in-resolved')
+    assert.equal(asked.payload.data.interpretationAudit.costBasis, 'api-metered')
     assert.equal(asked.payload.data.interpretationAudit.costMinorUnits, null)
-    assert.deepEqual(asked.payload.data.interpretationAudit.usage, { inputTokens: 1200, outputTokens: 40 })
+    assert.match(asked.payload.data.interpretationAudit.modelInputHash, /^[a-f0-9]{64}$/)
+    assert.deepEqual(asked.payload.data.interpretationAudit.usage, { inputTokens: 100, outputTokens: 20 })
     assert.equal(asked.payload.data.impact.renderBlockedUntilDirectorRun, true)
-    assert.equal(interpreter.calls.length >= 1 && interpreter.calls.every((call) => call.args.includes('read-only') && call.args.every((arg) => !arg.includes(BRIEFING))), true)
-    assert.ok(interpreter.calls.every((call) => !call.stdin.slice(0, call.stdin.indexOf('The briefing, as a JSON document')).includes(BRIEFING)), 'the briefing never reaches the standing instruction')
+    assert.equal(interpreter.calls.length >= 1 && interpreter.calls.every((call) => call.authorized && call.path === '/v1/chat/completions'), true)
+    assert.ok(interpreter.calls.every((call) => call.body.messages[0].role === 'system' && !call.body.messages[0].content.includes(BRIEFING)), 'the briefing never reaches the standing instruction')
     const readAfter = await get()
     assert.equal(readAfter.payload.data.hashes.requestHash, asked.payload.data.hashes.requestHash)
     assert.equal(readAfter.payload.data.hashes.briefSnapshotId, asked.payload.data.hashes.briefSnapshotId)
@@ -178,6 +166,47 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     assert.equal(stored.payload.data.state, 'interpreted')
     assert.equal(stored.payload.data.interpretation.directives[0].excerpt.text, 'epsilon')
     assert.equal(seeded.versions.base !== directed.version.id, true)
+
+    // 6. Rendering is blocked until a new Director run: after the request is revised, the report the Director sealed no longer admits the final.
+    const { admitDirectorQualityForFinal } = await import('../../src/v2/domain/final-caption-certification.ts')
+    const { deriveEditorialRequestFromBrief } = await import('../../src/v2/domain/editorial-request.ts')
+    const briefOfHead = async () => {
+      const row = await db.v2ProjectVersion.findUniqueOrThrow({ where: { id: (await db.v2Project.findUniqueOrThrow({ where: { id: projectId } })).currentVersionId }, include: { briefSnapshot: true } })
+      return JSON.parse(row.briefSnapshot.contentJson)
+    }
+    const binding = async () => ({ currentRequestHash: deriveEditorialRequestFromBrief(await briefOfHead()).requestHash, sealedRequestHash: directed.run.requestHash,
+      sealedPolicyResolutionHash: directed.run.policyResolution.policyResolutionHash })
+    assert.equal(admitDirectorQualityForFinal(directed.run.qualityReport, await binding()).admitted, true, 'the report the run sealed admits the final of the request it judged')
+    const revised = await revise({ ...(await headOf()), directives: [{ id: 'f6-after', kind: 'movement', value: 'none' }] }, `f6req-${run}-after`)
+    assert.equal(revised.status, 201, JSON.stringify(revised.payload))
+    assert.equal(revised.payload.data.impact.renderBlockedUntilDirectorRun, true)
+    assert.equal(revised.payload.data.impact.renderSemanticsChanged, true)
+    const refusal = admitDirectorQualityForFinal(directed.run.qualityReport, await binding())
+    assert.equal(refusal.admitted, false)
+    assert.match(refusal.reason, /editorial request changed after this Director run/)
+    // ... and a new Director run over the revised request is admitted again.
+    const redirected = await director(await headOf(), 'redirected')
+    assert.equal(redirected.run.requestHash, revised.payload.data.hashes.requestHash)
+    assert.equal(admitDirectorQualityForFinal(redirected.run.qualityReport, { currentRequestHash: redirected.run.requestHash, sealedRequestHash: redirected.run.requestHash, sealedPolicyResolutionHash: redirected.run.policyResolution.policyResolutionHash }).admitted, true)
+
+    // 7. A project that states no language (no locale is assumed) is read by the repositories that judge rights under the undetermined locale; none
+    // of them stops on the missing one any more, and none answers with another error for it.
+    const { UNDETERMINED_LOCALE } = await import('../../src/v2/domain/asset-rights.ts')
+    const { PrismaAssetSelectionRepository } = await import('../../src/v2/infrastructure/prisma/asset-selection-repository.ts')
+    const { PrismaQualityIterationRepository } = await import('../../src/v2/infrastructure/prisma/quality-iteration-repository.ts')
+    const { PrismaMusicAnalysisRunRepository } = await import('../../src/v2/infrastructure/prisma/music-analysis-run-repository.ts')
+    const silent = await seedSealedProject(db, { workspaceId, actor: seedActor, prefix: 'f6nolocale', name: 'A project with no language', locale: null })
+    assert.equal((await db.v2Project.findUniqueOrThrow({ where: { id: silent.projectId } })).locale, null)
+    const selection = await new PrismaAssetSelectionRepository(db).readProjectContext({ workspaceId, projectId: silent.projectId })
+    assert.equal(selection.locale, UNDETERMINED_LOCALE)
+    const iteration = await new PrismaQualityIterationRepository(db).readContext({ workspaceId, projectId: silent.projectId, projectVersionId: silent.head.version.id, proxyReviewId: 'f6-no-such-review', assetSelectionIds: [] })
+    assert.equal(iteration, null, 'the missing proxy review is the only thing it can say')
+    const music = new PrismaMusicAnalysisRunRepository(db)
+    const authority = (extra) => music.resolveRequestAuthority({ workspaceId, projectId: silent.projectId, projectVersionId: silent.head.version.id, artifactId: 'f6-no-such-artifact', at: new Date().toISOString(), ...extra })
+    await assert.rejects(authority({}), (error) => error.code === 'ASSET_NOT_USABLE' && !/localized/.test(error.message))
+    // A version that is no longer the current one is a conflict (409); only a project that does not exist is "not found".
+    await assert.rejects(authority({ projectVersionId: 'f6-an-old-version' }), (error) => error.code === 'VERSION_CONFLICT')
+    await assert.rejects(authority({ projectId: 'f6-no-such-project' }), (error) => error.code === 'PROJECT_NOT_FOUND')
   } finally {
     await interpreter.close()
     for (const name of CONFIGURATION) {

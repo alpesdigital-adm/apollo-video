@@ -1,4 +1,4 @@
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -11,11 +11,13 @@ const SCRIPT = new URL('./fake-codex.mjs', import.meta.url)
 export function installFakeCodex(config = {}, root = tmpdir()) {
   const directory = mkdtempSync(join(root, 'apollo-fake-codex-'))
   const binary = join(directory, 'fake-codex.mjs')
+  const codexHome = join(directory, 'codex-home')
+  mkdirSync(codexHome)
   copyFileSync(SCRIPT, binary)
   const write = (next) => writeFileSync(`${binary}.config.json`, JSON.stringify(next))
   write(config)
   return Object.freeze({
-    binary, directory,
+    binary, directory, codexHome,
     configure: (next) => write(next),
     invocations: () => (existsSync(`${binary}.log.jsonl`) ? readFileSync(`${binary}.log.jsonl`, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : []),
     executions: () => (existsSync(`${binary}.log.jsonl`) ? readFileSync(`${binary}.log.jsonl`, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)).filter((entry) => entry.command === 'exec') : []),

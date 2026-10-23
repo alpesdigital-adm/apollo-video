@@ -17,6 +17,7 @@ import {
   type AssetCandidateRightsEvidence,
 } from '../../domain/asset-selection.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
+import { UNDETERMINED_LOCALE } from '../../domain/asset-rights.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
@@ -180,10 +181,10 @@ export class PrismaAssetSelectionRepository implements AssetSelectionRepository 
       include: { currentVersion: true },
     })
     if (!project) return null
-    if (!project.currentVersion || !project.locale) {
+    if (!project.currentVersion) {
       throw new DomainError(
         'PRECONDITION_REQUIRED',
-        'Asset selection requires a current project version and locale',
+        'Asset selection requires a current project version',
       )
     }
     return Object.freeze({
@@ -191,7 +192,8 @@ export class PrismaAssetSelectionRepository implements AssetSelectionRepository 
       projectId: project.id,
       projectVersionId: project.currentVersion.id,
       projectVersionHash: project.currentVersion.baseHash,
-      locale: project.locale,
+      // A project that states no language is judged under the undetermined locale: a rights snapshot that restricts locales does not allow it.
+      locale: project.locale ?? UNDETERMINED_LOCALE,
     })
   }
 

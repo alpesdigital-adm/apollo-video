@@ -37,7 +37,17 @@ export const BRIEF_INTERPRETER_PROMPT_VERSION = 'brief-interpreter/v1'
 export const BRIEF_INTERPRETATION_AUDIT_SCHEMA = 'brief-interpretation-audit/v1' as const
 export { BRIEF_INTERPRETER_UNAVAILABLE_REASON }
 const MAX_ITEMS = 64
-const MAX_TEXT = 500
+const MAX_TEXT = 200
+/** A quote must stand on words: at least this many letters or digits. A space, a letter or a punctuation mark is not a citation. */
+const MIN_QUOTE_SIGNIFICANT = 2
+/** Above this many characters a briefing is more than one short request, and a directive may not cite (most of) all of it. */
+const WHOLE_BRIEFING_FLOOR = 120
+const WHOLE_BRIEFING_SHARE = 0.6
+/**
+ * Free text the model writes (a summary of what is unsupported, the text of a question) is not checked against the briefing word by word - it may
+ * be in another language - so it is kept short and refused when it carries data the briefing cannot have given: a file path, a URL, an encoded blob.
+ */
+const HOST_DATA = /(?:[A-Za-z]:[\\/][^\s]{2,})|(?:\\\\[^\s]+)|(?:\bfile:\/\/)|(?:https?:\/\/)|(?:(?:^|\s)\/(?:etc|home|usr|var|tmp|mnt|root|Users)\b)|(?:[A-Za-z0-9+/=_-]{40,})|(?:[\u0000-\u0008\u000e-\u001f])/u
 
 function describeVocabulary(): string {
   return EDITORIAL_DIRECTIVE_KINDS.map((kind) => {
@@ -63,7 +73,8 @@ export const BRIEF_INTERPRETER_SYSTEM_PROMPT = [
   '4. Anything the briefing asks of the video that does not fit the vocabulary goes to `unsupported`, with a short neutral summary of what was asked. Never force a request into a directive that does not mean it.',
   '5. If the briefing is ambiguous, or says two incompatible things about one subject, put a `question` (and no directive) for that subject.',
   '6. `coverage` lists which of these topics the briefing itself states: audience (who the video is for), offer (what is being offered), tone (the manner of speaking). List a topic only if the briefing states it.',
-  '7. Answer only with the JSON object of the response schema.',
+  '7. The text you write yourself (`summary`, `question`) is short (at most 200 characters), neutral, and says only what the briefing asks: never a file path, a link, an encoded value or anything you were not given in the briefing.',
+  '8. Answer only with the JSON object of the response schema.',
   '',
   'Vocabulary (kind: allowed values):',
   describeVocabulary(),
@@ -116,6 +127,8 @@ export interface BriefInterpretationAudit {
   promptHash: string
   /** SHA-256 of the briefing text the model read. */
   inputHash: string
+  /** SHA-256 of everything that entered the model (prompt and briefing, the parameters that bound it, the schema), when the adapter states it. */
+  modelInputHash: string | null
   /** SHA-256 of the raw text the model answered. */
   responseHash: string
   usage: Readonly<{ inputTokens: number; outputTokens: number }> | null
@@ -153,7 +166,7 @@ function refused(message: string, details: Record<string, unknown> = {}): never 
 }
 
 /** Finds the words of a quote in the briefing, exactly. A quote that is not literally there is the model's invention. */
-export function locateQuote(briefing: string, quote: unknown, where: string): Readonly<BriefExcerpt> {
+export function locateQuote(briefing: string, quote: unknown, where: string, standsAlone = false): Readonly<BriefExcerpt> {
   if (typeof quote !== 'string' || quote.length === 0 || quote.length > briefing.length) {
     refused('Brief interpreter returned an item without a quote of the briefing', { where })
   }
@@ -164,6 +177,11 @@ export function locateQuote(briefing: string, quote: unknown, where: string): Re
     start = text.length > 0 ? briefing.indexOf(text) : -1
   }
   if (start < 0) refused('Brief interpreter cited words that the briefing does not contain; the interpretation was refused', { where })
+  if ((text.match(/[\p{L}\p{N}]/gu) ?? []).length < MIN_QUOTE_SIGNIFICANT) refused('Brief interpreter cited too little of the briefing for the citation to mean anything; the interpretation was refused', { where })
+  // A directive stands on specific words. Citing (almost) all of a long briefing is not a citation of anything in particular.
+  if (standsAlone && briefing.length > WHOLE_BRIEFING_FLOOR && text.length > briefing.length * WHOLE_BRIEFING_SHARE) {
+    refused('Brief interpreter cited most of the briefing for a single item; the interpretation was refused', { where })
+  }
   return Object.freeze({ start, end: start + text.length, text })
 }
 
@@ -176,7 +194,13 @@ function shortText(value: unknown, field: string): string {
   if (typeof value !== 'string') refused('Brief interpreter returned a malformed response', { field })
   const text = (value as string).replace(/\s+/gu, ' ').trim()
   if (text.length === 0) refused('Brief interpreter returned a malformed response', { field })
+  if (HOST_DATA.test(text)) refused('Brief interpreter wrote data the briefing cannot have given (a path, a link or an encoded blob); the interpretation was refused', { field })
   return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1)}…` : text
+}
+
+/** Case and accent insensitive form, for comparing a name the model wrote with the words of the briefing. */
+function folded(value: string): string {
+  return value.normalize('NFD').replace(/[̀-ͯ]/gu, '').toLowerCase().replace(/\s+/gu, ' ').trim()
 }
 
 function describeDirective(kind: string, value: unknown, param: unknown): string {
@@ -210,7 +234,7 @@ export function interpretationFromModelText(input: Readonly<{
     if (!isRecord(item)) refused('Brief interpreter returned a malformed directive', { index })
     const entry = item as Record<string, unknown>
     // The citation first: a directive that does not quote the briefing is refused whatever it says.
-    const excerpt = locateQuote(input.briefingText, entry.quote, `directives[${index}]`)
+    const excerpt = locateQuote(input.briefingText, entry.quote, `directives[${index}]`, true)
     const kind = entry.kind, value = entry.value
     let param = entry.param
     const paramKind = typeof kind === 'string' && (EDITORIAL_DIRECTIVE_KINDS as readonly string[]).includes(kind) && typeof value === 'string'
@@ -220,6 +244,10 @@ export function interpretationFromModelText(input: Readonly<{
       const directive = parseEditorialDirective({
         id: `d${accepted.length + 1}`, kind, value, ...(param !== null && param !== undefined ? { param } : {}),
       }, 'brief interpretation')
+      // The subject a directive keeps or avoids is a name the requester wrote: it has to be found in the briefing.
+      if ((directive.kind === 'keep' || directive.kind === 'avoid') && !folded(input.briefingText).includes(folded(String(directive.param)))) {
+        throw new DomainError('INVALID_ARGUMENT', 'subject is not in the briefing')
+      }
       accepted.push(Object.freeze({ ...directive, excerpt }) as InterpretedDirective)
     } catch (error) {
       if (!(error instanceof DomainError) || error.code !== 'INVALID_ARGUMENT') throw error
@@ -238,8 +266,23 @@ export function interpretationFromModelText(input: Readonly<{
   for (const kind of EDITORIAL_DIRECTIVE_KINDS) {
     const ofKind = accepted.filter((directive) => directive.kind === kind)
     if (kind === 'keep' || kind === 'avoid') {
+      // The same subject asked to be kept and to be avoided is an ambiguity too: both leave, and the owner is asked.
+      const opposite = accepted.filter((directive) => directive.kind === (kind === 'keep' ? 'avoid' : 'keep'))
       const seen = new Set<string>()
-      for (const directive of ofKind) if (!seen.has(meaning(directive))) { seen.add(meaning(directive)); directives.push(directive) }
+      for (const directive of ofKind) {
+        const clash = opposite.find((other) => folded(String(other.param)) === folded(String(directive.param)))
+        if (clash) {
+          if (kind === 'keep') {
+            withdrawn += 2
+            questions.push(Object.freeze({
+              id: nextId('q', questions), status: 'open' as const, excerpt: directive.excerpt,
+              question: shortText(`The briefing asks both to keep and to avoid "${String(directive.param)}". Which one is meant?`, 'questions.question'),
+            }))
+          }
+          continue
+        }
+        if (!seen.has(meaning(directive))) { seen.add(meaning(directive)); directives.push(directive) }
+      }
       continue
     }
     const distinct = [...new Map(ofKind.map((directive) => [meaning(directive), directive])).values()]
@@ -275,7 +318,7 @@ export function interpretationFromModelText(input: Readonly<{
   coverageItems.forEach((item, index) => {
     if (!isRecord(item)) refused('Brief interpreter returned a malformed coverage entry', { index })
     const entry = item as Record<string, unknown>
-    const excerpt = locateQuote(input.briefingText, entry.quote, `coverage[${index}]`)
+    const excerpt = locateQuote(input.briefingText, entry.quote, `coverage[${index}]`, true)
     if (typeof entry.topic !== 'string' || !(BRIEF_COVERAGE_TOPICS as readonly string[]).includes(entry.topic)) refused('Brief interpreter returned a coverage topic outside the vocabulary', { index })
     if (!coverage.some((existing) => existing.topic === entry.topic)) coverage.push(Object.freeze({ topic: entry.topic as BriefCoverageItem['topic'], excerpt }))
   })
@@ -330,7 +373,7 @@ export function interpretBriefService(dependencies: InterpretBriefDependencies) 
     const audit: BriefInterpretationAudit = Object.freeze({
       schemaVersion: BRIEF_INTERPRETATION_AUDIT_SCHEMA,
       provider: model.provider, model: model.model, resolvedModel: response.resolvedModel ?? null, providerVersion: response.providerVersion ?? null, promptVersion,
-      promptHash: BRIEF_INTERPRETER_PROMPT_HASH, inputHash: sha256Text(briefingText), responseHash: sha256Text(response.text),
+      promptHash: BRIEF_INTERPRETER_PROMPT_HASH, inputHash: sha256Text(briefingText), modelInputHash: response.modelInputHash ?? null, responseHash: sha256Text(response.text),
       usage: usage ? Object.freeze({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }) : null,
       costBasis: model.costBasis, costMinorUnits, signals: Object.freeze(signals),
       directivesMovedToUnsupported: checked.directivesMovedToUnsupported, directivesWithdrawnAsAmbiguous: checked.directivesWithdrawnAsAmbiguous,

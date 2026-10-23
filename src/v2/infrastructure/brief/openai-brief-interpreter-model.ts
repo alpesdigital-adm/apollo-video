@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import type {
   BriefInterpreterModel,
   BriefInterpreterRequest,
@@ -133,17 +135,18 @@ export class OpenAiBriefInterpreterModel implements BriefInterpreterModel {
     const abort = () => controller.abort(input.signal?.reason)
     input.signal?.addEventListener('abort', abort, { once: true })
     try {
+      const requestBody = JSON.stringify({
+        model: this.model,
+        max_completion_tokens: this.maxCompletionTokens,
+        response_format: { type: 'json_schema', json_schema: { name: input.responseSchema.name, strict: true, schema: input.responseSchema.schema } },
+        messages: [{ role: 'system', content: input.system }, { role: 'user', content: input.user }],
+      })
       let response: Response
       try {
         response = await this.request(`${this.baseUrl}/chat/completions`, {
           method: 'POST', redirect: 'error', signal: controller.signal,
           headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
-          body: JSON.stringify({
-            model: this.model,
-            max_completion_tokens: this.maxCompletionTokens,
-            response_format: { type: 'json_schema', json_schema: { name: input.responseSchema.name, strict: true, schema: input.responseSchema.schema } },
-            messages: [{ role: 'system', content: input.system }, { role: 'user', content: input.user }],
-          }),
+          body: requestBody,
         })
       } catch {
         if (input.signal?.aborted) throw input.signal.reason
@@ -169,6 +172,7 @@ export class OpenAiBriefInterpreterModel implements BriefInterpreterModel {
         text: message.content,
         ...(usage && Number.isSafeInteger(usage.prompt_tokens) && Number.isSafeInteger(usage.completion_tokens)
           ? { usage: Object.freeze({ inputTokens: usage.prompt_tokens as number, outputTokens: usage.completion_tokens as number }) } : {}),
+        modelInputHash: createHash('sha256').update(requestBody, 'utf8').digest('hex'),
         ...(typeof resolved === 'string' && resolved.length > 0 && resolved.length <= 128 ? { resolvedModel: resolved } : {}),
       })
     } finally {

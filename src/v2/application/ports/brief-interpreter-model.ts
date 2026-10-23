@@ -21,6 +21,8 @@ export interface BriefInterpreterResponse {
   resolvedModel?: string
   /** The version of the program that answered (a CLI), when it states one. */
   providerVersion?: string
+  /** SHA-256 of everything that entered the model for this call (the prompt with the briefing in it, the flags or parameters that bound the agent, the schema). */
+  modelInputHash?: string
 }
 
 export interface BriefInterpreterModel {
