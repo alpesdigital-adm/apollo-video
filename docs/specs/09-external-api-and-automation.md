@@ -1106,7 +1106,7 @@ orientação neutra e fps iguais, e recusa janela fora da timeline, maior que a 
 workspace/projeto/perfil e só retorna o envelope `face-producer-envelope/v2` após `succeeded`, revalidando
 source, versão, direitos, integridade e as saídas brutas do detector (5600 bytes por amostra), e devolve ao lado
 dele `producerAuthentication`: o veredito do registro de produtores, recalculado na leitura. Um produtor em
-plataforma sem recibo de paridade (hoje, Linux) é válido como envelope mas não autenticado, e evidência não
+plataforma sem recibo de paridade (Linux é aceito desde 22/10/2026, ADR-160, só nos bytes do recibo: interpretador, manifesto de runtime e ponte) é válido como envelope mas não autenticado, e evidência não
 autenticada nunca libera a área de legenda. O aceite do proprietário não é qualificação: o envelope conserva
 `faceSafety=unknown`, `identity=not-performed` e avaliação `owner-accepted-scoped`. Detalhes, limites e
 bloqueios de implantação: `docs/quality/w62-v9-runtime.md`.

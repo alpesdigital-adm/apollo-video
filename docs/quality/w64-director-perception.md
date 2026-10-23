@@ -36,7 +36,7 @@ rosto a 6 Hz) chegaria a `high`. Cobertura densa sem nenhuma observação (OCR a
 | --- | --- | --- | --- |
 | `transcript-word` | 600 | 0,70 | — (mas as palavras trazem prior, ver acima) |
 | `ocr` | 2000 | 0,60 | — |
-| `face` | 500 (gap de clearance da política de rosto) | 0,50 (piso V9) | **`partial`**, lido de `FACE_EVIDENCE_POLICY.claims` (`qualification: false`, gate `linux-parity-run-on-60-development-images-pending`) |
+| `face` | 500 (gap de clearance da política de rosto) | 0,50 (piso V9) | **`partial`**, lido de `FACE_EVIDENCE_POLICY.claims` (`qualification: false`, gate `linux-parity-run-on-60-development-images-pending`, valor histórico da política v1: a paridade Linux foi aceita pelo dono em 22/10/2026, ADR-160, e o estado vivo está no registro de produtores) |
 | `shot`, `motion` | 0 | 0 | — |
 | demais kinds | sempre `absent` no snapshot | | |
 
