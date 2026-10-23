@@ -234,6 +234,43 @@ function interpretationBody(interpretation: Omit<BriefInterpretationV1, 'interpr
   return body
 }
 
+const SHA256_HEX = /^[a-f0-9]{64}$/u
+const AUDIT_SIGNAL = /^[a-z][a-z0-9-]{2,63}$/u
+const AUDIT_TEXT = /^[^\u0000-\u001f\u007f]{1,200}$/u
+const audited = (value: unknown, nullable = false): boolean => (nullable && value === null) || (typeof value === 'string' && AUDIT_TEXT.test(value))
+const auditedInteger = (value: unknown): boolean => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+
+/**
+ * ADR-160. The audit of a reading sealed with a Command is the record of ONE call that read ONE text: it is checked against that text and that
+ * interpretation, never stored as whatever a caller handed over. Exact fields; the hash of the briefing it read is the hash of this briefing;
+ * the provider, the model and the prompt version are those the interpretation names; every hash is a SHA-256; the cost and the usage are
+ * numbers or an honest null. Fail closed.
+ */
+export function parseBriefInterpretationAudit(value: unknown, briefingText: string, interpretation: Readonly<Pick<BriefInterpretationV1, 'interpreter'>>): Readonly<Record<string, unknown>> {
+  assertDomain(isRecord(value) && onlyKeys(value, ['schemaVersion', 'provider', 'model', 'resolvedModel', 'providerVersion', 'promptVersion', 'promptHash', 'inputHash',
+    'modelInputHash', 'responseHash', 'usage', 'costBasis', 'costMinorUnits', 'signals', 'directivesMovedToUnsupported', 'directivesWithdrawnAsAmbiguous']),
+  'INVALID_ARGUMENT', 'The audit of a reading has missing or unsupported fields')
+  const audit = value as Record<string, unknown>
+  assertDomain(audit.schemaVersion === 'brief-interpretation-audit/v1', 'INVALID_ARGUMENT', 'The audit of a reading has an unsupported version')
+  assertDomain(audit.provider === interpretation.interpreter.provider && audit.model === interpretation.interpreter.model && audit.promptVersion === interpretation.interpreter.promptVersion,
+    'INVALID_ARGUMENT', 'The audit names another provider, model or prompt than the interpretation it audits')
+  assertDomain(audited(audit.provider) && audited(audit.model) && audited(audit.promptVersion) && audited(audit.resolvedModel, true) && audited(audit.providerVersion, true),
+    'INVALID_ARGUMENT', 'The audit names its provider, model and versions in short plain text')
+  assertDomain(audit.inputHash === sha256(briefingText), 'INVALID_ARGUMENT', 'The audit is of a reading of other words than this briefing')
+  assertDomain(typeof audit.promptHash === 'string' && SHA256_HEX.test(audit.promptHash) && typeof audit.responseHash === 'string' && SHA256_HEX.test(audit.responseHash) &&
+    (audit.modelInputHash === null || (typeof audit.modelInputHash === 'string' && SHA256_HEX.test(audit.modelInputHash))), 'INVALID_ARGUMENT', 'The hashes of the audit are not SHA-256')
+  assertDomain(audit.usage === null || (isRecord(audit.usage) && onlyKeys(audit.usage, ['inputTokens', 'outputTokens']) && auditedInteger(audit.usage.inputTokens) && auditedInteger(audit.usage.outputTokens)),
+    'INVALID_ARGUMENT', 'The usage of the audit is a count of tokens, or null')
+  assertDomain(audit.costBasis === 'api-metered' || audit.costBasis === 'subscription', 'INVALID_ARGUMENT', 'The cost basis of the audit is unsupported')
+  assertDomain(audit.costMinorUnits === null || (auditedInteger(audit.costMinorUnits) && audit.costBasis === 'api-metered'), 'INVALID_ARGUMENT',
+    'Only a metered reading has a cost; a subscription states none')
+  assertDomain(Array.isArray(audit.signals) && audit.signals.length <= 8 && audit.signals.every((item) => typeof item === 'string' && AUDIT_SIGNAL.test(item)) &&
+    new Set(audit.signals).size === audit.signals.length, 'INVALID_ARGUMENT', 'The signals of the audit are a short list of facts')
+  assertDomain(auditedInteger(audit.directivesMovedToUnsupported) && auditedInteger(audit.directivesWithdrawnAsAmbiguous), 'INVALID_ARGUMENT',
+    'The counts of the audit are whole numbers')
+  return Object.freeze({ ...audit })
+}
+
 /**
  * Validates an interpretation against the briefing it claims to read: every directive and every unsupported item and question cites
  * the briefing's words (exact offsets and text), every directive is inside the closed vocabulary, and the hashes agree. Fail closed.

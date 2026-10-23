@@ -102,7 +102,7 @@ import { DomainError } from './errors.ts'
 import { createDesiredAction, parseDesiredAction, parseDesiredActionInput, type DesiredActionInput, type DesiredAction } from './desired-action.ts'
 import { normalizeProjectName } from './project.ts'
 import { createProductionBrief } from './production-brief.ts'
-import { parseBriefInterpretation } from './editorial-request.ts'
+import { parseBriefInterpretation, parseBriefInterpretationAudit } from './editorial-request.ts'
 import { resolveStrategicObjective, type StrategicObjectiveId } from './strategic-objective.ts'
 import { createProjectSnapshot, type ProjectSnapshot } from './project-snapshot.ts'
 import { stableSerialize } from './canonical-hash.ts'
@@ -132,10 +132,17 @@ function creationBriefMatchesIntent(contentJson: string, intent: Readonly<{ obje
     Object.keys(reading).sort().join('|') !== 'interpretation|interpretationAudit') return false
   const briefingText = createProductionBrief({ ownerText: intent.briefing }).ownerInput?.text
   if (briefingText === undefined) return false
-  const interpretation = parseBriefInterpretation(reading.interpretation, briefingText)
-  return contentJson === stableSerialize({ ...base,
-    productionBrief: createProductionBrief({ ownerText: intent.briefing, interpretedCoverage: (interpretation.coverage ?? []).map((item) => item.topic) }),
-    editorialRequest: { interpretation, interpretationAudit: reading.interpretationAudit } })
+  try {
+    const interpretation = parseBriefInterpretation(reading.interpretation, briefingText)
+    // The audit is the record of the call that read THIS text: it is checked against the text and the interpretation, not taken as handed over.
+    const interpretationAudit = parseBriefInterpretationAudit(reading.interpretationAudit, briefingText, interpretation)
+    return contentJson === stableSerialize({ ...base,
+      productionBrief: createProductionBrief({ ownerText: intent.briefing, interpretedCoverage: (interpretation.coverage ?? []).map((item) => item.topic) }),
+      editorialRequest: { interpretation, interpretationAudit } })
+  } catch (error) {
+    if (error instanceof DomainError) return false
+    throw error
+  }
 }
 
 export type ProjectCreationCallerIntentV2 = Readonly<

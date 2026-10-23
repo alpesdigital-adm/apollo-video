@@ -781,3 +781,41 @@ test('the service waits longer than the provider: its default timeout is the ada
   assert.equal(waits[1] > 120_000, true)
   assert.equal(waits[2], 5_000, 'an explicit deployment timeout is kept as stated')
 })
+
+test('ADR-160: the audit sealed with a reading is checked against the text and the interpretation it audits', async () => {
+  const BRIEFING = 'alpha beta gamma delta'
+  const answer = { directives: [], unsupported: [], questions: [], coverage: [{ topic: 'tone', quote: 'gamma' }] }
+  const model = { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', async interpret() { return { text: JSON.stringify(answer) } } }
+  const real = await interpretBriefService({ model })({ briefing: BRIEFING })
+  const sealed = async (audit) => {
+    const fixture = createFixture({ interpretBrief: async () => ({ interpretation: real.interpretation, audit }) })
+    const created = await fixture.service(request({ briefing: BRIEFING }))
+    return { fixture, created, brief: JSON.parse(fixture.repository.lastBundle.snapshots[0].contentJson) }
+  }
+  // The genuine audit is sealed.
+  const genuine = await sealed(real.audit)
+  assert.deepEqual(genuine.brief.editorialRequest.interpretationAudit, JSON.parse(JSON.stringify(real.audit)))
+  assert.deepEqual(genuine.created.briefReading, { status: 'read' })
+  // Each tampering makes it no reading at all: the project is created, the briefing is kept as written and unread, and nothing false is sealed.
+  const tampered = {
+    'another text': { ...real.audit, inputHash: 'a'.repeat(64) },
+    'another model': { ...real.audit, model: 'another-model' },
+    'another prompt version': { ...real.audit, promptVersion: 'brief-interpreter/v9' },
+    'a hash that is not SHA-256': { ...real.audit, responseHash: 'not-a-hash' },
+    'a field nobody defined': { ...real.audit, verdict: 'approved' },
+    'a missing field': Object.fromEntries(Object.entries(real.audit).filter(([key]) => key !== 'promptHash')),
+    'a cost on a subscription': { ...real.audit, costBasis: 'subscription', costMinorUnits: 5 },
+    'negative usage': { ...real.audit, usage: { inputTokens: -1, outputTokens: 1 } },
+    'a signal that is not a fact': { ...real.audit, signals: ['Approved by the Apollo!'] },
+    'nothing at all': null,
+  }
+  for (const [name, audit] of Object.entries(tampered)) {
+    const result = await sealed(audit)
+    assert.equal(result.brief.editorialRequest, undefined, `${name}: a reading with a bad audit is not sealed`)
+    assert.deepEqual(result.created.briefReading, { status: 'unread', reason: 'brief-interpretation-failed' }, name)
+  }
+  // The Command itself refuses a brief that carries such an audit, wherever it came from.
+  const { parseBriefInterpretationAudit } = await import('../../src/v2/domain/editorial-request.ts')
+  assert.throws(() => parseBriefInterpretationAudit({ ...real.audit, inputHash: 'b'.repeat(64) }, BRIEFING, real.interpretation), (error) => error.code === 'INVALID_ARGUMENT')
+  assert.deepEqual(parseBriefInterpretationAudit(real.audit, BRIEFING, real.interpretation), real.audit)
+})

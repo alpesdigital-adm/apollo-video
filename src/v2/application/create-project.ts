@@ -3,7 +3,7 @@ import { createProject } from '../domain/project.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createProductionBrief, normalizeBriefingText } from '../domain/production-brief.ts'
 import { coveredTopicsOf, type BriefInterpretationAudit, type InterpretBrief } from './interpret-brief.ts'
-import { BRIEF_INTERPRETATION_FAILED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON, parseBriefInterpretation, type BriefInterpretationV1 } from '../domain/editorial-request.ts'
+import { BRIEF_INTERPRETATION_FAILED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON, parseBriefInterpretation, parseBriefInterpretationAudit, type BriefInterpretationV1 } from '../domain/editorial-request.ts'
 import { createProjectCreationOutputCommandV2, normalizeProjectCreationIntentV2 } from '../domain/project-creation-command.ts'
 import { createOutputVariantCommand } from '../domain/output-variant-command.ts'
 import { createOutputSpecRevisionBody, type OutputSpecRevisionBody } from '../domain/output-spec-revision.ts'
@@ -127,7 +127,10 @@ export function createProjectService(dependencies: ClockAndIds & {
         try {
           const read = await dependencies.interpretBrief({ briefing: briefingText })
           // The reading is sealed only if it is of THIS text (hash and every citation checked again); any other reading is no reading.
-          reading = { interpretation: parseBriefInterpretation(JSON.parse(JSON.stringify(read.interpretation)), briefingText), audit: read.audit }
+          const interpretation = parseBriefInterpretation(JSON.parse(JSON.stringify(read.interpretation)), briefingText)
+          // The audit is sealed with the reading, so it is checked against the same text and the same interpretation (a bad audit is no reading).
+          const audit = parseBriefInterpretationAudit(JSON.parse(JSON.stringify(read.audit)), briefingText, interpretation) as unknown as Readonly<BriefInterpretationAudit>
+          reading = { interpretation, audit }
           briefReading = { status: 'read' }
         } catch (error) {
           // The project is the owner's and must not be lost to the interpreter: ANY failure of the reading (no interpreter, a timeout, an abort, a
