@@ -15,10 +15,14 @@ export interface EditorialRequestRevisionPayloadV1 {
     directives: 'kept' | 'replaced'
     variantOverrides: 'kept' | 'replaced'
     desiredAction: 'kept' | 'replaced'
+    /** `set`: the revision named the objective of the project (it had none, or no Director run had judged against it yet). Absent in a revision made before the objective could be set. */
+    objective?: 'kept' | 'set'
     answeredQuestionIds: readonly string[]
   }>
   /** True when the model read the briefing for this Command; false when the interpretation was kept (or there is no briefing). */
   interpreted: boolean
+  /** The objective the request of this revision is stated under (null: none). Absent in a revision made before the objective could be set. */
+  objective?: string | null
   previousRequestHash: string
   requestHash: string
   interpretationHash: string | null
@@ -32,7 +36,7 @@ export interface EditorialRequestContext {
   /** The sealed output bundle of the current head: the exact parent the Command's Version is born from. */
   parent: OperationalOutputParentV3
   /** The objective is absent when the project was created with none (ADR-160). */
-  project: Readonly<{ objective?: string }>
+  project: Readonly<{ objective?: string; /** True once a Director run exists for the project: the objective then changes through the Director's own flow. */ directorStarted: boolean }>
   currentBriefSnapshot: Readonly<{ id: string; contentSchemaVersion: number; contentHash: string; content: Readonly<Record<string, unknown>> }>
   currentDurationFrames: number
   /** The renders of the head Version, each attributed to its own output. */

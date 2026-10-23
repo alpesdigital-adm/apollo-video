@@ -43,8 +43,8 @@ test('T-FR-012 project editor shows persisted owner trust, summary and assumptio
   assert.match(projectEditorSource, /data-testid="production-brief-summary"/)
   assert.match(projectEditorSource, /data-testid="production-brief-coverage"/)
   assert.match(projectEditorSource, /data-testid="production-brief-assumptions"/)
-  assert.match(projectEditorSource, /Owner autorizado/)
-  assert.match(projectEditorSource, /Media-only/)
+  assert.match(projectEditorSource, /Texto do dono/)
+  assert.match(projectEditorSource, /Só a mídia/)
   assert.match(projectEditorSource, /Nenhuma geração cara foi iniciada por esta leitura/)
 })
 

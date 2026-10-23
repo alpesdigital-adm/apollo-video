@@ -23,7 +23,7 @@ export interface PickerGraph {
   edges: readonly PickerEdge[]
 }
 
-const ROLE_LABELS: Readonly<Record<PickRole, string>> = Object.freeze({ hook: 'Abertura (hook)', body: 'Corpo', proof: 'Prova', cta: 'Chamada final (CTA)' })
+const ROLE_LABELS: Readonly<Record<PickRole, string>> = Object.freeze({ hook: 'Abertura', body: 'Corpo', proof: 'Prova', cta: 'Chamada final' })
 
 function snippet(text: string): string {
   const clean = text.replace(/\s+/gu, ' ').trim()

@@ -17,7 +17,7 @@ import {
 import { createEditorialRequestRevisionImpact, createEditorialRequestRevisionInvalidations } from '../domain/editorial-request-revision-impact.ts'
 import { notExecutableSummary } from '../domain/editorial-request-texts.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
-import type { StrategicObjectiveId } from '../domain/strategic-objective.ts'
+import { resolveStrategicObjective, type StrategicObjectiveId } from '../domain/strategic-objective.ts'
 import { normalizeBriefingText, parseProductionBrief, createProductionBrief } from '../domain/production-brief.ts'
 import { reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
@@ -43,6 +43,8 @@ export interface ReviseEditorialRequestBody {
   variantOverrides?: unknown
   desiredAction?: unknown
   answers?: unknown
+  /** The objective of the project, when it has none yet (or no Director run has judged against it). A value outside the closed catalog is refused. */
+  objective?: unknown
 }
 
 function structuredOf(brief: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
@@ -104,7 +106,7 @@ export function reviseEditorialRequestService(dependencies: {
 
     // The body is validated before anything else: nothing is read, and no model is called, for a request that cannot be this Command's.
     const body = request.body
-    assertDomain(isRecord(body) && Object.keys(body).every((key) => ['briefing', 'directives', 'variantOverrides', 'desiredAction', 'answers'].includes(key)),
+    assertDomain(isRecord(body) && Object.keys(body).every((key) => ['briefing', 'directives', 'variantOverrides', 'desiredAction', 'answers', 'objective'].includes(key)),
       'INVALID_ARGUMENT', 'The editorial request body has unsupported fields')
     assertDomain(body.briefing === undefined || body.briefing === null || typeof body.briefing === 'string', 'INVALID_ARGUMENT', 'briefing must be a text or null')
     const bodyBriefing = typeof body.briefing === 'string' ? normalizeBriefingText(body.briefing) : body.briefing
@@ -113,6 +115,7 @@ export function reviseEditorialRequestService(dependencies: {
     const bodyDirectives = body.directives === undefined ? undefined : parseDirectives(body.directives, 'request')
     const bodyOverrides = body.variantOverrides === undefined ? undefined : parseVariantOverrides(body.variantOverrides)
     const bodyDesiredAction = body.desiredAction === undefined ? undefined : parseDesiredActionInput(body.desiredAction)
+    const bodyObjective = body.objective === undefined ? undefined : resolveStrategicObjective(typeof body.objective === 'string' ? body.objective : '').id
     const answers = body.answers === undefined ? undefined : body.answers
     assertDomain(answers === undefined || Array.isArray(answers), 'INVALID_ARGUMENT', 'answers must be a list')
     assertDomain(Object.keys(body).length > 0, 'INVALID_ARGUMENT', 'The editorial request body names nothing to revise; to read the briefing again name it')
@@ -120,7 +123,7 @@ export function reviseEditorialRequestService(dependencies: {
     const requestFingerprint = calculateCanonicalHash({
       schemaVersion: 'revise-editorial-request-request/v1', workspaceId, projectId, baseVersionId, baseHash: request.baseHash,
       body: { briefing: bodyBriefing === undefined ? 'kept' : bodyBriefing, directives: bodyDirectives ?? 'kept', variantOverrides: bodyOverrides ?? 'kept',
-        desiredAction: bodyDesiredAction ?? 'kept', answers: answers ?? 'none' },
+        desiredAction: bodyDesiredAction ?? 'kept', answers: answers ?? 'none', ...(bodyObjective !== undefined ? { objective: bodyObjective } : {}) },
       reason: reason ?? null, actorContextHash: authenticationAudit.contextHash,
     })
     // A replay never calls the model again: the Command it finds already holds the interpretation it made.
@@ -137,8 +140,16 @@ export function reviseEditorialRequestService(dependencies: {
     if (currentVersion.id !== baseVersionId || currentVersion.baseHash !== request.baseHash) throw new DomainError('VERSION_CONFLICT', 'Editorial request base version is stale')
 
     const currentBrief = context.currentBriefSnapshot.content
-    const objective = context.project.objective
-    const currentRequest = deriveEditorialRequestFromBrief({ ...currentBrief, ...(objective !== undefined ? { objective } : {}) })
+    const currentObjective = context.project.objective
+    // ADR-160. The objective is the owner's: a project made without one gets it here, in a revision that is kept and invalidates what was made before it.
+    // Once the Director has judged the project against an objective, that objective changes through the Director's own flow (a new run, linked to the old one).
+    if (bodyObjective !== undefined) {
+      assertDomain(bodyObjective !== currentObjective, 'INVALID_ARGUMENT', 'The project already has this objective')
+      assertDomain(currentObjective === undefined || !context.project.directorStarted, 'INVALID_ARGUMENT',
+        'The Director already judged this project against its objective; to change it, run the Director with the new objective')
+    }
+    const objective = bodyObjective ?? currentObjective
+    const currentRequest = deriveEditorialRequestFromBrief({ ...currentBrief, ...(currentObjective !== undefined ? { objective: currentObjective } : {}) })
     const currentStructured = structuredOf(currentBrief)
     const currentText = currentRequest.briefing?.text
     const nextText = bodyBriefing === undefined ? currentText : bodyBriefing === null ? undefined : bodyBriefing
@@ -185,8 +196,9 @@ export function reviseEditorialRequestService(dependencies: {
       ? (currentStructured.variantOverrides as Record<string, readonly EditorialDirective[]>) : {})
     // A project with no objective has no desired action (the kind of action is the objective's): one in the body is refused, and none is invented.
     assertDomain(objective !== undefined || bodyDesiredAction === undefined, 'INVALID_ARGUMENT', 'A desired action belongs to an objective, and this project has none')
-    const currentDesiredAction = objective === undefined ? undefined : parseDesiredAction(currentBrief.desiredAction, objective as StrategicObjectiveId)
-    const desiredAction = bodyDesiredAction !== undefined
+    const currentDesiredAction = currentObjective === undefined ? undefined : parseDesiredAction(currentBrief.desiredAction, currentObjective as StrategicObjectiveId)
+    // The action belongs to the objective: a new objective brings its own (and asks for the destination it needs), never the one of the old objective.
+    const desiredAction = objective !== undefined && (bodyDesiredAction !== undefined || bodyObjective !== undefined)
       ? createDesiredAction({ objective: objective as StrategicObjectiveId, desiredAction: bodyDesiredAction })
       : currentDesiredAction
     // The request the Version will carry. The constructor repeats every check (vocabulary, citations, the interpretation of THIS text).
@@ -219,6 +231,7 @@ export function reviseEditorialRequestService(dependencies: {
     const briefDocument = Object.freeze({
       ...rest,
       schemaVersion: Number(currentBrief.schemaVersion) === 3 ? 1 : Number(currentBrief.schemaVersion),
+      ...(bodyObjective !== undefined ? { objective: bodyObjective } : {}),
       desiredAction: desiredAction ?? null,
       productionBrief,
       editorialRequest: Object.freeze({
@@ -245,9 +258,11 @@ export function reviseEditorialRequestService(dependencies: {
         directives: bodyDirectives === undefined ? 'kept' as const : 'replaced' as const,
         variantOverrides: bodyOverrides === undefined ? 'kept' as const : 'replaced' as const,
         desiredAction: bodyDesiredAction === undefined ? 'kept' as const : 'replaced' as const,
+        objective: bodyObjective === undefined ? 'kept' as const : 'set' as const,
         answeredQuestionIds: Object.freeze([...answered]),
       }),
       interpreted,
+      objective: objective ?? null,
       previousRequestHash: currentRequest.requestHash,
       requestHash: nextRequest.requestHash,
       interpretationHash: interpretation?.interpretationHash ?? null,

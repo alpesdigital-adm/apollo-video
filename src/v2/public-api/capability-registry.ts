@@ -6433,10 +6433,10 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
   },
   {
-    id: 'apollo.projects.editorial-request.revise', version: '2.0.0', title: 'Revise the editorial request of a project',
-    description: 'Replaces the parts of the editorial request the body names (briefing, structured directives, per-output directives, desired action) through a typed EditCommand, a new immutable Brief Snapshot and ProjectVersion. A briefing with text is read by the interpreter configured for the deployment (fail-closed with PRECONDITION_REQUIRED when there is none) and only when its text changed or was never read. Open questions are answered by naming the question and the answer; rendering stays blocked until a new DirectorRun resolves the new request.',
+    id: 'apollo.projects.editorial-request.revise', version: '3.0.0', title: 'Revise the editorial request of a project',
+    description: 'Replaces the parts of the editorial request the body names (briefing, structured directives, per-output directives, desired action, and the strategic objective while the project has none or no Director run exists) through a typed EditCommand, a new immutable Brief Snapshot and ProjectVersion. A briefing with text is read by the interpreter configured for the deployment (fail-closed with PRECONDITION_REQUIRED when there is none) and only when its text changed or was never read. Open questions are answered by naming the question and the answer; rendering stays blocked until a new DirectorRun resolves the new request.',
     exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['projects:write'],
-    inputSchemaRef: 'apollo://schemas/editorial-request-revise-request/v2', outputSchemaRef: 'apollo://schemas/editorial-request-revised/v2',
+    inputSchemaRef: 'apollo://schemas/editorial-request-revise-request/v3', outputSchemaRef: 'apollo://schemas/editorial-request-revised/v3',
     endpoint: { method: 'POST', path: '/v1/projects/{projectId}/editorial-request' }, toolName: 'apollo.projects.editorial-request.revise',
     supportsDryRun: false, costClass: 'low', confirmation: 'none', successStatuses: [200, 201], idempotency: 'required', requestBodyRequired: true,
   },

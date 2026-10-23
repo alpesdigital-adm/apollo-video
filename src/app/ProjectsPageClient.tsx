@@ -1034,7 +1034,7 @@ export default function Dashboard({ workspaceId }: { workspaceId: string }) {
                       </div>
                     ))}
                   </div>
-                  {objective === null ? <p className="mt-3 text-[11px] text-[#8f897f]" data-testid="project-objective-none">Nenhum objetivo escolhido: o Apollo não presume um.</p> : null}
+                  {objective === null ? <p className="mt-3 text-[11px] text-[#8f897f]" data-testid="project-objective-none">Nenhum objetivo escolhido: o Apollo não presume um. O projeto pode ser criado assim, mas antes de editar o Diretor vai pedir o objetivo; você o define na página do projeto.</p> : null}
                 </fieldset>
 
                 {requiresDestination && selectedObjective ? (

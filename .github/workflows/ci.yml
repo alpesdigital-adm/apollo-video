@@ -798,6 +798,34 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # ADR-160 F7/F8: the screens that take the request of a video (project creation, the project page, Lotes) and the path selector of the recipe, in a
+      # real Chromium against the production build. The interpreter is the local stand-in of the provider (never the real Codex). Screenshots are uploaded
+      # for a person to read the screens as the owner sees them.
+      - name: Run ADR-160 request screens browser journey
+        id: briefing-screens
+        run: npm run test:e2e:briefing-screens-browser
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-briefing-screens-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_BRIEFING_SCREENS_E2E: "1"
+          APOLLO_E2E_SCREENSHOT_DIR: ${{ runner.temp }}/briefing-screens
+
+      - name: Run ADR-160 recipe path browser journey
+        id: recipe-path
+        run: npm run test:e2e:recipe-path-browser
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-recipe-path-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_RECIPE_PATH_E2E: "1"
+          APOLLO_E2E_SCREENSHOT_DIR: ${{ runner.temp }}/briefing-screens
+
+      - name: Publish ADR-160 request screens
+        if: always() && steps.briefing-screens.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-briefing-screens-${{ github.sha }}
+          path: ${{ runner.temp }}/briefing-screens
+          if-no-files-found: warn
+          retention-days: 14
+
       # W69 tail: the subtitle sidecar of each output follows the cues its MP4 burned. One project, two outputs, a real recording, the
       # production proxy-render worker, `next start`, real FFmpeg and real storage; the SRT/VTT are read by an independent parser and by FFmpeg's
       # own demuxer, and their cue boundaries are compared with the decoded frames of the delivered MP4.

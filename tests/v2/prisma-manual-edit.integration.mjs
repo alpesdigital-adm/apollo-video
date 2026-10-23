@@ -1854,14 +1854,14 @@ ${editorialDiagnostic}`)
         briefing: 'alpha beta gamma',
         coverage: { audience: false, offer: false, tone: false },
         assumptions: ['audience-not-specified', 'offer-not-specified', 'tone-not-specified'],
-        trustLabel: 'Owner autorizado',
+        trustLabel: 'Texto do dono',
       },
       {
         label: 'curto',
         briefing: 'alpha',
         coverage: { audience: false, offer: false, tone: false },
         assumptions: ['audience-not-specified', 'offer-not-specified', 'tone-not-specified'],
-        trustLabel: 'Owner autorizado',
+        trustLabel: 'Texto do dono',
       },
       {
         label: 'ausente',
@@ -1873,7 +1873,7 @@ ${editorialDiagnostic}`)
           'offer-not-specified',
           'tone-not-specified',
         ],
-        trustLabel: 'Media-only',
+        trustLabel: 'Só a mídia',
       },
     ]
 

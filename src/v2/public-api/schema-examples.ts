@@ -14720,6 +14720,15 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), answers: [{ questionId: 'q1', choiceId: 'c1' }] },
       { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), answers: [{ questionId: 'q2', answer: '<resposta do dono>' }] },
     ],
+    'apollo://schemas/editorial-request-revise-request/v3': [
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), briefing: editorialRequestBriefingExample, reason: '<motivo da revisão>' },
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), objective: 'discovery', reason: '<motivo da revisão>' },
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), answers: [{ questionId: 'q1', choiceId: 'c1' }] },
+    ],
+    'apollo://schemas/editorial-request-revised/v3': [{
+      data: { ...editorialRequestRevisedExample, change: { ...editorialRequestRevisedExample.change, objective: 'kept' }, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2, blocksDirector: true },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/editorial-request-revised/v2': [{
       data: { ...editorialRequestRevisedExample, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2, blocksDirector: true },
       meta: { apiVersion: 'v1' },

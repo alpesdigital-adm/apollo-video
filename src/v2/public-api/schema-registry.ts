@@ -8770,6 +8770,26 @@ const batchEditorialRequestResponseSchema = {
     }] },
   },
 }
+// ---- ADR-160 (v3). The objective of the project can be named in a revision: while the project has none, or while no Director run has judged against it.
+const editorialRequestReviseRequestSchemaV3 = {
+  ...editorialRequestReviseRequestSchemaV2,
+  properties: {
+    ...editorialRequestReviseRequestSchemaV2.properties,
+    objective: { ...strategicObjectiveSchema, description: 'The strategic objective of the project, from the closed catalog. Allowed while the project has none or no Director run exists; after that the Director run carries the change. A destination-bound objective needs the desiredAction with its destination in the same body.' },
+  },
+  anyOf: ['briefing', 'directives', 'variantOverrides', 'desiredAction', 'answers', 'objective'].map((field) => ({ required: [field], properties: { [field]: {} } })),
+}
+const editorialRequestRevisionResultSchemaV3 = {
+  ...editorialRequestRevisionResultSchemaV2,
+  properties: {
+    ...editorialRequestRevisionResultSchemaV2.properties,
+    change: {
+      ...editorialRequestRevisionResultSchema.properties.change,
+      required: [...editorialRequestRevisionResultSchema.properties.change.required, 'objective'],
+      properties: { ...editorialRequestRevisionResultSchema.properties.change.properties, objective: { enum: ['kept', 'set'] } },
+    },
+  },
+}
 const batchEditorialRequestReviseRequestSchema = {
   type: 'object', additionalProperties: false, required: ['expectedRequestHash'],
   properties: {
@@ -27282,8 +27302,10 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
   defineSchema('batch-editorial-request-response', 1, 'The editorial request of one production batch as it stands now: the briefing as written and how it was read, with what is unsupported, what is still a question (and the closed answers it offers), the revision it is at and whether it keeps the batch from being generated', successSchema(batchEditorialRequestResponseSchema)),
   defineSchema('batch-editorial-request-revise-request', 1, 'Answer the open questions of the request of a production batch, or give the batch a new briefing that is read again; the request it replaces is kept as a revision', batchEditorialRequestReviseRequestSchema),
   defineSchema('batch-editorial-request-revised', 1, 'The request of a production batch after a revision: how the briefing is read now, what changed and whether the batch can be generated', successSchema(batchEditorialRequestRevisedSchema)),
+  defineSchema('editorial-request-revise-request', 3, 'Replace the parts of the editorial request of a video that the body names, including its strategic objective while the project has none or no Director run exists; a question is answered in words or by choosing one of its closed answers', editorialRequestReviseRequestSchemaV3),
   defineSchema('editorial-request-revise-request', 2, 'Replace the parts of the editorial request of a video that the body names; a question is answered in words or by choosing one of its closed answers, and a choice becomes the directive of the same revision', editorialRequestReviseRequestSchemaV2),
   defineSchema('editorial-request-response', 2, 'The editorial request of the current Version: what was asked, how the briefing was read, what is unsupported and what is still a question, with the closed answers a question offers', successSchema(currentEditorialRequestSchemaV2)),
+  defineSchema('editorial-request-revised', 3, 'A revised editorial request: the EditCommand, the new Brief Snapshot state and the deferred render impact, with the closed answers a question offers and whether the revision set the objective', successSchema(editorialRequestRevisionResultSchemaV3)),
   defineSchema('editorial-request-revised', 2, 'A revised editorial request: the EditCommand, the new Brief Snapshot state and the deferred render impact, with the closed answers a question offers', successSchema(editorialRequestRevisionResultSchemaV2)),
   defineSchema('editorial-request-revision-impact', 1, 'Content-addressed deferred impact of a revised editorial request', editorialRequestRevisionImpactSchema),
   defineSchema('editorial-request-revise-request', 1, 'Replace the parts of the editorial request of a video that the body names, through an immutable EditCommand that reads the briefing', editorialRequestReviseRequestSchema),

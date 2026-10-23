@@ -73,6 +73,11 @@ function objectiveOf(project: { objective: string | null }, content: Readonly<Re
   return project.objective ?? (typeof content.objective === 'string' ? content.objective : undefined)
 }
 
+/** A revision made since the objective can be set states the objective its request was made under; an older one is read under the objective of the project. */
+function statedObjective(payload: Readonly<{ objective?: string | null }>, fallback: string | undefined): string | undefined {
+  return 'objective' in payload ? (payload.objective ?? undefined) : fallback
+}
+
 function hydrateStoredCommand(row: StoredCommand, objective: string | undefined, replayed: boolean): Readonly<EditorialRequestRevisionResult> {
   const authenticationAudit = hydrateEditCommandExternalActorAudit(row)
   if (row.type !== 'revise-editorial-request' || !row.resultVersion) throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial request revision result is missing')
@@ -80,7 +85,7 @@ function hydrateStoredCommand(row: StoredCommand, objective: string | undefined,
   const impact = parseEditorialRequestRevisionImpact(payload.impact)
   const stored = hydrateBriefSnapshot(row.resultVersion.briefSnapshot)
   // The Command names the request the Brief Snapshot of its Version states: both are recomputed from the document, not trusted from the payload.
-  const request = deriveEditorialRequestFromBrief({ ...stored.content, ...(objective !== undefined ? { objective } : {}) })
+  const request = deriveEditorialRequestFromBrief({ ...stored.content, ...(statedObjective(payload, objective) !== undefined ? { objective: statedObjective(payload, objective)! } : {}) })
   if (
     payload.schemaVersion !== 1 ||
     payload.nextRequiredCapability !== 'apollo.projects.commands.apply:run-director' ||
@@ -182,9 +187,10 @@ export class PrismaEditorialRequestRepository implements EditorialRequestReposit
     }
     const brief = hydrateBriefSnapshot(project.currentVersion.briefSnapshot)
     if (parent.version.snapshotRefs.brief !== brief.snapshot.id) throw new DomainError('PERSISTENCE_CONFLICT', 'Project brief snapshot differs from the sealed head')
+    const directorStarted = (await this.client.v2DirectorRun.count({ where: { workspaceId: input.workspaceId, projectId: input.projectId } })) > 0
     return Object.freeze({
       parent,
-      project: Object.freeze({ ...(objectiveOf(project, brief.content) !== undefined ? { objective: objectiveOf(project, brief.content)! } : {}) }),
+      project: Object.freeze({ ...(objectiveOf(project, brief.content) !== undefined ? { objective: objectiveOf(project, brief.content)! } : {}), directorStarted }),
       currentBriefSnapshot: Object.freeze({ id: brief.snapshot.id, contentSchemaVersion: brief.snapshot.contentSchemaVersion, contentHash: brief.snapshot.contentHash, content: brief.content }),
       currentDurationFrames,
       outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: currentVersionId, proxies: proxyOutputs, finals: finalOutputs }),
@@ -267,9 +273,17 @@ export class PrismaEditorialRequestRepository implements EditorialRequestReposit
             impactHash: item.impactHash, createdAt: new Date(item.createdAt),
           })) })
         }
+        // The objective of the project is set by this revision when it names one: only while the project has none, or while no Director run has judged against it.
+        const setsObjective = bundle.command.payload.change.objective === 'set'
+        if (setsObjective) {
+          if (typeof bundle.command.payload.objective !== 'string') throw new DomainError('PERSISTENCE_CONFLICT', 'An editorial request revision that sets the objective must state it')
+          if (projectRow.objective !== null && (await transaction.v2DirectorRun.count({ where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId } })) > 0) {
+            throw new DomainError('VERSION_CONFLICT', 'The Director judged the project against its objective before the editorial request revision commit')
+          }
+        }
         const updated = await transaction.v2Project.updateMany({
-          where: { id: bundle.command.projectId, workspaceId: bundle.command.workspaceId, currentVersionId: bundle.command.baseVersionId },
-          data: { currentVersionId: bundle.version.id },
+          where: { id: bundle.command.projectId, workspaceId: bundle.command.workspaceId, currentVersionId: bundle.command.baseVersionId, ...(setsObjective ? { objective: projectRow.objective } : {}) },
+          data: { currentVersionId: bundle.version.id, ...(setsObjective ? { objective: bundle.command.payload.objective as string } : {}) },
         })
         if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project current version changed during the editorial request revision')
         await transaction.v2PublicEventOutbox.create({ data: {

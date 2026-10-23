@@ -195,7 +195,7 @@ test('structured changes to a request already read keep its reading: the model i
   assert.equal(result.command.payload.interpreted, false)
   assert.equal(requestOf(result).interpretation.interpretationHash, requestOf(read).interpretation.interpretationHash)
   assert.deepEqual(requestOf(result).directives.map((directive) => directive.kind), ['cta'])
-  assert.deepEqual(result.command.payload.change, { briefing: 'kept', directives: 'replaced', variantOverrides: 'kept', desiredAction: 'kept', answeredQuestionIds: [] })
+  assert.deepEqual(result.command.payload.change, { briefing: 'kept', directives: 'replaced', variantOverrides: 'kept', desiredAction: 'kept', objective: 'kept', answeredQuestionIds: [] })
   // The desired action is replaceable too (a question about the call to action is answered by the text of it).
   const withAction = await service(memoryRepository(parent, { content: JSON.parse(read.briefSnapshot.contentJson) }), second)(request(parent, actor, { desiredAction: { visualCta: '<texto do chamado>' } }))
   assert.equal(requestOf(withAction).desiredAction.visualCta, '<texto do chamado>')
@@ -282,7 +282,8 @@ test('the public contract: capabilities, body parser, presenters and schemas agr
   const { parent, actor } = await world()
   const result = await service(memoryRepository(parent), stubModel(empty))(request(parent, actor, { briefing: BRIEFING }))
   const presented = presentEditorialRequestRevisionResult(result)
-  const validateRevised = ajv.compile(getPublicSchema('apollo://schemas/editorial-request-revised/v1').schema)
+  // The capability publishes v3: the change also says whether the revision set the objective.
+  const validateRevised = ajv.compile(getPublicSchema('apollo://schemas/editorial-request-revised/v3').schema)
   assert.ok(validateRevised({ data: JSON.parse(JSON.stringify(presented)), meta: { apiVersion: 'v1' } }), JSON.stringify(validateRevised.errors))
   const validateResponse = ajv.compile(getPublicSchema('apollo://schemas/editorial-request-response/v1').schema)
   const current = presentCurrentEditorialRequest({ version: result.version, ...describeEditorialRequest({ objective: 'discovery', briefSnapshot: { id: result.briefSnapshot.id, contentHash: result.briefSnapshot.contentHash, content: JSON.parse(result.briefSnapshot.contentJson) } }) })
@@ -395,4 +396,54 @@ test('ADR-160: a project created with no objective states its request, is read a
   assert.equal(describeEditorialRequest({ briefSnapshot: { id: read.briefSnapshot.id, contentHash: read.briefSnapshot.contentHash, content: brief } }).blocksDirector, false)
   // A desired action belongs to an objective: it is refused here, not made up.
   await assert.rejects(service(repository(), stubModel(empty))(request(parent, actor, { desiredAction: { verbalCta: 'um texto' } }, { idempotencyKey: 'editorial-request-revision-9' })), (error) => error.code === 'INVALID_ARGUMENT')
+})
+
+test('ADR-160: the owner gives the project its objective later, in a revision: closed catalog, destination when the objective needs one, never after the Director judged', async () => {
+  const { parent, actor } = await world()
+  const none = { schemaVersion: 1, objective: null, desiredAction: null, productionBrief: createProductionBrief({ ownerText: BRIEFING }), createdAt: '2026-10-22T12:00:00.000Z' }
+  const noneProject = () => memoryRepository(parent, { content: none, project: { directorStarted: false } })
+  const model = stubModel(empty)
+
+  // An id outside the closed catalog is refused before the model is paid for.
+  await assert.rejects(service(noneProject(), model)(request(parent, actor, { objective: 'content-distribution' })), (error) => error.code === 'INVALID_ARGUMENT')
+  assert.equal(model.calls.length, 0)
+
+  // The project has none: the revision sets it, with the action that belongs to it, and says so in its payload.
+  const set = await service(noneProject(), model)(request(parent, actor, { objective: 'discovery' }))
+  const brief = JSON.parse(set.briefSnapshot.contentJson)
+  assert.equal(brief.objective, 'discovery')
+  assert.equal(brief.desiredAction.kind, 'continue-viewing')
+  assert.equal(set.command.payload.change.objective, 'set')
+  assert.equal(set.command.payload.objective, 'discovery')
+  assert.notEqual(set.command.payload.requestHash, set.command.payload.previousRequestHash)
+  assert.equal(deriveEditorialRequestFromBrief({ ...brief }).objective, 'discovery')
+  assert.equal(model.calls.length, 1, 'the briefing nobody had read is read once; the objective itself is not read')
+
+  // A revision that does not name it keeps it as it was.
+  const kept = await service(noneProject(), model)(request(parent, actor, { briefing: 'outro texto' }, { idempotencyKey: 'editorial-request-revision-2' }))
+  assert.equal(kept.command.payload.change.objective, 'kept')
+  assert.equal(kept.command.payload.objective, null)
+
+  // An objective that needs a destination asks for it in the same body.
+  await assert.rejects(service(noneProject(), model)(request(parent, actor, { objective: 'whatsapp' }, { idempotencyKey: 'editorial-request-revision-3' })), (error) => error.code === 'INVALID_ARGUMENT' && /destination/u.test(error.message))
+  const bound = await service(noneProject(), model)(request(parent, actor, { objective: 'whatsapp', desiredAction: { destination: { type: 'whatsapp', value: '+5511999999999' } } }, { idempotencyKey: 'editorial-request-revision-4' }))
+  assert.equal(JSON.parse(bound.briefSnapshot.contentJson).desiredAction.kind, 'message-whatsapp')
+
+  // The same objective is no revision; once the Director ran, the Director's own flow carries the change.
+  const withObjective = (directorStarted) => memoryRepository(parent, { project: { objective: 'discovery', directorStarted } })
+  await assert.rejects(service(withObjective(false), model)(request(parent, actor, { objective: 'discovery' }, { idempotencyKey: 'editorial-request-revision-5' })), (error) => error.code === 'INVALID_ARGUMENT')
+  await assert.rejects(service(withObjective(true), model)(request(parent, actor, { objective: 'awareness' }, { idempotencyKey: 'editorial-request-revision-6' })), (error) => error.code === 'INVALID_ARGUMENT' && /Director/u.test(error.message))
+  const changed = await service(withObjective(false), model)(request(parent, actor, { objective: 'awareness' }, { idempotencyKey: 'editorial-request-revision-7' }))
+  assert.equal(JSON.parse(changed.briefSnapshot.contentJson).objective, 'awareness')
+  assert.equal(changed.command.payload.change.objective, 'set')
+
+  // The public contract carries it: the body parser, the schemas and the capability agree.
+  assert.deepEqual(parseReviseEditorialRequestBody({ baseVersionId: 'v1', baseHash: 'a'.repeat(64), objective: 'discovery' }).body, { objective: 'discovery' })
+  const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.editorial-request.revise')
+  assert.equal(capability.inputSchemaRef, 'apollo://schemas/editorial-request-revise-request/v3')
+  const ajv = new Ajv2020({ allErrors: true, strict: true, validateFormats: true })
+  addFormats(ajv)
+  const validate = ajv.compile(getPublicSchema('apollo://schemas/editorial-request-revise-request/v3').schema)
+  assert.equal(validate({ baseVersionId: parent.version.id, baseHash: parent.version.baseHash, objective: 'discovery' }), true)
+  assert.equal(validate({ baseVersionId: parent.version.id, baseHash: parent.version.baseHash, objective: 'content-distribution' }), false)
 })

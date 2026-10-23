@@ -70,6 +70,8 @@ const PATTERNS = Object.freeze([
     regex: new RegExp(String.raw`useState(?:<[^>]*>)?\(\s*(?!['"` + '`' + String.raw`](?:${VIEW_STATE_WORDS.join('|')})['"` + '`' + String.raw`]\s*\))(?:'[^']+'|"[^"]+"|` + '`[^`$]+`' + String.raw`)\s*\)`) },
   { id: 'placeholder= with a phrase (3+ words) in a screen', screensOnly: true,
     regex: /placeholder=(?:"[^"]*\s[^"]*\s[^"]*"|'[^']*\s[^']*\s[^']*'|\{\s*['"`][^'"`]*\s[^'"`]*\s[^'"`]*['"`]\s*\})/ },
+  // A number a field opens with (a slider at 100, a count at 3) is a value the owner never chose. A zero is no value (a cursor, a counter, a progress bar), so it passes; any other number is listed in the baseline with its reason.
+  { id: 'useState(<number>) in a screen', screensOnly: true, regex: /useState(?:<[^>]*>)?\(\s*-?(?!0\s*\))\d+(?:\.\d+)?\s*\)/ },
   { id: 'new Set([<literal>]) in a screen', screensOnly: true, regex: /new Set(?:<[^>]*>)?\(\s*\[\s*['"]/ },
   { id: 'defaultValue=<literal> in a screen', screensOnly: true, regex: /defaultValue=(?:"[^"]+"|\{\s*['"`][^'"`]+['"`]\s*\})/ },
 ])
@@ -93,6 +95,9 @@ const BASELINE = Object.freeze({
   // neutral values of numeric controls and indexes
   'src/app/color-match/page.tsx :: useState(\'<non-empty literal>\') in a screen': 3, // '0', '1', '1': brightness, contrast and saturation with no adjustment
   'src/app/playback-map/page.tsx :: useState(\'<non-empty literal>\') in a screen': 1, // '0': index of the first anchor
+  // numbers of the screen's own tools, not of the video: the length of a review marker, the opacity of a comparison overlay, the overlap window of a webhook replay
+  'src/app/projects/[id]/page.tsx :: useState(<number>) in a screen': 2, // 5 (seconds of a review marker range, only a starting size the reviewer drags), 0.5 (opacity of the compare overlay)
+  'src/components/WebhookControlRoom.tsx :: useState(<number>) in a screen': 1, // 3600 (seconds of overlap when replaying deliveries: operations, not editorial)
   // technical descriptions of a file or of an operation
   'src/components/IssueOverridePanel.tsx :: new Set([<literal>]) in a screen': 1, // the terminal states of an operation
   'src/components/TransformationReviewPanel.tsx :: useState(\'<non-empty literal>\') in a screen': 1, // 'static': the tracking status of a region the reviewer has not touched

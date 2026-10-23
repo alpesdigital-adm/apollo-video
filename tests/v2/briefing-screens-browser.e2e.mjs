@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { STRATEGIC_OBJECTIVES } from '../../src/v2/domain/strategic-objective.ts'
 import { assertIsolatedDatabase } from './helpers/capture-journey.mjs'
 import { startBriefInterpreterStandIn } from './helpers/brief-interpreter-stand-in.mjs'
 
@@ -265,6 +266,13 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     assert.equal(await closed.getByRole('radio').count(), 2)
     assert.equal(await requestPanel.locator('textarea[id^="answer-"]').count(), 1, 'the open question is answered in words')
     await requestPanel.getByTestId('editorial-request-questions').scrollIntoViewIfNeeded()
+    // The choices follow the width of their own column (about 200 px here), never the window: each is whole, one under the other, and readable.
+    for (const label of await closed.locator('label').all()) {
+      const box = await label.boundingBox()
+      assert.ok(box.width >= 150, `a choice is squeezed to ${box.width}px`)
+      assert.equal(await label.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, 'the text of a choice is cut')
+      assert.equal(await label.locator('span').evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true)
+    }
     await shot('05-projeto-leitura-escolha-e-texto.png')
     const before = await (await fetch(`${baseUrl}/v1/projects/${world.projectId}/editorial-request`, { headers: { authorization } })).json()
     assert.equal(before.data.blocksDirector, true)
@@ -372,6 +380,26 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     await shot('17-lotes-pedido-liberado.png')
     const released = await startItem(`batch-start-released-${fixture.suffix}`)
     assert.equal(released.status, 201, JSON.stringify(await released.json()))
+
+    // ---- 3. A project made without an objective: the page says the Director waits for one, and the selector DEFINES it (the same revision the API
+    // and the MCP use); once defined, the page shows it in words and the Director is no longer waiting. ----
+    const bare = await seedSealedProject(prisma, { workspaceId, actor: worldActor, prefix: 'bare', name: 'Projeto sem objetivo', objective: null })
+    await page.goto(`${baseUrl}/projects/${bare.projectId}`)
+    const governance = page.getByTestId('director-objective-governance')
+    await governance.waitFor()
+    const define = page.getByTestId('project-objective-define')
+    assert.match(await define.textContent(), /O Diretor espera por ele/)
+    assert.equal(await page.getByTestId('project-objective-define-button').isDisabled(), true, 'nothing to define until the owner chooses')
+    assert.match(await page.locator('dl').first().textContent(), /Ainda não definido/)
+    await shot('18-projeto-sem-objetivo-diretor-espera.png')
+    await governance.locator('select').selectOption({ label: STRATEGIC_OBJECTIVES.find((item) => item.id === 'awareness').label })
+    await page.getByTestId('project-objective-define-button').click()
+    await define.waitFor({ state: 'detached', timeout: 60_000 })
+    const defined = await (await fetch(`${baseUrl}/v1/projects/${bare.projectId}/editorial-request`, { headers: { authorization } })).json()
+    assert.equal(defined.data.request.objective, 'awareness')
+    assert.match(await page.locator('dl').first().textContent(), new RegExp(STRATEGIC_OBJECTIVES.find((item) => item.id === 'awareness').label))
+    assert.doesNotMatch(await page.locator('dl').first().textContent(), /awareness/, 'the objective is shown in words, never as its id')
+    await shot('19-projeto-objetivo-definido.png')
   } catch (error) {
     if (shots) {
       const visible = await page?.locator('body').innerText().catch(() => '(page text unavailable)')

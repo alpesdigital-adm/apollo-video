@@ -13,7 +13,7 @@ function text(value: unknown, field: string): string {
   return value.trim()
 }
 
-const BODY_FIELDS = ['baseVersionId', 'baseHash', 'briefing', 'directives', 'variantOverrides', 'desiredAction', 'answers', 'reason'] as const
+const BODY_FIELDS = ['baseVersionId', 'baseHash', 'briefing', 'directives', 'variantOverrides', 'desiredAction', 'answers', 'objective', 'reason'] as const
 
 /**
  * The body of `revise-editorial-request`. Each request field that is present REPLACES that part of the request; one that is absent keeps it
@@ -29,6 +29,7 @@ export function parseReviseEditorialRequestBody(raw: unknown) {
     ...(body.variantOverrides !== undefined ? { variantOverrides: body.variantOverrides } : {}),
     ...(body.desiredAction !== undefined ? { desiredAction: body.desiredAction } : {}),
     ...(body.answers !== undefined ? { answers: body.answers } : {}),
+    ...(body.objective !== undefined ? { objective: body.objective } : {}),
   }
   return Object.freeze({
     baseVersionId: text(body.baseVersionId, 'baseVersionId'),
@@ -94,7 +95,7 @@ export function presentEditorialRequestRevisionResult(value: Readonly<EditorialR
       createdAt: value.command.createdAt,
     }),
     ...presentCurrentEditorialRequest({ ...view, version: value.version }),
-    change: value.command.payload.change,
+    change: Object.freeze({ ...value.command.payload.change, objective: value.command.payload.change.objective ?? 'kept' as const }),
     interpreted: value.command.payload.interpreted,
     impact: value.impact,
     invalidations: value.invalidations,

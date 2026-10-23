@@ -196,7 +196,7 @@ test('T-FR-085 /batches preflights a bounded portfolio through the public V2 API
   assert.match(batchUiSource, /expectedReuseRate/)
   assert.match(batchUiSource, /confirmationToken/)
   assert.match(batchUiSource, /produto cartesiano nunca materializado/)
-  assert.match(batchUiSource, /0 jobs criados/)
+  assert.match(batchUiSource, /Nenhuma tarefa criada/)
 })
 
 test('T-FR-086 /batches edits only an explicit recipe, format and target scope through the public V2 API', () => {

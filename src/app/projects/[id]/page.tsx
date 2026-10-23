@@ -36,6 +36,7 @@ import {
 } from '@/v2/domain/strategic-objective'
 import { parseProductionBrief } from '@/v2/domain/production-brief'
 import { describeCarriedReview } from '@/v2/ui/proxy-review-carry-view'
+import { objectiveName } from '@/v2/ui/batch-texts'
 
 const PRODUCTION_BRIEF_ASSUMPTION_LABELS: Readonly<Record<string, string>> = {
   'briefing-absent': 'Briefing livre não informado',
@@ -1198,6 +1199,8 @@ export default function ProjectWorkspacePage() {
     fingerprint: string
     key: string
   } | null>(null)
+  const objectiveIdempotencyKey = useRef<{ fingerprint: string; key: string } | null>(null)
+  const [objectiveSaving, setObjectiveSaving] = useState(false)
   const contiguousExtractionKey = useRef<{
     fingerprint: string
     key: string
@@ -3153,9 +3156,59 @@ export default function ProjectWorkspacePage() {
     setUploadLabel('')
   }
 
+  // ADR-160. A project made without an objective gets it here, through a revision of its editorial request (the same Command the API and the MCP use):
+  // it is kept as a new version, and what was made before it is marked as outdated. The Director runs only after this.
+  async function defineProjectObjective() {
+    if (!workspace?.version || workspace.project.objective) return
+    if (directorObjectiveChoice === null) {
+      setNotice('Escolha o objetivo do projeto antes de definir.')
+      return
+    }
+    const chosen = directorObjectiveChoice
+    const destination = directorDestination.trim()
+    if (OBJECTIVES_REQUIRING_DESTINATION.has(chosen) && !destination) {
+      setNotice('Este objetivo exige um destino explícito para a ação esperada.')
+      return
+    }
+    const verbalCta = directorVerbalCta.trim()
+    const visualCta = directorVisualCta.trim()
+    const disclosures = directorDisclosures.split('\n').map((item) => item.trim()).filter(Boolean)
+    const desiredAction = {
+      ...(destination ? { destination: { type: DIRECTOR_DESTINATION_TYPE[chosen] ?? (destination.startsWith('@') ? 'handle' : 'url'), value: destination } } : {}),
+      ...(verbalCta ? { verbalCta } : {}),
+      ...(visualCta ? { visualCta } : {}),
+      ...(disclosures.length ? { disclosures } : {}),
+    }
+    const body = {
+      baseVersionId: workspace.version.id, baseHash: workspace.version.baseHash, objective: chosen,
+      ...(Object.keys(desiredAction).length > 0 ? { desiredAction } : {}),
+      reason: 'Definir o objetivo do projeto, que foi criado sem um.',
+    }
+    const fingerprint = JSON.stringify(body)
+    if (objectiveIdempotencyKey.current?.fingerprint !== fingerprint) objectiveIdempotencyKey.current = { fingerprint, key: crypto.randomUUID() }
+    setObjectiveSaving(true)
+    setNotice(null)
+    try {
+      await requestJson(`/v1/projects/${encodeURIComponent(projectId)}/editorial-request`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': objectiveIdempotencyKey.current.key },
+        body: JSON.stringify(body),
+      })
+      objectiveIdempotencyKey.current = null
+      setDirectorObjectiveChoice(null)
+      setNotice(`Objetivo definido: ${objectiveName(chosen)}. O que foi feito antes dele fica marcado como desatualizado; o Diretor já pode rodar.`)
+      reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
+      await loadWorkspace(true)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não foi possível definir o objetivo do projeto.')
+    } finally {
+      setObjectiveSaving(false)
+    }
+  }
+
   async function runDirector() {
     if (workspace?.version && !workspace.project.objective) {
-      setNotice('Este projeto foi criado sem objetivo, e o Apollo não presume um. O Diretor julga o resultado contra o objetivo do projeto, então ele espera: o que não depende de objetivo segue funcionando.')
+      setNotice('Este projeto foi criado sem objetivo, e o Apollo não presume um. Escolha o objetivo e toque em "Definir objetivo do projeto": o Diretor espera por ele, e o que não depende de objetivo segue funcionando.')
       return
     }
     if (!workspace?.version || !workspace.project.objective || workspace.editPlan?.state !== 'compiled' || !transcript) {
@@ -3540,14 +3593,14 @@ export default function ProjectWorkspacePage() {
           <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-[#b58d31]">Direção registrada</p>
           <h2 className="mt-3 text-xl font-semibold tracking-[-0.03em]">A intenção vem antes do corte.</h2>
           <dl className="mt-7 space-y-5">
-            <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">Objetivo</dt><dd className="mt-1.5 text-sm text-[#d1cbc1]">{workspace.project.objective ?? 'Não informado'}</dd></div>
+            <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">Objetivo</dt><dd className="mt-1.5 text-sm text-[#d1cbc1]">{workspace.project.objective ? objectiveName(workspace.project.objective) : 'Ainda não definido'}</dd></div>
             <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">{workspaceOutputs.length > 1 ? 'Saída em edição' : 'Formato mestre'}</dt>{workspaceOutputs.length > 1 ? <dd className="mt-1.5"><OutputSelector outputs={workspaceOutputs} selectedId={outputVariantId} onSelect={setChosenOutputId} /></dd> : <dd className="mt-1.5 flex items-center gap-2 text-sm text-[#d1cbc1]"><span className="grid h-7 min-w-7 place-items-center rounded-md border border-[#d9a937]/25 px-1 text-[9px] text-[#d9ad48]">{outputAspectRatio ?? '—'}</span> Canvas e áreas seguras</dd>}</div>
             <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">Idioma</dt><dd className="mt-1.5 text-sm text-[#d1cbc1]">{workspace.project.locale ?? 'Detectado pela fala'}</dd></div>
           </dl>
           <div className="mt-7 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4" data-testid="production-brief-state">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[9px] uppercase tracking-[0.16em] text-[#6c685f]">Briefing do diretor</p>
-              <span className="text-[9px] text-[#5fbd7e]">{productionBrief?.ownerInput ? 'Owner autorizado' : 'Media-only'}</span>
+              <span className="text-[9px] text-[#5fbd7e]">{productionBrief?.ownerInput ? 'Texto do dono' : 'Só a mídia'}</span>
             </div>
             <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-[#969188]" data-testid="production-brief-summary">{(productionBrief?.summary.text ?? briefText) || 'Briefing persistido indisponível.'}</p>
             {/* A briefing with text that nobody has read says nothing about what it covers (ADR-160): no chip and no "no gaps" claim. */}
@@ -3595,14 +3648,20 @@ export default function ProjectWorkspacePage() {
             </select>
             <p className="mt-2 text-[10px] leading-4 text-[#8c877e]">{selectedDirectorObjective?.description}</p>
             <p className="mt-1 text-[10px] leading-4 text-[#69655e]">Resultado esperado: {selectedDirectorObjective?.exampleOutcome}</p>
+            {workspace.version && !workspace.project.objective ? (
+              <div className="mt-3 border-t border-white/[0.07] pt-3" data-testid="project-objective-define">
+                <p className="text-[10px] leading-4 text-[#d2ad59]">Este projeto foi criado sem objetivo e o Apollo não presume um. O Diretor espera por ele: escolha acima e defina.</p>
+                <button className="mt-2 h-10 rounded-lg bg-[#d9a43a] px-4 text-xs font-semibold text-[#171717] disabled:opacity-40" data-testid="project-objective-define-button" disabled={objectiveSaving || directorObjective === null || operationActive} onClick={() => { void defineProjectObjective() }} type="button">{objectiveSaving ? 'Definindo...' : 'Definir objetivo do projeto'}</button>
+              </div>
+            ) : null}
             {latestDirectorRun ? (
               <p className="mt-2 font-mono text-[8px] text-[#716c64]">
-                {latestDirectorRun.rubricRef} · revisão {latestDirectorRun.objectiveVersion}
+                Critérios do objetivo · revisão {latestDirectorRun.objectiveVersion}
               </p>
             ) : null}
             {directorObjectiveChanged ? (
               <div className="mt-3 border-t border-white/[0.07] pt-3">
-                <p className="text-[10px] leading-4 text-[#d2ad59]">A direção anterior não será alterada: a troca criará uma nova versão e um novo DirectorRun ligado ao anterior.</p>
+                <p className="text-[10px] leading-4 text-[#d2ad59]">A direção anterior não será alterada: a troca criará uma nova versão e uma nova direção ligada à anterior.</p>
               </div>
             ) : null}
             <div className="mt-3 space-y-3 border-t border-white/[0.07] pt-3" data-testid="director-desired-action">
@@ -3613,10 +3672,10 @@ export default function ProjectWorkspacePage() {
                 </label>
               ) : null}
               <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">CTA verbal<input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={160} onChange={(event) => setDirectorVerbalCta(event.target.value)} value={directorVerbalCta} /></label>
-                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">CTA visual<input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={160} onChange={(event) => setDirectorVisualCta(event.target.value)} value={directorVisualCta} /></label>
+                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">Chamada falada<input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={160} onChange={(event) => setDirectorVerbalCta(event.target.value)} value={directorVerbalCta} /></label>
+                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">Chamada na tela<input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={160} onChange={(event) => setDirectorVisualCta(event.target.value)} value={directorVisualCta} /></label>
               </div>
-              <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">Disclosures · um por linha<textarea className="mt-1.5 min-h-16 w-full resize-y rounded-lg border border-white/[0.09] bg-[#080808] px-3 py-2 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={2000} onChange={(event) => setDirectorDisclosures(event.target.value)} value={directorDisclosures} /></label>
+              <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">Avisos obrigatórios · um por linha<textarea className="mt-1.5 min-h-16 w-full resize-y rounded-lg border border-white/[0.09] bg-[#080808] px-3 py-2 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={2000} onChange={(event) => setDirectorDisclosures(event.target.value)} value={directorDisclosures} /></label>
               {directorObjectiveChanged || directorDesiredActionChanged ? (
                 <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">Motivo obrigatório<textarea className="mt-1.5 min-h-20 w-full resize-y rounded-lg border border-white/[0.09] bg-[#080808] px-3 py-2 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={1000} onChange={(event) => setDirectorObjectiveReason(event.target.value)} placeholder="Explique a mudança de objetivo ou ação desejada." value={directorObjectiveReason} /></label>
               ) : null}
@@ -5436,7 +5495,7 @@ export default function ProjectWorkspacePage() {
                           </span>
                         </div>
                         <p className="mt-2 font-mono text-[8px] text-[#68635c]">
-                          {readableTimestamp(reuse.plan.sourceRangeMs[0])} → {readableTimestamp(reuse.plan.sourceRangeMs[1])} · {readableDuration(reuse.plan.composition.durationMs)} total · {reuse.plan.objective}
+                          {readableTimestamp(reuse.plan.sourceRangeMs[0])} → {readableTimestamp(reuse.plan.sourceRangeMs[1])} · {readableDuration(reuse.plan.composition.durationMs)} total · {objectiveName(reuse.plan.objective)}
                         </p>
 
                         <div className="mt-4 grid grid-cols-5 overflow-hidden border border-white/[0.07]" data-testid="validation-envelope-aspects">
@@ -5540,7 +5599,7 @@ export default function ProjectWorkspacePage() {
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <p className="text-[10px] font-semibold text-[#c9c4bb]">{run.objective}</p>
+                        <p className="text-[10px] font-semibold text-[#c9c4bb]">{objectiveName(run.objective)}</p>
                         <p className="mt-1 font-mono text-[8px] text-[#625e57]">receita {run.targetRecipeId.slice(-12)} · {run.summary.needCount} declaraç{run.summary.needCount === 1 ? 'ão' : 'ões'}</p>
                       </div>
                       <div className="flex flex-wrap gap-1.5 font-mono text-[8px]">

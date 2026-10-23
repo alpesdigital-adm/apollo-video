@@ -316,7 +316,7 @@ test('ADR-160: no question, choice or unsupported item the Apollo writes carries
   assert.equal(notExecutableSummary('movement', 'zoom-in'), 'Movimento de câmera: Zoom (o Apollo ainda não aplica zoom)')
 })
 
-test('the screens and the services that talk to the owner carry none of the jargon the review named', () => {
+test('the jargon the review named stays out of the project screen (the full sweep of every screen of the request is tests/v2/screen-language.test.mjs)', () => {
   const project = source('src/app/ProjectsPageClient.tsx')
   for (const jargon of ['Versão inicial imutável e auditável', 'entram na versão 1']) assert.equal(project.includes(jargon), false, jargon)
 })

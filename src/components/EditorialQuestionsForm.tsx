@@ -44,7 +44,7 @@ export default function EditorialQuestionsForm({
             <fieldset aria-describedby={question.excerpt ? `answer-${question.id}-excerpt` : undefined} data-testid={`question-choices-${question.id}`}>
               <legend className="text-xs leading-5 text-[#d1cbc1]">{question.question}</legend>
               {question.excerpt ? <p className="mt-1 text-[11px] leading-4 text-[#8f897f]" id={`answer-${question.id}-excerpt`}>Trecho do briefing: “{question.excerpt}”</p> : null}
-              <div className="mt-2 grid gap-2 sm:grid-cols-2" role="radiogroup">
+              <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(min(100%,13rem),1fr))] gap-2" role="radiogroup">
                 {question.choices.map((choice) => {
                   const selected = answers[question.id] === choice.id
                   return (

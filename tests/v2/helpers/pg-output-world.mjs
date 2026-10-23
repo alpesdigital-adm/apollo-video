@@ -81,7 +81,7 @@ export async function seedSealedProject(client, {
   const createId = (kind) => ids[kind] ?? allocate.id(kind)
   const dependencies = (repository) => ({ repository, clock: at, createId, createEventId: randomUUID })
   const created = await createProjectService(dependencies(new PrismaCreationOutputBundleRepositoryV2(client)))({
-    workspaceId, name, objective, locale, ...(briefing === undefined ? {} : { briefing }), actor, idempotencyKey: allocate.id('root-request'),
+    workspaceId, name, ...(objective === null ? {} : { objective }), locale, ...(briefing === undefined ? {} : { briefing }), actor, idempotencyKey: allocate.id('root-request'),
   })
   const projectId = created.projectAtCreation.id
   const root = created.bundle
