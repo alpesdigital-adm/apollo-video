@@ -345,3 +345,37 @@ test('a closed answer is chosen: the choice is the owner\'s answer and the direc
   // A word answer to a closed question is refused.
   await assert.rejects(service(repository(), second)(request(parent, actor, { answers: [{ questionId: 'q1', answer: 'texto livre' }] })), (error) => error.code === 'INVALID_ARGUMENT')
 })
+
+test('ADR-160: the directive a choice made does not survive the rewrite of the briefing, nor its removal', async () => {
+  const { parent, actor } = await world()
+  const asking = stubModel({ ...empty, directives: [
+    { kind: 'layout', value: 'source-native', param: null, quote: 'alpha' }, { kind: 'layout', value: 'fit-with-backdrop', param: null, quote: 'beta' },
+  ] })
+  const read = await service(memoryRepository(parent), asking)(request(parent, actor, { briefing: BRIEFING }))
+  const repository = (content) => memoryRepository(parent, { content })
+  const chosen = await service(repository(JSON.parse(read.briefSnapshot.contentJson)), stubModel(empty))(request(parent, actor, { answers: [{ questionId: 'q1', choiceId: 'c2' }] }))
+  assert.deepEqual(requestOf(chosen).directives.map((directive) => directive.id), ['answer-q1'])
+  const chosenContent = JSON.parse(chosen.briefSnapshot.contentJson)
+
+  // Same text, structured change that does not touch the briefing: the answer stays.
+  const kept = await service(repository(chosenContent), stubModel(empty))(request(parent, actor, { desiredAction: { verbalCta: 'um texto' } }))
+  assert.deepEqual(requestOf(kept).directives.map((directive) => directive.id), ['answer-q1'], 'the briefing did not change, so the answer stands')
+
+  // The briefing is rewritten: the old answers fall, even when the caller lists the directive again.
+  const rewritten = await service(repository(chosenContent), stubModel(empty))(request(parent, actor, { briefing: 'epsilon zeta eta theta' }))
+  assert.deepEqual(requestOf(rewritten).directives, [], 'a choice made about the old text decides nothing about the new one')
+  const relisted = await service(repository(chosenContent), stubModel(empty))(request(parent, actor, {
+    briefing: 'epsilon zeta eta theta', directives: [{ id: 'answer-q1', kind: 'layout', value: 'fit-with-backdrop' }],
+  }, { idempotencyKey: 'editorial-request-revision-2' }))
+  assert.deepEqual(requestOf(relisted).directives, [])
+
+  // A directive the owner wrote in a field of its own is not an answer and stays.
+  const withOwn = await service(repository(chosenContent), stubModel(empty))(request(parent, actor, {
+    briefing: 'epsilon zeta eta theta', directives: [{ id: 'answer-q1', kind: 'layout', value: 'fit-with-backdrop' }, { id: 'own-1', kind: 'movement', value: 'none' }],
+  }, { idempotencyKey: 'editorial-request-revision-3' }))
+  assert.deepEqual(requestOf(withOwn).directives.map((directive) => directive.id), ['own-1'])
+
+  // Removing the briefing drops them too.
+  const cleared = await service(repository(chosenContent), stubModel(empty))(request(parent, actor, { briefing: null }, { idempotencyKey: 'editorial-request-revision-4' }))
+  assert.deepEqual(requestOf(cleared).directives, [])
+})

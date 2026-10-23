@@ -65,6 +65,11 @@ function snapshotOf(workspaceId: string, projectId: string, snapshotId: string, 
   })
 }
 
+/** The directive a closed answer makes (`answer-<questionId>`): it belongs to the interpretation whose question it answered. */
+function isAnswerDirective(directive: Readonly<Pick<EditorialDirective, 'id'>>): boolean {
+  return /^answer-q[0-9]+$/u.test(directive.id)
+}
+
 export function reviseEditorialRequestService(dependencies: {
   repository: EditorialRequestRepository
   /** Reads a briefing. Absent model inside: a briefing with text then fails closed with PRECONDITION_REQUIRED. */
@@ -169,7 +174,10 @@ export function reviseEditorialRequestService(dependencies: {
       assertDomain(answers === undefined, 'INVALID_ARGUMENT', 'There is no briefing, so there is no question to answer')
     }
 
-    const baseDirectives = bodyDirectives ?? (Array.isArray(currentStructured.directives) ? (currentStructured.directives as readonly EditorialDirective[]) : [])
+    // A choice is the owner's answer to a question of the interpretation of THAT text. When the briefing changes (or is cleared), the questions are
+    // gone and so are the directives their answers made: they do not survive the rewrite, whoever lists them.
+    const requestedDirectives = bodyDirectives ?? (Array.isArray(currentStructured.directives) ? (currentStructured.directives as readonly EditorialDirective[]) : [])
+    const baseDirectives = briefingChanged ? requestedDirectives.filter((directive) => !isAnswerDirective(directive)) : requestedDirectives
     const directives = [...baseDirectives.filter((directive) => !chosen.some((item) => item.id === directive.id)), ...chosen]
     const variantOverrides = bodyOverrides ?? (isRecord(currentStructured.variantOverrides)
       ? (currentStructured.variantOverrides as Record<string, readonly EditorialDirective[]>) : {})
