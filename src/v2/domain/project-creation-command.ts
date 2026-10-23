@@ -122,7 +122,7 @@ export type { ForkIdentityKindV2, ForkIdentityRemapV2, V2RenderablePlanSnapshotF
  * briefing (ADR-160: the interpretation belongs to the text): an interpretation that is bound to the exact text (its hash and every citation are
  * checked against it) and the audit of the call that made it. A reading of other words, or any other extra content, is refused.
  */
-function creationBriefMatchesIntent(contentJson: string, intent: Readonly<{ objective: StrategicObjectiveId; desiredAction: unknown; briefing: string | null }>, createdAt: string): boolean {
+function creationBriefMatchesIntent(contentJson: string, intent: Readonly<{ objective: StrategicObjectiveId | null; desiredAction: unknown; briefing: string | null }>, createdAt: string): boolean {
   const base = { schemaVersion: 1, objective: intent.objective, desiredAction: intent.desiredAction,
     productionBrief: createProductionBrief({ ...(intent.briefing === null ? {} : { ownerText: intent.briefing }) }), createdAt }
   if (contentJson === stableSerialize(base)) return true
@@ -147,14 +147,15 @@ function creationBriefMatchesIntent(contentJson: string, intent: Readonly<{ obje
 
 export type ProjectCreationCallerIntentV2 = Readonly<
   { schemaVersion: 'project-creation-intent/v2'; kind: 'initialize-empty'; name: string;
-    objective: StrategicObjectiveId; locale: string | null; briefing: string | null;
-    desiredAction: Readonly<DesiredActionInput> } |
+    /** Null when the requester chose none: the Apollo does not presume one (ADR-160). A desired action belongs to an objective, so it is then empty. */
+    objective: StrategicObjectiveId | null; locale: string | null; briefing: string | null;
+    desiredAction: Readonly<DesiredActionInput> | null } |
   { schemaVersion: 'project-creation-intent/v2'; kind: 'fork-with-content'; name: string }
 >
 export type NormalizedProjectCreationIntentV2 = Readonly<
   { schemaVersion: 'project-creation-intent/v2'; kind: 'initialize-empty'; name: string;
-    objective: StrategicObjectiveId; locale: string | null; briefing: string | null;
-    desiredAction: Readonly<DesiredAction> } |
+    objective: StrategicObjectiveId | null; locale: string | null; briefing: string | null;
+    desiredAction: Readonly<DesiredAction> | null } |
   { schemaVersion: 'project-creation-intent/v2'; kind: 'fork-with-content'; name: string }
 >
 export interface ProjectCreationSourceBaselineV2 {
@@ -202,9 +203,12 @@ export function normalizeProjectCreationIntentV2(input: ProjectCreationCallerInt
     try { locale = Intl.getCanonicalLocales(input.locale.trim())[0] ?? '' } catch { locale = '' }
     assertDomain(locale.length > 0, 'INVALID_COMMAND', 'Creation V2 locale is invalid')
   }
-  const objective = resolveStrategicObjective(input.objective).id
+  const objective = input.objective === null || input.objective === undefined ? null : resolveStrategicObjective(input.objective).id
   const productionBrief = createProductionBrief({ ...(input.briefing === null ? {} : { ownerText: input.briefing }) })
-  const desiredAction = createDesiredAction({ objective, desiredAction: parseDesiredActionInput(input.desiredAction) })
+  const requestedAction = input.desiredAction === null || input.desiredAction === undefined ? {} : parseDesiredActionInput(input.desiredAction)
+  // No objective, no desired action: the kind of action is the objective's, so the Apollo has none to give (it does not presume an objective).
+  assertDomain(objective !== null || Object.keys(requestedAction).length === 0, 'INVALID_COMMAND', 'A desired action belongs to an objective: choose the objective, or leave both out')
+  const desiredAction = objective === null ? null : createDesiredAction({ objective, desiredAction: requestedAction })
   return Object.freeze({ schemaVersion: input.schemaVersion, kind: input.kind, name, objective, locale,
     briefing: productionBrief.ownerInput?.text ?? null, desiredAction })
 }
@@ -220,7 +224,13 @@ export function validateNormalizedProjectCreationIntentV2(input: NormalizedProje
     ['initialize-empty', 'fork-with-content'].includes(input.kind), 'INVALID_COMMAND', 'Stored Creation V2 intent version/kind is invalid')
   let fresh: NormalizedProjectCreationIntentV2
   if (input.kind === 'initialize-empty') {
-    const action = input.desiredAction
+    if (input.objective === null) {
+      assertDomain(input.desiredAction === null, 'INVALID_COMMAND', 'Stored Creation V2 desired action needs its objective')
+      const none = normalizeProjectCreationIntentV2({ ...input, desiredAction: null })
+      assertDomain(serializeOutputCanonicalJson(none) === serializeOutputCanonicalJson(input), 'INVALID_COMMAND', 'Stored Creation V2 intent must already be normalized')
+      return none
+    }
+    const action = input.desiredAction!
     creationV2Exact(action, ['schemaVersion', 'kind', 'disclosures',
       ...(['destination','verbalCta','visualCta'] as const).filter(key => Object.hasOwn(action,key))])
     assertDomain(action.schemaVersion === 1 && typeof action.kind === 'string' &&
@@ -533,7 +543,7 @@ export function validateProjectCreationOutputCommandV2(input: ProjectCreationOut
 
 /** Creation2 administrative metadata only; format never supplies output geometry. */
 export function creationProjectMetadataV2(input: ProjectCreationOutputCommandV2): Readonly<{
-  name: string; ownerId: string; format: string | null; objective: string; locale: string | null
+  name: string; ownerId: string; format: string | null; objective: string | null; locale: string | null
 }> {
   const command = validateProjectCreationOutputCommandV2(input), intent = command.payload.callerIntent
   const source = command.payload.forkDerivation?.document.sourceProject

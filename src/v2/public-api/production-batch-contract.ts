@@ -241,7 +241,7 @@ export function parseCreateProductionBatchBody(
     // The editorial request of the whole batch: any non-empty text (the interpreter reads it; the service checks the length and the content).
     briefing: string(body.briefing, 'briefing', 1, 10_000),
     name: string(body.name, 'name', 1, 200),
-    objective: string(body.objective, 'objective', 1, 128),
+    ...(body.objective !== undefined ? { objective: string(body.objective, 'objective', 1, 128) } : {}),
     sourceGroups: Object.freeze(sourceGroups),
     recipes: Object.freeze(recipes),
     variants: Object.freeze(variants),

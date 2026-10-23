@@ -102,13 +102,13 @@ export function createProjectService(dependencies: ClockAndIds & {
    */
   interpretBrief?: InterpretBrief
 }) {
-  return async (request: { workspaceId: string; name: string; objective: StrategicObjectiveId; locale?: string;
+  return async (request: { workspaceId: string; name: string; /** Optional (ADR-160): without one the Apollo presumes none. */ objective?: StrategicObjectiveId | null; locale?: string;
     briefing?: string; desiredAction?: Readonly<DesiredActionInput>; actor: AuthenticatedExternalActor; idempotencyKey: string }) => {
     assertDomain(Object.keys(request).every(k => ['workspaceId', 'name', 'objective', 'locale', 'briefing',
       'desiredAction', 'actor', 'idempotencyKey'].includes(k)), 'INVALID_ARGUMENT', 'Creation cannot specify an implicit output')
     const audit = authenticated(request.actor, request.workspaceId), idempotencyKey = key(request.idempotencyKey)
     const callerIntent = normalizeProjectCreationIntentV2({ schemaVersion: 'project-creation-intent/v2', kind: 'initialize-empty',
-      name: request.name, objective: request.objective, locale: request.locale ?? null,
+      name: request.name, objective: request.objective ?? null, locale: request.locale ?? null,
       briefing: request.briefing ?? null, desiredAction: request.desiredAction ?? {} })
     assertDomain(callerIntent.kind === 'initialize-empty', 'INVALID_COMMAND', 'Public creation requires empty root intent')
     // All allocations are fixed before repository retries, including the plan's
@@ -176,7 +176,7 @@ export function createProjectService(dependencies: ClockAndIds & {
     const c = result.bundle.command, intent = c.payload.callerIntent
     assertDomain(intent.kind === 'initialize-empty', 'PERSISTENCE_CONFLICT', 'Creation replay intent differs')
     const projectAtCreation = createProject({ id: c.projectId, workspaceId: c.workspaceId, name: intent.name, status: 'draft',
-      objective: intent.objective, ...(intent.locale !== null ? { locale: intent.locale } : {}), ownerId: c.author.id,
+      ...(intent.objective !== null ? { objective: intent.objective } : {}), ...(intent.locale !== null ? { locale: intent.locale } : {}), ownerId: c.author.id,
       createdBy: c.author, createdAt: c.createdAt })
     return Object.freeze({ projectAtCreation, creationVersion: result.bundle.version, bundle: result.bundle, replayed: result.replayed, briefReading })
   }

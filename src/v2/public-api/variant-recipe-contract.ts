@@ -212,6 +212,7 @@ export function parseCreateVariantRecipeBody(
       'orderedNodeIds',
       'assumptions',
       'requireProof',
+      'objective',
       'coldOpen',
     ],
     'body',
@@ -254,6 +255,9 @@ export function parseCreateVariantRecipeBody(
       : {}),
     ...(body.requireProof !== undefined
       ? { requireProof: body.requireProof }
+      : {}),
+    ...(body.objective !== undefined
+      ? { objective: string(body.objective, 'objective', 1, 128) }
       : {}),
     ...(body.coldOpen !== undefined
       ? { coldOpen: parseColdOpen(body.coldOpen) }

@@ -97,7 +97,8 @@ export async function POST(request: NextRequest) {
     if (typeof body.name !== 'string') {
       throw new DomainError('INVALID_ARGUMENT', 'name must be a string')
     }
-    if (typeof body.objective !== 'string') {
+    // The objective is optional (ADR-160): the Apollo presumes none. When it is given it is one of the strategic objectives.
+    if (body.objective !== undefined && typeof body.objective !== 'string') {
       throw new DomainError('INVALID_ARGUMENT', 'objective must be a string')
     }
     for (const field of ['locale', 'briefing'] as const) {
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
     const result = await createProject({
       workspaceId: actor.workspaceId,
       name: body.name,
-      objective: body.objective as StrategicObjectiveId,
+      ...(body.objective !== undefined ? { objective: body.objective as StrategicObjectiveId } : {}),
       ...(locale ? { locale } : {}),
       ...(briefing ? { briefing } : {}),
       ...(desiredAction ? { desiredAction } : {}),

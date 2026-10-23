@@ -7654,6 +7654,10 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
   Object.freeze({
     'apollo://schemas/create-project-request/v4': [{ name: 'Projeto sem formato implícito', objective: 'discovery', locale: 'pt-BR' }],
     'apollo://schemas/create-project-request/v5': [{ name: '<nome do projeto>', objective: 'discovery', briefing: '<texto do pedido>' }],
+    'apollo://schemas/create-project-request/v6': [
+      { name: '<nome do projeto>', briefing: '<texto do pedido>' },
+      { name: '<nome do projeto>', objective: 'discovery', briefing: '<texto do pedido>' },
+    ],
     'apollo://schemas/project-created/v5': [{ data: {
       projectAtCreation: { id: projectId, workspaceId, name: 'Projeto vazio explícito', status: 'draft',
         objective: 'discovery', locale: 'pt-BR', ownerId: clientId, createdAt,
@@ -12494,6 +12498,18 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     'apollo://schemas/create-production-batch-request/v2': [
       { ...productionBatchCreateRequestExample, briefing: '<texto do pedido>' },
     ],
+    // ADR-160: the versions whose batch may state no objective; the examples that state one are still valid under them, and one states none.
+    'apollo://schemas/create-production-batch-request/v3': [
+      { ...productionBatchCreateRequestExample, briefing: '<texto do pedido>' },
+      (() => { const { objective: _omitted, ...withoutObjective } = productionBatchCreateRequestExample; void _omitted; return { ...withoutObjective, briefing: '<texto do pedido>' } })(),
+    ],
+    'apollo://schemas/production-batch-mutated/v3': [
+      { data: { batch: productionBatchVisibleExample, replayed: false }, meta: { apiVersion: 'v1' } },
+      (() => { const { objective: _omitted, ...withoutObjective } = productionBatchVisibleExample; void _omitted; return { data: { batch: withoutObjective, replayed: false }, meta: { apiVersion: 'v1' } } })(),
+    ],
+    'apollo://schemas/production-batch-read/v3': [{ data: { batch: productionBatchVisibleExample }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/production-batch-page/v3': [{ data: { batches: [productionBatchVisibleExample], nextCursor: productionBatchVisibleExample.id }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/batch-partial-retry-mutated/v3': [{ data: { batch: productionBatchVisibleExample, partialRetry: batchPartialRetryExample, replayed: false }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/production-batch-mutated/v1': [
       {
         data: {
@@ -15765,6 +15781,10 @@ const MULTI_OUTPUT_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>>
     'apollo://schemas/project-workspace/v14': workspaces,
     // W64: the version whose uncertainty `type` also names crop, caption and insert; same examples, one more accepted value.
     'apollo://schemas/project-workspace/v15': structuredClone(workspaces),
+    // ADR-160: the version whose brief may state no objective; the same examples are still valid under it.
+    'apollo://schemas/project-workspace/v16': structuredClone(workspaces),
+    'apollo://schemas/create-variant-recipe-request/v2': clonedExamples('apollo://schemas/create-variant-recipe-request/v1'),
+    'apollo://schemas/create-variant-portfolio-preflight-request/v2': clonedExamples('apollo://schemas/create-variant-portfolio-preflight-request/v1'),
     'apollo://schemas/director-quality-report-read/v3': directorQualityReadExamplesV3,
     'apollo://schemas/director-quality-report-read/v4': directorQualityReadExamplesV4,
     // ADR-160 F4: a cut of the source applies no movement, so its opening has no window to protect.

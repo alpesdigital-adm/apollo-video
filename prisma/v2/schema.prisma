@@ -7776,7 +7776,7 @@ model V2ProductionBatch {
   schemaVersion           String   @db.VarChar(64)
   policyVersion           String   @db.VarChar(64)
   name                    String   @db.VarChar(200)
-  objective               String   @db.VarChar(128)
+  objective               String?  @db.VarChar(128)
   aggregateStatus         String   @db.VarChar(32)
   revision                Int      @default(1)
   sourceGroupsJson        String   @db.Text

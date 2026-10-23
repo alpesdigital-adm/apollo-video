@@ -432,8 +432,18 @@ export const EDITORIAL_REQUEST_BLOCKED_REASON = 'editorial-request-blocked' as c
 export const BRIEF_INTERPRETER_UNAVAILABLE_REASON = 'brief-interpreter-unavailable' as const
 /** An interpreter is configured but the reading was not made (timeout, abort, provider failure, a reply the Apollo refused): the briefing stays unread. */
 export const BRIEF_INTERPRETATION_FAILED_REASON = 'brief-interpretation-failed' as const
+/**
+ * The project has no objective (the requester chose none and the Apollo presumes none), and the Director judges a plan against an objective's
+ * rubric. It waits for one instead of inventing it; everything that does not need an objective keeps working.
+ */
+export const DIRECTOR_OBJECTIVE_REQUIRED_REASON = 'director-objective-required' as const
+/**
+ * A step of a production batch judges against an objective (a recipe, a portfolio), and the batch was created with none. The Apollo presumes none: the
+ * request of that step names the objective it is judged against.
+ */
+export const OBJECTIVE_REQUIRED_REASON = 'objective-required' as const
 /** The `reason` codes the public error envelope publishes for the editorial request (PRECONDITION_REQUIRED). */
-export const EDITORIAL_REQUEST_PUBLISHED_REASONS = Object.freeze([BRIEF_INTERPRETATION_REQUIRED_REASON, EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON, EDITORIAL_REQUEST_BLOCKED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON, BRIEF_INTERPRETATION_FAILED_REASON] as const)
+export const EDITORIAL_REQUEST_PUBLISHED_REASONS = Object.freeze([BRIEF_INTERPRETATION_REQUIRED_REASON, EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON, EDITORIAL_REQUEST_BLOCKED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON, BRIEF_INTERPRETATION_FAILED_REASON, DIRECTOR_OBJECTIVE_REQUIRED_REASON, OBJECTIVE_REQUIRED_REASON] as const)
 
 /**
  * A briefing with text and no interpretation of exactly that text is NOT an empty briefing: it is a request nobody has read. The Director

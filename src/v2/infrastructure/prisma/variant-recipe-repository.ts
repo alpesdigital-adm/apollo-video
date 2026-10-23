@@ -271,7 +271,8 @@ async function assertCreationContext(
       'Variant recipe production batch was not found',
     )
   }
-  if (batch.objective !== run.objective) {
+  // A batch created with no objective stores none; the recipe then carries the one its request named.
+  if (batch.objective !== null && batch.objective !== run.objective) {
     throw new DomainError(
       'VERSION_CONFLICT',
       'Production batch objective changed before recipe persistence',
@@ -361,7 +362,7 @@ implements VariantRecipeRepository {
     }
     return Object.freeze({
       projectId: batch.projectId,
-      objective: batch.objective,
+      ...(batch.objective !== null ? { objective: batch.objective } : {}),
       compatibilityGraph: hydrateCompatibilityGraphRow(graph),
     })
   }

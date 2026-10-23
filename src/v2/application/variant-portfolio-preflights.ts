@@ -1,5 +1,6 @@
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
+import { objectiveOf } from './variant-recipes.ts'
 import {
   createVariantPortfolioPreflightResult,
 } from '../domain/preflight-result.ts'
@@ -114,6 +115,8 @@ export interface CreateVariantPortfolioPreflightRequest {
   expectedCompatibilityGraphRunHash: string
   requestedRecipeCount: number
   requireProof?: boolean
+  /** The objective the portfolio is judged against: required when the batch has none, and never different from the batch's own. */
+  objective?: string
   confirmationToken?: string
   actor: AuthenticatedExternalActor
   idempotencyKey: string
@@ -159,6 +162,7 @@ export function createVariantPortfolioPreflightService(dependencies: {
         request.expectedCompatibilityGraphRunHash,
       requestedRecipeCount: request.requestedRecipeCount,
       requireProof: request.requireProof === true,
+      ...(request.objective !== undefined ? { objective: request.objective } : {}),
       actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findCreateReplay({
@@ -251,7 +255,7 @@ export function createVariantPortfolioPreflightService(dependencies: {
       workspaceId,
       projectId: context.projectId,
       batchId,
-      objective: context.objective,
+      objective: objectiveOf(context.objective, request.objective),
       compatibilityGraph: context.compatibilityGraph,
       policy,
       requestedRecipeCount: request.requestedRecipeCount,

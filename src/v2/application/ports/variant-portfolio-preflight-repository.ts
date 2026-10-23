@@ -34,7 +34,7 @@ export interface VariantPortfolioPreflightRepository {
     actorClientId: string
   }): Promise<Readonly<{
     projectId: string
-    objective: string
+    objective?: string
     compatibilityGraph: Readonly<CompatibilityGraphRun>
     batchVariantCount: number
     budgetRemainingMinorUnits: number

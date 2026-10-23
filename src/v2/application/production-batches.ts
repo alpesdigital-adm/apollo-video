@@ -161,7 +161,8 @@ export interface CreateProductionBatchRequest {
   /** The editorial request of the whole batch: any non-empty text. It is read by the interpreter when the batch is created. */
   briefing: string
   name: string
-  objective: string
+  /** Optional (ADR-160): without one the batch has none. */
+  objective?: string
   sourceGroups: readonly Readonly<ProductionBatchSourceGroup>[]
   recipes: readonly Readonly<ProductionBatchRecipe>[]
   variants: readonly Readonly<ProductionBatchVariant>[]

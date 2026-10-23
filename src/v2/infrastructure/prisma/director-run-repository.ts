@@ -49,6 +49,7 @@ import {
   bindDirectorObjective,
   resolveStrategicObjective,
 } from '../../domain/strategic-objective.ts'
+import { DIRECTOR_OBJECTIVE_REQUIRED_REASON } from '../../domain/editorial-request.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { parseEditorialPolicyResolution, POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION, resolutionOwnsPolicyRef, type EditorialPolicyResolutionV1 } from '../../domain/editorial-policy-resolution.ts'
 import { readRequestedSpeechRemovals } from './speech-removal-lineage.ts'
@@ -613,7 +614,8 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     const versionRow = project?.currentVersion
     const master = project?.mediaAssets[0]
     if (!project || !versionRow || !master) return null
-    if (!project.objective) throw new DomainError('PERSISTENCE_CONFLICT', 'Project direction metadata is incomplete')
+    // A project created with no objective has none to judge against: the Director waits for one (it never presumes it).
+    if (!project.objective) throw new DomainError('PRECONDITION_REQUIRED', 'The project has no strategic objective, and the Director judges a plan against the rubric of one', { reason: DIRECTOR_OBJECTIVE_REQUIRED_REASON })
     const projectObjective = resolveStrategicObjective(project.objective)
     const latestDirectorRun = project.directorRuns[0]
     const latestDirectorObjective = latestDirectorRun

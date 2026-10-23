@@ -105,7 +105,8 @@ export interface ProductionBatch {
   workspaceId: string
   projectId: string
   name: string
-  objective: string
+  /** Absent when the requester chose none: the Apollo presumes none (ADR-160). The steps that judge against one ask for it where they need it. */
+  objective?: string
   policyVersion: typeof PRODUCTION_BATCH_POLICY_VERSION
   revision: number
   sourceGroups: readonly Readonly<ProductionBatchSourceGroup>[]
@@ -443,7 +444,7 @@ export function createProductionBatch(input: {
   workspaceId: string
   projectId: string
   name: string
-  objective: string
+  objective?: string
   revision?: number
   sourceGroups: readonly Readonly<ProductionBatchSourceGroup>[]
   recipes: readonly Readonly<ProductionBatchRecipe>[]
@@ -635,11 +636,9 @@ export function createProductionBatch(input: {
     workspaceId: normalizedToken(input.workspaceId, 'workspaceId'),
     projectId: normalizedToken(input.projectId, 'projectId'),
     name: normalizedLabel(input.name, 'name', 200),
-    objective: normalizedToken(
-      input.objective,
-      'objective',
-      BATCH_KEY,
-    ),
+    ...(input.objective !== undefined && input.objective !== null
+      ? { objective: normalizedToken(input.objective, 'objective', BATCH_KEY) }
+      : {}),
     policyVersion: PRODUCTION_BATCH_POLICY_VERSION,
     revision: normalizedInteger(
       input.revision ?? 1,
@@ -701,7 +700,7 @@ export function hydrateProductionBatch(
     workspaceId: input.workspaceId,
     projectId: input.projectId,
     name: input.name,
-    objective: input.objective,
+    ...(input.objective !== undefined ? { objective: input.objective } : {}),
     policyVersion: input.policyVersion,
     revision: input.revision,
     sourceGroups,

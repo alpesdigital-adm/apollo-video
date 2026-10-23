@@ -36,6 +36,7 @@ import {
 import { describeRequestFailure } from '@/v2/ui/editorial-request-view'
 import { LOCALE_OPTIONS } from '@/v2/ui/locale-options'
 import { objectiveRequiresProof } from '@/v2/domain/recipe-path-policy'
+import { STRATEGIC_OBJECTIVES, type StrategicObjectiveId } from '@/v2/domain/strategic-objective'
 
 type BatchStatus =
   | 'queued'
@@ -655,7 +656,8 @@ interface ProductionBatch {
   id: string
   projectId: string
   name: string
-  objective: string
+  /** Absent when the batch was created with none. */
+  objective?: string
   revision: number
   status: BatchStatus
   sourceGroups: { id: string; name: string; sourceArtifactIds: string[] }[]
@@ -1144,6 +1146,7 @@ export default function BatchesPage() {
     setRecipePicks(EMPTY_PICKS)
     setProofChoice('')
     setConfirmedLinks(new Set())
+    setStepObjective('')
     if (!selectedBatchIdForRequest) return
     const controller = new AbortController()
     setBatchRequestLoading(true)
@@ -1616,7 +1619,21 @@ export default function BatchesPage() {
     () => linksKeepingRecipeBack(variantRecipeLinks, confirmedLinks),
     [variantRecipeLinks, confirmedLinks],
   )
-  const batchObjectiveRequiresProof = objectiveRequiresProof(selectedBatch?.objective)
+  // The objective a recipe or a portfolio is judged against: the batch's own, or the one the owner names here when the batch has none.
+  const [stepObjective, setStepObjective] = useState<StrategicObjectiveId | ''>('')
+  const stepObjectiveToSend = selectedBatch?.objective ? undefined : (stepObjective || undefined)
+  const stepNeedsObjective = Boolean(selectedBatch) && !selectedBatch?.objective && stepObjective === ''
+  const batchObjectiveRequiresProof = objectiveRequiresProof(selectedBatch?.objective ?? (stepObjective || undefined))
+  const stepObjectiveSelect = selectedBatch && !selectedBatch.objective ? (
+    <label className="mt-3 block max-w-md" data-testid="step-objective">
+      <span className="text-[10px] font-semibold text-[#aaa49a]">O que este passo precisa provocar?</span>
+      <select className="mt-1 h-9 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-2 text-xs text-[#d1cbc1] outline-hidden focus:border-[#c09a5a]/45" data-testid="step-objective-select" onChange={(event) => { setStepObjective(event.target.value as StrategicObjectiveId | ''); variantRecipeIdempotencyKey.current = null }} value={stepObjective}>
+        <option value="">Escolha</option>
+        {STRATEGIC_OBJECTIVES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+      </select>
+      <span className="mt-1 block text-[10px] leading-4 text-[#8f897f]">Este lote não tem objetivo, e o Apollo não presume um. A receita e o portfólio são julgados contra o objetivo que você escolher aqui.</span>
+    </label>
+  ) : null
   const compatibilityEligibleTakes = useMemo(
     () => (activeTakeLibrary?.takes ?? []).filter((take) =>
       (take.status === 'primary' || take.status === 'alternate') &&
@@ -1723,11 +1740,8 @@ export default function BatchesPage() {
       return
     }
     setBriefingError(null)
+    // The batch takes the objective of its project when the project has one; a project with none gives the batch none (the Apollo presumes none).
     const batchObjective = selectedProject?.objective
-    if (!batchObjective) {
-      setNotice('Este projeto não tem objetivo registrado. O lote usa o objetivo do projeto, e o Apollo não escolhe um por você.')
-      return
-    }
     if (sourceIds.size === 0) {
       setNotice('Selecione pelo menos um material com direitos aprovados.')
       return
@@ -1787,7 +1801,7 @@ export default function BatchesPage() {
           projectId,
           briefing: normalizedBriefing,
           name: name.trim(),
-          objective: batchObjective,
+          ...(batchObjective ? { objective: batchObjective } : {}),
           sourceGroups: [{
             id: 'sources',
             name: 'Materiais selecionados',
@@ -2446,6 +2460,7 @@ export default function BatchesPage() {
             selection: variantRecipePath.selection,
             orderedNodeIds: variantRecipePath.orderedNodeIds,
             requireProof: variantRecipePath.requireProof,
+            ...(stepObjectiveToSend ? { objective: stepObjectiveToSend } : {}),
             ...(ownerConfirmationAssumptions(variantRecipeLinks, confirmedLinks).length > 0
               ? { assumptions: ownerConfirmationAssumptions(variantRecipeLinks, confirmedLinks) }
               : {}),
@@ -2533,6 +2548,7 @@ export default function BatchesPage() {
               activeCompatibilityGraph.runHash,
             requestedRecipeCount,
             requireProof: proofChoice === 'with-proof',
+            ...(stepObjectiveToSend ? { objective: stepObjectiveToSend } : {}),
             ...(confirmExpansion
               ? { confirmationToken: portfolioConfirmationToken }
               : {}),
@@ -3533,7 +3549,7 @@ export default function BatchesPage() {
                             <span className="h-px w-5 bg-[#9a762c]" /> Lote ativo
                           </div>
                           <h2 className="mt-2 truncate text-xl font-semibold tracking-[-0.025em] text-[#f0ece4]">{selectedBatch.name}</h2>
-                          <p className="mt-1 text-xs text-[#6f6b64]">{selectedBatch.objective} · revisão {selectedBatch.revision}</p>
+                          <p className="mt-1 text-xs text-[#6f6b64]">{selectedBatch.objective ?? 'sem objetivo'} · revisão {selectedBatch.revision}</p>
                         </div>
                         <div className="flex shrink-0 gap-2">
                           {selectedBatch.visibleState.primaryAction === 'retry' ? (
@@ -4163,7 +4179,7 @@ export default function BatchesPage() {
                                   <button
                                     className="h-9 rounded-lg border border-[#c09a5a]/30 bg-[#c09a5a]/10 px-3 text-[10px] font-bold text-[#dfbd83] transition hover:bg-[#c09a5a]/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c09a5a] disabled:cursor-not-allowed disabled:opacity-40"
                                     data-testid="create-variant-recipe"
-                                    disabled={busy || !variantRecipePath || variantRecipeLinksKeepingBack.length > 0}
+                                    disabled={busy || !variantRecipePath || variantRecipeLinksKeepingBack.length > 0 || stepNeedsObjective}
                                     onClick={() => void createVariantRecipe()}
                                     title={!variantRecipePath
                                       ? 'Escolha, abaixo, a prova (sim ou não) e um take para cada etapa do caminho.'
@@ -4176,6 +4192,8 @@ export default function BatchesPage() {
                                   </button>
                                 </div>
                               </div>
+
+                              {activeCompatibilityGraph ? stepObjectiveSelect : null}
 
                               {activeCompatibilityGraph ? (
                                 <RecipePathPicker
@@ -4308,6 +4326,7 @@ export default function BatchesPage() {
                                   <p className="mt-1 max-w-2xl text-[10px] leading-4 text-[#746f67]">
                                     O cálculo prévio conta todas as possibilidades, elimina as combinações incompatíveis e monta uma seleção variada dentro da qualidade, da cobertura e do orçamento. Nenhum vídeo é gerado aqui.
                                   </p>
+                                  {stepNeedsObjective ? <p className="mt-1 max-w-2xl text-[10px] leading-4 text-[#c79b42]" data-testid="portfolio-needs-objective" role="status">Este lote não tem objetivo. Escolha, acima da receita, o objetivo contra o qual o portfólio será julgado.</p> : null}
                                   {activeCompatibilityGraph && activeCompatibilityGraph.summary.acceptedCount === 0 && activeCompatibilityGraph.summary.borderlineCount > 0 ? (
                                     <p className="mt-1 max-w-2xl text-[10px] leading-4 text-[#c79b42]" data-testid="portfolio-needs-owner-links" role="status">
                                       Nenhuma ligação foi aceita sozinha pelo Apollo, então o portfólio automático não tem o que combinar. Informe o contexto que falta e recalcule o mapa, ou monte as receitas uma a uma confirmando as ligações acima.
@@ -4370,7 +4389,7 @@ export default function BatchesPage() {
                                   <button
                                     className="h-9 rounded-lg border border-[#7792d2]/30 bg-[#7792d2]/10 px-3 text-[10px] font-bold text-[#a9bce8] transition hover:bg-[#7792d2]/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7792d2] disabled:cursor-not-allowed disabled:opacity-40"
                                     data-testid="create-variant-portfolio-preflight"
-                                    disabled={busy || !activeCompatibilityGraph}
+                                    disabled={busy || !activeCompatibilityGraph || stepNeedsObjective}
                                     onClick={() => void createVariantPortfolioPreflight(false)}
                                     type="button"
                                   >

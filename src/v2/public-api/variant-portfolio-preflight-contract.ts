@@ -57,6 +57,7 @@ export function parseCreateVariantPortfolioPreflightBody(
     'expectedCompatibilityGraphRunHash',
     'requestedRecipeCount',
     'requireProof',
+    'objective',
     'confirmationToken',
   ])
   assertDomain(
@@ -79,6 +80,12 @@ export function parseCreateVariantPortfolioPreflightBody(
     'requireProof must be a boolean',
   )
   assertDomain(
+    body.objective === undefined ||
+      (typeof body.objective === 'string' && body.objective.trim().length >= 1 && body.objective.trim().length <= 128),
+    'INVALID_ARGUMENT',
+    'objective is invalid',
+  )
+  assertDomain(
     body.confirmationToken === undefined ||
       (
         typeof body.confirmationToken === 'string' &&
@@ -99,6 +106,9 @@ export function parseCreateVariantPortfolioPreflightBody(
     requestedRecipeCount: Number(body.requestedRecipeCount),
     ...(body.requireProof !== undefined
       ? { requireProof: body.requireProof }
+      : {}),
+    ...(typeof body.objective === 'string' && body.objective.trim().length >= 1 && body.objective.trim().length <= 128
+      ? { objective: body.objective.trim() }
       : {}),
     ...(body.confirmationToken !== undefined
       ? { confirmationToken: body.confirmationToken }

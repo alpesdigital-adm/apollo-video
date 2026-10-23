@@ -17,7 +17,7 @@ function resultFromReceipt(bundle: CreationOutputVersionBundleV2, replayed: bool
   const c=bundle.command, fork=c.payload.forkDerivation
   if(fork?.schemaVersion!=='project-fork-derivation/v3')throw new DomainError('PERSISTENCE_CONFLICT','Duplication receipt is not a content fork3')
   const metadata=creationProjectMetadataV2(c)
-  const project=createProject({id:c.projectId,workspaceId:c.workspaceId,name:metadata.name,status:'draft',objective:metadata.objective,...(metadata.locale!==null?{locale:metadata.locale}:{}),
+  const project=createProject({id:c.projectId,workspaceId:c.workspaceId,name:metadata.name,status:'draft',...(metadata.objective!==null?{objective:metadata.objective}:{}),...(metadata.locale!==null?{locale:metadata.locale}:{}),
     ownerId:c.author.id,duplicatedFromProjectId:fork.document.kernel.document.source.version.projectId,createdBy:c.author,createdAt:c.createdAt})
   return Object.freeze({project,version:bundle.version,bundle,sharedArtifactIds:Object.freeze([...new Set(fork.document.sourceReferences.map(r=>r.artifactId))]),copiedBytes:0,replayed})
 }

@@ -8956,6 +8956,17 @@ const productionBatchSchemaV2 = {
     visibleState: productionBatchVisibleStateSchema,
   },
 }
+// ADR-160. A batch may be created with no objective: the batch document then states none. A published schema never changes under its ref: these are the
+// versions whose batch does not require one.
+const productionBatchSchemaV3 = {
+  ...productionBatchSchemaV2,
+  required: productionBatchSchemaV2.required.filter((key: string) => key !== 'objective'),
+  properties: {
+    ...productionBatchSchemaV2.properties,
+    objective: { ...productionBatchSchemaV2.properties.objective, description: 'Absent when the batch was created with none: the Apollo presumes no objective.' },
+  },
+}
+
 
 const artifactInvalidationVisibleStateSchema = {
   ...visibleStateSchema,
@@ -27287,6 +27298,16 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
       desiredAction: desiredActionInputSchema,
     }, allOf: desiredActionObjectiveRequirements,
   }),
+  defineSchema('create-project-request', 6, 'Create empty output-bound project root; the objective is optional and the Apollo presumes none', {
+    type: 'object', additionalProperties: false, required: ['name'],
+    properties: {
+      name: { type: 'string', minLength: 1, maxLength: 120 },
+      objective: { ...strategicObjectiveSchema, description: 'Optional. What the video must provoke. When it is absent the Apollo presumes no objective: nothing depends on one, no call to action or proof is required by it, and the Director (which judges against an objective) waits for one.' },
+      locale: { type: 'string', minLength: 2, maxLength: 35, description: 'Optional. A project has no language unless one is stated; captions follow the request or the language observed in the speech.' },
+      briefing: { type: 'string', minLength: 1, maxLength: 10000, description: 'Optional. The editorial request of the video as free text: any non-empty text is valid. It is read when the project is created; if it cannot be read it is kept as written, unread.' },
+      desiredAction: { ...desiredActionInputSchema, description: 'Optional. Belongs to an objective: it is refused without one.' },
+    }, dependentRequired: { desiredAction: ['objective'] }, allOf: desiredActionObjectiveRequirements,
+  }),
   defineSchema('project-final-export-request', 1, 'Approve and export the current project version', {
     type: 'object', additionalProperties: false,
     required: ['projectVersionId', 'projectVersionHash', 'format', 'approval'],
@@ -30154,6 +30175,17 @@ const PROJECT_WORKSPACE_V14 = derivedSchema('apollo://schemas/project-workspace/
   schemaNode(data, 'properties').outputs = workspaceOutputsSchema
 })
 
+// W64. A Director run graded by confidence-band-policy/v2 types its crop, caption and insert decisions, and a decision of those types
+// is `review` whenever its evidence is not high - so they appear among a run's uncertainties. A published schema never changes under
+// its ref: this is the version whose uncertainty `type` names them.
+const PROJECT_WORKSPACE_V15 = derivedSchema('apollo://schemas/project-workspace/v14', {
+  id: 'project-workspace', version: 15, title: 'Project workspace with evidence-gated Director uncertainty types',
+}, (body) => {
+  const runs = schemaNode(body, 'properties', 'data', 'properties', 'directorRuns', 'items', 'properties')
+  const uncertainty = schemaNode(runs, 'uncertainties', 'items', 'properties', 'type')
+  uncertainty.enum = [...(uncertainty.enum as string[]), 'crop', 'caption', 'insert']
+}, [PROJECT_WORKSPACE_V14])
+
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   ...PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS,
   // ADR-160 F4: the opening window of an EditPlan is the one the editorial policy resolved - none when no movement is applied and the request
@@ -30245,13 +30277,49 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   // W64. A Director run graded by confidence-band-policy/v2 types its crop, caption and insert decisions, and a decision of those types
   // is `review` whenever its evidence is not high - so they appear among a run's uncertainties. A published schema never changes under
   // its ref: this is the version whose uncertainty `type` names them.
-  derivedSchema('apollo://schemas/project-workspace/v14', {
-    id: 'project-workspace', version: 15, title: 'Project workspace with evidence-gated Director uncertainty types',
+  PROJECT_WORKSPACE_V15,
+  // ADR-160. A project may be created with no objective, so its brief states none (and no desired action, which belongs to an objective). A published
+  // schema never changes under its ref: this is the version whose brief does not require them.
+  derivedSchema('apollo://schemas/project-workspace/v15', {
+    id: 'project-workspace', version: 16, title: 'Project workspace whose brief may state no objective',
   }, (body) => {
-    const runs = schemaNode(body, 'properties', 'data', 'properties', 'directorRuns', 'items', 'properties')
-    const uncertainty = schemaNode(runs, 'uncertainties', 'items', 'properties', 'type')
-    uncertainty.enum = [...(uncertainty.enum as string[]), 'crop', 'caption', 'insert']
-  }, [PROJECT_WORKSPACE_V14]),
+    const brief = schemaNode(body, 'properties', 'data', 'properties', 'brief')
+    brief.required = (brief.required as string[]).filter((key) => key !== 'objective' && key !== 'desiredAction')
+    const properties = brief.properties as SchemaNode
+    properties.objective = { anyOf: [properties.objective, { type: 'null' }] }
+    properties.desiredAction = { anyOf: [properties.desiredAction, { type: 'null' }] }
+  }, [PROJECT_WORKSPACE_V14, PROJECT_WORKSPACE_V15]),
+  derivedSchema('apollo://schemas/create-production-batch-request/v2', {
+    id: 'create-production-batch-request', version: 3,
+    title: 'Create one explicit bounded production batch under the editorial request of its briefing; the objective is optional and the Apollo presumes none',
+  }, (body) => {
+    body.required = (body.required as string[]).filter((key) => key !== 'objective')
+  }),
+  defineSchema('production-batch-mutated', 3, 'Created or mutated production batch whose objective may be absent',
+    successSchema({ type: 'object', additionalProperties: false, required: ['batch', 'replayed'], properties: { batch: productionBatchSchemaV3, replayed: { type: 'boolean' } } })),
+  defineSchema('production-batch-read', 3, 'Read one production batch whose objective may be absent',
+    successSchema({ type: 'object', additionalProperties: false, required: ['batch'], properties: { batch: productionBatchSchemaV3 } })),
+  defineSchema('production-batch-page', 3, 'Filtered cursor page of production batches whose objective may be absent',
+    successSchema({ type: 'object', additionalProperties: false, required: ['batches'], properties: { batches: { type: 'array', maxItems: 100, items: productionBatchSchemaV3 }, nextCursor: idSchema } })),
+  defineSchema('batch-partial-retry-mutated', 3, 'Persisted mixed partial retry with the resulting batch, whose objective may be absent',
+    successSchema({ type: 'object', additionalProperties: false, required: ['batch', 'partialRetry', 'replayed'], properties: { batch: productionBatchSchemaV3, partialRetry: batchPartialRetrySchema, replayed: { type: 'boolean' } } })),
+  // ADR-160. A batch may have no objective. The steps that judge against one (a recipe, a portfolio) take it in their own request, where it is needed:
+  // required when the batch has none, never different from the batch's own. The recipe's path may also hold links the owner confirmed.
+  derivedSchema('apollo://schemas/create-variant-recipe-request/v1', {
+    id: 'create-variant-recipe-request', version: 2,
+    title: 'Compile one immutable variant recipe from an exact compatibility graph and an H+B+optional proof+CTA path whose links are accepted by the map or confirmed by the owner',
+  }, (body) => {
+    const properties = schemaNode(body, 'properties')
+    properties.objective = { type: 'string', minLength: 1, maxLength: 128, description: 'The objective the recipe is judged against. Required when the batch was created with none (refused with the reason objective-required); never different from the batch objective when it has one.' }
+    const assumptions = schemaNode(properties, 'assumptions')
+    assumptions.description = 'Supposed facts of the recipe. A link the map left borderline is taken only with an assumption OWNER_CONFIRMED_LINK_<FROM>_<TO> (roles in capitals) whose evidenceRefs name the edge; a blocked link is never taken.'
+  }),
+  derivedSchema('apollo://schemas/create-variant-portfolio-preflight-request/v1', {
+    id: 'create-variant-portfolio-preflight-request', version: 2,
+    title: 'Count, filter, rank and bound the variant space before any paid job is created, against the objective of the batch or the one the request names',
+  }, (body) => {
+    schemaNode(body, 'properties').objective = { type: 'string', minLength: 1, maxLength: 128, description: 'The objective the portfolio is judged against. Required when the batch was created with none (refused with the reason objective-required); never different from the batch objective when it has one.' }
+  }),
 ])
 
 const schemasByRef = new Map(PUBLIC_SCHEMAS.map((definition) => [definition.ref, definition]))
