@@ -914,6 +914,7 @@ export default function BatchesPage() {
   const [ownerContext, setOwnerContext] = useState<OwnerCompatibilityContext>({ ...EMPTY_OWNER_CONTEXT })
   const [recipePicks, setRecipePicks] = useState<PathPicks>(EMPTY_PICKS)
   const [proofChoice, setProofChoice] = useState<ProofChoice>('')
+  const [stepObjective, setStepObjective] = useState<StrategicObjectiveId | ''>('')
   // The links of the path the Apollo left for the owner (a borderline edge) and that the owner confirmed on the screen: ids of edges.
   const [confirmedLinks, setConfirmedLinks] = useState<ReadonlySet<string>>(() => new Set())
   const idempotencyKey = useRef<string | null>(null)
@@ -1623,7 +1624,6 @@ export default function BatchesPage() {
     [variantRecipeLinks, confirmedLinks],
   )
   // The objective a recipe or a portfolio is judged against: the batch's own, or the one the owner names here when the batch has none.
-  const [stepObjective, setStepObjective] = useState<StrategicObjectiveId | ''>('')
   const stepObjectiveToSend = selectedBatch?.objective ? undefined : (stepObjective || undefined)
   const stepNeedsObjective = Boolean(selectedBatch) && !selectedBatch?.objective && stepObjective === ''
   const batchObjectiveRequiresProof = objectiveRequiresProof(selectedBatch?.objective ?? (stepObjective || undefined))
