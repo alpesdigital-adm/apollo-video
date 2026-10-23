@@ -146,6 +146,6 @@ test('stored boxes are reproducible from the retained raw output, and the produc
   assert.equal(faceSampleMatchesRawOutput(forged, raw), false)
   const envelope = createFaceProducerEnvelopeV3(sourceWindowInput({ start: 0, end: 150 }))
   assert.equal(authenticateFaceEnvelope(envelope).authenticated, true)
-  const linux = acceptedProducer('win32'); linux.runtime.platform = 'linux'
-  assert.deepEqual(authenticateFaceEnvelope(createFaceProducerEnvelopeV3(sourceWindowInput({ start: 0, end: 150, producer: linux }))).reasons, ['RUNTIME_PLATFORM_NOT_PARITIED'])
+  const linux = acceptedProducer('linux'); linux.pythonExecutableSha256 = 'f'.repeat(64)
+  assert.deepEqual(authenticateFaceEnvelope(createFaceProducerEnvelopeV3(sourceWindowInput({ start: 0, end: 150, producer: linux }))).reasons, ['PYTHON_EXECUTABLE_PIN_MISMATCH'])
 })

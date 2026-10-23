@@ -86,7 +86,7 @@ test('publish refuses, before touching the database, a producer the registry doe
   let touched = 0
   const repository = new PrismaFaceSourceWindowRepository({ $transaction: async () => { touched += 1; throw new Error('database reached') } })
   const refused = (error) => error.code === 'PERSISTENCE_CONFLICT' && /accepted producer/.test(error.message)
-  await assert.rejects(repository.publish(publishInput(windowWithRaw({ producer: acceptedProducer('linux') }))), refused)
+  await assert.rejects(repository.publish(publishInput(windowWithRaw({ producer: { ...acceptedProducer('linux'), pythonExecutableSha256: 'f'.repeat(64) } }))), refused)
   const base = acceptedProducer()
   await assert.rejects(repository.publish(publishInput(windowWithRaw({
     producer: { ...base, assessment: { ...base.assessment, runtimeParity: { status: 'pending', receiptSha256: null } } } }))), refused)

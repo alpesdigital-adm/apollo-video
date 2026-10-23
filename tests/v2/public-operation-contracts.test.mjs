@@ -362,8 +362,8 @@ test('owner-accepted face window capabilities require scoped auth, own the caden
   assert.equal(response(body({ envelope: undefined })), false)
   assert.equal(response(body({ producerAuthentication: undefined })), false)
 
-  // a Linux producer is a valid envelope that the registry does not authenticate: both facts are visible
-  const linux = sealedWindow({ producer: acceptedProducer('linux') })
+  // a Linux producer on bytes other than its receipt's is a valid envelope that the registry does not authenticate: both facts are visible
+  const linux = sealedWindow({ producer: { ...acceptedProducer('linux'), pythonExecutableSha256: 'f'.repeat(64) } })
   const linuxVerdict = authenticateFaceEnvelope(linux)
   assert.equal(linuxVerdict.authenticated, false)
   assert.equal(response(body({ envelope: linux, producerAuthentication: linuxVerdict })), true, ajv.errorsText(response.errors))
@@ -455,8 +455,8 @@ test('face source window capabilities are keyed by the source, own the cadence a
   assert.equal(response(body({ envelope: undefined })), false)
   assert.equal(response(body({ producerAuthentication: undefined })), false)
 
-  // a Linux producer is a valid envelope that the registry does not authenticate: both facts are visible
-  const linux = sealedSourceWindow({ producer: acceptedProducer('linux') })
+  // a Linux producer on bytes other than its receipt's is a valid envelope that the registry does not authenticate: both facts are visible
+  const linux = sealedSourceWindow({ producer: { ...acceptedProducer('linux'), pythonExecutableSha256: 'f'.repeat(64) } })
   const linuxVerdict = authenticateFaceEnvelope(linux)
   assert.equal(linuxVerdict.authenticated, false)
   assert.equal(response(body({ envelope: linux, producerAuthentication: linuxVerdict })), true, ajv.errorsText(response.errors))

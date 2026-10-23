@@ -68,11 +68,12 @@ test('evidence for another workspace, source, bytes or clock is not used and its
 })
 
 test('a producer that was not accepted on that platform, or a forged seal, is never trusted', () => {
-  const linux = acceptedProducer('win32')
-  linux.runtime.platform = 'linux'
+  // Linux is accepted only on the bytes its receipt names: a drifted interpreter is a valid envelope the registry does not authenticate.
+  const linux = acceptedProducer('linux')
+  linux.pythonExecutableSha256 = 'f'.repeat(64)
   const stream = collectFaceSourceEvidenceStream([sealedSourceWindow({ start: 0, end: 150, rowsAt: () => FACE, producer: linux })], sourceExpectation())
   assert.equal(stream.samples.length, 0)
-  assert.deepEqual(stream.untrusted[0].reasons, ['PRODUCER_RUNTIME_PLATFORM_NOT_PARITIED'])
+  assert.deepEqual(stream.untrusted[0].reasons, ['PRODUCER_PYTHON_EXECUTABLE_PIN_MISMATCH'])
   const forged = clone(sealedSourceWindow({ start: 0, end: 150, rowsAt: () => [] }))
   forged.samples[0].boxes = clone(sealedSourceWindow({ start: 0, end: 5, rowsAt: () => FACE }).samples[0].boxes)
   const forgedStream = collectFaceSourceEvidenceStream([forged], sourceExpectation())
