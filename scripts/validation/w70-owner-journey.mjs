@@ -402,7 +402,18 @@ async function runLocked(config, { secrets, logPath }) {
       method: 'POST', path: `${projectPath()}/duplicates`, key: keyFor('duplicate', current.versionId), expect: [200, 201], allowError: true,
       body: { expectedVersionId: current.versionId, expectedVersionHash: current.baseHash, name: `${original.name}-correction`.slice(0, 120) }, label: 'duplicate-for-correction',
     }
-    let duplicated = await call(duplicateRequest)
+    // The product commits a duplication in one 30 s transaction; an INTERNAL_ERROR answer means it rolled back, and the same idempotency key
+    // asks again safely (replay or create). Three tries, then the failure stands.
+    const askDuplicate = async () => {
+      let answer = await call(duplicateRequest)
+      for (let retry = 1; !answer.ok && answer.status >= 500 && retry <= 2; retry += 1) {
+        await log('retry', { what: 'duplicate-for-correction', status: answer.status, code: answer.error?.code, retry })
+        await delay(5_000)
+        answer = await call(duplicateRequest)
+      }
+      return answer
+    }
+    let duplicated = await askDuplicate()
     if (!duplicated.ok && duplicated.error?.code === 'ASSET_RIGHTS_BLOCKED') {
       // The copy shares the project's media by reference, and the proxies and finals the project produced carry no rights of their own.
       const lacking = (current.workspace.media ?? []).filter((item) => item.rightsStatus !== 'approved')
@@ -414,7 +425,7 @@ async function runLocked(config, { secrets, logPath }) {
         await call({ method: 'PUT', path, headers: { 'if-match': read.headers.etag ?? '' }, body: decision.body, expect: [200], label: `rights-put:${item.role}` })
       }
       state.derivedRights = { decision: decision.name, decisionSha256: decision.sha256, artifacts: lacking.map((item) => item.artifactId) }
-      duplicated = await call(duplicateRequest)
+      duplicated = await askDuplicate()
     }
     if (!duplicated.ok) throw new JourneyError('UNEXPECTED_RESPONSE', `duplicating the delivered project answered ${duplicated.status} ${duplicated.error?.code}: ${duplicated.error?.message}`, { status: duplicated.status, error: duplicated.error })
     state.originalProject = original

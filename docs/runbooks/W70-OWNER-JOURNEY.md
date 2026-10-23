@@ -110,7 +110,7 @@ O condutor espera cada decisão consultando `<decisions>/<nome>.json` a cada `--
 
 `owner-acceptance.json`: `{ "accepted": true, "by": "<quem decidiu>", "note": "<nota>" }` (`accepted: false` grava o resultado no manifesto e sai com código 4).
 
-`source-rights.json` (só se os direitos não vierem aprovados): `{ "reason": "<motivo>", "body": { <documento de direitos de PUT /v1/artifacts/{id}/rights> } }`.
+`source-rights.json` (quando os direitos não vierem aprovados, ou quando o final for recusado por direitos): `{ "reason": "<motivo>", "body": { <documento de direitos de PUT /v1/artifacts/{id}/rights> } }`. `derived-rights.json` tem o mesmo formato e vale para os proxies e finais do projeto, quando a duplicação da fase 7 é recusada por falta de direitos neles.
 
 **Pedidos (`requests`).** `method` é `POST` ou `PUT`; `path` fica dentro de `/v1/` (o servidor é sempre o do condutor); `body` é objeto; `ifMatch` e `expect` são opcionais. Uma string que é exatamente `{{nome}}` é substituída na hora do pedido: `projectId`, `head.versionId`, `head.baseHash` (a Version atual, relida), `transcript.id`, `sourceArtifact.id`, `variant:<proporção>`, `proxyArtifact:<proporção>`, `review:<proporção>.id|hash|revision`, e `r<N>.data.<caminho>` ou `r<N>.headers.etag` (a N-ésima resposta da mesma lista, a partir de 0). Nome desconhecido para o pedido: nada é enviado.
 
