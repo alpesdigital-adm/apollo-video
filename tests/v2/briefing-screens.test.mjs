@@ -11,6 +11,16 @@ import {
   normalizeBriefingInput,
 } from '../../src/v2/ui/briefing-guidance.ts'
 import {
+  EMPTY_OWNER_CONTEXT,
+  EMPTY_PICKS,
+  buildCompatibilityContexts,
+  contextToken,
+  describeUnevaluated,
+  edgeBetween,
+  pathFromPicks,
+  resolveContextStatements,
+} from '../../src/v2/ui/compatibility-context.ts'
+import {
   buildAnswersBody,
   describeDirective,
   describeRequestBlock,
@@ -44,14 +54,14 @@ test('a briefing is any non-empty text: one line is enough, and only blank is re
 })
 
 test('the briefing field of both screens has no placeholder, no preset value and the guidance beside it', () => {
-  for (const [file, id] of [['src/app/ProjectsPageClient.tsx', 'project-briefing']]) {
+  for (const [file, id] of [['src/app/ProjectsPageClient.tsx', 'project-briefing'], ['src/app/batches/page.tsx', 'batch-briefing']]) {
     const text = source(file)
     const element = text.match(new RegExp(`<textarea[^>]*id="${id}"[^>]*>`))?.[0]
     assert.ok(element, `${file} has the briefing field`)
     assert.doesNotMatch(element, /placeholder=/, `${file}: the briefing field has no placeholder`)
     assert.match(element, /aria-required="true"/)
     assert.match(element, new RegExp(`aria-describedby=\\{?\`?"?${id}-guidance`))
-    assert.match(text, new RegExp(`<BriefingGuidance id="${id}-guidance"`))
+    assert.match(text, new RegExp(`<BriefingGuidance[^>]*id="${id}-guidance"`))
     assert.match(text, /useState\(''\)/)
   }
 })
@@ -101,4 +111,87 @@ test('an interpreter that is not configured is said plainly, and the text stays 
   const failure = describeRequestFailure(412, { error: { code: 'PRECONDITION_REQUIRED', details: { reason: 'brief-interpreter-unavailable' } } })
   assert.match(failure.message, /texto ficou salvo/)
   assert.equal(describeRequestFailure(401, null).kind, 'session-expired')
+})
+
+test('the Lotes screen pre-fills nothing and chooses nothing for the owner (ADR-160 F8)', () => {
+  const text = source('src/app/batches/page.tsx')
+  for (const forbidden of [
+    'Composição principal', 'UI_BEST_ACCEPTED_PATH', 'requireProof: false', 'workspace-default', 'batch-default-action', 'workspace-presenter',
+    "'discovery'", "useState('pt-BR')", "setLocale('pt-BR')", 'subtitle-style-dynamic', "'cta-primary'", 'brand-kit-current', 'tone: 0.5', 'energy: 0.5',
+    'placeholder="Ex.', "new Set(['9:16'])", "useState('25.00')", "useState('12')",
+  ]) assert.equal(text.includes(forbidden), false, `the Lotes screen still carries: ${forbidden}`)
+  // The state of every choice starts empty.
+  assert.match(text, /const \[recipeText, setRecipeText\] = useState\(''\)/)
+  assert.match(text, /const \[locale, setLocale\] = useState\(''\)/)
+  assert.match(text, /const \[budget, setBudget\] = useState\(''\)/)
+  assert.match(text, /const \[formats, setFormats\] = useState<Set<string>>\(new Set\(\)\)/)
+  // The recipe path is what the owner picks; the proof is a stated choice that reaches the request.
+  assert.match(text, /<RecipePathPicker/)
+  assert.match(text, /requireProof: variantRecipePath\.requireProof/)
+  assert.match(text, /requireProof: proofChoice === 'with-proof'/)
+  // The context of the compatibility map is read from the request of the batch.
+  assert.match(text, /\/editorial-request/)
+  assert.match(text, /buildCompatibilityContexts\(/)
+})
+
+const takes = [
+  { id: 'take-a', takeHash: 'a'.repeat(64), sourceHash: 'b'.repeat(64), assignment: { role: 'hook' } },
+  { id: 'take-b', takeHash: 'c'.repeat(64), sourceHash: 'd'.repeat(64), assignment: { role: 'body' } },
+]
+const requestOf = (coverage = []) => ({
+  request: { briefing: { text: '<texto do pedido>' }, requestHash: 'e'.repeat(64) },
+  interpretation: { interpretationHash: 'f'.repeat(64), coverage: coverage.map(([topic, text]) => ({ topic, excerpt: { text } })) },
+})
+
+test('a batch that states nothing sends contexts with nothing in them but the takes themselves', () => {
+  const statements = resolveContextStatements(requestOf(), EMPTY_OWNER_CONTEXT)
+  assert.deepEqual(statements.map((item) => [item.field, item.source]), [['audience', 'missing'], ['offer', 'missing'], ['persona', 'missing'], ['action', 'missing'], ['locale', 'missing'], ['tone', 'missing']])
+  const contexts = buildCompatibilityContexts(takes, statements, requestOf())
+  for (const [index, context] of contexts.entries()) {
+    assert.deepEqual(Object.keys(context).sort(), ['claims', 'continuityProvides', 'continuityRequires', 'evidenceRefs', 'expectedTakeHash', 'takeId'])
+    assert.deepEqual(context.continuityProvides, [`role-${takes[index].assignment.role}`])
+    assert.deepEqual(context.evidenceRefs, [takes[index].takeHash, takes[index].sourceHash])
+  }
+})
+
+test('what the briefing says about the audience and the offer reaches every take, with the evidence of the reading; the owner overrides it; tone is shown, never converted', () => {
+  const request = requestOf([['audience', 'o público do pedido'], ['offer', 'a oferta do pedido'], ['tone', 'o tom do pedido']])
+  const statements = resolveContextStatements(request, { ...EMPTY_OWNER_CONTEXT, persona: 'quem fala', locale: 'xx-YY' })
+  assert.deepEqual(statements.map((item) => item.source), ['briefing', 'briefing', 'owner', 'missing', 'owner', 'briefing'])
+  assert.equal(statements.find((item) => item.field === 'tone').informationalOnly, true)
+  const contexts = buildCompatibilityContexts(takes, statements, request)
+  assert.equal(contexts[0].audienceTags[0], contexts[1].audienceTags[0], 'every take of the batch carries the same statement')
+  assert.equal(contexts[0].audienceTags[0], contextToken('audience', 'o público do pedido'))
+  assert.equal(contexts[0].locale, 'xx-YY')
+  assert.equal('desiredAction' in contexts[0], false, 'nobody stated the action: it is not invented')
+  for (const field of ['tone', 'energy', 'visual', 'experiment', 'narrativeTags']) assert.equal(field in contexts[0], false, `${field} is never sent`)
+  assert.ok(contexts[0].evidenceRefs.includes(request.request.requestHash) && contexts[0].evidenceRefs.includes(request.interpretation.interpretationHash))
+  const overridden = resolveContextStatements(request, { ...EMPTY_OWNER_CONTEXT, audience: 'outro público' })
+  assert.equal(overridden[0].source, 'owner')
+  assert.equal(contextToken('audience', '  Outro   Público '), contextToken('audience', 'outro público'), 'the identifier ignores case and spacing')
+  assert.notEqual(contextToken('audience', 'x'), contextToken('offer', 'x'))
+  // The language of the script counts as stated, after the owner's own choice.
+  assert.equal(resolveContextStatements(requestOf(), EMPTY_OWNER_CONTEXT, 'xx-YY').find((item) => item.field === 'locale').source, 'script')
+})
+
+test('a computed graph says what it could not evaluate, in words', () => {
+  const graph = {
+    nodes: [{ unspecified: ['personaId', 'tone'] }, {}],
+    edges: [{ notEvaluable: [{ check: 'PERSONA_MISMATCH', fields: ['personaId'] }], softScores: [{ dimension: 'tone', score: null }, { dimension: 'duration', score: 0.5 }] }],
+    summary: { notEvaluableEdgeCount: 1 },
+  }
+  assert.deepEqual(describeUnevaluated(graph), { fields: ['persona', 'tom'], checks: ['mesma persona'], dimensions: ['tone'], edgeCount: 1 })
+})
+
+test('the recipe path is the one the owner picked, and incomplete until the proof choice and every role are given', () => {
+  const picks = { hook: 'n1', body: 'n2', proof: 'n3', cta: 'n4' }
+  assert.equal(pathFromPicks(picks, ''), null, 'no proof choice, no path')
+  assert.equal(pathFromPicks(EMPTY_PICKS, 'without-proof'), null)
+  assert.equal(pathFromPicks({ ...picks, proof: '' }, 'with-proof'), null)
+  assert.deepEqual(pathFromPicks(picks, 'with-proof'), { selection: { hookNodeId: 'n1', bodyNodeId: 'n2', proofNodeId: 'n3', ctaNodeId: 'n4' }, orderedNodeIds: ['n1', 'n2', 'n3', 'n4'], requireProof: true })
+  assert.deepEqual(pathFromPicks(picks, 'without-proof'), { selection: { hookNodeId: 'n1', bodyNodeId: 'n2', ctaNodeId: 'n4' }, orderedNodeIds: ['n1', 'n2', 'n4'], requireProof: false })
+  const graph = { edges: [{ fromNodeId: 'n1', toNodeId: 'n2', decision: 'accepted' }, { fromNodeId: 'n2', toNodeId: 'n4', decision: 'borderline', notEvaluable: [{}] }] }
+  assert.deepEqual(edgeBetween(graph, 'n1', 'n2'), { verdict: 'accepted', notEvaluable: false })
+  assert.deepEqual(edgeBetween(graph, 'n2', 'n4'), { verdict: 'borderline', notEvaluable: true })
+  assert.deepEqual(edgeBetween(graph, 'n1', 'n4'), { verdict: 'absent', notEvaluable: false })
 })

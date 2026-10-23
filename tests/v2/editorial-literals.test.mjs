@@ -64,13 +64,7 @@ const PATTERNS = Object.freeze([
  * Violations that existed when the rule was adopted, by `file :: pattern`. Only ever lower a count or delete an entry.
  * (Never add one: fix the literal, or move the rule into the resolution module.)
  */
-const BASELINE = Object.freeze({
-  "src/app/batches/page.tsx :: ['workspace-default'] (list of one)": 1,
-  "src/app/batches/page.tsx :: placeholder=\"Ex.": 1,
-  "src/app/batches/page.tsx :: useState('pt-BR')": 2,
-  "src/app/batches/page.tsx :: || 'pt-BR'": 1,
-  "src/app/batches/page.tsx :: setLocale('pt-BR')": 1,
-})
+const BASELINE = Object.freeze({})
 
 const keyOf = (file, patternId) => `${file} :: ${patternId}`
 

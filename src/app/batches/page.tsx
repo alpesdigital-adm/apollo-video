@@ -6,7 +6,31 @@ import { useRouter } from 'next/navigation'
 
 import LogoutButton from '@/components/LogoutButton'
 import AppShellNavigation from '@/components/AppShellNavigation'
+import BatchEditorialRequestPanel, { type BatchEditorialRequestData } from '@/components/BatchEditorialRequestPanel'
+import BriefingGuidance from '@/components/BriefingGuidance'
+import CompatibilityContextForm from '@/components/CompatibilityContextForm'
+import RecipePathPicker from '@/components/RecipePathPicker'
 import type { VisibleState, VisibleStateLabel } from '@/v2/domain/visible-state'
+import {
+  BRIEFING_FIELD_LABEL,
+  BRIEFING_MAX_LENGTH,
+  BRIEFING_REQUIRED_MESSAGE,
+  normalizeBriefingInput,
+} from '@/v2/ui/briefing-guidance'
+import {
+  CHECK_NAMES,
+  EMPTY_OWNER_CONTEXT,
+  EMPTY_PICKS,
+  buildCompatibilityContexts,
+  describeUnevaluated,
+  pathFromPicks,
+  resolveContextStatements,
+  type OwnerCompatibilityContext,
+  type PathPicks,
+  type PickRole,
+  type ProofChoice,
+} from '@/v2/ui/compatibility-context'
+import { LOCALE_OPTIONS } from '@/v2/ui/locale-options'
 
 type BatchStatus =
   | 'queued'
@@ -240,6 +264,8 @@ interface CompatibilityGraphRun {
     role: 'hook' | 'body' | 'proof' | 'cta'
     sourceHash: string
     durationMs: number
+    /** v2: the context fields nobody stated. */
+    unspecified?: string[]
   }>
   edges: Array<{
     id: string
@@ -256,9 +282,12 @@ interface CompatibilityGraphRun {
     }>
     softScores: Array<{
       dimension: 'narrative' | 'tone' | 'energy' | 'duration' | 'visual' | 'experiment'
-      score: number
+      /** null = not evaluable: a context it needs was not stated. */
+      score: number | null
       weight: number
     }>
+    /** v2: checks that could not be made, and the fields that were missing for each. */
+    notEvaluable?: Array<{ check: string; fields: string[] }>
     evidence: {
       evidenceHash: string
     }
@@ -271,6 +300,7 @@ interface CompatibilityGraphRun {
     blockedCount: number
     hardFailureCount: number
     averageSoftScore: number
+    notEvaluableEdgeCount?: number
   }
   createdAt: string
   runHash: string
@@ -860,11 +890,18 @@ export default function BatchesPage() {
   const [name, setName] = useState('')
   const [briefing, setBriefing] = useState('')
   const [sourceIds, setSourceIds] = useState<Set<string>>(new Set())
-  const [recipeText, setRecipeText] = useState('Composição principal')
-  const [formats, setFormats] = useState<Set<string>>(new Set(['9:16']))
-  const [matrix, setMatrix] = useState<Set<string>>(new Set(['0::9:16']))
-  const [locale, setLocale] = useState('pt-BR')
-  const [budget, setBudget] = useState('25.00')
+  const [briefingError, setBriefingError] = useState<string | null>(null)
+  const [recipeText, setRecipeText] = useState('')
+  const [formats, setFormats] = useState<Set<string>>(new Set())
+  const [matrix, setMatrix] = useState<Set<string>>(new Set())
+  const [locale, setLocale] = useState('')
+  const [budget, setBudget] = useState('')
+  const [batchRequest, setBatchRequest] = useState<BatchEditorialRequestData | null>(null)
+  const [batchRequestLoading, setBatchRequestLoading] = useState(false)
+  const [batchRequestError, setBatchRequestError] = useState<string | null>(null)
+  const [ownerContext, setOwnerContext] = useState<OwnerCompatibilityContext>({ ...EMPTY_OWNER_CONTEXT })
+  const [recipePicks, setRecipePicks] = useState<PathPicks>(EMPTY_PICKS)
+  const [proofChoice, setProofChoice] = useState<ProofChoice>('')
   const idempotencyKey = useRef<string | null>(null)
   const [detailView, setDetailView] =
     useState<'script' | 'outputs'>('script')
@@ -892,7 +929,7 @@ export default function BatchesPage() {
     setActiveVariantPortfolioPreflightId,
   ] = useState<string | null>(null)
   const [portfolioRequestedCount, setPortfolioRequestedCount] =
-    useState('12')
+    useState('')
   const [portfolioConfirmationToken, setPortfolioConfirmationToken] =
     useState<string | null>(null)
   const [batchEditPreflights, setBatchEditPreflights] =
@@ -912,9 +949,9 @@ export default function BatchesPage() {
   const [batchEditItemIds, setBatchEditItemIds] =
     useState<Set<string>>(new Set())
   const [batchEditOperationType, setBatchEditOperationType] =
-    useState<BatchEditOperationType>('subtitle-style')
+    useState<BatchEditOperationType | ''>('')
   const [batchEditValueRef, setBatchEditValueRef] =
-    useState('subtitle-style-dynamic')
+    useState('')
   const [batchEditMode, setBatchEditMode] =
     useState<BatchEditMode>('all-or-nothing')
   const [batchEditCommitToken, setBatchEditCommitToken] =
@@ -922,7 +959,7 @@ export default function BatchesPage() {
   const [alignmentLoading, setAlignmentLoading] = useState(false)
   const [scriptComposerOpen, setScriptComposerOpen] = useState(false)
   const [scriptTitle, setScriptTitle] = useState('')
-  const [scriptLocale, setScriptLocale] = useState('pt-BR')
+  const [scriptLocale, setScriptLocale] = useState('')
   const [scriptRawText, setScriptRawText] = useState('')
   const [scriptSourceIds, setScriptSourceIds] =
     useState<Set<string>>(new Set())
@@ -1085,6 +1122,37 @@ export default function BatchesPage() {
   const selectedBatchKey = selectedBatch
     ? `${selectedBatch.id}:${selectedBatch.projectId}`
     : ''
+
+  // ADR-160 F8. The request of the selected batch (its briefing and how it was read): the compatibility step takes its context from it.
+  const selectedBatchIdForRequest = selectedBatch?.id ?? null
+  useEffect(() => {
+    setBatchRequest(null)
+    setBatchRequestError(null)
+    setOwnerContext({ ...EMPTY_OWNER_CONTEXT })
+    setRecipePicks(EMPTY_PICKS)
+    setProofChoice('')
+    if (!selectedBatchIdForRequest) return
+    const controller = new AbortController()
+    setBatchRequestLoading(true)
+    async function loadRequest() {
+      try {
+        const response = await fetch(`/v1/batches/${encodeURIComponent(selectedBatchIdForRequest!)}/editorial-request`, {
+          signal: controller.signal, cache: 'no-store', headers: { accept: 'application/json' },
+        })
+        if (response.status === 401) { router.replace('/login'); return }
+        const payload = await response.json() as ApiEnvelope<BatchEditorialRequestData>
+        if (!response.ok || !payload.data) throw new Error(apiError(payload, 'Não foi possível ler o pedido do lote.'))
+        setBatchRequest(payload.data)
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        setBatchRequestError(error instanceof Error ? error.message : 'Não foi possível ler o pedido do lote.')
+      } finally {
+        if (!controller.signal.aborted) setBatchRequestLoading(false)
+      }
+    }
+    void loadRequest()
+    return () => controller.abort()
+  }, [selectedBatchIdForRequest, router])
 
   useEffect(() => {
     if (!selectedBatch) {
@@ -1385,7 +1453,8 @@ export default function BatchesPage() {
         batchEditCommitIdempotencyKey.current = null
         const project = projects.find((candidate) =>
           candidate.id === selectedBatch!.projectId)
-        setScriptLocale(project?.locale || 'pt-BR')
+        // The script is in the language its owner says; a project that states none leaves the field for the owner to fill.
+        setScriptLocale(project?.locale ?? '')
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           return
@@ -1520,95 +1589,20 @@ export default function BatchesPage() {
       batchVariantsById.get(item.variantId)!.outputSpecId))].toSorted(),
     [batchEditDraftItems, batchVariantsById],
   )
-  const variantRecipeCandidate = useMemo(() => {
-    if (!activeCompatibilityGraph || !selectedBatch) return null
-    const nodesByRole = {
-      hook: activeCompatibilityGraph.nodes.filter((node) =>
-        node.role === 'hook'),
-      body: activeCompatibilityGraph.nodes.filter((node) =>
-        node.role === 'body'),
-      proof: activeCompatibilityGraph.nodes.filter((node) =>
-        node.role === 'proof'),
-      cta: activeCompatibilityGraph.nodes.filter((node) =>
-        node.role === 'cta'),
-    }
-    const accepted = (
-      fromNodeId: string,
-      toNodeId: string,
-      relation: CompatibilityGraphRun['edges'][number]['relation'],
-    ) => activeCompatibilityGraph.edges.some((edge) =>
-      edge.fromNodeId === fromNodeId &&
-      edge.toNodeId === toNodeId &&
-      edge.relation === relation &&
-      edge.decision === 'accepted' &&
-      edge.eligible)
-    for (const hook of nodesByRole.hook) {
-      for (const body of nodesByRole.body) {
-        if (!accepted(hook.id, body.id, 'hook-body')) continue
-        for (const proof of nodesByRole.proof) {
-          if (!accepted(body.id, proof.id, 'body-proof')) continue
-          for (const cta of nodesByRole.cta) {
-            if (accepted(proof.id, cta.id, 'proof-cta')) {
-              return {
-                selection: {
-                  hookNodeId: hook.id,
-                  bodyNodeId: body.id,
-                  proofNodeId: proof.id,
-                  ctaNodeId: cta.id,
-                },
-                orderedNodeIds: [
-                  hook.id,
-                  body.id,
-                  proof.id,
-                  cta.id,
-                ],
-                includesProof: true,
-              }
-            }
-          }
-        }
-      }
-    }
-    const proofOptionalObjectives = new Set([
-      'awareness',
-      'content-discovery',
-      'content-distribution',
-      'download',
-      'education',
-      'lead-capture',
-      'lead-generation',
-      'schedule',
-      'warming',
-      'whatsapp',
-    ])
-    if (!proofOptionalObjectives.has(selectedBatch.objective)) {
-      return null
-    }
-    for (const hook of nodesByRole.hook) {
-      for (const body of nodesByRole.body) {
-        if (!accepted(hook.id, body.id, 'hook-body')) continue
-        for (const cta of nodesByRole.cta) {
-          if (accepted(body.id, cta.id, 'body-cta')) {
-            return {
-              selection: {
-                hookNodeId: hook.id,
-                bodyNodeId: body.id,
-                ctaNodeId: cta.id,
-              },
-              orderedNodeIds: [hook.id, body.id, cta.id],
-              includesProof: false,
-            }
-          }
-        }
-      }
-    }
-    return null
-  }, [activeCompatibilityGraph, selectedBatch])
+  // The path of a recipe is what the owner picked (RecipePathPicker); the Apollo does not choose "the best accepted path" for them.
+  const variantRecipePath = useMemo(
+    () => pathFromPicks(recipePicks, proofChoice),
+    [recipePicks, proofChoice],
+  )
   const compatibilityEligibleTakes = useMemo(
     () => (activeTakeLibrary?.takes ?? []).filter((take) =>
       (take.status === 'primary' || take.status === 'alternate') &&
       ['hook', 'body', 'proof', 'cta'].includes(take.assignment.role)),
     [activeTakeLibrary],
+  )
+  const contextStatements = useMemo(
+    () => resolveContextStatements(batchRequest, ownerContext, activeAlignment?.document.locale),
+    [batchRequest, ownerContext, activeAlignment],
   )
   const compatibilityEligibleRoles = new Set(
     compatibilityEligibleTakes.map((take) => take.assignment.role),
@@ -1651,17 +1645,12 @@ export default function BatchesPage() {
   function toggleFormat(format: string) {
     setFormats((current) => {
       const next = new Set(current)
+      // Choosing a format never checks a cell of the matrix: every output is confirmed one by one.
       if (next.has(format)) {
-        if (next.size === 1) return current
         next.delete(format)
         setMatrix((cells) => new Set([...cells].filter((cell) => !cell.endsWith(`::${format}`))))
       } else {
         next.add(format)
-        setMatrix((cells) => {
-          const result = new Set(cells)
-          recipes.forEach((_, index) => result.add(`${index}::${format}`))
-          return result
-        })
       }
       return next
     })
@@ -1688,11 +1677,12 @@ export default function BatchesPage() {
   function resetComposer() {
     setName('')
     setBriefing('')
-    setRecipeText('Composição principal')
-    setFormats(new Set(['9:16']))
-    setMatrix(new Set(['0::9:16']))
-    setLocale('pt-BR')
-    setBudget('25.00')
+    setBriefingError(null)
+    setRecipeText('')
+    setFormats(new Set())
+    setMatrix(new Set())
+    setLocale('')
+    setBudget('')
     setSourceIds(new Set())
     idempotencyKey.current = null
   }
@@ -1703,21 +1693,37 @@ export default function BatchesPage() {
       setNotice('Escolha o projeto e informe um nome para o lote.')
       return
     }
-    if (briefing.trim().length === 0) {
-      setNotice('Escreva o pedido do lote: qualquer texto vale, mas o lote precisa de um.')
+    const normalizedBriefing = normalizeBriefingInput(briefing)
+    if (normalizedBriefing === null) {
+      setBriefingError(BRIEFING_REQUIRED_MESSAGE)
+      setNotice(BRIEFING_REQUIRED_MESSAGE)
+      return
+    }
+    setBriefingError(null)
+    const batchObjective = selectedProject?.objective
+    if (!batchObjective) {
+      setNotice('Este projeto não tem objetivo registrado. O lote usa o objetivo do projeto, e o Apollo não escolhe um por você.')
       return
     }
     if (sourceIds.size === 0) {
       setNotice('Selecione pelo menos um material com direitos aprovados.')
       return
     }
+    if (formats.size === 0) {
+      setNotice('Escolha pelo menos um formato candidato. O Apollo não escolhe por você.')
+      return
+    }
+    if (!locale) {
+      setNotice('Escolha o idioma das saídas do lote.')
+      return
+    }
     if (recipes.length === 0 || selectedCells.length === 0) {
       setNotice('Selecione explicitamente pelo menos uma saída na matriz.')
       return
     }
-    const maxCostMinorUnits = Math.round(Number(budget) * 100)
+    const maxCostMinorUnits = budget.trim() === '' ? Number.NaN : Math.round(Number(budget) * 100)
     if (!Number.isSafeInteger(maxCostMinorUnits) || maxCostMinorUnits < 0) {
-      setNotice('Informe um teto de custo válido.')
+      setNotice('Informe o teto de custo do lote.')
       return
     }
     setBusy(true)
@@ -1756,9 +1762,9 @@ export default function BatchesPage() {
         },
         body: JSON.stringify({
           projectId,
-          briefing: briefing.trim(),
+          briefing: normalizedBriefing,
           name: name.trim(),
-          objective: selectedProject?.objective || 'discovery',
+          objective: batchObjective,
           sourceGroups: [{
             id: 'sources',
             name: 'Materiais selecionados',
@@ -2303,27 +2309,13 @@ export default function BatchesPage() {
     compatibilityGraphIdempotencyKey.current ??=
       globalThis.crypto.randomUUID()
     try {
-      const contexts = compatibilityEligibleTakes.map((take) => ({
-        takeId: take.id,
-        expectedTakeHash: take.takeHash,
-        offerId: `offer-${selectedBatch.objective}`,
-        audienceTags: ['workspace-default'],
-        claims: [],
-        personaId: 'workspace-presenter',
-        locale: scriptLocale,
-        desiredAction: 'batch-default-action',
-        continuityProvides: [`role-${take.assignment.role}`],
-        continuityRequires: [],
-        narrativeTags: [
-          selectedBatch.objective,
-          'workspace-context',
-        ],
-        tone: 0.5,
-        energy: 0.5,
-        visual: 0.5,
-        experiment: 0.5,
-        evidenceRefs: [take.takeHash, take.sourceHash],
-      }))
+      // ADR-160 F8. The context comes from the batch briefing (as the interpreter read it) or from what the owner typed; a field nobody
+      // stated is left out of the request, and the graph then records it as unspecified.
+      const contexts = buildCompatibilityContexts(
+        compatibilityEligibleTakes,
+        contextStatements,
+        batchRequest,
+      )
       const response = await fetch(
         `/v1/batches/${encodeURIComponent(selectedBatch.id)}/compatibility-graphs`,
         {
@@ -2384,7 +2376,7 @@ export default function BatchesPage() {
     if (
       !selectedBatch ||
       !activeCompatibilityGraph ||
-      !variantRecipeCandidate
+      !variantRecipePath
     ) {
       return
     }
@@ -2407,19 +2399,9 @@ export default function BatchesPage() {
             compatibilityGraphId: activeCompatibilityGraph.id,
             expectedCompatibilityGraphRunHash:
               activeCompatibilityGraph.runHash,
-            selection: variantRecipeCandidate.selection,
-            orderedNodeIds: variantRecipeCandidate.orderedNodeIds,
-            assumptions: [
-              {
-                code: 'UI_BEST_ACCEPTED_PATH',
-                statement:
-                  'The workspace selected the first fully accepted path in deterministic role order.',
-                evidenceRefs: [
-                  activeCompatibilityGraph.runHash,
-                ],
-              },
-            ],
-            requireProof: false,
+            selection: variantRecipePath.selection,
+            orderedNodeIds: variantRecipePath.orderedNodeIds,
+            requireProof: variantRecipePath.requireProof,
           }),
         },
       )
@@ -2463,13 +2445,17 @@ export default function BatchesPage() {
     confirmExpansion = false,
   ) {
     if (!selectedBatch || !activeCompatibilityGraph) return
-    const requestedRecipeCount = Number(portfolioRequestedCount)
+    const requestedRecipeCount = portfolioRequestedCount.trim() === '' ? Number.NaN : Number(portfolioRequestedCount)
     if (
       !Number.isSafeInteger(requestedRecipeCount) ||
       requestedRecipeCount < 1 ||
       requestedRecipeCount > 1_000
     ) {
-      setNotice('Informe entre 1 e 1.000 receitas para o portfólio.')
+      setNotice('Informe entre 1 e 1.000 receitas para o portfólio. O Apollo não sugere um número.')
+      return
+    }
+    if (proofChoice === '') {
+      setNotice('Diga se as receitas do portfólio levam prova. O Apollo não escolhe por você.')
       return
     }
     if (confirmExpansion && !portfolioConfirmationToken) {
@@ -2499,7 +2485,7 @@ export default function BatchesPage() {
             expectedCompatibilityGraphRunHash:
               activeCompatibilityGraph.runHash,
             requestedRecipeCount,
-            requireProof: false,
+            requireProof: proofChoice === 'with-proof',
             ...(confirmExpansion
               ? { confirmationToken: portfolioConfirmationToken }
               : {}),
@@ -2602,6 +2588,10 @@ export default function BatchesPage() {
   async function createBatchEditPreflight() {
     if (!selectedBatch) return
     const valueRef = batchEditValueRef.trim()
+    if (batchEditOperationType === '') {
+      setNotice('Escolha qual alteração fazer em lote. O Apollo não escolhe por você.')
+      return
+    }
     if (
       batchEditDraftItems.length === 0 ||
       batchEditDraftRecipeIds.length === 0 ||
@@ -3071,17 +3061,12 @@ export default function BatchesPage() {
                                     onChange={(event) => {
                                       const type = event.target.value as BatchEditOperationType
                                       setBatchEditOperationType(type)
-                                      setBatchEditValueRef(
-                                        type === 'replace-cta'
-                                          ? 'cta-primary'
-                                          : type === 'subtitle-style'
-                                            ? 'subtitle-style-dynamic'
-                                            : 'brand-kit-current',
-                                      )
+                                      setBatchEditValueRef('')
                                       invalidateBatchEditDraft()
                                     }}
                                     value={batchEditOperationType}
                                   >
+                                    <option value="">Escolha a alteração</option>
                                     <option value="replace-cta">Trocar CTA</option>
                                     <option value="subtitle-style">Estilo de legenda</option>
                                     <option value="brand-kit">Brand Kit</option>
@@ -3535,6 +3520,17 @@ export default function BatchesPage() {
                       </div>
                     </div>
 
+                    <details className="border-b border-white/[0.07] bg-[#0a0a0a] px-4 py-3 sm:px-5" data-testid="batch-request-section" open={Boolean(batchRequest && (batchRequest.openQuestions.length > 0 || batchRequest.unsupported.length > 0))}>
+                      <summary className="cursor-pointer text-xs font-semibold text-[#c8c2b8]">
+                        Pedido do lote
+                        {batchRequest && batchRequest.openQuestions.length > 0 ? <span className="ml-2 text-[10px] font-normal text-[#c79b42]">{batchRequest.openQuestions.length === 1 ? '1 ponto em dúvida' : `${batchRequest.openQuestions.length} pontos em dúvida`}</span> : null}
+                        {batchRequest && batchRequest.unsupported.length > 0 ? <span className="ml-2 text-[10px] font-normal text-[#c9908f]">{batchRequest.unsupported.length === 1 ? '1 pedido que o Apollo não faz' : `${batchRequest.unsupported.length} pedidos que o Apollo não faz`}</span> : null}
+                      </summary>
+                      <div className="mt-3">
+                        <BatchEditorialRequestPanel data={batchRequest} error={batchRequestError} loading={batchRequestLoading} />
+                      </div>
+                    </details>
+
                     <div className="flex border-b border-white/[0.07] bg-[#090909] px-3 pt-2 sm:px-4">
                       <button
                         className={`relative px-3 py-3 text-[10px] font-semibold transition ${detailView === 'script' ? 'text-[#e7bd59]' : 'text-[#77736c] hover:text-[#bbb5ab]'}`}
@@ -3960,6 +3956,15 @@ export default function BatchesPage() {
                                 </div>
                               </div>
 
+                              {activeTakeLibrary && canBuildCompatibilityGraph ? (
+                                <CompatibilityContextForm
+                                  idPrefix="compatibility-context"
+                                  onChange={(next) => { setOwnerContext(next); compatibilityGraphIdempotencyKey.current = null }}
+                                  owner={ownerContext}
+                                  statements={contextStatements}
+                                />
+                              ) : null}
+
                               {!activeTakeLibrary ? (
                                 <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
                                   <p className="text-xs font-semibold text-[#aaa49a]">Crie primeiro a biblioteca de takes.</p>
@@ -3992,6 +3997,21 @@ export default function BatchesPage() {
                                     ))}
                                   </div>
 
+                                  {(() => {
+                                    const unevaluated = describeUnevaluated(activeCompatibilityGraph)
+                                    return unevaluated.edgeCount > 0 ? (
+                                      <div className="mt-3 rounded-xl border border-[#c79b42]/25 bg-[#c79b42]/[0.05] p-3" data-testid="compatibility-not-evaluable" role="status">
+                                        <p className="text-xs font-semibold text-[#dcc07a]">{unevaluated.edgeCount === 1 ? 'Uma ligação tem' : `${unevaluated.edgeCount} ligações têm`} conferências que não puderam ser feitas</p>
+                                        <p className="mt-1 text-[10px] leading-4 text-[#a48f5e]">
+                                          Faltou informar: {unevaluated.fields.join(', ')}.
+                                          {unevaluated.checks.length > 0 ? ` Não foi possível conferir: ${unevaluated.checks.join(', ')}.` : ''}
+                                          {unevaluated.dimensions.length > 0 ? ` Ficaram fora da nota: ${unevaluated.dimensions.map((dimension) => COMPATIBILITY_SOFT_LABELS[dimension as keyof typeof COMPATIBILITY_SOFT_LABELS] ?? dimension).join(', ')}.` : ''}
+                                          {' '}O Apollo não preencheu nada no lugar. Informe acima e recalcule o mapa.
+                                        </p>
+                                      </div>
+                                    ) : null
+                                  })()}
+
                                   <div className="mt-4 grid gap-3 xl:grid-cols-2">
                                     {activeCompatibilityGraph.edges.map((edge) => (
                                       <article
@@ -4015,13 +4035,19 @@ export default function BatchesPage() {
                                           {edge.softScores.map((score) => (
                                             <div className="grid grid-cols-[66px_1fr_30px] items-center gap-2" key={score.dimension}>
                                               <span className="truncate text-[8px] text-[#736e66]">{COMPATIBILITY_SOFT_LABELS[score.dimension]}</span>
-                                              <span className="h-1 overflow-hidden rounded-full bg-white/[0.06]">
-                                                <span
-                                                  className={`block h-full rounded-full ${score.score >= 0.7 ? 'bg-[#6886ca]' : score.score >= 0.5 ? 'bg-[#c79b42]' : 'bg-[#bd6464]'}`}
-                                                  style={{ width: `${Math.round(score.score * 100)}%` }}
-                                                />
-                                              </span>
-                                              <span className="text-right font-mono text-[8px] text-[#aaa298]">{Math.round(score.score * 100)}</span>
+                                              {score.score === null ? (
+                                                <span className="col-span-2 text-[8px] text-[#8a7a55]">sem dado, fora da nota</span>
+                                              ) : (
+                                                <>
+                                                  <span className="h-1 overflow-hidden rounded-full bg-white/[0.06]">
+                                                    <span
+                                                      className={`block h-full rounded-full ${score.score >= 0.7 ? 'bg-[#6886ca]' : score.score >= 0.5 ? 'bg-[#c79b42]' : 'bg-[#bd6464]'}`}
+                                                      style={{ width: `${Math.round(score.score * 100)}%` }}
+                                                    />
+                                                  </span>
+                                                  <span className="text-right font-mono text-[8px] text-[#aaa298]">{Math.round(score.score * 100)}</span>
+                                                </>
+                                              )}
                                             </div>
                                           ))}
                                         </div>
@@ -4043,6 +4069,11 @@ export default function BatchesPage() {
                                               ))}
                                             </div>
                                           )}
+                                          {(edge.notEvaluable?.length ?? 0) > 0 ? (
+                                            <p className="mt-2 text-[8px] leading-4 text-[#8a7a55]" data-testid={`compatibility-edge-not-evaluable-${edge.id}`}>
+                                              Não conferido por falta de informação: {edge.notEvaluable!.map((item) => CHECK_NAMES[item.check] ?? item.check).join(', ')}.
+                                            </p>
+                                          ) : null}
                                         </div>
                                       </article>
                                     ))}
@@ -4085,9 +4116,9 @@ export default function BatchesPage() {
                                   <button
                                     className="h-9 rounded-lg border border-[#c09a5a]/30 bg-[#c09a5a]/10 px-3 text-[10px] font-bold text-[#dfbd83] transition hover:bg-[#c09a5a]/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c09a5a] disabled:cursor-not-allowed disabled:opacity-40"
                                     data-testid="create-variant-recipe"
-                                    disabled={busy || !variantRecipeCandidate}
+                                    disabled={busy || !variantRecipePath}
                                     onClick={() => void createVariantRecipe()}
-                                    title={variantRecipeCandidate ? undefined : 'É necessário um caminho inteiramente aceito e compatível com a política de prova do objetivo.'}
+                                    title={variantRecipePath ? undefined : 'Escolha, abaixo, a prova (sim ou não) e um take para cada etapa do caminho.'}
                                     type="button"
                                   >
                                     {activeVariantRecipe ? 'Compilar outra' : 'Compilar receita'}
@@ -4095,20 +4126,27 @@ export default function BatchesPage() {
                                 </div>
                               </div>
 
+                              {activeCompatibilityGraph ? (
+                                <RecipePathPicker
+                                  graph={activeCompatibilityGraph}
+                                  idPrefix="recipe-path"
+                                  onPick={(role: PickRole, nodeId: string) => { setRecipePicks((current) => ({ ...current, [role]: nodeId })); variantRecipeIdempotencyKey.current = null }}
+                                  onProof={(choice: ProofChoice) => { setProofChoice(choice); setRecipePicks((current) => choice === 'with-proof' ? current : { ...current, proof: '' }); variantRecipeIdempotencyKey.current = null; resetVariantPortfolio() }}
+                                  picks={recipePicks}
+                                  proof={proofChoice}
+                                  takes={activeTakeLibrary?.takes ?? []}
+                                />
+                              ) : null}
+
                               {!activeCompatibilityGraph ? (
                                 <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
                                   <p className="text-xs font-semibold text-[#aaa49a]">Calcule primeiro o mapa de compatibilidade.</p>
                                   <p className="mt-1 text-[10px] leading-4 text-[#716d66]">A receita só pode referenciar nós e edges aceitos de um grafo imutável.</p>
                                 </div>
-                              ) : !variantRecipeCandidate && !activeVariantRecipe ? (
-                                <div className="mt-4 rounded-xl border border-[#c27c52]/18 bg-[#c27c52]/[0.04] p-4">
-                                  <p className="text-xs font-semibold text-[#d5a17d]">Nenhum caminho editorial completo foi aceito.</p>
-                                  <p className="mt-1 text-[10px] leading-4 text-[#826b5c]">É preciso hook → corpo → CTA, com prova quando o objetivo exigir. Edges limítrofes ou bloqueados nunca entram automaticamente.</p>
-                                </div>
                               ) : !activeVariantRecipe ? (
                                 <div className="mt-4 rounded-xl border border-[#c09a5a]/18 bg-[#c09a5a]/[0.035] p-4">
-                                  <p className="text-xs font-semibold text-[#d8bd91]">Existe um caminho aceito pronto para compilação.</p>
-                                  <p className="mt-1 text-[10px] leading-4 text-[#87775f]">{variantRecipeCandidate?.includesProof ? 'A sequência inclui prova.' : 'A política do objetivo permite uma receita curta sem prova.'} A ação cria somente planos e referências virtuais.</p>
+                                  <p className="text-xs font-semibold text-[#d8bd91]">{variantRecipePath ? 'O caminho que você escolheu está pronto para compilação.' : 'Escolha o caminho da receita.'}</p>
+                                  <p className="mt-1 text-[10px] leading-4 text-[#87775f]">{variantRecipePath ? (variantRecipePath.requireProof ? 'A sequência inclui prova.' : 'A sequência não tem prova, como você escolheu.') : 'Diga se leva prova e escolha um take para cada etapa.'} Se alguma ligação não for aceita ou o objetivo do lote não permitir a escolha, o servidor recusa e explica. A ação cria somente planos e referências virtuais.</p>
                                 </div>
                               ) : (
                                 <div className="mt-4 space-y-4" data-testid={`variant-recipe-${activeVariantRecipe.id}`}>
@@ -4238,6 +4276,20 @@ export default function BatchesPage() {
                                       </select>
                                     </label>
                                   ) : null}
+                                  <label>
+                                    <span className="mb-1 block text-[8px] uppercase tracking-[0.12em] text-[#625e57]">Prova nas receitas</span>
+                                    <select
+                                      aria-label="As receitas do portfólio levam prova?"
+                                      className="h-9 rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[10px] text-[#d8d1c6] outline-hidden focus:border-[#7792d2]/45"
+                                      data-testid="portfolio-proof-choice"
+                                      onChange={(event) => { setProofChoice(event.target.value as ProofChoice); resetVariantPortfolio() }}
+                                      value={proofChoice}
+                                    >
+                                      <option value="">Escolha</option>
+                                      <option value="with-proof">Com prova</option>
+                                      <option value="without-proof">Sem prova</option>
+                                    </select>
+                                  </label>
                                   <label>
                                     <span className="mb-1 block text-[8px] uppercase tracking-[0.12em] text-[#625e57]">Receitas desejadas</span>
                                     <input
@@ -4458,7 +4510,11 @@ export default function BatchesPage() {
                   </label>
                   <label>
                     <span className="text-xs font-semibold text-[#c8c2b8]">Idioma</span>
-                    <input className="mt-2 h-11 min-w-0 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" maxLength={35} onChange={(event) => { setScriptLocale(event.target.value); scriptIdempotencyKey.current = null }} required value={scriptLocale} />
+                    <select className="mt-2 h-11 min-w-0 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" onChange={(event) => { setScriptLocale(event.target.value); scriptIdempotencyKey.current = null }} required value={scriptLocale}>
+                      <option value="">Escolha o idioma</option>
+                      {scriptLocale && !LOCALE_OPTIONS.some((option) => option.value === scriptLocale) ? <option value={scriptLocale}>{scriptLocale}</option> : null}
+                      {LOCALE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
                   </label>
                 </div>
                 <label className="block">
@@ -4550,14 +4606,20 @@ export default function BatchesPage() {
                   </label>
                   <label className="block">
                     <span className="text-xs font-semibold text-[#c8c2b8]">Nome do lote</span>
-                    <input autoFocus className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={200} onChange={(event) => { setName(event.target.value); idempotencyKey.current = null }} placeholder="Ex.: Hooks validados · agosto" required value={name} />
+                    <input autoFocus className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" maxLength={200} onChange={(event) => { setName(event.target.value); idempotencyKey.current = null }} required value={name} />
                   </label>
                 </div>
 
-                <label className="block">
-                  <span className="text-xs font-semibold text-[#c8c2b8]">Pedido do lote (briefing)</span>
-                  <textarea className="mt-2 min-h-28 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 py-3 text-sm text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" maxLength={10000} onChange={(event) => { setBriefing(event.target.value); idempotencyKey.current = null }} required value={briefing} />
-                </label>
+                <div>
+                  <label className="block" htmlFor="batch-briefing">
+                    <span className="text-xs font-semibold text-[#c8c2b8]">{BRIEFING_FIELD_LABEL} do lote</span>
+                    <span className="ml-2 text-[10px] text-[#d9a43a]">obrigatório</span>
+                  </label>
+                  <textarea aria-describedby={`batch-briefing-guidance${briefingError ? ' batch-briefing-error' : ''}`} aria-invalid={briefingError ? true : undefined} aria-required="true" className="mt-2 min-h-28 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 py-3 text-sm leading-6 text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" id="batch-briefing" maxLength={BRIEFING_MAX_LENGTH} onChange={(event) => { setBriefing(event.target.value); if (briefingError) setBriefingError(null); idempotencyKey.current = null }} value={briefing} />
+                  <p className="mt-1.5 text-[10px] text-[#625f59]">Vale para o lote todo. Qualquer texto serve, até uma linha; depois de criado, o lote mostra como o Apollo entendeu.</p>
+                  {briefingError ? <p className="mt-1.5 text-xs text-[#e0a0a0]" id="batch-briefing-error" role="alert">{briefingError}</p> : null}
+                  <BriefingGuidance className="mt-3" id="batch-briefing-guidance" />
+                </div>
 
                 <fieldset>
                   <div className="flex items-end justify-between gap-4">
@@ -4591,12 +4653,12 @@ export default function BatchesPage() {
                 <label className="block">
                   <span className="text-xs font-semibold text-[#c8c2b8]">Receitas editoriais</span>
                   <span className="ml-2 text-[10px] text-[#77736c]">uma por linha</span>
-                  <textarea className="mt-2 min-h-28 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 text-sm leading-6 text-[#f2eee7] outline-hidden placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={3000} onChange={(event) => { setRecipeText(event.target.value); idempotencyKey.current = null }} placeholder={'Hook direto + corpo + CTA\nHook de prova + corpo + CTA'} value={recipeText} />
+                  <textarea className="mt-2 min-h-28 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 text-sm leading-6 text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" maxLength={3000} onChange={(event) => { setRecipeText(event.target.value); idempotencyKey.current = null }} value={recipeText} />
                   <p className="mt-1.5 text-[9px] text-[#68645d]">{recipes.length} receita{recipes.length === 1 ? '' : 's'} válida{recipes.length === 1 ? '' : 's'}</p>
                 </label>
 
                 <fieldset>
-                  <legend className="text-xs font-semibold text-[#c8c2b8]">Formatos candidatos</legend>
+                  <legend className="text-xs font-semibold text-[#c8c2b8]">Formatos candidatos <span className="ml-1 text-[10px] font-normal text-[#77736c]">escolha ao menos um</span></legend>
                   <div className="mt-3 grid gap-2 sm:grid-cols-3">
                     {FORMATS.map((format) => {
                       const checked = formats.has(format.id)
@@ -4612,15 +4674,22 @@ export default function BatchesPage() {
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="block">
-                    <span className="text-xs font-semibold text-[#c8c2b8]">Idioma</span>
-                    <input className="mt-2 h-11 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" maxLength={35} onChange={(event) => setLocale(event.target.value)} pattern="[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8}){0,2}" required value={locale} />
+                    <span className="text-xs font-semibold text-[#c8c2b8]">Idioma das saídas</span>
+                    <span className="ml-2 text-[10px] text-[#d9a43a]">obrigatório</span>
+                    <select aria-describedby="batch-locale-help" className="mt-2 h-11 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" onChange={(event) => setLocale(event.target.value)} required value={locale}>
+                      <option value="">Escolha o idioma</option>
+                      {LOCALE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                    <span className="mt-1.5 block text-[10px] leading-4 text-[#68645d]" id="batch-locale-help">O contrato do lote pede o idioma de cada formato. Nenhum vem escolhido.</span>
                   </label>
                   <label className="block">
                     <span className="text-xs font-semibold text-[#c8c2b8]">Teto de custo</span>
+                    <span className="ml-2 text-[10px] text-[#d9a43a]">obrigatório</span>
                     <div className="mt-2 flex h-11 items-center rounded-xl border border-white/[0.09] bg-[#080808] px-4 focus-within:border-[#d5a535]/55">
                       <span className="mr-2 text-[10px] text-[#6f6b64]">USD</span>
-                      <input className="min-w-0 flex-1 bg-transparent text-sm text-[#f2eee7] outline-hidden" min="0" onChange={(event) => setBudget(event.target.value)} required step="0.01" type="number" value={budget} />
+                      <input aria-describedby="batch-budget-help" className="min-w-0 flex-1 bg-transparent text-sm text-[#f2eee7] outline-hidden" min="0" onChange={(event) => setBudget(event.target.value)} required step="0.01" type="number" value={budget} />
                     </div>
+                    <span className="mt-1.5 block text-[10px] leading-4 text-[#68645d]" id="batch-budget-help">O lote não gasta além deste valor. Nenhum valor vem preenchido.</span>
                   </label>
                 </div>
               </div>

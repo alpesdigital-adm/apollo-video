@@ -1,12 +1,12 @@
 {
   "schemaVersion": "ui-capability-parity-report/v1",
   "summary": {
-    "uiActions": 186,
-    "capabilities": 165,
-    "endpoints": 165,
-    "registeredCapabilities": 398,
-    "operableCapabilities": 398,
-    "publicContractCapabilities": 398,
+    "uiActions": 187,
+    "capabilities": 166,
+    "endpoints": 166,
+    "registeredCapabilities": 399,
+    "operableCapabilities": 399,
+    "publicContractCapabilities": 399,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -16,7 +16,27 @@
   "routesWithoutApplicationServiceEndpoints": [],
   "rows": [
     {
-      "uiAction": "src/app/batches/page.tsx:1017",
+      "uiAction": "src/app/batches/page.tsx:1020",
+      "capabilityId": "apollo.batches.list",
+      "capabilityVersion": "2.0.0",
+      "endpoint": "GET /v1/batches",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listProductionBatchesService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/batches/page.tsx:1054",
       "capabilityId": "apollo.projects.list",
       "capabilityVersion": "6.1.0",
       "endpoint": "GET /v1/projects",
@@ -36,7 +56,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1044",
+      "uiAction": "src/app/batches/page.tsx:1081",
       "capabilityId": "apollo.projects.workspace.current.read",
       "capabilityVersion": "12.2.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
@@ -56,7 +76,27 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1122",
+      "uiAction": "src/app/batches/page.tsx:1139",
+      "capabilityId": "apollo.batches.editorial-request.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/batches/{batchId}/editorial-request",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readProductionBatchEditorialRequestService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/batches/page.tsx:1190",
       "capabilityId": "apollo.projects.workspace.current.read",
       "capabilityVersion": "12.2.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
@@ -76,7 +116,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1130",
+      "uiAction": "src/app/batches/page.tsx:1198",
       "capabilityId": "apollo.batches.script-alignments.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/script-alignments",
@@ -96,7 +136,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1138",
+      "uiAction": "src/app/batches/page.tsx:1206",
       "capabilityId": "apollo.batches.take-libraries.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/take-libraries",
@@ -116,9 +156,9 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1146",
+      "uiAction": "src/app/batches/page.tsx:1214",
       "capabilityId": "apollo.batches.compatibility-graphs.list",
-      "capabilityVersion": "1.0.0",
+      "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/batches/{batchId}/compatibility-graphs",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -136,7 +176,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1154",
+      "uiAction": "src/app/batches/page.tsx:1222",
       "capabilityId": "apollo.batches.variant-recipes.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/variant-recipes",
@@ -156,7 +196,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1162",
+      "uiAction": "src/app/batches/page.tsx:1230",
       "capabilityId": "apollo.batches.variant-portfolio-preflights.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/variant-portfolio-preflights",
@@ -176,7 +216,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1170",
+      "uiAction": "src/app/batches/page.tsx:1238",
       "capabilityId": "apollo.batches.edit-preflights.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/edit-preflights",
@@ -196,7 +236,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1178",
+      "uiAction": "src/app/batches/page.tsx:1246",
       "capabilityId": "apollo.batches.edit-commands.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/edit-commands",
@@ -216,7 +256,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1186",
+      "uiAction": "src/app/batches/page.tsx:1254",
       "capabilityId": "apollo.batches.partial-retries.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/partial-retries",
@@ -236,7 +276,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1750",
+      "uiAction": "src/app/batches/page.tsx:1756",
       "capabilityId": "apollo.batches.create",
       "capabilityVersion": "3.0.0",
       "endpoint": "POST /v1/batches",
@@ -257,7 +297,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1800",
+      "uiAction": "src/app/batches/page.tsx:1806",
       "capabilityId": "apollo.batches.read",
       "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/batches/{batchId}",
@@ -277,7 +317,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1821",
+      "uiAction": "src/app/batches/page.tsx:1827",
       "capabilityId": "apollo.batches.actions.apply",
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/batches/{batchId}/actions",
@@ -297,7 +337,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1849",
+      "uiAction": "src/app/batches/page.tsx:1855",
       "capabilityId": "apollo.batches.items.actions.apply",
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/batches/{batchId}/items/{itemId}/actions",
@@ -317,7 +357,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:1901",
+      "uiAction": "src/app/batches/page.tsx:1907",
       "capabilityId": "apollo.batches.partial-retries.create",
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/batches/{batchId}/partial-retries",
@@ -337,7 +377,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:2036",
+      "uiAction": "src/app/batches/page.tsx:2042",
       "capabilityId": "apollo.batches.script-alignments.create",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/batches/{batchId}/script-alignments",
@@ -357,7 +397,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:2103",
+      "uiAction": "src/app/batches/page.tsx:2109",
       "capabilityId": "apollo.batches.script-alignments.reviews.apply",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/batches/{batchId}/script-alignments/{alignmentId}/reviews",
@@ -377,7 +417,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:2162",
+      "uiAction": "src/app/batches/page.tsx:2168",
       "capabilityId": "apollo.batches.take-libraries.create",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/batches/{batchId}/take-libraries",
@@ -397,7 +437,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:2238",
+      "uiAction": "src/app/batches/page.tsx:2244",
       "capabilityId": "apollo.batches.take-libraries.selections.apply",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/batches/{batchId}/take-libraries/{libraryId}/selections",
@@ -417,9 +457,9 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:2327",
+      "uiAction": "src/app/batches/page.tsx:2319",
       "capabilityId": "apollo.batches.compatibility-graphs.create",
-      "capabilityVersion": "1.0.0",
+      "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/batches/{batchId}/compatibility-graphs",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -437,7 +477,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:2396",
+      "uiAction": "src/app/batches/page.tsx:2388",
       "capabilityId": "apollo.batches.variant-recipes.create",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/batches/{batchId}/variant-recipes",
@@ -457,7 +497,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:2488",
+      "uiAction": "src/app/batches/page.tsx:2474",
       "capabilityId": "apollo.batches.variant-portfolio-preflights.create",
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/batches/{batchId}/variant-portfolio-preflights",
@@ -477,7 +517,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:2629",
+      "uiAction": "src/app/batches/page.tsx:2619",
       "capabilityId": "apollo.batches.edit-preflights.create",
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/batches/{batchId}/edit-preflights",
@@ -497,7 +537,7 @@
       ]
     },
     {
-      "uiAction": "src/app/batches/page.tsx:2719",
+      "uiAction": "src/app/batches/page.tsx:2709",
       "capabilityId": "apollo.batches.edit-preflights.commit",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/batches/{batchId}/edit-preflights/{preflightId}/commit",
@@ -508,26 +548,6 @@
         "commitBatchEditService",
         "governanceAnomalyPolicyFromEnvironment",
         "governanceDefaultLimitsFromEnvironment",
-        "requireScope"
-      ],
-      "tests": [
-        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
-        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
-        "tests/v2/public-contracts.test.mjs:public-contract-registry"
-      ]
-    },
-    {
-      "uiAction": "src/app/batches/page.tsx:983",
-      "capabilityId": "apollo.batches.list",
-      "capabilityVersion": "2.0.0",
-      "endpoint": "GET /v1/batches",
-      "applicationServices": [
-        "admitGovernedCapabilityService",
-        "authenticateApiClientService",
-        "authenticateUiSessionService",
-        "governanceAnomalyPolicyFromEnvironment",
-        "governanceDefaultLimitsFromEnvironment",
-        "listProductionBatchesService",
         "requireScope"
       ],
       "tests": [
@@ -5756,6 +5776,17 @@
       ]
     },
     {
+      "capabilityId": "apollo.batches.editorial-request.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/batches/{batchId}/editorial-request",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/batch-editorial-request-response/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
       "capabilityId": "apollo.batches.script-alignments.list",
       "exposure": "public",
       "endpoint": "GET /v1/batches/{batchId}/script-alignments",
@@ -5848,7 +5879,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/batches/{batchId}/compatibility-graphs",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/compatibility-graph-page/v1",
+      "outputSchemaRef": "apollo://schemas/compatibility-graph-page/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -5858,8 +5889,8 @@
       "capabilityId": "apollo.batches.compatibility-graphs.create",
       "exposure": "public",
       "endpoint": "POST /v1/batches/{batchId}/compatibility-graphs",
-      "inputSchemaRef": "apollo://schemas/create-compatibility-graph-request/v1",
-      "outputSchemaRef": "apollo://schemas/compatibility-graph-mutated/v1",
+      "inputSchemaRef": "apollo://schemas/create-compatibility-graph-request/v2",
+      "outputSchemaRef": "apollo://schemas/compatibility-graph-mutated/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -5870,7 +5901,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/batches/{batchId}/compatibility-graphs/{graphId}",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/compatibility-graph-read/v1",
+      "outputSchemaRef": "apollo://schemas/compatibility-graph-read/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
