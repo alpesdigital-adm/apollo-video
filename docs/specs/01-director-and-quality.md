@@ -255,6 +255,8 @@ O interpretador propõe; quem decide é a resolução. O texto do briefing é co
 
 Implementação (F6): a leitura é `interpretBriefService` (aplicação) sobre a porta `BriefInterpreterModel`; o adaptador OpenAI usa saída estruturada com o esquema de resposta do Apollo (citações por texto, os offsets são calculados aqui). A citação tem de existir literalmente no briefing normalizado que o brief guarda, senão a resposta inteira é recusada; diretiva fora do vocabulário vira `unsupported` com o trecho; duas diretivas divergentes do mesmo tipo viram pergunta. `coverage` (público, oferta, tom) vem da leitura. A auditoria registra provedor, modelo, hash do prompt, hash do texto, hash da resposta, uso e custo. O pedido é revisado por `revise-editorial-request` e lido por `GET /v1/projects/{projectId}/editorial-request` (ADR-160, seção F6).
 
+Telas (F7/F8): criação de projeto e Lotes pedem o briefing (qualquer texto não vazio) com orientação só por tópicos e não pré-preenchem nada; depois de salvar, a tela mostra a interpretação com o trecho citado, o que não é suportado e as perguntas, e diz que o Diretor está bloqueado enquanto houver pergunta aberta. O pedido de um lote é lido por `GET /v1/batches/{batchId}/editorial-request`. No grafo de compatibilidade v2 o contexto que o pedido não disse fica `unspecified` e a checagem que depende dele fica `not-evaluable` (ADR-160, seção F7 e F8).
+
 #### 7.4.3 `editorial-policy-resolution/v1` e a regra `minimal-intervention`
 
 `resolveEditorialPolicies(request, mediaContext, outputSpec)` é uma função pura e versionada. Cada política sai
