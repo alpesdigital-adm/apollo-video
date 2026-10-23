@@ -102,6 +102,7 @@ import { DomainError } from './errors.ts'
 import { createDesiredAction, parseDesiredAction, parseDesiredActionInput, type DesiredActionInput, type DesiredAction } from './desired-action.ts'
 import { normalizeProjectName } from './project.ts'
 import { createProductionBrief } from './production-brief.ts'
+import { parseBriefInterpretation, parseBriefInterpretationAudit } from './editorial-request.ts'
 import { resolveStrategicObjective, type StrategicObjectiveId } from './strategic-objective.ts'
 import { createProjectSnapshot, type ProjectSnapshot } from './project-snapshot.ts'
 import { stableSerialize } from './canonical-hash.ts'
@@ -116,16 +117,45 @@ import { FORK_IDENTITY_KINDS_V2, indexForkIdentityBijectionV2, createV2Renderabl
 export { FORK_IDENTITY_KINDS_V2, indexForkIdentityBijectionV2, createV2RenderablePlanSnapshotFacts } from './project-fork-derivation.ts'
 export type { ForkIdentityKindV2, ForkIdentityRemapV2, V2RenderablePlanSnapshotFacts, ForkRenderablePlanMaterializationV2 } from './project-fork-derivation.ts'
 
+/**
+ * The brief a creation Command carries is the one its caller intent states, and nothing else. The one thing it may add is the READING of that same
+ * briefing (ADR-160: the interpretation belongs to the text): an interpretation that is bound to the exact text (its hash and every citation are
+ * checked against it) and the audit of the call that made it. A reading of other words, or any other extra content, is refused.
+ */
+function creationBriefMatchesIntent(contentJson: string, intent: Readonly<{ objective: StrategicObjectiveId | null; desiredAction: unknown; briefing: string | null }>, createdAt: string): boolean {
+  const base = { schemaVersion: 1, objective: intent.objective, desiredAction: intent.desiredAction,
+    productionBrief: createProductionBrief({ ...(intent.briefing === null ? {} : { ownerText: intent.briefing }) }), createdAt }
+  if (contentJson === stableSerialize(base)) return true
+  const document = JSON.parse(contentJson) as Record<string, unknown>
+  const reading = document.editorialRequest as Record<string, unknown> | undefined
+  if (intent.briefing === null || reading === undefined || reading === null || typeof reading !== 'object' || Array.isArray(reading) ||
+    Object.keys(reading).sort().join('|') !== 'interpretation|interpretationAudit') return false
+  const briefingText = createProductionBrief({ ownerText: intent.briefing }).ownerInput?.text
+  if (briefingText === undefined) return false
+  try {
+    const interpretation = parseBriefInterpretation(reading.interpretation, briefingText)
+    // The audit is the record of the call that read THIS text: it is checked against the text and the interpretation, not taken as handed over.
+    const interpretationAudit = parseBriefInterpretationAudit(reading.interpretationAudit, briefingText, interpretation)
+    return contentJson === stableSerialize({ ...base,
+      productionBrief: createProductionBrief({ ownerText: intent.briefing, interpretedCoverage: (interpretation.coverage ?? []).map((item) => item.topic) }),
+      editorialRequest: { interpretation, interpretationAudit } })
+  } catch (error) {
+    if (error instanceof DomainError) return false
+    throw error
+  }
+}
+
 export type ProjectCreationCallerIntentV2 = Readonly<
   { schemaVersion: 'project-creation-intent/v2'; kind: 'initialize-empty'; name: string;
-    objective: StrategicObjectiveId; locale: string; briefing: string | null;
-    desiredAction: Readonly<DesiredActionInput> } |
+    /** Null when the requester chose none: the Apollo does not presume one (ADR-160). A desired action belongs to an objective, so it is then empty. */
+    objective: StrategicObjectiveId | null; locale: string | null; briefing: string | null;
+    desiredAction: Readonly<DesiredActionInput> | null } |
   { schemaVersion: 'project-creation-intent/v2'; kind: 'fork-with-content'; name: string }
 >
 export type NormalizedProjectCreationIntentV2 = Readonly<
   { schemaVersion: 'project-creation-intent/v2'; kind: 'initialize-empty'; name: string;
-    objective: StrategicObjectiveId; locale: string; briefing: string | null;
-    desiredAction: Readonly<DesiredAction> } |
+    objective: StrategicObjectiveId | null; locale: string | null; briefing: string | null;
+    desiredAction: Readonly<DesiredAction> | null } |
   { schemaVersion: 'project-creation-intent/v2'; kind: 'fork-with-content'; name: string }
 >
 export interface ProjectCreationSourceBaselineV2 {
@@ -165,14 +195,20 @@ export function normalizeProjectCreationIntentV2(input: ProjectCreationCallerInt
   const name = normalizeProjectName(input.name)
   assertDomain(name.length >= 1 && name.length <= 120, 'INVALID_COMMAND', 'Creation V2 name is invalid')
   if (input.kind === 'fork-with-content') return Object.freeze({ schemaVersion: input.schemaVersion, kind: input.kind, name })
-  assertDomain(typeof input.locale === 'string' && input.locale.trim().length > 0 &&
-    (input.briefing === null || typeof input.briefing === 'string'), 'INVALID_COMMAND', 'Creation V2 requires explicit locale and briefing presence')
-  let locale = ''
-  try { locale = Intl.getCanonicalLocales(input.locale.trim())[0] ?? '' } catch { /* invalid below */ }
-  assertDomain(locale.length > 0, 'INVALID_COMMAND', 'Creation V2 locale is invalid')
-  const objective = resolveStrategicObjective(input.objective).id
+  // A project may be created without a language (ADR-160: no locale is assumed); when one is given it must be a valid language tag.
+  assertDomain((input.locale === null || (typeof input.locale === 'string' && input.locale.trim().length > 0)) &&
+    (input.briefing === null || typeof input.briefing === 'string'), 'INVALID_COMMAND', 'Creation V2 requires an explicit locale (or its explicit absence) and briefing presence')
+  let locale: string | null = null
+  if (input.locale !== null) {
+    try { locale = Intl.getCanonicalLocales(input.locale.trim())[0] ?? '' } catch { locale = '' }
+    assertDomain(locale.length > 0, 'INVALID_COMMAND', 'Creation V2 locale is invalid')
+  }
+  const objective = input.objective === null || input.objective === undefined ? null : resolveStrategicObjective(input.objective).id
   const productionBrief = createProductionBrief({ ...(input.briefing === null ? {} : { ownerText: input.briefing }) })
-  const desiredAction = createDesiredAction({ objective, desiredAction: parseDesiredActionInput(input.desiredAction) })
+  const requestedAction = input.desiredAction === null || input.desiredAction === undefined ? {} : parseDesiredActionInput(input.desiredAction)
+  // No objective, no desired action: the kind of action is the objective's, so the Apollo has none to give (it does not presume an objective).
+  assertDomain(objective !== null || Object.keys(requestedAction).length === 0, 'INVALID_COMMAND', 'A desired action belongs to an objective: choose the objective, or leave both out')
+  const desiredAction = objective === null ? null : createDesiredAction({ objective, desiredAction: requestedAction })
   return Object.freeze({ schemaVersion: input.schemaVersion, kind: input.kind, name, objective, locale,
     briefing: productionBrief.ownerInput?.text ?? null, desiredAction })
 }
@@ -188,7 +224,13 @@ export function validateNormalizedProjectCreationIntentV2(input: NormalizedProje
     ['initialize-empty', 'fork-with-content'].includes(input.kind), 'INVALID_COMMAND', 'Stored Creation V2 intent version/kind is invalid')
   let fresh: NormalizedProjectCreationIntentV2
   if (input.kind === 'initialize-empty') {
-    const action = input.desiredAction
+    if (input.objective === null) {
+      assertDomain(input.desiredAction === null, 'INVALID_COMMAND', 'Stored Creation V2 desired action needs its objective')
+      const none = normalizeProjectCreationIntentV2({ ...input, desiredAction: null })
+      assertDomain(serializeOutputCanonicalJson(none) === serializeOutputCanonicalJson(input), 'INVALID_COMMAND', 'Stored Creation V2 intent must already be normalized')
+      return none
+    }
+    const action = input.desiredAction!
     creationV2Exact(action, ['schemaVersion', 'kind', 'disclosures',
       ...(['destination','verbalCta','visualCta'] as const).filter(key => Object.hasOwn(action,key))])
     assertDomain(action.schemaVersion === 1 && typeof action.kind === 'string' &&
@@ -277,9 +319,7 @@ export function createProjectCreationCommandV2(input: OutputCanonicalPolicy & Re
       ['markers', 'protectedElements', 'transitions', 'localeVariantRefs', 'formatVariantRefs', 'lineageRefs'].every((key) =>
         editDocument[key] === undefined || Array.isArray(editDocument[key]) && (editDocument[key] as unknown[]).length === 0),
     'INVALID_COMMAND', 'Creation V2 empty intent cannot hide source content')
-    assertDomain(snapshots.find((s) => s.kind === 'brief')!.contentJson === stableSerialize({ schemaVersion: 1,
-      objective: intent.objective, desiredAction: intent.desiredAction,
-      productionBrief: createProductionBrief({ ...(intent.briefing === null ? {} : { ownerText: intent.briefing }) }), createdAt: input.createdAt }) &&
+    assertDomain(creationBriefMatchesIntent(snapshots.find((s) => s.kind === 'brief')!.contentJson, intent, input.createdAt) &&
       snapshots.find((s) => s.kind === 'policies')!.contentJson === stableSerialize({ schemaVersion: 1, workspaceId: input.workspaceId,
         state: 'unconfigured', brandKitMode: 'inherit', guardrails: [], createdAt: input.createdAt }),
     'INVALID_COMMAND', 'Creation V2 snapshots contradict its caller intent')
@@ -503,7 +543,7 @@ export function validateProjectCreationOutputCommandV2(input: ProjectCreationOut
 
 /** Creation2 administrative metadata only; format never supplies output geometry. */
 export function creationProjectMetadataV2(input: ProjectCreationOutputCommandV2): Readonly<{
-  name: string; ownerId: string; format: string | null; objective: string; locale: string
+  name: string; ownerId: string; format: string | null; objective: string | null; locale: string | null
 }> {
   const command = validateProjectCreationOutputCommandV2(input), intent = command.payload.callerIntent
   const source = command.payload.forkDerivation?.document.sourceProject

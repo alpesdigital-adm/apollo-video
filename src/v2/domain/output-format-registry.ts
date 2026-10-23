@@ -15,8 +15,8 @@ export const OUTPUT_PLATFORMS = [
 ] as const
 export type OutputPlatform = (typeof OUTPUT_PLATFORMS)[number]
 
-export interface OutputFormatPresetV1 {
-  schemaVersion: 'output-format-preset/v1'
+export interface OutputFormatPresetV2 {
+  schemaVersion: 'output-format-preset/v2'
   version: 1
   spec: Readonly<OutputSpec>
   subtitleBounds: Readonly<NormalizedBounds>
@@ -28,10 +28,10 @@ export interface OutputFormatPresetV1 {
   presetHash: string
 }
 
-export interface OutputFormatRegistryV1 {
-  schemaVersion: 'output-format-registry/v1'
+export interface OutputFormatRegistryV2 {
+  schemaVersion: 'output-format-registry/v2'
   registryVersion: 1
-  presets: Readonly<Record<OutputAspectRatio, Readonly<OutputFormatPresetV1>>>
+  presets: Readonly<Record<OutputAspectRatio, Readonly<OutputFormatPresetV2>>>
   registryHash: string
 }
 
@@ -43,7 +43,7 @@ const PRESET_POLICY = Object.freeze({
   '21:9': Object.freeze({ subtitleBounds: { x: 0.12, y: 0.7, width: 0.76, height: 0.23 }, proxy: [1050, 450], platforms: ['generic', 'youtube'] }),
 } satisfies Record<OutputAspectRatio, { subtitleBounds: NormalizedBounds; proxy: readonly [number, number]; platforms: readonly OutputPlatform[] }>)
 
-function createOutputFormatPreset(aspectRatio: OutputAspectRatio): Readonly<OutputFormatPresetV1> {
+function createOutputFormatPreset(aspectRatio: OutputAspectRatio): Readonly<OutputFormatPresetV2> {
   const policy = PRESET_POLICY[aspectRatio]
   const spec = createOutputSpec(OUTPUT_PRESETS[aspectRatio])
   const bounds = policy.subtitleBounds
@@ -60,25 +60,25 @@ function createOutputFormatPreset(aspectRatio: OutputAspectRatio): Readonly<Outp
     proxy: Object.freeze({ width: policy.proxy[0], height: policy.proxy[1], codec: 'h264' as const, audioCodec: 'aac' as const, container: 'mp4' as const, pixelFormat: 'yuv420p' as const, videoBitrateKbps: 4_000, audioBitrateKbps: 160 }),
     final: Object.freeze({ codec: 'h264' as const, audioCodec: 'aac' as const, container: 'mp4' as const, pixelFormat: 'yuv420p' as const, videoBitrateKbps: aspectRatio === '21:9' ? 16_000 : 12_000, audioBitrateKbps: 192 }),
   })
-  const body = Object.freeze({ schemaVersion: 'output-format-preset/v1' as const, version: 1 as const, spec, subtitleBounds: Object.freeze({ ...bounds }), exportDefaults, compatiblePlatforms: Object.freeze([...policy.platforms]) as readonly OutputPlatform[] })
+  const body = Object.freeze({ schemaVersion: 'output-format-preset/v2' as const, version: 1 as const, spec, subtitleBounds: Object.freeze({ ...bounds }), exportDefaults, compatiblePlatforms: Object.freeze([...policy.platforms]) as readonly OutputPlatform[] })
   return Object.freeze({ ...body, presetHash: calculateCanonicalHash(body) })
 }
 
 const FORMAT_PRESETS = Object.freeze(Object.fromEntries(
   OUTPUT_ASPECT_RATIOS.map((ratio) => [ratio, createOutputFormatPreset(ratio)]),
-) as unknown as Record<OutputAspectRatio, Readonly<OutputFormatPresetV1>>)
-const REGISTRY_BODY = Object.freeze({ schemaVersion: 'output-format-registry/v1' as const, registryVersion: 1 as const, presets: FORMAT_PRESETS })
+) as unknown as Record<OutputAspectRatio, Readonly<OutputFormatPresetV2>>)
+const REGISTRY_BODY = Object.freeze({ schemaVersion: 'output-format-registry/v2' as const, registryVersion: 1 as const, presets: FORMAT_PRESETS })
 
-export const OUTPUT_FORMAT_REGISTRY: Readonly<OutputFormatRegistryV1> =
+export const OUTPUT_FORMAT_REGISTRY: Readonly<OutputFormatRegistryV2> =
   Object.freeze({ ...REGISTRY_BODY, registryHash: calculateCanonicalHash(REGISTRY_BODY) })
 
-export function readOutputFormatPreset(aspectRatio: OutputAspectRatio): Readonly<OutputFormatPresetV1> {
+export function readOutputFormatPreset(aspectRatio: OutputAspectRatio): Readonly<OutputFormatPresetV2> {
   const preset = OUTPUT_FORMAT_REGISTRY.presets[aspectRatio]
   assertDomain(preset, 'INVALID_OUTPUT_SPEC', 'Output format preset is not registered', { aspectRatio })
   return preset
 }
 
-export function customizeOutputFormatPreset(aspectRatio: OutputAspectRatio, input: Partial<Pick<OutputSpec, 'width' | 'height' | 'fps' | 'safeArea'>>): Readonly<OutputFormatPresetV1> {
+export function customizeOutputFormatPreset(aspectRatio: OutputAspectRatio, input: Partial<Pick<OutputSpec, 'width' | 'height' | 'fps' | 'safeArea'>>): Readonly<OutputFormatPresetV2> {
   const preset = readOutputFormatPreset(aspectRatio)
   const spec = createOutputSpec({ ...preset.spec, ...input, id: `${preset.spec.id}-custom`, aspectRatio, safeArea: input.safeArea ?? preset.spec.safeArea })
   const body = Object.freeze({ schemaVersion: preset.schemaVersion, version: preset.version, spec, subtitleBounds: preset.subtitleBounds, exportDefaults: preset.exportDefaults, compatiblePlatforms: preset.compatiblePlatforms })

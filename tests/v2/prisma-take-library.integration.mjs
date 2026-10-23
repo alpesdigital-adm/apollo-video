@@ -213,7 +213,7 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
         workspaceId,
         name: 'Anúncio com retakes',
         status: 'draft',
-        objective: 'content-distribution',
+        objective: 'discovery',
         format: '9:16',
         locale: 'pt-BR',
         createdByType: 'api-client',
@@ -273,7 +273,7 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
       workspaceId,
       projectId,
       name: 'Retakes de hook',
-      objective: 'content-distribution',
+      objective: 'discovery',
       sourceGroups: [{
         id: 'source-group-retakes',
         name: 'Retakes',

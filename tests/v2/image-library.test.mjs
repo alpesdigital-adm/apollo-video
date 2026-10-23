@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { catalogImage, IMAGE_EVAL_FIXTURES, rankReusableImages, searchImages } from '../../src/v2/domain/image-library.ts'
+import { catalogImage, rankReusableImages, searchImages } from '../../src/v2/domain/image-library.ts'
+import { IMAGE_EVAL_FIXTURES } from './helpers/image-eval-fixtures.mjs'
 import { createImageAnalysis } from '../../src/v2/domain/image-analysis.ts'
 import { parseTesseractTsv } from '../../src/v2/infrastructure/image/tesseract-image-vision-provider.ts'
 import { reuseImageArtifactService, searchReusableImagesService } from '../../src/v2/application/analyze-image-artifact.ts'

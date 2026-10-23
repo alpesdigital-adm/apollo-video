@@ -59,14 +59,16 @@ export class SandboxMediaTranscriber implements MediaTranscriber {
 
   async transcribe(input: {
     audioPath: string
-    language: string
+    language?: string
     signal?: AbortSignal
   }) {
     input.signal?.throwIfAborted()
     const bytes = await readFile(input.audioPath)
     input.signal?.throwIfAborted()
     const transcript = createMediaTranscript({
-      language: input.language,
+      // The sandbox hears nothing: told a language it repeats it, asked to detect one it reports the undetermined language.
+      language: input.language ?? 'und',
+      languageBasis: input.language ? 'declared-not-verified' : 'detected-from-media',
       text: 'sandbox transcript',
       words: [
         { word: 'sandbox', start: 0, end: 0.05 },
@@ -85,7 +87,7 @@ export class SandboxMediaTranscriber implements MediaTranscriber {
     const receipt = this.provider.executeV2({
       ...this.context,
       operation: 'transcription',
-      inputHash: inputIdentity(bytes, input.language),
+      inputHash: inputIdentity(bytes, input.language ?? ''),
       outputHash: transcript.transcriptHash,
       units: simulatedUnits(bytes),
     })

@@ -1,3 +1,4 @@
+import { RENDERER_BASELINE_CAPTION_PRESET } from "../domain/editorial-policy-resolution.ts";
 import { calculateCanonicalHash } from "../domain/canonical-hash.ts";
 import { assertDomain } from "../domain/errors.ts";
 import {
@@ -200,7 +201,7 @@ export function compileLocalizationMedia(input: CompileLocalizationMediaInput) {
       {
         id: `localized-subtitles-${variant.id}`,
         kind: "captions",
-        presetId: basePlan.subtitleTracks[0]?.presetId ?? "clean-color",
+        presetId: basePlan.subtitleTracks[0]?.presetId ?? RENDERER_BASELINE_CAPTION_PRESET,
         anchor: "bottom",
         faceProtection: true,
         maxLines: 2,

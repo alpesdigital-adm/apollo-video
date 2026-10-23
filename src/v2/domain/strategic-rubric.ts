@@ -106,6 +106,22 @@ export const STRATEGIC_RUBRICS: readonly StrategicRubric[] = Object.freeze(
   }),
 )
 
+/**
+ * The criteria a request does not ask to be judged on are not scored (ADR-160): a rubric whose criteria are not all requested keeps the
+ * requested ones with their weights renormalized (each base weight over the sum of the requested ones). Only these criteria can be left
+ * out: the others are about the integrity, the legibility and the rights of what is delivered, and are never optional.
+ */
+export const OPTIONAL_RUBRIC_CRITERIA: readonly RubricCriterionId[] = Object.freeze(['hook-clarity', 'cta-clarity', 'friction-reduction'] as const)
+
+export function effectiveRubricCriteria(rubric: StrategicRubric, notRequested: readonly RubricCriterionId[] = []): readonly RubricCriterion[] {
+  assertDomain(notRequested.every((id) => OPTIONAL_RUBRIC_CRITERIA.includes(id)), 'INVALID_ARGUMENT', 'A criterion that cannot be left out was marked as not requested')
+  const kept = rubric.criteria.filter((criterion) => !notRequested.includes(criterion.id))
+  if (kept.length === rubric.criteria.length) return rubric.criteria
+  assertDomain(kept.length >= 5, 'INVALID_ARGUMENT', 'A rubric keeps at least five criteria')
+  const total = kept.reduce((sum, criterion) => sum + criterion.weight, 0)
+  return Object.freeze(kept.map((criterion) => Object.freeze({ ...criterion, weight: criterion.weight / total })))
+}
+
 export function resolveStrategicRubric(objective: StrategicObjectiveId): StrategicRubric {
   const rubric = STRATEGIC_RUBRICS.find((candidate) => candidate.objective === objective)
   assertDomain(rubric, 'PERSISTENCE_CONFLICT', 'Strategic rubric is not registered', { objective })
@@ -143,7 +159,7 @@ export interface QualityReport {
 }
 
 function qualityEvidence(
-  rubric: StrategicRubric,
+  rubric: Pick<StrategicRubric, 'criteria'>,
   values: readonly QualityEvidence[],
 ): readonly Readonly<QualityEvidence & { weight: number }>[] {
   assertDomain(
@@ -185,9 +201,11 @@ export function createQualityReport(input: {
   }>
   gateEvidence?: Partial<Record<StrategicQualityGateId, readonly string[]>>
   evaluatedAt: string
+  /** Criteria of the rubric the request did not ask to be judged on: left out of the score, the others renormalized (see `effectiveRubricCriteria`). */
+  notRequested?: readonly RubricCriterionId[]
 }): Readonly<QualityReport> {
   const rubric = resolveStrategicRubric(input.objective)
-  const evidence = qualityEvidence(rubric, input.evidence)
+  const evidence = qualityEvidence({ criteria: effectiveRubricCriteria(rubric, input.notRequested) }, input.evidence)
   const gateState: Record<StrategicQualityGateId, boolean> = {
     'narrative-integrity': input.gates.narrativeIntegrity,
     legibility: input.gates.legibility,
@@ -287,9 +305,13 @@ export function parseStrategicQualityReport(value: unknown): Readonly<QualityRep
       return candidate as Record<string, unknown>
     })
     const gate = (id: StrategicQualityGateId) => gateResults.find((item) => item.id === id)
+    // A stored report scored without some optional criteria names the others; the criteria it left out are the ones its evidence lacks.
+    const baseCriteria = resolveStrategicRubric(objective).criteria.map((criterion) => criterion.id)
+    const notRequested = baseCriteria.filter((id) => !evidence.some((item) => item.criterionId === id))
     const rebuilt = createQualityReport({
       objective,
       evidence,
+      notRequested,
       gates: {
         narrativeIntegrity: gate('narrative-integrity')?.passed === true,
         legibility: gate('legibility')?.passed === true,

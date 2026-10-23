@@ -23,7 +23,11 @@ test('conversion action requires an explicit compatible destination and canonica
 
 test('critic reports objective, spoken CTA and destination mismatches without inventing a fix', () => {
   const whatsapp = createDesiredAction({ objective: 'whatsapp', desiredAction: { destination: { type: 'whatsapp', value: '+5511999999999' } } })
-  assert.deepEqual(validateDesiredActionAlignment({ objective: 'whatsapp', action: whatsapp, spokenCta: 'Clique para saber mais' }).issues, ['spoken-cta-mismatch'])
+  assert.deepEqual(validateDesiredActionAlignment({ objective: 'whatsapp', action: whatsapp, spokenCta: 'Clique para saber mais', language: 'pt-BR' }).issues, ['spoken-cta-mismatch'])
+  // The words of a call to action belong to a language: without a lexicon for it nothing is called a mismatch, and the explicit text still is checked.
+  assert.deepEqual(validateDesiredActionAlignment({ objective: 'whatsapp', action: whatsapp, spokenCta: 'Clique para saber mais' }).issues, [])
+  assert.deepEqual(validateDesiredActionAlignment({ objective: 'whatsapp', action: whatsapp, spokenCta: 'qualquer coisa', language: 'xx' }).issues, [])
+  assert.deepEqual(validateDesiredActionAlignment({ objective: 'whatsapp', action: whatsapp, spokenCta: 'Send me a message on WhatsApp', language: 'en' }).issues, [])
   assert.deepEqual(validateDesiredActionAlignment({ objective: 'sale', action: whatsapp }).issues, ['objective-action-mismatch'])
 })
 

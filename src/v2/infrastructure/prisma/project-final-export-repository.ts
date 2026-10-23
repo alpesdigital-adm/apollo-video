@@ -1,3 +1,4 @@
+import { UNDETERMINED_LOCALE } from '../../domain/asset-rights.ts'
 import { randomUUID } from 'node:crypto'
 import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
@@ -6,9 +7,13 @@ import type {
   ProjectFinalExportAttemptHistory,
   ProjectFinalExportRepository,
 } from '../../application/ports/project-final-export-repository.ts'
+import type { ProjectProxyRenderSource } from '../../application/ports/project-proxy-render-repository.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { captionFitGeometriesOfOutput, drawnCaptionCuesThatDoNotFit } from '../../domain/caption-fit.ts'
 import { admitDirectorQualityForFinal } from '../../domain/final-caption-certification.ts'
+import { parseEditorialPolicyResolution, POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION } from '../../domain/editorial-policy-resolution.ts'
+import { deriveEditorialRequestFromBrief } from '../../domain/editorial-request.ts'
 import { projectStatusTransitionPath } from '../../domain/project.ts'
 import { readOutputFormatPreset } from '../../domain/output-format-registry.ts'
 import { outputVariantsOf } from '../../domain/output-consumption.ts'
@@ -20,6 +25,8 @@ import { legacyProxyBelongsToOutput } from './proxy-reuse-safety.ts'
 import { PrismaProjectProxyRenderRepository } from './project-proxy-render-repository.ts'
 import { parseDirectorQualityReport } from './director-run-repository.ts'
 import { readDirectorInheritanceWalk } from './director-run-inheritance.ts'
+import { readRequestedSpeechRemovals } from './speech-removal-lineage.ts'
+import { requestedSpeechReintroducedByCaptions } from '../../application/requested-speech-removals.ts'
 import {
   describeDirectorInheritanceBlock, directorRunInheritanceEquals, type DirectorRunInheritance,
 } from '../../domain/director-run-inheritance.ts'
@@ -95,7 +102,8 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
         versions: {
           where: { id: input.projectVersionId, baseHash: input.projectVersionHash },
           take: 1,
-          select: { id: true },
+          // ADR-160. The brief of the Version being exported: the request it states now is the request a Director report must have answered.
+          select: { id: true, briefSnapshot: { select: { contentJson: true } } },
         },
         proxyReviews: {
           where: {
@@ -149,7 +157,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
         ...(input.qualitySnapshotId ? { qualitySnapshotId: input.qualitySnapshotId } : {}),
       },
       orderBy: { createdAt: 'desc' },
-      include: { qualitySnapshot: true },
+      include: { qualitySnapshot: true, policySnapshot: true },
     })
     const proxyReview = project.proxyReviews[0]
     if (!directorRun || !proxyReview) return null
@@ -164,7 +172,24 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     // the final burns: `per-cue-caption-certification` admits the report the Director really produces when the unknown face claim
     // is its ONLY reservation, and the worker then certifies every burned cue and omits the rest. A report that DOES claim a
     // verified face safety keeps the original requirement: every evidence ref must be a face perception envelope of the run.
-    const admission = admitDirectorQualityForFinal(quality)
+    // ADR-160. Nothing is inherited from a report that did not judge this request: the admission binds the report to the request the brief
+    // states now (recomputed here) and to the resolution the Director run sealed (read back and verified here).
+    let currentRequestHash: string
+    try {
+      currentRequestHash = deriveEditorialRequestFromBrief(JSON.parse(version.briefSnapshot.contentJson) as Record<string, unknown>).requestHash
+    } catch { return null }
+    let sealedPolicyResolutionHash: string | null = null
+    let sealedCaptionLanguage: string | null = null
+    if (directorRun.policySnapshot) {
+      if (directorRun.policySnapshot.kind !== 'policy-resolution' || directorRun.policySnapshot.schemaVersion !== POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION) return null
+      const resolution = parseEditorialPolicyResolution(JSON.parse(directorRun.policySnapshot.contentJson))
+      if (resolution.requestHash !== directorRun.requestHash) return null
+      sealedPolicyResolutionHash = resolution.policyResolutionHash
+      sealedCaptionLanguage = resolution.policies.language.value.captionLanguage
+    }
+    const admission = admitDirectorQualityForFinal(quality, {
+      currentRequestHash, sealedRequestHash: directorRun.requestHash, sealedPolicyResolutionHash,
+    })
     if (!admission.admitted) return null
     if (admission.basis === 'verified-face-safety') {
       for (const reference of quality.faceSafety.evidenceRefs) {
@@ -176,7 +201,8 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       }
     }
     return Object.freeze({
-      locale: project.locale ?? 'pt-BR',
+      // The language the project states; failing that, the one the sealed resolution found in the speech; failing that, none (rights are then judged as undetermined).
+      locale: project.locale ?? sealedCaptionLanguage ?? UNDETERMINED_LOCALE,
       directorRunId: directorRun.id,
       ...(inheritance ? { directorInheritance: inheritance } : {}),
       qualitySnapshotId: directorRun.qualitySnapshotId,
@@ -202,6 +228,75 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     })
   }
 
+  /**
+   * Admission of the final, last gate. A Version that inherits the Director's quality through a subtitle text exception (or that was
+   * edited by one at all) shows captions the Director never read: the text of an exception can write back a phrase the project asked to
+   * remove. So the requests in the lineage of the exported Version are checked again against the captions the final would burn
+   * (the plan's cues with this output's exceptions applied). A phrase that is back refuses the final, fail closed.
+   */
+  private async assertCaptionsHonourRequestedSpeechRemovals(
+    input: Readonly<{ workspaceId: string; projectId: string; projectVersionId: string }>,
+    source: Readonly<ProjectProxyRenderSource>,
+  ): Promise<void> {
+    const rules = await readRequestedSpeechRemovals(this.client, {
+      workspaceId: input.workspaceId, projectId: input.projectId, headVersionId: input.projectVersionId,
+    })
+    const present = requestedSpeechReintroducedByCaptions({
+      rules,
+      cues: (source.editPlan.subtitleTracks as readonly Readonly<{ cues: readonly Readonly<{ id: string; startFrame: number; endFrame: number; text: string }>[] }>[])
+        .flatMap((track) => track.cues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame, text: cue.text }))),
+      overrides: source.subtitleOverrides ?? [],
+      variantId: sourceOutputVariantId(source),
+    })
+    if (present.length > 0) {
+      throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED',
+        'The captions of this final say again a phrase the project asked to remove; the exception that wrote it back must be changed first', {
+          reason: 'requested-speech-reintroduced', versionId: input.projectVersionId, ruleIds: [...present],
+        })
+    }
+  }
+
+  /**
+   * Admission of the final, last gate, for the width of the output. The Director certified that every cue of its plan fits the band
+   * measured on each output that burns captions (`captionsFitMeasured`, against the geometry its policy resolution sealed). A text
+   * exception inherited by this Version can lengthen a segment beyond that band without the Director ever measuring it. So the cues the
+   * final would burn (the plan's cues with this output's exceptions applied) are measured again against the geometry sealed in the
+   * resolution of the Director run the final stands on. One that no longer fits refuses the final, fail closed; an output the resolution
+   * sealed as sidecar or without captions has nothing to measure.
+   */
+  private async assertCaptionsFitMeasuredOutput(
+    input: Readonly<{ workspaceId: string; projectId: string; projectVersionId: string }>,
+    source: Readonly<ProjectProxyRenderSource>,
+    directorRunId: string,
+  ): Promise<void> {
+    const run = await this.client.v2DirectorRun.findFirst({
+      where: { id: directorRunId, workspaceId: input.workspaceId, projectId: input.projectId },
+      include: { policySnapshot: true },
+    })
+    // The admission bound the report to a sealed resolution; one that cannot be read back here leaves nothing to measure against.
+    if (!run?.policySnapshot || run.policySnapshot.kind !== 'policy-resolution' || run.policySnapshot.schemaVersion !== POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'The policy resolution the final stands on cannot be read to measure its captions', {
+        reason: 'caption-fit-resolution-missing', versionId: input.projectVersionId, directorRunId,
+      })
+    }
+    const variantId = sourceOutputVariantId(source)
+    const resolution = parseEditorialPolicyResolution(JSON.parse(run.policySnapshot.contentJson))
+    const geometries = captionFitGeometriesOfOutput(resolution.policies.captions.value.deliveries, variantId)
+    const refused = drawnCaptionCuesThatDoNotFit({
+      cues: (source.editPlan.subtitleTracks as readonly Readonly<{ cues: readonly Readonly<{ id: string; startFrame: number; endFrame: number; text: string }>[] }>[])
+        .flatMap((track) => track.cues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame, text: cue.text }))),
+      overrides: source.subtitleOverrides ?? [],
+      variantId,
+      geometries,
+    })
+    if (refused.length > 0) {
+      throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED',
+        'A caption of this final no longer fits the width measured for its output; the exception that lengthened it must be changed first', {
+          reason: 'caption-text-does-not-fit-measured-output', versionId: input.projectVersionId, variantId, cueIds: refused.map((item) => item.cueId),
+        })
+    }
+  }
+
   async readApprovedCurrentSource(input: {
     workspaceId: string
     projectId: string
@@ -217,6 +312,8 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     const approval = await this.readApproval({ ...input, outputVariantId: sourceOutputVariantId(source),
       outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: true })
     if (!approval || !reframeMatchesApproval(source, approval) || !subtitleOverridesMatchApproval(source, approval)) return null
+    await this.assertCaptionsHonourRequestedSpeechRemovals(input, source)
+    await this.assertCaptionsFitMeasuredOutput(input, source, approval.directorRunId)
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
   }
 
@@ -263,6 +360,8 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     const approval = await this.readApproval({ ...input, directorInheritance: input.directorInheritance ?? null, outputVariantId: sourceOutputVariantId(source),
       outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: false })
     if (!approval || !reframeMatchesApproval(source, approval) || !subtitleOverridesMatchApproval(source, approval)) return null
+    await this.assertCaptionsHonourRequestedSpeechRemovals(input, source)
+    await this.assertCaptionsFitMeasuredOutput(input, source, approval.directorRunId)
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
   }
 

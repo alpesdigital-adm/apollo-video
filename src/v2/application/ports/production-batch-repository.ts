@@ -5,6 +5,7 @@ import type {
   BatchItemAction,
   BatchItem,
   ProductionBatch,
+  ProductionBatchEditorialRequest,
   ProductionBatchStatus,
   ProductionBatchStep,
 } from '../../domain/production-batch.ts'
@@ -34,6 +35,32 @@ export interface ProductionBatchActionRecord {
   createdAt: string
   resultingBatch: Readonly<ProductionBatch>
   partialRetry?: Readonly<BatchPartialRetryRun>
+}
+
+/** One later request of a batch (the batch document itself never changes): append-only, the highest `sequence` is the current request. */
+export interface ProductionBatchRequestRevision {
+  id: string
+  workspaceId: string
+  batchId: string
+  sequence: number
+  /** Null when the batch had no request before this one. */
+  previousRequestHash: string | null
+  editorialRequest: Readonly<ProductionBatchEditorialRequest>
+  /** What this revision changed (the briefing, the questions answered, whether the briefing was read again). */
+  change: Readonly<Record<string, unknown>>
+  createdAt: string
+}
+
+export interface ProductionBatchRequestRevisionRecord extends Readonly<ProductionBatchRequestRevision> {
+  requestFingerprint: string
+  idempotencyKey: string
+  actorClientId: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
+}
+
+export interface ProductionBatchRequestRevisionReplay {
+  revision: Readonly<ProductionBatchRequestRevision>
+  requestFingerprint: string
 }
 
 export interface ProductionBatchReplay {
@@ -113,6 +140,20 @@ export interface ProductionBatchRepository {
     limit: number
     cursor?: string
   }): Promise<Readonly<ProductionBatchPartialRetryPage>>
+  /** The latest revision of the request of a batch; null when the request it was created with is still the current one. */
+  readCurrentEditorialRequest(input: {
+    workspaceId: string
+    batchId: string
+  }): Promise<Readonly<ProductionBatchRequestRevision> | null>
+  findRequestRevisionReplay(input: {
+    workspaceId: string
+    actorClientId: string
+    actorContextHash: string
+    idempotencyKey: string
+  }): Promise<Readonly<ProductionBatchRequestRevisionReplay> | null>
+  persistRequestRevision(
+    record: Readonly<ProductionBatchRequestRevisionRecord>,
+  ): Promise<Readonly<{ revision: Readonly<ProductionBatchRequestRevision>; replayed: boolean }>>
   persistAction(
     record: Readonly<ProductionBatchActionRecord>,
   ): Promise<Readonly<{

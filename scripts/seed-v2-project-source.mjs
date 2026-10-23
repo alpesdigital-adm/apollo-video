@@ -26,7 +26,6 @@ import { createMediaUploadSessionSignerFromEnvironment } from '../src/v2/infrast
 const DEFAULTS = Object.freeze({
   objective: 'discovery',
   format: '9:16',
-  locale: 'pt-BR',
   sourceMime: 'video/mp4',
   waitSeconds: 900,
 })
@@ -49,6 +48,8 @@ export function outputVariantRequestFor({ aspectRatio, locale }) {
   if (!canvas) throw new Error(`--format ${aspectRatio} has no output canvas; use one of ${Object.keys(CANVAS).join(', ')}`)
   const body = structuredClone(publicSchemaExamples(getPublicSchema('apollo://schemas/create-project-output-variant-request/v1'))[0])
   const id = `profile-${aspectRatio.replace(':', 'x')}`
+  // The contract of this request requires the output to state its language: it is the caller's, never a default of the seed.
+  if (!locale) throw new Error('--output-locale (or --locale) is required: the output variant states the language of the output')
   body.output = { ...body.output, locale, aspectRatio, width: canvas.width, height: canvas.height, deliveryProfileId: id }
   body.profile = { ...body.profile, id,
     final: { ...body.profile.final, width: canvas.width, height: canvas.height },
@@ -64,7 +65,7 @@ export function readSeedArguments(values) {
   const allowed = new Set([
     'seed-id', 'workspace-id', 'client-id', 'credential-id', 'api-environment',
     'project-name', 'source-file',
-    'source-mime', 'objective', 'format', 'locale', 'briefing', 'wait-seconds',
+    'source-mime', 'objective', 'format', 'locale', 'output-locale', 'briefing', 'wait-seconds',
   ])
   for (let index = 0; index < values.length; index += 2) {
     const key = values[index]
@@ -109,7 +110,8 @@ export function readSeedArguments(values) {
     waitSeconds,
     objective: parsed.get('objective')?.trim() || DEFAULTS.objective,
     format: parsed.get('format')?.trim() || DEFAULTS.format,
-    locale: parsed.get('locale')?.trim() || DEFAULTS.locale,
+    ...(parsed.get('locale')?.trim() ? { locale: parsed.get('locale').trim() } : {}),
+    ...(parsed.get('output-locale')?.trim() ? { outputLocale: parsed.get('output-locale').trim() } : {}),
     ...(parsed.get('briefing')?.trim() ? { briefing: parsed.get('briefing').trim() } : {}),
   })
 }
@@ -196,7 +198,7 @@ export async function seedV2ProjectSource({
     workspaceId: input.workspaceId,
     name: input.projectName,
     objective: input.objective,
-    locale: input.locale,
+    ...(input.locale ? { locale: input.locale } : {}),
     ...(input.briefing ? { briefing: input.briefing } : {}),
     actor,
     idempotencyKey: `seed-project:${input.seedId}`,
@@ -207,7 +209,7 @@ export async function seedV2ProjectSource({
     createId: (kind) => `${kind}-${randomUUID()}`,
     createEventId: randomUUID,
   })({
-    ...outputVariantRequestFor({ aspectRatio: input.format, locale: input.locale }),
+    ...outputVariantRequestFor({ aspectRatio: input.format, locale: input.outputLocale ?? input.locale }),
     workspaceId: input.workspaceId,
     projectId: project.projectAtCreation.id,
     baseVersionId: project.creationVersion.id,

@@ -1,3 +1,4 @@
+import { UNDETERMINED_LOCALE } from '../domain/asset-rights.ts'
 import { createHash } from 'node:crypto'
 
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
@@ -30,8 +31,6 @@ import type {
 } from './ports/subtitle-sidecar-repository.ts'
 import { calculateVersionHash } from './version-hash.ts'
 
-/** Default sidecar locale until FR-176 introduces per-locale subtitle tracks. */
-export const DEFAULT_SUBTITLE_SIDECAR_LOCALE = 'pt-BR'
 const SIDECAR_ARTIFACT_PREFIX = 'subtitles'
 const SIDECAR_TOOL_ID = 'apollo-subtitle-sidecar'
 
@@ -218,7 +217,8 @@ export function exportProjectSubtitleSidecarService(dependencies: {
       'INVALID_ARGUMENT',
       'idempotencyKey is required',
     )
-    const locale = input.locale?.trim() || DEFAULT_SUBTITLE_SIDECAR_LOCALE
+    // The language is the caller's: a sidecar of an unstated language is tagged undetermined, never as one particular language.
+    const locale = input.locale?.trim() || UNDETERMINED_LOCALE
 
     const alignment = await dependencies.sidecars.readRenderedAlignment({
       workspaceId: input.workspaceId,

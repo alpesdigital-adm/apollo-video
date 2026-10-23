@@ -1,3 +1,4 @@
+import { planMovementPolicyUnder, requestlessEditorialPolicies } from './editorial-policy-resolution.ts'
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
 import {
@@ -117,7 +118,7 @@ export interface ContiguousExtractionEditPlan {
   synthesizedRanges: false
   lineageRefs: readonly string[]
   movementPolicy: Readonly<{
-    automaticZoom: false
+    automaticZoom: boolean
     reason: 'contiguous-source-preservation'
   }>
   selectionHash: string
@@ -631,7 +632,7 @@ export function extractContiguous(input: {
       ...selected.evidenceRefs,
     ]),
     movementPolicy: Object.freeze({
-      automaticZoom: false as const,
+      automaticZoom: planMovementPolicyUnder(requestlessEditorialPolicies(), 1).automaticZoom,
       reason: 'contiguous-source-preservation' as const,
     }),
     selectionHash: selected.candidateHash,

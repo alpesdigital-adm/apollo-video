@@ -10,6 +10,7 @@ import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
+import { sealedEditorialFixture } from './helpers/editorial-request-fixture.mjs'
 
 /**
  * W65b PostgreSQL + FFmpeg proof of the face evidence keyed by SOURCE time, on a Director-cut timeline (written for a supervised run;
@@ -90,22 +91,16 @@ const markerVeto = {
   },
 }
 
-function qualityReportFor({ suffix, evaluatedAt, createQualityReport, resolveStrategicRubric }) {
+/** The v5 report a Director run of the request-driven era leaves (ADR-160), bound to the brief of the Version it directs. */
+async function qualityReportFor({ suffix, evaluatedAt, createQualityReport, resolveStrategicRubric, briefContentJson, workspaceId, projectId, projectVersionId }) {
   const rubric = resolveStrategicRubric('discovery')
   const strategic = createQualityReport({ objective: 'discovery',
     evidence: rubric.criteria.map((criterion) => ({ criterionId: criterion.id, score: 100, evidence: [`controlled:${criterion.id}`] })),
     gates: { narrativeIntegrity: true, legibility: true, rights: true }, evaluatedAt })
-  return {
-    schemaVersion: 'director-quality-report/v3', id: `quality-report-${suffix}`, desiredActionRef: { id: `action-${suffix}` },
-    status: 'review-required', strategic, score: 1,
-    // The report the Director really produces: face safety UNKNOWN and nothing else to reserve.
-    faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
-    hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true, subtitlesFaceSafe: false, subtitlesBounded: true,
-      forbiddenSpeechAbsent: true, timelineContinuous: true },
+  // The report the Director really produces: face safety UNKNOWN and nothing else to reserve.
+  return sealedEditorialFixture({ briefContentJson, strategic, suffix, evaluatedAt, workspaceId, projectId, projectVersionId,
     issues: [{ code: 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED', severity: 'warning', category: 'editorial',
-      message: 'Face detector evidence is unavailable. Caption placement requires review before approval or final export.', correctable: true }],
-    criticVersion: 'project-director-critic/v2', evaluatedAt,
-  }
+      message: 'Face detector evidence is unavailable. Caption placement requires review before approval or final export.', correctable: true }] })
 }
 
 test('T-W65B final export on a Director cut with face evidence keyed by source time: reused across Versions, projected through the clips, confirmed in pixels', {
@@ -229,7 +224,7 @@ test('T-W65B final export on a Director cut with face evidence keyed by source t
       localeVariantRefs: [], formatVariantRefs: [], lineageRefs: [sourceArtifactId],
       subtitleTracks: withCues && cues.length ? [{ id: 'track-captions', kind: 'captions', presetId: 'clean-color', anchor: 'bottom', faceProtection: true,
         maxLines: 2, maxCharactersPerBlock: 32, cues: cues.map((cue) => ({ ...cue })) }] : [],
-      transitions: [], movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
+      transitions: [], movementPolicy: { automaticZoom: false, protectedOpeningFrames: 0 },
     })
     // The BASE Version plays the whole source in one clip.
     const baseEditPlan = planOf({ planId: id('base-plan'), versionId: baseVersionId, durationFrames: SOURCE_FRAMES, withCues: false,
@@ -253,7 +248,12 @@ test('T-W65B final export on a Director cut with face evidence keyed by source t
       selection: { mode: 'none' }, actor, idempotencyKey: id('lut-none'), reason: 'Keep this fixture colorimetrically neutral.' })
     assert.equal(noLut.selection.resolved.mode, 'none')
     // The run's own snapshots. A snapshot is inserted, never edited.
-    const qualityReport = qualityReportFor({ suffix: `${key}-${suffix}`, evaluatedAt: createdAt.toISOString(), createQualityReport, resolveStrategicRubric })
+    const headRow = await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: noLut.version.id } })
+    const briefRow = await client.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: headRow.briefSnapshotId } })
+    const sealed = await qualityReportFor({ suffix: `${key}-${suffix}`, evaluatedAt: createdAt.toISOString(), createQualityReport, resolveStrategicRubric,
+      briefContentJson: briefRow.contentJson, workspaceId, projectId, projectVersionId })
+    const qualityReport = sealed.qualityReport
+    const policySnapshotId = id('policy')
     const snapshotIds = { perception: id('perception'), treatment: id('treatment'), story: id('story'), quality: qualitySnapshotId }
     for (const [snapshotId, kind, schemaVersion, content] of [
       [snapshotIds.perception, 'perception', 1, { schemaVersion: 1, id: snapshotIds.perception,
@@ -262,7 +262,8 @@ test('T-W65B final export on a Director cut with face evidence keyed by source t
           sourceTranscriptId: id('transcript') } }],
       [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
-      [snapshotIds.quality, 'quality-report', 3, qualityReport],
+      [snapshotIds.quality, 'quality-report', 5, qualityReport],
+      [policySnapshotId, 'policy-resolution', 2, sealed.resolution],
     ]) {
       await client.v2ProjectSnapshot.create({ data: { id: snapshotId, workspaceId, projectId, kind, schemaVersion,
         contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt } })
@@ -277,7 +278,8 @@ test('T-W65B final export on a Director cut with face evidence keyed by source t
       baseVersionId: noLut.version.id, resultVersionId: projectVersionId, status: 'succeeded', objective: 'discovery', objectiveVersion: 1,
       rubricRef: 'awareness-discovery/v1', plannerVersion: 'director-e2e-1.0.0', criticVersion: 'critic-e2e-1.0.0',
       perceptionSnapshotId: snapshotIds.perception, treatmentSnapshotId: snapshotIds.treatment, storySnapshotId: snapshotIds.story,
-      editPlanSnapshotId, qualitySnapshotId, decisionsJson: stableSerialize([]), assumptionsJson: stableSerialize([]),
+      editPlanSnapshotId, qualitySnapshotId, policySnapshotId, requestHash: sealed.request.requestHash,
+      decisionsJson: stableSerialize([]), assumptionsJson: stableSerialize([]),
       initiatedByType: 'api-client', initiatedById: issued.client.id, createdAt, updatedAt: createdAt } })
 
     // The approved proxy: controlled metadata only (the one declared byte is not a rendered MP4); its review is ready-for-final.

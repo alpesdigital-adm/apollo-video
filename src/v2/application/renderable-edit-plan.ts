@@ -1,3 +1,5 @@
+import { compositionUnderPolicy, planMovementPolicyUnder, requestlessEditorialPolicies, resolveEditorialPolicies } from '../domain/editorial-policy-resolution.ts'
+import { createEditorialRequest } from '../domain/editorial-request.ts'
 import { calculateRenderablePlanHash, RENDERABLE_PLAN_COMPILER_VERSION } from '../domain/renderable-plan-authority.ts'
 export { calculateRenderablePlanHash, RENDERABLE_PLAN_COMPILER_VERSION } from '../domain/renderable-plan-authority.ts'
 import {
@@ -79,8 +81,12 @@ export type RenderablePlanOrigin = (typeof RENDERABLE_PLAN_ORIGINS)[number]
  */
 export const RENDERABLE_PLAN_AUDIO_FADE_MS = 24
 
-/** Subtitles are not compiled by these paths; the policy still has to be stated. */
-const SUBTITLE_MAX_CHARACTERS = 32
+/**
+ * These compilers materialize an aggregate somebody else decided and hold no editorial request of their own, so the policies their plan states
+ * are those of a request that is silent (rule `minimal-intervention`), resolved by the one module that names them. Subtitles are not compiled
+ * by these paths; the capacity the plan states is the caption preset's.
+ */
+const REQUESTLESS_POLICIES = requestlessEditorialPolicies()
 
 export interface RenderablePlanSource {
   readonly id: string
@@ -152,6 +158,12 @@ export interface AssembleDirectedEditPlanInput {
    */
   readonly decisions?: readonly Readonly<DirectorDecisionInput>[]
   readonly backgroundMusic?: Readonly<DirectedMusicTrack>
+  /**
+   * The frame shape of the source and of every output the plan is made for (`W:H`), when the compiler knows them. With it the layout follows the
+   * geometry like any other plan (the source as it is where the shapes agree); without it the geometry is unknown and the silence rule keeps the whole
+   * frame visible over a backdrop.
+   */
+  readonly geometry?: Readonly<{ sourceAspectRatio?: string; outputAspectRatios: readonly string[] }>
   readonly assumptions: readonly string[]
   readonly createdAt: string
 }
@@ -278,23 +290,16 @@ export function assembleDirectedEditPlan(
     // No word was retimed. The empty list is the measurement; the id names the
     // absence rather than pointing at a transcript this plan never read.
     retimedTranscript: Object.freeze({ sourceTranscriptId: 'not-retimed', words: Object.freeze([]) }),
-    movementPolicy: Object.freeze({
-      automaticZoom: false as const,
-      protectedOpeningFrames: Math.round(input.fps * 4),
-    }),
+    movementPolicy: planMovementPolicyUnder(REQUESTLESS_POLICIES, input.fps),
     subtitlePolicy: Object.freeze({
       faceProtection: true as const,
       anchor: 'bottom' as const,
-      maxCharactersPerBlock: SUBTITLE_MAX_CHARACTERS,
+      maxCharactersPerBlock: REQUESTLESS_POLICIES.captions.value.capacityCharacters,
     }),
-    composition: Object.freeze({
-      layout: 'landscape-inset' as const,
-      background: 'blurred-source' as const,
-      foregroundScale: 1 as const,
-      verticalPosition: 0.5 as const,
-      faceSafeFallback: Object.freeze([0.14, 0.08, 0.72, 0.56] as const),
-      subtitleSafeRegion: Object.freeze([0.08, 0.7, 0.84, 0.24] as const),
-    }),
+    composition: compositionUnderPolicy(input.geometry
+      ? resolveEditorialPolicies(createEditorialRequest({}), { hasSelectedInsert: false, ...(input.geometry.sourceAspectRatio ? { sourceAspectRatio: input.geometry.sourceAspectRatio } : {}) },
+        input.geometry.outputAspectRatios.map((aspectRatio, index) => ({ variantId: `output-${index + 1}`, aspectRatio }))).policies.layout
+      : REQUESTLESS_POLICIES.layout),
     director: Object.freeze({
       plannerVersion: RENDERABLE_PLAN_COMPILER_VERSION,
       decisions: input.decisions === undefined

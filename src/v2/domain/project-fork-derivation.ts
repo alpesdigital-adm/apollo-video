@@ -605,7 +605,7 @@ export interface ProjectForkDerivationBodyV2 extends OutputCanonicalPolicy {
   sourceEditPlanSnapshot: Readonly<ProjectSnapshot>
   sourceReferences: readonly Readonly<ForkMediaReferenceFactsV2>[]
   sourceProject: Readonly<{ id: string; workspaceId: string; currentVersionId: string; name: string; status: string; format: string | null; ownerId: string | null;
-    administrationRevision: number; updatedAt: string; objective: string; locale: string;
+    administrationRevision: number; updatedAt: string; objective: string; locale: string | null;
     createdByType: string; createdById: string; createdAt: string }>
 }
 export interface ProjectForkDerivationV2 {
@@ -624,7 +624,7 @@ export function createProjectForkDerivationV2(input: ProjectForkDerivationBodyV2
   const project = input.sourceProject
   assertDomain(project.id === source.version.projectId && project.workspaceId === source.version.workspaceId &&
     project.currentVersionId === source.version.id && typeof project.objective === 'string' && project.objective.length > 0 &&
-    typeof project.locale === 'string' && project.locale.length > 0 && ['api-client', 'user', 'system', 'director'].includes(project.createdByType) &&
+    (project.locale === null || (typeof project.locale === 'string' && project.locale.length > 0)) && ['api-client', 'user', 'system', 'director'].includes(project.createdByType) &&
     typeof project.name === 'string' && project.name.length > 0 && typeof project.status === 'string' && project.status.length > 0 &&
     (project.format === null || typeof project.format === 'string') && (project.ownerId === null || typeof project.ownerId === 'string') &&
     Number.isSafeInteger(project.administrationRevision) && project.administrationRevision > 0 &&
@@ -915,7 +915,7 @@ export function createProjectForkDerivationV3(input: ProjectForkDerivationBodyV3
     (project.format === null || typeof project.format === 'string') && (project.ownerId === null || typeof project.ownerId === 'string') &&
     Number.isSafeInteger(project.administrationRevision) && project.administrationRevision > 0 &&
     new Date(project.updatedAt).toISOString() === project.updatedAt && new Date(project.createdAt).toISOString() === project.createdAt &&
-    typeof project.objective === 'string' && project.objective.length > 0 && typeof project.locale === 'string' && project.locale.length > 0 &&
+    typeof project.objective === 'string' && project.objective.length > 0 && (project.locale === null || (typeof project.locale === 'string' && project.locale.length > 0)) &&
     ['api-client', 'user', 'system', 'director'].includes(project.createdByType) && typeof project.createdById === 'string' && project.createdById.length > 0,
   'INVALID_COMMAND', 'Fork3 actual source Project/head/lifecycle facts differ')
   assertDomain(same(input.sourceEditPlanSnapshot, operationalBundlePlanV3(source.bundle)),

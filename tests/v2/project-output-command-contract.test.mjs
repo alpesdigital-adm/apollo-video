@@ -75,13 +75,13 @@ test('W66 unknown or missing profile facts, injected identities and authenticate
 
 test('W66 public capability and new schemas preserve old contracts and require full output facts', () => {
   const create = FOUNDATION_CAPABILITIES.find(c => c.id === 'apollo.projects.create')
-  assert.equal(create.version, '6.0.0'); assert.equal(create.inputSchemaRef, 'apollo://schemas/create-project-request/v4')
+  assert.equal(create.version, '8.0.0'); assert.equal(create.inputSchemaRef, 'apollo://schemas/create-project-request/v6')
   const variant = FOUNDATION_CAPABILITIES.find(c => c.id === 'apollo.projects.output-variants.create')
   assert.deepEqual(variant.requiredScopes, ['projects:write']); assert.equal(variant.authMode, 'required')
   assert.equal(variant.idempotency, 'required'); assert.equal(variant.endpoint.path, '/v1/projects/{projectId}/output-variants')
-  for (const ref of ['create-project-request/v3', 'project-created/v4', 'project-workspace/v13'])
+  for (const ref of ['create-project-request/v3', 'create-project-request/v4', 'project-created/v4', 'project-workspace/v13'])
     assert.equal(getPublicSchema('apollo://schemas/' + ref).ref, 'apollo://schemas/' + ref)
-  for (const ref of ['create-project-request/v4', 'project-created/v5', 'create-project-output-variant-request/v1', 'project-output-variant-created/v1']) {
+  for (const ref of ['create-project-request/v5', 'project-created/v5', 'create-project-output-variant-request/v1', 'project-output-variant-created/v1']) {
     const definition = getPublicSchema('apollo://schemas/' + ref), validate = addFormats(new Ajv2020({ strict: false })).compile(definition.schema)
     for (const example of publicSchemaExamples(definition)) assert.equal(validate(example), true, JSON.stringify(validate.errors))
   }

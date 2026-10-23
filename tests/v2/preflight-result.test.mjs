@@ -54,7 +54,8 @@ test('operational preflight creates publish the canonical result through new maj
   ])
   for (const [id, outputSchemaRef] of expected) {
     const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === id)
-    assert.equal(capability.version, '2.0.0')
+    // The portfolio preflight took its objective into its own request (ADR-160): its capability is one major ahead.
+    assert.equal(capability.version, id === 'apollo.batches.variant-portfolio-preflights.create' ? '3.0.0' : '2.0.0')
     assert.equal(capability.outputSchemaRef, outputSchemaRef)
     const schema = getPublicSchema(outputSchemaRef)
     assert.ok(schema.schema.properties.data.required.includes('result'))

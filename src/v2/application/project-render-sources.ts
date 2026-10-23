@@ -128,6 +128,8 @@ export function projectProxyRenderInputHash(input: {
     // W70 readiness (R2). The colour grade the render applies (effective ColorPlan and LUT selection, by ancestry). Absent on a source the
     // project render repository did not read (a renderable snapshot), which keeps its identity.
     ...(source.colorGrade ? { colorGrade: source.colorGrade } : {}),
+    // ADR-160. The resolution the plan was made from: a render approved under another resolution is another input. Absent when the plan has none.
+    ...(source.policyResolution ? { policyResolutionHash: source.policyResolution.policyResolutionHash } : {}),
   }
   return calculateVersionHash(source.unchangedReuse
     ? {
@@ -188,6 +190,7 @@ export function projectProxyRenderContentHash(input: {
     formatSubjects: source.formatSubjects ? calculateCanonicalHash(source.formatSubjects) : null,
     placementAssets: source.placementAssets ? source.placementAssets.map((asset) => asset.sha256).toSorted() : null,
     reframeRecordHash: source.reframeRecordHash ?? null,
+    ...(source.policyResolution ? { policyResolutionHash: source.policyResolution.policyResolutionHash } : {}),
     subtitleOverridesHash: source.subtitleOverridesHash ?? null,
     // W70 readiness (R2, Opus validation). What the colour grade does to the pixels (not the rows holding it), and the policies the review of
     // a render is judged under: another grade, or another critic, is another content.

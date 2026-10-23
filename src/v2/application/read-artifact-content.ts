@@ -1,4 +1,5 @@
 import { DomainError } from '../domain/errors.ts'
+import { normalizeLibraryLocale } from '../domain/media-library.ts'
 import type { ArtifactContentStorage, ArtifactByteRange } from './ports/artifact-content-storage.ts'
 import type { MediaArtifactQueryRepository } from './ports/media-artifact-query-repository.ts'
 import type { MediaLibraryRepository } from './ports/media-library-repository.ts'
@@ -38,7 +39,8 @@ export function readArtifactContentService(dependencies: {
   library?: MediaLibraryRepository
   clock?: () => Date
 }) {
-  return async function read(input: { workspaceId: string; artifactId: string; rangeHeader: string | null }) {
+  return async function read(input: { workspaceId: string; artifactId: string; rangeHeader: string | null; locale?: string }) {
+    const locale = normalizeLibraryLocale(input.locale)
     const artifact = await dependencies.artifacts.findById(input.workspaceId, input.artifactId.trim())
     if (!artifact || artifact.status !== 'available') throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Media artifact content was not found')
     const previewRecipes = new Set(['media-library-thumbnail', 'media-library-waveform', 'image-thumbnail', 'image-preview', 'extract-range'])
@@ -49,7 +51,7 @@ export function readArtifactContentService(dependencies: {
       for (const manifest of previewManifests) {
         for (const source of manifest.sources.filter((source) => source.role === 'source-master')) {
           const original = await dependencies.artifacts.findById(input.workspaceId, source.artifactId)
-          const item = await dependencies.library.findById(input.workspaceId, source.artifactId, dependencies.clock?.() ?? new Date())
+          const item = await dependencies.library.findById(input.workspaceId, source.artifactId, dependencies.clock?.() ?? new Date(), ...(locale ? [locale] : []))
           if (original?.status === 'available' && original.sha256 === source.sha256 && original.artifactKey === source.artifactKey && item?.status === 'usable' && item.rights.status === 'eligible') eligible = true
         }
       }

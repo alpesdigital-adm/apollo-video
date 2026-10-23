@@ -1,4 +1,6 @@
 import { assertDirectorSnapshotContent, bindDirectorSnapshotIdentities } from '../../src/v2/application/director-snapshot-identity.ts'
+import { parseEditorialPolicyResolution, resolutionOwnsPolicyRef } from '../../src/v2/domain/editorial-policy-resolution.ts'
+import { deriveEditorialRequestFromBrief } from '../../src/v2/domain/editorial-request.ts'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
@@ -15,9 +17,12 @@ import { assertDirectorRunEvidenceConsistency } from '../../src/v2/domain/direct
 import { serverPerceptionSnapshotId } from '../../src/v2/domain/server-perception-snapshot.ts'
 import { childCommandOf } from '../../src/v2/domain/project-output-state-transition.ts'
 import { ingestedRecordings, ingestedWorld, recompiledChild, worldActor } from './helpers/output-world.mjs'
+import { admitDirectorQualityForFinal, REQUIRED_HARD_CHECKS } from '../../src/v2/domain/final-caption-certification.ts'
+import { defineEditorialPhraseRules } from '../../src/v2/application/editorial-phrase-rules.ts'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
 import { createPerceptionProducerEnvelope } from '../../src/v2/domain/perception-producer-envelope.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
+import { readByInterpreter } from './helpers/editorial-request-fixture.mjs'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { createDirectorRunImpact, createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 import { validateDirectorDecisions } from '../../src/v2/domain/director-run.ts'
@@ -193,6 +198,8 @@ class InMemoryDirectorRepository {
       ? options.ownerText
       : 'Tom: direto, natural e sem efeitos gratuitos.'
     this.guardrails = options.guardrails ?? []
+    // A briefing with text is a request the Director refuses until an interpreter has read it (ADR-160 F6): unless a test says otherwise, it was read and held nothing to map.
+    this.editorialRequest = this.ownerText && !options.unread ? { ...readByInterpreter(this.ownerText), ...(options.editorialRequest ?? {}) } : options.editorialRequest
     this.ctaText = Object.hasOwn(options, 'ctaText')
       ? options.ctaText
       : ({
@@ -219,6 +226,10 @@ class InMemoryDirectorRepository {
       snapshotHash: 'd'.repeat(64), status: 'approved', consentStatus: 'not-required',
     }
     this.baseEditPlan = options.editPlan
+    // The language the project declares; null: it declares none (ADR-160).
+    this.projectLocale = options.projectLocale === undefined ? 'pt-BR' : options.projectLocale
+    // The speech the project asked to remove (the rules of its remove-spoken-content Commands); none unless a test sends a request.
+    this.requestedSpeechRemovals = options.requestedSpeechRemovals ?? []
     this.requested = []
     this.records = new Map()
   }
@@ -245,7 +256,7 @@ class InMemoryDirectorRepository {
     if (workspaceId !== 'workspace-1' || projectId !== 'project-1') return null
     return {
       workspaceId,
-      project: { id: projectId, objective: this.projectObjective, locale: 'pt-BR' },
+      project: { id: projectId, objective: this.projectObjective, ...(this.projectLocale ? { locale: this.projectLocale } : {}) },
       ...(this.latestDirectorObjective
         ? { latestDirectorObjective: this.latestDirectorObjective }
         : {}),
@@ -268,6 +279,7 @@ class InMemoryDirectorRepository {
             : {}),
         }),
         productionBrief: createProductionBrief({ ownerText: this.ownerText }),
+        ...(this.editorialRequest ? { editorialRequest: this.editorialRequest } : {}),
       },
       policies: { automaticZoom: false, faceProtection: true, guardrails: this.guardrails },
       editPlan: this.currentPlan(),
@@ -279,6 +291,8 @@ class InMemoryDirectorRepository {
         .map((artifactId) => ({ artifactId, rights: artifactId === this.transcript.sourceArtifactId ? this.sourceRights : this.insertRights })),
       outputReferences: this.outputReferences,
       transcript: this.transcript,
+      requestedSpeechRemovals: this.requestedSpeechRemovals,
+      ...(this.sourceDimensions ? { sourceDimensions: this.sourceDimensions } : {}),
       ...(this.ocrEnvelope ? { ocrEnvelope: this.ocrEnvelope } : {}),
     }
   }
@@ -342,6 +356,11 @@ class InMemoryDirectorRepository {
   }
 }
 
+/** The verdict of one hard check of a v5 report by id (undefined: the report has no such check). */
+const hardCheck = (report, id) => report.hardChecks.find((check) => check.id === id)?.passed
+/** What final-export admission binds a run's report to when the brief still states the request the run sealed. */
+const bindingOf = (run) => ({ currentRequestHash: run.requestHash, sealedRequestHash: run.requestHash, sealedPolicyResolutionHash: run.policyResolution.policyResolutionHash })
+
 function fixture(options = {}) {
   const repository = new InMemoryDirectorRepository(options)
   const counters = new Map()
@@ -352,7 +371,9 @@ function fixture(options = {}) {
     createId: (kind) => {
       const next = (counters.get(kind) ?? 0) + 1
       counters.set(kind, next)
-      return `${kind}-${next}`
+      // The sealed output world below numbers its own snapshots `project-snapshot-N`: the Director's own ids live in another namespace, so a
+      // run never meets a world snapshot by counting.
+      return kind === 'project-snapshot' ? `${kind}-run-${next}` : `${kind}-${next}`
     },
     createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}`,
     compileBrief: createEvidenceBoundBriefCompiler(),
@@ -419,7 +440,7 @@ test('Director binds controlled OCR samples to snapshot v2 while face safety rem
     const result = await service(request())
     const snapshot = repository.lastBundle.snapshots.find((item) => item.kind === 'perception')
     assert.equal(snapshot.contentSchemaVersion, 2)
-    assert.equal(result.run.plannerVersion, 'apollo-director-policy/v2')
+    assert.equal(result.run.plannerVersion, 'apollo-director-policy/v4')
     assert.equal(result.run.perception.schemaVersion, 2)
     assert.equal(result.run.perception.inputVersionId, 'project-version-4')
     assert.equal(result.run.perception.ocrEvidence.envelopeId, envelope.id)
@@ -433,7 +454,7 @@ test('Director binds controlled OCR samples to snapshot v2 while face safety rem
     assert.equal(result.run.perception.summary.confidence, 0.82)
     assert.equal(result.run.qualityReport.status, 'review-required')
     assert.equal(result.run.qualityReport.faceSafety.status, 'unknown')
-    assert.equal(result.run.qualityReport.hardChecks.subtitlesFaceSafe, false)
+    assert.equal(hardCheck(result.run.qualityReport, 'subtitlesFaceSafe'), undefined, 'a v5 report keeps no face flag among its checks: the claim is faceSafety alone')
     assert.equal(result.run.qualityReport.issues.some((issue) =>
       issue.code === 'OCR_SOURCE_LOWER_REGION_REVIEW_REQUIRED'), !empty)
   }
@@ -480,8 +501,8 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.equal(result.run.objectiveVersion, 1)
   assert.equal(result.run.rubricRef, 'awareness-discovery/v1')
   assert.equal(result.command.payload.previousObjective, 'discovery')
-  assert.equal(result.command.payload.snapshotRefs.brief, 'project-snapshot-1')
-  assert.deepEqual(repository.lastBundle.snapshots.map((snapshot) => snapshot.kind), ['brief', 'perception', 'treatment', 'story', 'edit-plan', 'quality-report'])
+  assert.equal(result.command.payload.snapshotRefs.brief, 'project-snapshot-run-1')
+  assert.deepEqual(repository.lastBundle.snapshots.map((snapshot) => snapshot.kind), ['brief', 'perception', 'treatment', 'story', 'edit-plan', 'quality-report', 'policy-resolution'])
   const briefSnapshot = repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'brief')
   const persistedBrief = JSON.parse(briefSnapshot.contentJson)
   assert.equal(briefSnapshot.contentSchemaVersion, 3)
@@ -501,13 +522,14 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.equal(result.run.storyPlan.blocks.length, 3)
   assert.equal(plan.videoTracks[0].clips.length, 3)
   assert.equal(plan.movementPolicy.automaticZoom, false)
-  assert.equal(plan.movementPolicy.protectedOpeningFrames, 120)
+  // No movement is applied and the request names no window: there is no opening to protect (ADR-160 F4).
+  assert.equal(plan.movementPolicy.protectedOpeningFrames, 0)
   assert.equal(plan.effectTracks.length, 0)
   assert.equal(plan.transitions.length, 2)
   assert.equal(plan.transitions.every((transition) => transition.type === 'straight-cut' && transition.audioFadeMs === 24), true)
   const cues = plan.subtitleTracks.flatMap((track) => track.cues)
   assert.ok(cues.length > 0)
-  assert.equal(cues.every((cue) => cue.anchor === 'bottom' && cue.text.length <= 32), true)
+  assert.equal(cues.every((cue) => cue.anchor === 'bottom' && cue.text.length <= result.run.policyResolution.policies.captions.value.capacityCharacters), true)
   assert.equal(cues.every((cue, index) => index === 0 || cue.startFrame >= cues[index - 1].endFrame), true)
   const captionText = cues.map((cue) => cue.text).join(' ').toLowerCase()
   assert.equal(captionText.includes('31 de janeiro'), false)
@@ -533,18 +555,23 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   )
   assert.equal(result.run.qualityReport.status, 'review-required')
   assert.deepEqual(result.run.qualityReport.faceSafety, { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] })
-  assert.equal(result.run.qualityReport.hardChecks.subtitlesFaceSafe, false)
+  assert.equal(hardCheck(result.run.qualityReport, 'subtitlesFaceSafe'), undefined)
   assert.ok(result.run.qualityReport.issues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED'))
-  assert.equal(result.run.qualityReport.schemaVersion, 'director-quality-report/v4')
+  assert.equal(result.run.qualityReport.schemaVersion, 'director-quality-report/v5')
   assert.equal(result.run.qualityReport.strategic.rubric.id, 'awareness-discovery')
   assert.equal(result.run.qualityReport.strategic.rubric.threshold, 68)
   assert.equal(result.run.qualityReport.strategic.rubric.purpose, 'editorial-quality-proxy')
   assert.equal(result.run.qualityReport.strategic.passed, true)
   assert.deepEqual(result.run.qualityReport.strategic.gateFailures, [])
-  assert.equal(result.run.qualityReport.strategic.evidence.length, 6)
+  // The hook criterion measures a role the request did not ask for: it is not scored, and the weights of the other five sum to one (ADR-160 F5).
+  assert.equal(result.run.qualityReport.strategic.evidence.length, 5)
+  assert.equal(result.run.qualityReport.strategic.evidence.some((item) => item.criterionId === 'hook-clarity'), false)
+  assert.ok(Math.abs(result.run.qualityReport.strategic.evidence.reduce((sum, item) => sum + item.weight, 0) - 1) < 1e-9)
+  assert.deepEqual(result.run.policyResolution.policies.rubric.value.notRequested, ['hook-clarity', 'cta-clarity', 'friction-reduction'])
+  assert.equal(result.run.storyPlan.blocks.every((block) => block.role === 'segment'), true, 'no role by position')
   assert.equal(result.run.qualityReport.score, result.run.qualityReport.strategic.score / 100)
-  assert.equal(Object.entries(result.run.qualityReport.hardChecks).filter(([key]) => key !== 'subtitlesFaceSafe').every(([, value]) => value), true)
-  assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'quality-report').contentSchemaVersion, 4)
+  assert.equal(result.run.qualityReport.hardChecks.every((check) => check.passed), true)
+  assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'quality-report').contentSchemaVersion, 5)
   assert.equal(repository.lastBundle.event.type, 'project.version.created')
   assert.deepEqual(result.impact.changeKinds, ['director-replan'])
   assert.deepEqual(result.impact.dependencyTypes, ['audio', 'content', 'policy', 'timing', 'visual'])
@@ -579,17 +606,19 @@ test('Director re-evaluates confirmed caption corrections without reusing the ol
   assert.notEqual(replanned.run.id, original.run.id)
   assert.equal(replanned.version.parentVersionId, original.version.id)
   assert.notEqual(replanned.run.qualityReport.id, original.run.qualityReport.id)
-  assert.equal(replanned.run.qualityReport.hardChecks.forbiddenSpeechAbsent, true)
+  assert.equal(hardCheck(replanned.run.qualityReport, 'forbiddenSpeechAbsent'), true)
   assert.equal(replanned.run.editPlan.reviewPatch.patchId, 'reviewed-patch-1')
 })
 
 test('Director rejects unsafe or stale reviewed captions before persistence', async () => {
+  // The project asked, through its remove-spoken-content request, to take this phrase out; a reviewed caption that says it again is refused.
+  const requestedSpeechRemovals = defineEditorialPhraseRules([{ id: 'phrase-rule-requested-1', label: 'frase pedida', alternatives: ['promoção relâmpago'] }])
   for (const mutation of [
-    (cue) => { cue.text = '31 de janeiro' },
+    (cue) => { cue.text = 'Promoção relâmpago!' },
     (cue) => { cue.anchor = 'center' },
     (cue) => { cue.startFrame += 1 },
   ]) {
-    const { repository, service } = fixture()
+    const { repository, service } = fixture({ requestedSpeechRemovals })
     const original = await service(request())
     const reviewed = structuredClone(original.run.editPlan)
     reviewed.reviewPatch = { patchId: 'reviewed-patch-1', annotationIds: ['annotation-caption-1'] }
@@ -599,6 +628,48 @@ test('Director rejects unsafe or stale reviewed captions before persistence', as
     await assert.rejects(service(request({ baseVersionId: original.version.id, baseHash: original.version.baseHash, idempotency: { key: 'unsafe-caption' } })), (error) => error.code === 'INVALID_RENDER_INPUT')
     assert.equal(repository.lastBundle.run.id, original.run.id)
   }
+})
+
+// The Director works from what each video's own request asks, never from a context fixed in the product: what it forbids in the
+// captions is the speech THIS project asked to remove (the rules of its remove-spoken-content Commands), and nothing else.
+function planSaying(words) {
+  const plan = structuredClone(compiledEditorialPlan())
+  words.forEach((text, index) => { plan.retimedTranscript.words[index].text = text })
+  return plan
+}
+
+test('a video that says "dois dias" and "31 de janeiro" is not blocked when nothing asked to remove them', async () => {
+  const editPlan = planSaying(['Seja', 'bem-vindo.', '31', 'de', 'janeiro,', 'em', 'dois', 'dias.'])
+  const { repository, service } = fixture({ editPlan })
+  const result = await service(request({ idempotency: { key: 'speech-without-request' } }))
+  const captions = result.run.editPlan.subtitleTracks.flatMap((track) => track.cues).map((cue) => cue.text).join(' ')
+  assert.match(captions, /31 de janeiro/)
+  assert.match(captions, /dois dias/)
+  assert.equal(hardCheck(result.run.qualityReport, 'forbiddenSpeechAbsent'), true)
+  assert.notEqual(result.run.qualityReport.status, 'blocked')
+  assert.equal(admitDirectorQualityForFinal(result.run.qualityReport, bindingOf(result.run)).admitted, true)
+  assert.equal(result.run.qualityReport.criticVersion, 'apollo-director-critic/v5')
+  assert.ok(repository.lastBundle)
+})
+
+test('a request to remove a phrase that the captions still say blocks the Director on forbiddenSpeechAbsent', async () => {
+  const editPlan = planSaying(['Seja', 'bem-vindo.', 'Hoje', 'tem', 'promoção', 'relâmpago.'])
+  const requestedSpeechRemovals = defineEditorialPhraseRules([
+    { id: 'phrase-rule-requested-1', label: 'frase pedida', alternatives: ['promoção relâmpago', 'oferta relampago'] },
+  ])
+  const asked = fixture({ editPlan, requestedSpeechRemovals })
+  await assert.rejects(
+    asked.service(request({ idempotency: { key: 'speech-still-present' } })),
+    (error) => error instanceof DomainError && error.code === 'INVALID_RENDER_INPUT' &&
+      error.details.gateFailures.includes('narrative-integrity') &&
+      JSON.stringify(error.details.requestedSpeechStillPresent) === JSON.stringify(['phrase-rule-requested-1']),
+  )
+  assert.equal(asked.repository.lastBundle, undefined)
+  // The same words with no request, and the request over words that do not say it, both pass: the rule is the request, not the words.
+  const unasked = fixture({ editPlan })
+  assert.equal((await unasked.service(request({ idempotency: { key: 'speech-no-request' } }))).run.qualityReport.hardChecks.find((check) => check.id === 'forbiddenSpeechAbsent').passed, true)
+  const removed = fixture({ requestedSpeechRemovals })
+  assert.equal((await removed.service(request({ idempotency: { key: 'speech-request-honoured' } }))).run.qualityReport.hardChecks.find((check) => check.id === 'forbiddenSpeechAbsent').passed, true)
 })
 
 test('Director blocks material brief conflicts before creating or persisting plans', async () => {
@@ -858,7 +929,9 @@ test('Director V2 persists an evidence-bound media-only treatment before proxy e
   assert.ok(result.run.treatmentPlan.claimPolicy.observedClaims.includes('Comunicar bem muda resultados.'))
   assert.deepEqual(result.run.treatmentPlan.claimPolicy.proposedClaims, [])
   assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'treatment').contentSchemaVersion, 3)
-  assert.match(result.run.decisions.find((decision) => decision.id === 'decision-motion-none').reason, /No owner brief/u)
+  const motion = result.run.decisions.find((decision) => decision.id === 'decision-motion-none').reason
+  assert.match(motion, /The request does not mention camera movement/u)
+  assert.doesNotMatch(motion, /owner|brief/iu, 'a request that said nothing is not attributed to anyone')
 })
 
 test('Director V2 still requests one full proxy without fabricating stale artifacts when the base has no completed outputs', async () => {
@@ -912,7 +985,7 @@ test('W66 multi-output: the Director impact document refuses a render of a stran
   const base = {
     commandId: 'command-director-two-outputs', baseVersionId: 'version-director-two-outputs-base', resultVersionId: 'version-director-two-outputs-result',
     sourceTranscriptId: 'transcript-director-two-outputs', sourceTranscriptHash: 'a'.repeat(64),
-    plannerVersion: 'apollo-director-policy/v2', criticVersion: 'apollo-director-critic/v3', affectedEndFrame: 300, renderEndFrame: 280,
+    plannerVersion: 'apollo-director-policy/v4', criticVersion: 'apollo-director-critic/v5', affectedEndFrame: 300, renderEndFrame: 280,
   }
   const reference = (variantId) => ({ artifactId: `artifact-${variantId}`, kind: 'proxy', sourceVersionId: base.baseVersionId, variantId })
   const ok = createDirectorRunImpact({ ...base, variantIds: ['variant-wide', 'variant-vertical'], outputReferences: [reference('variant-wide')] })
@@ -1586,10 +1659,10 @@ test('W64 with no perception at all the plan is review - never the old flag, nev
   const { repository, service } = fixture()
   const { run } = await service(request())
   const report = run.qualityReport
-  assert.equal(report.schemaVersion, 'director-quality-report/v4')
+  assert.equal(report.schemaVersion, 'director-quality-report/v5')
   assert.equal(report.status, 'review-required')
   assert.equal(report.faceSafety.status, 'unknown')
-  assert.equal(report.hardChecks.subtitlesFaceSafe, false, 'face safety is still claimed by nobody')
+  assert.equal(hardCheck(report, 'subtitlesFaceSafe'), undefined, 'face safety is claimed by nobody: no check of the list says it')
   // all six decisions were graded by policy v2 and say so; only crop, caption and insert stand on perception
   assert.ok(run.decisions.every((decision) => decision.bandPolicy.policyHash === CONFIDENCE_BAND_POLICY_V2_SHA256))
   assert.deepEqual(run.decisions.filter((decision) => decision.perceptionEvidence).map((decision) => [decision.id, decision.decisionType]).toSorted(),
@@ -1636,7 +1709,7 @@ test('W64 with no perception at all the plan is review - never the old flag, nev
     [[0, 115, 'deferred'], [145, 275, 'deferred'], [305, 420, 'deferred']])
   // the stored bytes read back through the strict parser, and a tampered tier does not
   const stored = repository.lastBundle.snapshots.find((item) => item.kind === 'quality-report')
-  const parse = (contentJson) => parseDirectorQualityReport({ contentJson, contentHash: stored.contentHash, contentSchemaVersion: 4, objective: run.objective, rubricRef: run.rubricRef })
+  const parse = (contentJson) => parseDirectorQualityReport({ contentJson, contentHash: stored.contentHash, contentSchemaVersion: 5, objective: run.objective, rubricRef: run.rubricRef })
   assert.equal(parse(stored.contentJson).perceptionEvidence.evidenceHash, report.perceptionEvidence.evidenceHash)
   const forged = JSON.parse(stored.contentJson)
   forged.perceptionEvidence.modalities.find((item) => item.modality === 'face').tier = 'high'
@@ -1800,4 +1873,219 @@ test('W64 the result Version is materialized after the commit and never before i
   const failing = fixture({ materializeSnapshot: async (input) => { refused.push(input) } })
   await assert.rejects(failing.service(request({ baseHash: 'c'.repeat(64), idempotency: { key: 'director-stale-materialize' } })), (error) => error.code === 'VERSION_CONFLICT')
   assert.equal(refused.length, 0)
+})
+
+// ---- ADR-160: the plan is made from the policy resolution of the editorial request, and says so.
+
+test('ADR-160 the run seals the request it answers and the policy resolution it was planned and judged against', async () => {
+  const { repository, service } = fixture()
+  const { run, command } = await service(request({ idempotency: { key: 'request-sealed' } }))
+  assert.match(run.requestHash, /^[a-f0-9]{64}$/)
+  assert.equal(run.policyResolution.requestHash, run.requestHash)
+  assert.equal(run.qualityReport.requestHash, run.requestHash)
+  assert.equal(run.qualityReport.policyResolutionHash, run.policyResolution.policyResolutionHash)
+  assert.equal(run.qualityReport.criticVersion, 'apollo-director-critic/v5')
+  // the sealed resolution is a snapshot of its own, named by the command and by the run
+  const sealed = repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'policy-resolution')
+  assert.equal(command.payload.snapshotRefs.policyResolution, sealed.id)
+  assert.equal(parseEditorialPolicyResolution(JSON.parse(sealed.contentJson)).policyResolutionHash, run.policyResolution.policyResolutionHash)
+  // the request is the one the brief states: the same reader the final-export admission uses
+  const brief = JSON.parse(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'brief').contentJson)
+  assert.equal(deriveEditorialRequestFromBrief(brief).requestHash, run.requestHash)
+  // every decision names the policy that sustains it, and the policy belongs to this resolution
+  for (const decision of run.decisions) {
+    assert.ok(decision.evidenceRefs.some((ref) => resolutionOwnsPolicyRef(run.policyResolution, ref)), `${decision.id} names no policy of the sealed resolution`)
+  }
+  // every hard check is tied to a policy of the resolution, or to none
+  for (const check of run.qualityReport.hardChecks) {
+    assert.ok(['request', 'invariant'].includes(check.kind))
+    assert.ok(check.policyRef === null || resolutionOwnsPolicyRef(run.policyResolution, check.policyRef), `${check.id} names a policy this resolution does not own`)
+    assert.ok(check.evidence.length > 0)
+  }
+  assert.deepEqual(run.qualityReport.hardChecks.map((check) => check.id),
+    ['requestHonored', 'movementMatchesPolicy', 'openingMatchesPolicy', 'forbiddenSpeechAbsent', 'captionsFitMeasured', 'timelineContinuous', 'sourceRightsCertain'])
+})
+
+test('ADR-160 the reason of a decision is generated from the origin of its policy, never from a wish the request did not state', async () => {
+  // A briefing that talks about tone and nothing about movement: the old reason attributed "a direct, natural tone" to the owner for the
+  // absence of camera movement. The reason now says that the request is silent about movement.
+  const { run } = await fixture().service(request({ idempotency: { key: 'reason-from-origin' } }))
+  const motion = run.decisions.find((decision) => decision.id === 'decision-motion-none')
+  assert.equal(run.policyResolution.policies.movement.origin, 'silence-rule')
+  assert.equal(run.policyResolution.policies.movement.rule, 'minimal-intervention')
+  assert.equal(motion.reason, run.policyResolution.policies.movement.reason)
+  assert.match(motion.reason, /does not mention camera movement/)
+  for (const decision of run.decisions) {
+    assert.doesNotMatch(decision.reason, /owner requested|requested a direct|natural tone/i, `${decision.id} attributes to the owner what the request does not say`)
+  }
+  // When the request DOES say it, the reason says so and points at the field.
+  const asked = fixture({ editorialRequest: { directives: [{ id: 'movement-field', kind: 'movement', value: 'none' }] } })
+  const { run: answered } = await asked.service(request({ idempotency: { key: 'reason-from-field' } }))
+  const answeredMotion = answered.decisions.find((decision) => decision.id === 'decision-motion-none')
+  assert.equal(answered.policyResolution.policies.movement.origin, 'request-field')
+  assert.match(answeredMotion.reason, /Requested as a structured field of the editorial request \(movement none\)/)
+  assert.notEqual(answered.requestHash, run.requestHash)
+  assert.notEqual(answered.policyResolution.policyResolutionHash, run.policyResolution.policyResolutionHash)
+})
+
+test('ADR-160 different briefings over the same media give different requests and different resolutions; a silent project resolves every policy with origin and reason', async () => {
+  const hashes = new Set()
+  for (const ownerText of [undefined, 'alpha beta gamma', 'delta epsilon']) {
+    const { run } = await fixture({ ownerText }).service(request({ idempotency: { key: `briefing-${String(ownerText).length}` } }))
+    hashes.add(run.requestHash)
+    hashes.add(run.policyResolution.policyResolutionHash)
+    for (const [key, policy] of Object.entries(run.policyResolution.policies)) {
+      assert.ok(policy.origin && policy.rule && policy.reason.length > 20 && policy.evidenceRefs.length > 0, `${key} lacks origin, rule, reason or evidence`)
+    }
+  }
+  assert.equal(hashes.size, 6, 'three briefings, three requests and three resolutions')
+})
+
+test('ADR-160 a request the Apollo cannot execute stops the Director before any plan is persisted: it is never ignored', async () => {
+  const unsupported = fixture({ editorialRequest: { directives: [{ id: 'movement-field', kind: 'movement', value: 'zoom-in' }] } })
+  await assert.rejects(unsupported.service(request({ idempotency: { key: 'unsupported-movement' } })),
+    (error) => error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' && error.details.unsupported[0].value === 'movement zoom-in')
+  assert.equal(unsupported.repository.lastBundle, undefined)
+  const rotten = fixture({ editorialRequest: { directives: [{ id: 'movement-field', kind: 'tone', value: 'warm' }] } })
+  await assert.rejects(rotten.service(request({ idempotency: { key: 'unknown-directive' } })), (error) => error instanceof DomainError)
+  assert.equal(rotten.repository.lastBundle, undefined)
+})
+
+test('ADR-160 the final admission needs the v5 report, critic v4, every check, the request now in the brief and the sealed resolution', async () => {
+  const { run } = await fixture().service(request({ idempotency: { key: 'admission' } }))
+  const report = run.qualityReport
+  const bound = bindingOf(run)
+  assert.deepEqual(admitDirectorQualityForFinal(report, bound), { admitted: true, basis: 'per-cue-caption-certification' })
+  const refused = (value, binding, pattern) => {
+    const verdict = admitDirectorQualityForFinal(value, binding)
+    assert.equal(verdict.admitted, false)
+    assert.match(verdict.reason, pattern)
+  }
+  refused(report, undefined, /cannot be bound/)
+  refused(report, { ...bound, currentRequestHash: 'f'.repeat(64) }, /request changed/)
+  refused(report, { ...bound, sealedRequestHash: null }, /did not seal/)
+  refused(report, { ...bound, sealedPolicyResolutionHash: 'e'.repeat(64) }, /policy resolution sealed/)
+  refused(report, { ...bound, sealedPolicyResolutionHash: null }, /policy resolution sealed/)
+  refused({ ...report, criticVersion: 'apollo-director-critic/v3' }, bound, /superseded/)
+  refused({ ...report, criticVersion: 'whatever' }, bound, /not a critic the Apollo admits/)
+  refused({ ...report, schemaVersion: 'director-quality-report/v4' }, bound, /superseded/)
+  refused({ ...report, schemaVersion: 'director-quality-report/v3' }, bound, /superseded/)
+  refused({ ...report, hardChecks: report.hardChecks.map((check) => check.id === 'movementMatchesPolicy' ? { ...check, passed: false } : check) }, bound, /movementMatchesPolicy did not hold/)
+  refused({ ...report, hardChecks: report.hardChecks.filter((check) => check.id !== 'requestHonored') }, bound, /requestHonored is missing/)
+  refused({ ...report, hardChecks: [] }, bound, /no hard check list/)
+  refused({ ...report, requestHash: undefined }, bound, /does not name/)
+  refused({ ...report, status: 'blocked' }, bound, /blocked/)
+  assert.deepEqual([...REQUIRED_HARD_CHECKS], ['requestHonored', 'timelineContinuous', 'sourceRightsCertain'])
+})
+
+test('ADR-160 F5: the call to action is the block where it is spoken, the overlay follows that speech, and no block has a role by position', async () => {
+  const { repository, service } = fixture({ projectObjective: 'sale', ctaText: 'Compre' })
+  // the call is said in the MIDDLE clip, not in the last one
+  const base = compiledEditorialPlan(false, 'Compre')
+  const words = base.retimedTranscript.words
+    .map((word) => word.text === 'Compre' ? { ...word, timelineStartFrame: 178, timelineEndFrame: 190, sourceStartSeconds: 11.9, sourceEndSeconds: 12.3 } : word)
+    .toSorted((left, right) => left.timelineStartFrame - right.timelineStartFrame)
+  repository.baseEditPlan = Object.freeze({ ...base, retimedTranscript: Object.freeze({ ...base.retimedTranscript, words: Object.freeze(words) }) })
+  const result = await service(request({
+    objective: 'sale',
+    desiredAction: { destination: { type: 'url', value: 'https://checkout.example/oferta' }, verbalCta: 'Compre', visualCta: 'Ver oferta' },
+    reason: 'A oferta pede uma ação.',
+    idempotency: { key: 'director-f5-structure' },
+  }))
+  const blocks = result.run.storyPlan.blocks
+  assert.deepEqual(blocks.map((block) => block.role), ['segment', 'cta', 'segment'], 'the call is in clip 2, wherever the clips are')
+  assert.deepEqual(result.run.storyPlan.acts.map((act) => act.id), ['sequence'])
+  assert.equal(blocks.every((block) => block.actId === 'sequence'), true)
+  // the visual call is drawn while the sentence of the call is spoken, not in a closing window of fixed length
+  const [overlay] = result.run.editPlan.overlayTracks
+  assert.equal(overlay.startFrame, 178)
+  assert.equal(overlay.endFrame, 190)
+  const policies = result.run.policyResolution.policies
+  assert.deepEqual(policies.ctaOverlay.value, { mode: 'window', startSeconds: 5.933, endSeconds: 6.333, anchoredTo: 'spoken-cta' })
+  assert.equal(policies.structure.value.roles, 'none')
+  assert.equal(result.run.qualityReport.strategic.gateResults.find((gate) => gate.id === 'cta-required').passed, true)
+  // the treatment plan carries the budgets of the resolution, not numbers of the planner
+  assert.equal(result.run.treatmentPlan.budget.patternBreaksPer30s, policies.budget.value.maxPatternBreaksPer30s)
+  assert.equal(result.run.treatmentPlan.budget.proofItems, policies.budget.value.maxProofItems)
+  assert.deepEqual([...result.run.treatmentPlan.patternBreaks.allowed], [])
+  assert.equal(result.run.treatmentPlan.ctaPolicy.placement, 'at-observed-call')
+  // the layout is the policy's: the fixture's source has no probed shape, so the whole frame stays over a backdrop
+  assert.equal(result.run.editPlan.composition.layout, 'landscape-inset')
+  assert.equal(policies.layout.rule, 'minimal-intervention')
+})
+
+test('ADR-160 F5: a source with the frame shape of every output is used as it is, and a source of another shape keeps the whole frame over a backdrop', async () => {
+  const native = fixture()
+  const ratio = native.repository.parent.state.document.entries[0].spec.output.aspectRatio
+  const [w, h] = ratio.split(':').map(Number)
+  native.repository.sourceDimensions = { width: w * 100, height: h * 100 }
+  const same = await native.service(request({ idempotency: { key: 'director-f5-native' } }))
+  assert.equal(same.run.policyResolution.policies.layout.value.mode, 'source-native')
+  assert.equal(same.run.policyResolution.policies.layout.origin, 'output-spec')
+  assert.equal(same.run.editPlan.composition.layout, 'source-native')
+  assert.equal(same.run.editPlan.composition.background, 'none')
+  assert.equal(same.run.decisions.find((decision) => decision.id === 'decision-layout-inset').choice, 'source-native-frame')
+  const other = fixture()
+  other.repository.sourceDimensions = { width: h * 100, height: w * 100 }
+  const different = await other.service(request({ idempotency: { key: 'director-f5-other-shape' } }))
+  assert.equal(different.run.policyResolution.policies.layout.value.mode, 'fit-with-backdrop')
+  assert.equal(different.run.editPlan.composition.layout, 'landscape-inset')
+  assert.equal(different.run.editPlan.composition.background, 'blurred-source')
+})
+
+test('ADR-160 F6 a briefing with text that no interpreter has read stops the Director: it is not planned over as an empty briefing', async () => {
+  const unread = fixture({ ownerText: 'alpha beta gamma', unread: true })
+  await assert.rejects(unread.service(request({ idempotency: { key: 'unread-briefing' } })), (error) =>
+    error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'brief-interpretation-required')
+  assert.equal(unread.repository.lastBundle, undefined)
+  // The same briefing, read, plans; an open question the reading raised stops it again, with the question in the error.
+  const { readByInterpreter: read } = await import('./helpers/editorial-request-fixture.mjs')
+  const asked = fixture({ ownerText: 'alpha beta gamma', editorialRequest: read('alpha beta gamma', {
+    questions: [{ id: 'q1', status: 'open', question: 'Which of the two is meant?', excerpt: { start: 0, end: 5, text: 'alpha' } }],
+  }) })
+  await assert.rejects(asked.service(request({ idempotency: { key: 'open-question' } })), (error) =>
+    error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' && error.details.openQuestions[0].id === 'q1')
+  assert.equal(asked.repository.lastBundle, undefined)
+  const answered = fixture({ ownerText: 'alpha beta gamma', editorialRequest: read('alpha beta gamma', {
+    questions: [{ id: 'q1', status: 'answered', answer: 'neither', question: 'Which of the two is meant?', excerpt: { start: 0, end: 5, text: 'alpha' } }],
+  }) })
+  await answered.service(request({ idempotency: { key: 'answered-question' } }))
+  assert.ok(answered.repository.lastBundle)
+})
+
+test('ADR-160: the caption language of a project that declares none is the language detected in the speech, and the resolution says where it came from', async () => {
+  const detected = fixture({ projectLocale: null, transcript: { id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'pt', languageBasis: 'detected-from-media',
+    provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64) } })
+  const result = await detected.service(request({ idempotency: { key: 'director-language-detected' } }))
+  const language = result.run.policyResolution.policies.language
+  assert.deepEqual(language.value, { captionLanguage: 'pt' })
+  assert.equal(language.origin, 'media-context')
+  assert.equal(language.rule, 'source-observation')
+  assert.equal(result.run.policyResolution.openQuestions.some((item) => item.id === 'declared-language-differs-from-speech'), false)
+  // the language the project declares is the requester's word: it is never recorded as observed in the media
+  const declared = fixture({ transcript: { id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'pt-BR', languageBasis: 'declared-not-verified',
+    provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64) } })
+  const declaredLanguage = (await declared.service(request({ idempotency: { key: 'director-language-declared' } }))).run.policyResolution.policies.language
+  assert.equal(declaredLanguage.origin, 'request-field')
+  assert.match(declaredLanguage.reason, /not verified/)
+})
+
+test('ADR-160: a transcript whose language the provider could not tell is the undetermined language - the captions wait for the answer', async () => {
+  const unknown = fixture({ projectLocale: null, transcript: { id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'und', languageBasis: 'detected-from-media',
+    provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64) } })
+  await assert.rejects(
+    () => unknown.service(request({ idempotency: { key: 'director-language-undetermined' } })),
+    (error) => error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' && JSON.stringify(error.details).includes('caption-language-unknown'),
+  )
+})
+
+test('a Director context that does not state the speech the project asked to remove is refused, never read as "nothing was asked"', async () => {
+  const { repository, service } = fixture()
+  const readContext = repository.readContext.bind(repository)
+  repository.readContext = async (input) => {
+    const { requestedSpeechRemovals: _omitted, ...context } = await readContext(input)
+    return context
+  }
+  await assert.rejects(service(request()), (error) => error.code === 'PERSISTENCE_CONFLICT' && /asked to remove/.test(error.message))
+  assert.equal(repository.lastBundle, undefined)
 })

@@ -126,6 +126,7 @@ export function parseCreateProductionBatchBody(
     'variants',
     'budget',
     'items',
+    'briefing',
   ], 'body')
   const sourceGroups = array(
     body.sourceGroups,
@@ -237,8 +238,10 @@ export function parseCreateProductionBatchBody(
     })
   return Object.freeze({
     projectId: string(body.projectId, 'projectId', 3, 128),
+    // The editorial request of the whole batch: any non-empty text (the interpreter reads it; the service checks the length and the content).
+    briefing: string(body.briefing, 'briefing', 1, 10_000),
     name: string(body.name, 'name', 1, 200),
-    objective: string(body.objective, 'objective', 1, 128),
+    ...(body.objective !== undefined ? { objective: string(body.objective, 'objective', 1, 128) } : {}),
     sourceGroups: Object.freeze(sourceGroups),
     recipes: Object.freeze(recipes),
     variants: Object.freeze(variants),
@@ -371,11 +374,17 @@ export function parseProductionBatchActionBody(raw: unknown) {
   })
 }
 
+/** The batch as it is published: the stored editorial request (briefing and its reading) is an input of the batch, not part of its public document. */
+function publishedBatch(batch: Readonly<ProductionBatch>) {
+  const { editorialRequest: _stored, ...published } = batch
+  return published
+}
+
 export function presentProductionBatch(
   batch: Readonly<ProductionBatch>,
 ) {
   return Object.freeze({
-    ...batch,
+    ...publishedBatch(batch),
     status: deriveBatchStatus(batch),
     progress: batchProgress(batch),
   })
@@ -390,7 +399,7 @@ export function presentProductionBatchV2(
     item.visibleState,
   ]))
   return Object.freeze({
-    ...batch,
+    ...publishedBatch(batch),
     items: Object.freeze(batch.items.map((item) => Object.freeze({
       ...item,
       visibleState: itemStates.get(item.id)!,
@@ -418,5 +427,75 @@ export function presentProductionBatchPage(input: {
   return Object.freeze({
     batches: Object.freeze(input.batches.map(presentProductionBatch)),
     ...(input.nextCursor ? { nextCursor: input.nextCursor } : {}),
+  })
+}
+
+/** The request of a batch as it stands now, as it is published by `apollo.batches.editorial-request.read` (and returned by the revision). */
+export function presentProductionBatchEditorialRequest(view: Readonly<{
+  batch: Readonly<{ id: string; projectId: string; name: string }>
+  state: 'no-request' | 'interpreted'
+  request: Readonly<{ schemaVersion: string; briefing?: Readonly<{ text: string; sha256: string }>; objective?: unknown; desiredAction?: unknown; directives: readonly unknown[]; variantOverrides: Readonly<Record<string, readonly unknown[]>>; requestHash: string }> | null
+  interpretation: unknown
+  interpretationAudit: unknown
+  unsupported: readonly unknown[]
+  openQuestions: readonly unknown[]
+  blocksGeneration: boolean
+  revision: Readonly<{ sequence: number; createdAt: string }> | null
+  hashes: unknown
+}>) {
+  const { request } = view
+  return Object.freeze({
+    batch: view.batch,
+    state: view.state,
+    request: request === null ? null : Object.freeze({
+      schemaVersion: request.schemaVersion,
+      ...(request.briefing ? { briefing: { text: request.briefing.text, sha256: request.briefing.sha256 } } : {}),
+      ...(request.objective ? { objective: request.objective } : {}),
+      ...(request.desiredAction ? { desiredAction: request.desiredAction } : {}),
+      directives: request.directives,
+      variantOverrides: request.variantOverrides,
+      requestHash: request.requestHash,
+    }),
+    interpretation: view.interpretation,
+    interpretationAudit: view.interpretationAudit,
+    unsupported: view.unsupported,
+    openQuestions: view.openQuestions,
+    blocksGeneration: view.blocksGeneration,
+    revision: view.revision,
+    hashes: view.hashes,
+  })
+}
+
+const REQUEST_HASH = /^[a-f0-9]{64}$/u
+
+/**
+ * The body of `apollo.batches.editorial-request.revise`: the hash of the request the owner was looking at (null when the batch has none), and
+ * either the new briefing of the batch or the answers to its open questions. The domain checks the shape of the answers.
+ */
+export function parseReviseProductionBatchEditorialRequestBody(raw: unknown) {
+  const body = record(raw, 'body')
+  exactFields(body, ['expectedRequestHash', 'briefing', 'answers'], 'body')
+  if (!('expectedRequestHash' in body)) throw new DomainError('INVALID_ARGUMENT', 'expectedRequestHash is required (null when the batch has no request)')
+  const expected = body.expectedRequestHash
+  if (expected !== null && !(typeof expected === 'string' && REQUEST_HASH.test(expected))) {
+    throw new DomainError('INVALID_ARGUMENT', 'expectedRequestHash is the hash of the request you were looking at, or null')
+  }
+  return Object.freeze({
+    expectedRequestHash: expected as string | null,
+    ...(body.briefing !== undefined ? { briefing: string(body.briefing, 'briefing', 1, 10_000) } : {}),
+    ...(body.answers !== undefined ? { answers: body.answers } : {}),
+  })
+}
+
+/** The result of a revision: the request as it stands now (with its revision), and what this revision changed. */
+export function presentProductionBatchEditorialRequestRevision(result: Readonly<{
+  revision: Readonly<{ id: string; sequence: number; previousRequestHash: string | null; change: Readonly<Record<string, unknown>>; createdAt: string }>
+  view: Parameters<typeof presentProductionBatchEditorialRequest>[0]
+  replayed: boolean
+}>) {
+  return Object.freeze({
+    ...presentProductionBatchEditorialRequest(result.view),
+    change: Object.freeze({ previousRequestHash: result.revision.previousRequestHash, ...result.revision.change }),
+    replayed: result.replayed,
   })
 }

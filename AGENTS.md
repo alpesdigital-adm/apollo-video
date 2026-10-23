@@ -61,6 +61,10 @@ Não é necessário realizar migração completa do banco ou preservar tabelas. 
 
 Apenas masters brutos selecionados podem ser preservados. Eles devem ser reingeridos pelo fluxo novo e receber novas identidades, rights, lineage e artifacts V2. Arquivo bruto é insumo; não é compatibilidade arquitetural.
 
+## Regra pétrea: nada é fixo, tudo vem do pedido de cada vídeo
+
+Decisão do proprietário (22/10/2026). No Apollo nada é fixo — tudo vem do pedido de cada vídeo. Conteúdo (frases, datas, cortes, CTA) e política editorial (movimento/zoom, abertura, estrutura narrativa, layout, idioma, legendas) são decididos a partir do briefing e dos Commands daquele vídeo. Nenhum valor de um vídeo ou teste vira regra, default, valor de substituição, recomendação ou exemplo de API; conteúdo de caso de teste só existe em `tests/`. Briefing: o produto pode orientar o que um bom briefing contém, mas aceita briefing simples; exemplos nunca viram default nem recomendação.
+
 ## Arquitetura obrigatória
 
 O único fluxo permitido é:
@@ -309,14 +313,18 @@ Estas regras são vinculantes para agentes, scripts manuais e CI:
     remove o diretório efêmero. Antes de um build, confirmar que não existe
     processo dono do arquivo; nunca contornar um handle ativo apagando o log.
 
-## Projeto real usado como E2E de recuperação
+## Caso de teste de regressão: E2E de recuperação do master da Imersão
 
-O primeiro E2E deve usar o master bruto já preservado do projeto de boas-vindas da Imersão.
+Esta seção descreve **um caso de teste de regressão**, não uma regra do produto (veja a regra pétrea acima). O primeiro E2E usa o master bruto já preservado do projeto de boas-vindas da Imersão. Tudo abaixo são critérios **daquele caso de teste**: valem para aquele pedido e não se generalizam para outros vídeos.
 
-Critérios obrigatórios:
+O pedido que o teste envia como Command `remove-spoken-content` vive em `tests/v2/helpers/recovery-master-regression-case.mjs`:
+
+- remover todas as falas que mencionem as datas “31 de janeiro” e “1 de fevereiro”, além de referências à duração de dois dias/dois dias de aula;
+- timestamps antigos (36,66–58,24 e 86,58–87,76) podem ajudar a localizar as falas no master, mas não são fonte de verdade. O ingest V2 deve gerar e validar seu próprio alinhamento.
+
+Critérios do caso (o briefing e o formato daquele pedido):
 
 - informar e respeitar briefing e formato antes da direção;
-- remover todas as falas que mencionem as datas “31 de janeiro” e “1 de fevereiro”, além de referências à duração de dois dias/dois dias de aula;
 - preservar sentido e continuidade do discurso após os cortes;
 - esconder cortes difíceis com decisão editorial justificável, não efeito gratuito;
 - não aplicar zoom, pan, tilt ou punch-in sem razão registrada pelo Diretor;
@@ -326,8 +334,6 @@ Critérios obrigatórios:
 - produzir MP4 final assistível;
 - executar as alterações pela API nova e registrar Commands/DirectorRun/QualityReport;
 - revisar o MP4 antes de declarar o teste concluído.
-
-Timestamps antigos como 36,66–58,24 e 86,58–87,76 podem ajudar a localizar as falas no master, mas não são fonte de verdade. O ingest V2 deve gerar e validar seu próprio alinhamento.
 
 ## Segurança para reset e remoção
 

@@ -13,7 +13,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ art
     const actor = await authenticateExternalRequest(request); requireScope(actor, 'artifacts:read')
     const { artifactId, kind } = await context.params
     if (kind !== 'thumbnail' && kind !== 'waveform') throw new DomainError('INVALID_ARGUMENT', 'Preview kind is invalid')
-    const content = await readMediaLibraryPreviewService({ library: createMediaLibraryRepository(), artifacts: createMediaArtifactQueryRepository(), storage: createArtifactContentStorage() })({ workspaceId: actor.workspaceId, itemId: artifactId, kind })
+    const content = await readMediaLibraryPreviewService({ library: createMediaLibraryRepository(), artifacts: createMediaArtifactQueryRepository(), storage: createArtifactContentStorage() })({ workspaceId: actor.workspaceId, itemId: artifactId, kind, ...(request.nextUrl.searchParams.has('locale') ? { locale: request.nextUrl.searchParams.get('locale') ?? '' } : {}) })
     return new Response(content.body, { headers: { ...publicApiHeaders(requestId), 'Cache-Control': 'private, no-store', 'Content-Type': content.contentType, 'Content-Length': String(content.byteSize), ETag: content.etag, 'X-Content-Type-Options': 'nosniff' } })
   } catch (error) { return respondPublicError(error, requestId) }
 }

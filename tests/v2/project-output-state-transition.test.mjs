@@ -196,8 +196,10 @@ async function pinChildCommandGuard(migration, table, { dispatch }) {
 
 test('the database guard names exactly the types, plan effects, replacements, origin keys and producer the domain declares', async () => {
   const table = Object.entries(CHILD_COMMAND_TRANSITIONS)
-  await pinChildCommandGuard('20261016120000_project_child_command_state_v1', table.filter(([type]) => type !== 'apply-variant-reframe-override'), { dispatch: true })
-  await pinChildCommandGuard('20261019100000_variant_reframe_v1', table, { dispatch: false })
+  await pinChildCommandGuard('20261016120000_project_child_command_state_v1', table.filter(([type]) => type !== 'apply-variant-reframe-override' && type !== 'revise-editorial-request'), { dispatch: true })
+  await pinChildCommandGuard('20261019100000_variant_reframe_v1', table.filter(([type]) => type !== 'revise-editorial-request'), { dispatch: false })
+  // ADR-160 F6 adds `revise-editorial-request` (it replaces the brief and nothing else, and preserves the plan): the definition in force names the table as it is now.
+  await pinChildCommandGuard('20261022150000_revise_editorial_request_v1', table, { dispatch: false })
 })
 
 test('a child plan is materialized only from observed sources: an unobserved source is refused, an emptied plan blocks', async () => {

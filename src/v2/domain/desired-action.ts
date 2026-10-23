@@ -4,6 +4,7 @@ import {
   type StrategicObjectiveId,
 } from './strategic-objective.ts'
 import { calculateCanonicalHash } from './canonical-hash.ts'
+import { ctaLexiconFor } from './cta-lexicon.ts'
 
 export const DESIRED_ACTION_DESTINATION_TYPES = Object.freeze([
   'url', 'handle', 'whatsapp', 'calendar', 'file',
@@ -145,14 +146,6 @@ const requiredDestinationType: Readonly<Partial<Record<DesiredActionKind, Desire
   'message-whatsapp': 'whatsapp',
   book: 'calendar',
   download: 'file',
-})
-
-const spokenCtaPattern: Readonly<Record<Exclude<DesiredActionKind, 'continue-viewing'>, RegExp>> = Object.freeze({
-  'submit-lead': /\b(cadastre|cadastro|inscreva|inscricao|formulario|contato|lead)\b/,
-  buy: /\b(compre|comprar|compra|checkout|garanta|adquira)\b/,
-  'message-whatsapp': /\bwhatsapp\b/,
-  book: /\b(agende|agendar|agenda|horario|consulta|reuniao)\b/,
-  download: /\b(baixe|baixar|download|material|guia|arquivo)\b/,
 })
 
 function normalizedSpeech(value: string): string {
@@ -348,6 +341,11 @@ export function validateDesiredActionAlignment(input: {
   objective: StrategicObjectiveId
   action: DesiredAction
   spokenCta?: string
+  /**
+   * The language the speech is in (ADR-160). The words of a spoken call to action are a fact of that language: without a lexicon for it the
+   * speech is only compared with the explicit `verbalCta` the requester gave, and an unrecognised word is never reported as a mismatch.
+   */
+  language?: string | null
 }): Readonly<{
   valid: boolean
   issues: readonly DesiredActionAlignmentIssue[]
@@ -364,8 +362,9 @@ export function validateDesiredActionAlignment(input: {
   const spoken = normalizedSpeech(input.spokenCta ?? '')
   if (spoken && input.action.kind !== 'continue-viewing') {
     const configuredVerbal = normalizedSpeech(input.action.verbalCta ?? '')
+    const lexicon = ctaLexiconFor(input.language)
     if (
-      !spokenCtaPattern[input.action.kind].test(spoken) ||
+      (lexicon !== null && !lexicon.patterns[input.action.kind].test(spoken)) ||
       (configuredVerbal && !spoken.includes(configuredVerbal))
     ) issues.push('spoken-cta-mismatch')
   }

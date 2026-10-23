@@ -1,3 +1,4 @@
+import { assertPlanHonorsResolution } from '../domain/editorial-policy-resolution.ts'
 import { createHash } from 'node:crypto'
 
 import { artifactOutputStoragePrefix } from '../domain/artifact-storage-identity.ts'
@@ -303,15 +304,15 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         ...(source.directorInheritance ? { directorInheritance: directorRunInheritanceIdentity(source.directorInheritance) } : {}),
       })
       if (
-        immutableInputHash !== context.inputHash ||
-        source.editPlan.movementPolicy.automaticZoom || clips.length < 1 ||
-        source.editPlan.movementPolicy.protectedOpeningFrames < Math.round(source.editPlan.fps * 4) ||
+        immutableInputHash !== context.inputHash || clips.length < 1 ||
         source.format !== context.outputSpec.aspectRatio ||
         source.proxyReviewId !== context.proxyReviewId ||
         source.proxyReviewHash !== context.proxyReviewHash ||
         source.proxyArtifactId !== context.proxyArtifactId ||
         Math.abs(source.editPlan.fps - context.outputSpec.fps) > 0.01
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Approved EditPlan or final OutputSpec is not safe to render')
+      // ADR-160. The approved plan is judged against the resolution it was made from, not against values of the worker.
+      assertPlanHonorsResolution(source.editPlan, source.policyResolution)
       const renderSourceIds = source.renderSources.map((asset) => asset.artifactId)
       failureStage = 'rights'
       await assertRights(renderSourceIds, source.locale)

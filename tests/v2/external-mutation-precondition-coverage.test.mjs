@@ -559,6 +559,12 @@ const coverage = Object.freeze({
   'apollo.projects.policy-overrides.set': {
     mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion, inherited policy values and completed output set',
   },
+  'apollo.batches.editorial-request.revise': {
+    mode: 'identity-bound-action', fields: ['expectedRequestHash'], evidence: 'request requires the exact hash of the request being replaced and serializable persistence rechecks it and the next sequence; a replay finds the stored revision before the interpreter is called',
+  },
+  'apollo.projects.editorial-request.revise': {
+    mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion and the completed output set; a replay finds the stored Command before the interpreter is called',
+  },
   'apollo.projects.final-exports.enqueue': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds explicit approval, current immutable ProjectVersion, EditPlan, DirectorRun, QualitySnapshot and source artifact identity',
   },
@@ -836,12 +842,12 @@ test('the current public surface has no unguarded state replacement', () => {
     'read-only-preflight': 5,
     'explicit-precondition': 10,
     'idempotent-create': 77,
-    'identity-bound-action': 11,
+    'identity-bound-action': 12,
     'natural-idempotent-create': 11,
     'state-machine-action': 20,
     'single-flight-action': 4,
     'revision-bound-action': 16,
-    'base-version-bound-action': 28,
+    'base-version-bound-action': 29,
     'fenced-natural-idempotent-action': 5,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,

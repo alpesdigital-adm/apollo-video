@@ -4,6 +4,7 @@ import { sha256 } from '@noble/hashes/sha256'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
+import EditorialRequestPanel from '@/components/EditorialRequestPanel'
 import IssueOverridePanel from '@/components/IssueOverridePanel'
 import LogoutButton from '@/components/LogoutButton'
 import SyntheticPhaseGatePanel from '@/components/SyntheticPhaseGatePanel'
@@ -35,6 +36,7 @@ import {
 } from '@/v2/domain/strategic-objective'
 import { parseProductionBrief } from '@/v2/domain/production-brief'
 import { describeCarriedReview } from '@/v2/ui/proxy-review-carry-view'
+import { objectiveName } from '@/v2/ui/batch-texts'
 
 const PRODUCTION_BRIEF_ASSUMPTION_LABELS: Readonly<Record<string, string>> = {
   'briefing-absent': 'Briefing livre não informado',
@@ -594,7 +596,7 @@ interface ContiguousExtractionData {
     }[]
     synthesizedRanges: false
     movementPolicy: {
-      automaticZoom: false
+      automaticZoom: boolean
       reason: 'contiguous-source-preservation'
     }
   }
@@ -1197,6 +1199,8 @@ export default function ProjectWorkspacePage() {
     fingerprint: string
     key: string
   } | null>(null)
+  const objectiveIdempotencyKey = useRef<{ fingerprint: string; key: string } | null>(null)
+  const [objectiveSaving, setObjectiveSaving] = useState(false)
   const contiguousExtractionKey = useRef<{
     fingerprint: string
     key: string
@@ -1224,8 +1228,9 @@ export default function ProjectWorkspacePage() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadLabel, setUploadLabel] = useState('')
   const [directorRunning, setDirectorRunning] = useState(false)
-  const [directorObjective, setDirectorObjective] =
-    useState<StrategicObjectiveId>('discovery')
+  // null = the objective the project already states; a value is the objective the owner picked for the next direction.
+  const [directorObjectiveChoice, setDirectorObjectiveChoice] =
+    useState<StrategicObjectiveId | null>(null)
   const [directorObjectiveReason, setDirectorObjectiveReason] = useState('')
   const [directorDestination, setDirectorDestination] = useState('')
   const [directorVerbalCta, setDirectorVerbalCta] = useState('')
@@ -1364,12 +1369,13 @@ export default function ProjectWorkspacePage() {
   const [selectedContiguousMomentId, setSelectedContiguousMomentId] =
     useState<string | null>(null)
   const [contiguousObjective, setContiguousObjective] =
-    useState<(typeof CONTIGUOUS_OBJECTIVES)[number][0]>('discovery')
+    useState<(typeof CONTIGUOUS_OBJECTIVES)[number][0] | ''>('')
+  // Nothing is pre-filled: the length, the tolerance and the frame rate of the extraction are the owner's (empty until stated).
   const [contiguousDurationSeconds, setContiguousDurationSeconds] =
-    useState(120)
+    useState('')
   const [contiguousToleranceSeconds, setContiguousToleranceSeconds] =
-    useState(15)
-  const [contiguousFps, setContiguousFps] = useState(30)
+    useState('')
+  const [contiguousFps, setContiguousFps] = useState('')
   const [contiguousSearching, setContiguousSearching] =
     useState(false)
   const [contiguousCreating, setContiguousCreating] =
@@ -2058,9 +2064,10 @@ export default function ProjectWorkspacePage() {
   )
   const transcript = workspace?.transcripts[0]
   const latestDirectorRun = workspace?.directorRuns[0]
+  const directorObjective = (directorObjectiveChoice ?? workspace?.project.objective ?? null) as StrategicObjectiveId | null
   const selectedDirectorObjective = STRATEGIC_OBJECTIVES.find(
     (item) => item.id === directorObjective,
-  )!
+  )
   const directorObjectiveChanged =
     Boolean(workspace?.project.objective) &&
     directorObjective !== workspace?.project.objective
@@ -2092,7 +2099,7 @@ export default function ProjectWorkspacePage() {
   useEffect(() => {
     if (!workspace?.project.objective) return
     if (STRATEGIC_OBJECTIVES.some((item) => item.id === workspace.project.objective)) {
-      setDirectorObjective(workspace.project.objective as StrategicObjectiveId)
+      setDirectorObjectiveChoice(null)
       setDirectorObjectiveReason('')
       setDirectorDestination(storedDesiredAction.destination)
       setDirectorVerbalCta(storedDesiredAction.verbalCta)
@@ -2232,10 +2239,19 @@ export default function ProjectWorkspacePage() {
 
   async function createContiguousExtraction(): Promise<void> {
     if (!selectedContiguousMoment || contiguousCreating) return
+    if (contiguousObjective === '') {
+      setContiguousError('Escolha o objetivo da extração. O Apollo não escolhe por você.')
+      return
+    }
+    if (contiguousDurationSeconds.trim() === '' || contiguousToleranceSeconds.trim() === '' || contiguousFps === '') {
+      setContiguousError('Informe a duração, a tolerância e os quadros por segundo da extração. O Apollo não sugere valores.')
+      return
+    }
     const targetDurationMs =
-      Math.round(contiguousDurationSeconds * 1_000)
+      Math.round(Number(contiguousDurationSeconds) * 1_000)
     const toleranceMs =
-      Math.round(contiguousToleranceSeconds * 1_000)
+      Math.round(Number(contiguousToleranceSeconds) * 1_000)
+    const fpsValue = Number(contiguousFps)
     if (
       !Number.isSafeInteger(targetDurationMs) ||
       targetDurationMs < 1_000 ||
@@ -2243,9 +2259,9 @@ export default function ProjectWorkspacePage() {
       !Number.isSafeInteger(toleranceMs) ||
       toleranceMs < 0 ||
       toleranceMs > targetDurationMs ||
-      !Number.isSafeInteger(contiguousFps) ||
-      contiguousFps < 1 ||
-      contiguousFps > 120
+      !Number.isSafeInteger(fpsValue) ||
+      fpsValue < 1 ||
+      fpsValue > 120
     ) {
       setContiguousError(
         'Revise duração, tolerância e quadros por segundo.',
@@ -2257,7 +2273,7 @@ export default function ProjectWorkspacePage() {
       topic: selectedContiguousMoment.moment.topic.normalized,
       targetDurationMs,
       toleranceMs,
-      fps: contiguousFps,
+      fps: fpsValue,
     }
     const fingerprint = JSON.stringify(body)
     if (
@@ -3140,13 +3156,68 @@ export default function ProjectWorkspacePage() {
     setUploadLabel('')
   }
 
+  // ADR-160. A project made without an objective gets it here, through a revision of its editorial request (the same Command the API and the MCP use):
+  // it is kept as a new version, and what was made before it is marked as outdated. The Director runs only after this.
+  async function defineProjectObjective() {
+    if (!workspace?.version || workspace.project.objective) return
+    if (directorObjectiveChoice === null) {
+      setNotice('Escolha o objetivo do projeto antes de definir.')
+      return
+    }
+    const chosen = directorObjectiveChoice
+    const destination = directorDestination.trim()
+    if (OBJECTIVES_REQUIRING_DESTINATION.has(chosen) && !destination) {
+      setNotice('Este objetivo exige um destino explícito para a ação esperada.')
+      return
+    }
+    const verbalCta = directorVerbalCta.trim()
+    const visualCta = directorVisualCta.trim()
+    const disclosures = directorDisclosures.split('\n').map((item) => item.trim()).filter(Boolean)
+    const desiredAction = {
+      ...(destination ? { destination: { type: DIRECTOR_DESTINATION_TYPE[chosen] ?? (destination.startsWith('@') ? 'handle' : 'url'), value: destination } } : {}),
+      ...(verbalCta ? { verbalCta } : {}),
+      ...(visualCta ? { visualCta } : {}),
+      ...(disclosures.length ? { disclosures } : {}),
+    }
+    const body = {
+      baseVersionId: workspace.version.id, baseHash: workspace.version.baseHash, objective: chosen,
+      ...(Object.keys(desiredAction).length > 0 ? { desiredAction } : {}),
+      reason: 'Definir o objetivo do projeto, que foi criado sem um.',
+    }
+    const fingerprint = JSON.stringify(body)
+    if (objectiveIdempotencyKey.current?.fingerprint !== fingerprint) objectiveIdempotencyKey.current = { fingerprint, key: crypto.randomUUID() }
+    setObjectiveSaving(true)
+    setNotice(null)
+    try {
+      await requestJson(`/v1/projects/${encodeURIComponent(projectId)}/editorial-request`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': objectiveIdempotencyKey.current.key },
+        body: JSON.stringify(body),
+      })
+      objectiveIdempotencyKey.current = null
+      setDirectorObjectiveChoice(null)
+      setNotice(`Objetivo definido: ${objectiveName(chosen)}. O que foi feito antes dele fica marcado como desatualizado; o Diretor já pode rodar.`)
+      reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
+      await loadWorkspace(true)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não foi possível definir o objetivo do projeto.')
+    } finally {
+      setObjectiveSaving(false)
+    }
+  }
+
   async function runDirector() {
+    if (workspace?.version && !workspace.project.objective) {
+      setNotice('Este projeto foi criado sem objetivo, e o Apollo não presume um. Escolha o objetivo e toque em "Definir objetivo do projeto": o Diretor espera por ele, e o que não depende de objetivo segue funcionando.')
+      return
+    }
     if (!workspace?.version || !workspace.project.objective || workspace.editPlan?.state !== 'compiled' || !transcript) {
       setNotice('O Diretor V2 precisa do corte editorial compilado e da transcrição alinhada.')
       return
     }
     const currentObjective = workspace.project.objective as StrategicObjectiveId
-    const objectiveChanged = directorObjective !== currentObjective
+    const directorObjectiveToRun = directorObjective ?? currentObjective
+    const objectiveChanged = directorObjectiveToRun !== currentObjective
     const objectiveReason = directorObjectiveReason.trim()
     const destination = directorDestination.trim()
     const verbalCta = directorVerbalCta.trim()
@@ -3160,6 +3231,7 @@ export default function ProjectWorkspacePage() {
     }
     if (
       objectiveChanged &&
+      directorObjective !== null &&
       OBJECTIVES_REQUIRING_DESTINATION.has(directorObjective) &&
       !destination
     ) {
@@ -3173,7 +3245,7 @@ export default function ProjectWorkspacePage() {
       projectId,
       baseVersionId: workspace.version.id,
       baseHash: workspace.version.baseHash,
-      objective: directorObjective,
+      objective: directorObjectiveToRun,
       desiredAction: actionChanged ? { destination, verbalCta, visualCta, disclosures } : null,
       reason,
     })
@@ -3194,10 +3266,10 @@ export default function ProjectWorkspacePage() {
         },
         body: JSON.stringify({
           type: 'run-director', baseVersionId: workspace.version.id, baseHash: workspace.version.baseHash,
-          objective: directorObjective,
+          objective: directorObjectiveToRun,
           ...(actionChanged ? { desiredAction: {
             ...(destination ? { destination: {
-              type: DIRECTOR_DESTINATION_TYPE[directorObjective] ??
+              type: DIRECTOR_DESTINATION_TYPE[directorObjectiveToRun] ??
                 (destination.startsWith('@') ? 'handle' : 'url'),
               value: destination,
             } } : {}),
@@ -3521,18 +3593,19 @@ export default function ProjectWorkspacePage() {
           <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-[#b58d31]">Direção registrada</p>
           <h2 className="mt-3 text-xl font-semibold tracking-[-0.03em]">A intenção vem antes do corte.</h2>
           <dl className="mt-7 space-y-5">
-            <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">Objetivo</dt><dd className="mt-1.5 text-sm text-[#d1cbc1]">{workspace.project.objective ?? 'Não informado'}</dd></div>
+            <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">Objetivo</dt><dd className="mt-1.5 text-sm text-[#d1cbc1]">{workspace.project.objective ? objectiveName(workspace.project.objective) : 'Ainda não definido'}</dd></div>
             <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">{workspaceOutputs.length > 1 ? 'Saída em edição' : 'Formato mestre'}</dt>{workspaceOutputs.length > 1 ? <dd className="mt-1.5"><OutputSelector outputs={workspaceOutputs} selectedId={outputVariantId} onSelect={setChosenOutputId} /></dd> : <dd className="mt-1.5 flex items-center gap-2 text-sm text-[#d1cbc1]"><span className="grid h-7 min-w-7 place-items-center rounded-md border border-[#d9a937]/25 px-1 text-[9px] text-[#d9ad48]">{outputAspectRatio ?? '—'}</span> Canvas e áreas seguras</dd>}</div>
-            <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">Idioma</dt><dd className="mt-1.5 text-sm text-[#d1cbc1]">{workspace.project.locale ?? 'pt-BR'}</dd></div>
+            <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">Idioma</dt><dd className="mt-1.5 text-sm text-[#d1cbc1]">{workspace.project.locale ?? 'Detectado pela fala'}</dd></div>
           </dl>
           <div className="mt-7 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4" data-testid="production-brief-state">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[9px] uppercase tracking-[0.16em] text-[#6c685f]">Briefing do diretor</p>
-              <span className="text-[9px] text-[#5fbd7e]">{productionBrief?.ownerInput ? 'Owner autorizado' : 'Media-only'}</span>
+              <span className="text-[9px] text-[#5fbd7e]">{productionBrief?.ownerInput ? 'Texto do dono' : 'Só a mídia'}</span>
             </div>
             <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-[#969188]" data-testid="production-brief-summary">{(productionBrief?.summary.text ?? briefText) || 'Briefing persistido indisponível.'}</p>
+            {/* A briefing with text that nobody has read says nothing about what it covers (ADR-160): no chip and no "no gaps" claim. */}
             <div className="mt-3 flex flex-wrap gap-1.5" data-testid="production-brief-coverage">
-              {Object.entries(productionBrief?.summary.coverage ?? {}).map(([field, covered]) => (
+              {productionBrief?.ownerInput && !productionBrief.assumptions.length && !Object.values(productionBrief.summary.coverage).some(Boolean) ? null : Object.entries(productionBrief?.summary.coverage ?? {}).map(([field, covered]) => (
                 <span className={`rounded-md border px-2 py-1 text-[9px] ${covered ? 'border-[#5fbd7e]/25 text-[#74c98f]' : 'border-white/[0.07] text-[#716d65]'}`} key={field}>
                   {field === 'audience' ? 'Público' : field === 'offer' ? 'Oferta' : 'Tom'}: {covered ? 'informado' : 'ausente'}
                 </span>
@@ -3542,8 +3615,13 @@ export default function ProjectWorkspacePage() {
               <ul className="mt-3 space-y-1 text-[10px] text-[#8f897f]" data-testid="production-brief-assumptions">
                 {productionBrief.assumptions.map((assumption) => <li key={assumption}>• {PRODUCTION_BRIEF_ASSUMPTION_LABELS[assumption]}</li>)}
               </ul>
-            ) : <p className="mt-3 text-[10px] text-[#74c98f]" data-testid="production-brief-assumptions">Sem lacunas básicas detectadas.</p>}
+            ) : productionBrief?.ownerInput && !Object.values(productionBrief.summary.coverage).some(Boolean)
+              ? <p className="mt-3 text-[10px] text-[#8f897f]" data-testid="production-brief-assumptions">O briefing ainda não foi lido pelo interpretador: o que ele cobre só é dito depois da leitura.</p>
+              : <p className="mt-3 text-[10px] text-[#74c98f]" data-testid="production-brief-assumptions">Sem lacunas básicas detectadas.</p>}
             <p className="mt-3 border-t border-white/[0.06] pt-3 text-[9px] text-[#68645d]">Nenhuma geração cara foi iniciada por esta leitura.</p>
+          </div>
+          <div className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4" data-testid="project-editorial-request">
+            <EditorialRequestPanel onChanged={() => { void loadWorkspace(true) }} projectId={projectId} />
           </div>
           <div className="mt-5 rounded-xl border border-[#d9a43a]/20 bg-[#d9a43a]/[0.035] p-4" data-testid="director-objective-governance">
             <label className="block text-[9px] font-semibold uppercase tracking-[0.16em] text-[#b58d31]" htmlFor="director-objective">
@@ -3554,43 +3632,50 @@ export default function ProjectWorkspacePage() {
               disabled={directorRunning || operationActive}
               id="director-objective"
               onChange={(event) => {
-                setDirectorObjective(event.target.value as StrategicObjectiveId)
+                setDirectorObjectiveChoice(event.target.value as StrategicObjectiveId)
                 setDirectorObjectiveReason('')
                 setDirectorDestination('')
                 setDirectorVerbalCta('')
                 setDirectorVisualCta('')
                 setDirectorDisclosures('')
               }}
-              value={directorObjective}
+              value={directorObjective ?? ''}
             >
+              {directorObjective === null ? <option disabled value="">Escolha o objetivo</option> : null}
               {STRATEGIC_OBJECTIVES.map((item) => (
                 <option key={item.id} value={item.id}>{item.label}</option>
               ))}
             </select>
-            <p className="mt-2 text-[10px] leading-4 text-[#8c877e]">{selectedDirectorObjective.description}</p>
-            <p className="mt-1 text-[10px] leading-4 text-[#69655e]">Resultado esperado: {selectedDirectorObjective.exampleOutcome}</p>
+            <p className="mt-2 text-[10px] leading-4 text-[#8c877e]">{selectedDirectorObjective?.description}</p>
+            <p className="mt-1 text-[10px] leading-4 text-[#69655e]">Resultado esperado: {selectedDirectorObjective?.exampleOutcome}</p>
+            {workspace.version && !workspace.project.objective ? (
+              <div className="mt-3 border-t border-white/[0.07] pt-3" data-testid="project-objective-define">
+                <p className="text-[10px] leading-4 text-[#d2ad59]">Este projeto foi criado sem objetivo e o Apollo não presume um. O Diretor espera por ele: escolha acima e defina.</p>
+                <button className="mt-2 h-10 rounded-lg bg-[#d9a43a] px-4 text-xs font-semibold text-[#171717] disabled:opacity-40" data-testid="project-objective-define-button" disabled={objectiveSaving || directorObjective === null || operationActive} onClick={() => { void defineProjectObjective() }} type="button">{objectiveSaving ? 'Definindo...' : 'Definir objetivo do projeto'}</button>
+              </div>
+            ) : null}
             {latestDirectorRun ? (
               <p className="mt-2 font-mono text-[8px] text-[#716c64]">
-                {latestDirectorRun.rubricRef} · revisão {latestDirectorRun.objectiveVersion}
+                Critérios do objetivo · revisão {latestDirectorRun.objectiveVersion}
               </p>
             ) : null}
             {directorObjectiveChanged ? (
               <div className="mt-3 border-t border-white/[0.07] pt-3">
-                <p className="text-[10px] leading-4 text-[#d2ad59]">A direção anterior não será alterada: a troca criará uma nova versão e um novo DirectorRun ligado ao anterior.</p>
+                <p className="text-[10px] leading-4 text-[#d2ad59]">A direção anterior não será alterada: a troca criará uma nova versão e uma nova direção ligada à anterior.</p>
               </div>
             ) : null}
             <div className="mt-3 space-y-3 border-t border-white/[0.07] pt-3" data-testid="director-desired-action">
-              {OBJECTIVES_REQUIRING_DESTINATION.has(directorObjective) ? (
+              {directorObjective !== null && OBJECTIVES_REQUIRING_DESTINATION.has(directorObjective) ? (
                 <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">
                   Destino obrigatório
                   <input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={2048} onChange={(event) => setDirectorDestination(event.target.value)} placeholder={directorObjective === 'whatsapp' ? '+5511999999999 ou https://wa.me/...' : directorObjective === 'booking' ? 'https://agenda.example/...' : directorObjective === 'download' ? 'https://arquivos.example/material.pdf' : 'https://destino.example/...'} value={directorDestination} />
                 </label>
               ) : null}
               <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">CTA verbal<input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={160} onChange={(event) => setDirectorVerbalCta(event.target.value)} value={directorVerbalCta} /></label>
-                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">CTA visual<input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={160} onChange={(event) => setDirectorVisualCta(event.target.value)} value={directorVisualCta} /></label>
+                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">Chamada falada<input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={160} onChange={(event) => setDirectorVerbalCta(event.target.value)} value={directorVerbalCta} /></label>
+                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">Chamada na tela<input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={160} onChange={(event) => setDirectorVisualCta(event.target.value)} value={directorVisualCta} /></label>
               </div>
-              <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">Disclosures · um por linha<textarea className="mt-1.5 min-h-16 w-full resize-y rounded-lg border border-white/[0.09] bg-[#080808] px-3 py-2 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={2000} onChange={(event) => setDirectorDisclosures(event.target.value)} value={directorDisclosures} /></label>
+              <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">Avisos obrigatórios · um por linha<textarea className="mt-1.5 min-h-16 w-full resize-y rounded-lg border border-white/[0.09] bg-[#080808] px-3 py-2 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={2000} onChange={(event) => setDirectorDisclosures(event.target.value)} value={directorDisclosures} /></label>
               {directorObjectiveChanged || directorDesiredActionChanged ? (
                 <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">Motivo obrigatório<textarea className="mt-1.5 min-h-20 w-full resize-y rounded-lg border border-white/[0.09] bg-[#080808] px-3 py-2 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={1000} onChange={(event) => setDirectorObjectiveReason(event.target.value)} placeholder="Explique a mudança de objetivo ou ação desejada." value={directorObjectiveReason} /></label>
               ) : null}
@@ -4388,7 +4473,7 @@ export default function ProjectWorkspacePage() {
                       ) : null}
                       {reviewElementResolution === 'ready' && reviewElementCandidates.length > 1 && !reviewElementConfirmed ? <p className="mt-2 text-[9px] text-[#ad8c45]">Há camadas sobrepostas. Confirme qual delas deve receber o ajuste.</p> : null}
                     </div>
-                    <textarea autoFocus className="mt-2 min-h-24 w-full resize-y border border-white/[0.1] bg-[#050505] px-3 py-3 text-sm leading-6 text-[#e3ddd3] outline-hidden transition placeholder:text-[#4e4b45] focus:border-[#d9aa3d]/55" id="review-instruction" maxLength={4000} onChange={(event) => setReviewText(event.target.value)} placeholder="Ex.: mover a legenda para não cobrir o rosto, somente neste trecho." value={reviewText} />
+                    <textarea autoFocus className="mt-2 min-h-24 w-full resize-y border border-white/[0.1] bg-[#050505] px-3 py-3 text-sm leading-6 text-[#e3ddd3] outline-hidden transition placeholder:text-[#4e4b45] focus:border-[#d9aa3d]/55" id="review-instruction" maxLength={4000} onChange={(event) => setReviewText(event.target.value)} value={reviewText} />
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button className={`border px-3 py-2 text-[10px] transition ${reviewScope === 'point' ? 'border-[#d9aa3d]/60 bg-[#d9aa3d]/10 text-[#e4bd62]' : 'border-white/[0.08] text-[#77736b] hover:text-white'}`} onClick={() => { setReviewScope('point'); setReviewRegion(null) }} type="button">Neste ponto</button>
                       <button className={`border px-3 py-2 text-[10px] transition ${reviewScope === 'region' ? 'border-[#d9aa3d]/60 bg-[#d9aa3d]/10 text-[#e4bd62]' : 'border-white/[0.08] text-[#77736b] hover:text-white'} disabled:opacity-30`} disabled={!reviewRegion} onClick={() => setReviewScope('region')} type="button">Área marcada</button>
@@ -4589,7 +4674,6 @@ export default function ProjectWorkspacePage() {
                           setContiguousSearchText(event.target.value)
                           setContiguousError(null)
                         }}
-                        placeholder="Ex.: oferta, tráfego, boas-vindas"
                         value={contiguousSearchText}
                       />
                       <button
@@ -4684,6 +4768,7 @@ export default function ProjectWorkspacePage() {
                       }}
                       value={contiguousObjective}
                     >
+                      <option className="bg-[#111]" disabled value="">Escolha o objetivo</option>
                       {CONTIGUOUS_OBJECTIVES.map(([value, label]) => (
                         <option className="bg-[#111]" key={value} value={value}>
                           {label}
@@ -4702,7 +4787,7 @@ export default function ProjectWorkspacePage() {
                       min="1"
                       onChange={(event) => {
                         setContiguousDurationSeconds(
-                          Number(event.target.value),
+                          event.target.value,
                         )
                         setContiguousExtraction(null)
                         contiguousExtractionKey.current = null
@@ -4719,11 +4804,11 @@ export default function ProjectWorkspacePage() {
                     <input
                       className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 font-mono text-[10px] text-[#bdb6ac] outline-hidden focus:border-[#d9aa3d]/45"
                       data-testid="contiguous-tolerance"
-                      max={Math.max(0, contiguousDurationSeconds)}
+                      max={Math.max(0, Number(contiguousDurationSeconds))}
                       min="0"
                       onChange={(event) => {
                         setContiguousToleranceSeconds(
-                          Number(event.target.value),
+                          event.target.value,
                         )
                         setContiguousExtraction(null)
                         contiguousExtractionKey.current = null
@@ -4740,12 +4825,13 @@ export default function ProjectWorkspacePage() {
                     <select
                       className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 text-[10px] text-[#bdb6ac] outline-hidden focus:border-[#d9aa3d]/45"
                       onChange={(event) => {
-                        setContiguousFps(Number(event.target.value))
+                        setContiguousFps(event.target.value)
                         setContiguousExtraction(null)
                         contiguousExtractionKey.current = null
                       }}
                       value={contiguousFps}
                     >
+                      <option className="bg-[#111]" disabled value="">Escolha</option>
                       {[24, 25, 30, 60].map((fps) => (
                         <option className="bg-[#111]" key={fps} value={fps}>
                           {fps} fps
@@ -5409,7 +5495,7 @@ export default function ProjectWorkspacePage() {
                           </span>
                         </div>
                         <p className="mt-2 font-mono text-[8px] text-[#68635c]">
-                          {readableTimestamp(reuse.plan.sourceRangeMs[0])} → {readableTimestamp(reuse.plan.sourceRangeMs[1])} · {readableDuration(reuse.plan.composition.durationMs)} total · {reuse.plan.objective}
+                          {readableTimestamp(reuse.plan.sourceRangeMs[0])} → {readableTimestamp(reuse.plan.sourceRangeMs[1])} · {readableDuration(reuse.plan.composition.durationMs)} total · {objectiveName(reuse.plan.objective)}
                         </p>
 
                         <div className="mt-4 grid grid-cols-5 overflow-hidden border border-white/[0.07]" data-testid="validation-envelope-aspects">
@@ -5513,7 +5599,7 @@ export default function ProjectWorkspacePage() {
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <p className="text-[10px] font-semibold text-[#c9c4bb]">{run.objective}</p>
+                        <p className="text-[10px] font-semibold text-[#c9c4bb]">{objectiveName(run.objective)}</p>
                         <p className="mt-1 font-mono text-[8px] text-[#625e57]">receita {run.targetRecipeId.slice(-12)} · {run.summary.needCount} declaraç{run.summary.needCount === 1 ? 'ão' : 'ões'}</p>
                       </div>
                       <div className="flex flex-wrap gap-1.5 font-mono text-[8px]">

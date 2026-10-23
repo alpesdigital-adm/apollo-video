@@ -126,7 +126,7 @@ export function inspectOutputVersionOriginDraft(input: OutputVersionOriginDraft)
       const legacy = input.command === null ? null : createProjectCreationCommand(input.command)
       const v2 = input.commandV2 === null ? null : buildProjectCreationOriginCommandV2({
         ...input.commandV2, allocation, callerIntent: input.commandV2.payload.callerIntent.kind === 'initialize-empty'
-          ? { ...input.commandV2.payload.callerIntent, desiredAction: {
+          ? { ...input.commandV2.payload.callerIntent, desiredAction: input.commandV2.payload.callerIntent.desiredAction === null ? null : {
             ...(input.commandV2.payload.callerIntent.desiredAction.destination ? { destination: input.commandV2.payload.callerIntent.desiredAction.destination } : {}),
             ...(input.commandV2.payload.callerIntent.desiredAction.verbalCta ? { verbalCta: input.commandV2.payload.callerIntent.desiredAction.verbalCta } : {}),
             ...(input.commandV2.payload.callerIntent.desiredAction.visualCta ? { visualCta: input.commandV2.payload.callerIntent.desiredAction.visualCta } : {}),

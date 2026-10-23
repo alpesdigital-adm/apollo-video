@@ -6,7 +6,12 @@ import {
   createProductionBatchItemResult,
   projectProductionBatchItemOperation,
 } from '../domain/batch-item-result.ts'
+import { createEditorialRequest } from '../domain/editorial-request.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
+import { normalizeBriefingText } from '../domain/production-brief.ts'
+import { resolveStrategicObjective } from '../domain/strategic-objective.ts'
+import type { InterpretBrief } from './interpret-brief.ts'
+import { assertBatchRequestAllowsGeneration, currentBatchEditorialRequest, describeBatchEditorialRequest } from './batch-editorial-request.ts'
 import {
   batchProgress,
   cancelProductionBatch,
@@ -154,8 +159,11 @@ function decodeBatchItemPageCursor(
 export interface CreateProductionBatchRequest {
   workspaceId: string
   projectId: string
+  /** The editorial request of the whole batch: any non-empty text. It is read by the interpreter when the batch is created. */
+  briefing: string
   name: string
-  objective: string
+  /** Optional (ADR-160): without one the batch has none. */
+  objective?: string
   sourceGroups: readonly Readonly<ProductionBatchSourceGroup>[]
   recipes: readonly Readonly<ProductionBatchRecipe>[]
   variants: readonly Readonly<ProductionBatchVariant>[]
@@ -176,6 +184,8 @@ export interface CreateProductionBatchRequest {
 
 export function createProductionBatchService(dependencies: {
   repository: ProductionBatchRepository
+  /** Reads a briefing (fail-closed with PRECONDITION_REQUIRED when the deployment has no interpreter). */
+  interpretBrief: InterpretBrief
   clock: () => Date
   createBatchId: () => string
   createItemId: () => string
@@ -194,10 +204,15 @@ export function createProductionBatchService(dependencies: {
     )
     const actorClientId = authenticationAudit.clientId
     const replayKey = idempotencyKey(request.idempotencyKey)
+    // Before anything is paid for: the objective is one of the strategic objectives, never free text.
+    if (request.objective !== undefined) resolveStrategicObjective(request.objective)
+    const briefing = normalizeBriefingText(typeof request.briefing === 'string' ? request.briefing : '')
+    assertDomain(briefing.length > 0 && briefing.length <= 10_000, 'INVALID_ARGUMENT', 'A batch needs a briefing: any text of 1 to 10000 characters')
     const requestFingerprint = calculateCanonicalHash({
-      schemaVersion: 'production-batch-create-request/v1',
+      schemaVersion: 'production-batch-create-request/v2',
       workspaceId,
       projectId,
+      briefing,
       name: request.name,
       objective: request.objective,
       sourceGroups: request.sourceGroups,
@@ -220,6 +235,12 @@ export function createProductionBatchService(dependencies: {
         replayed: true,
       })
     }
+    // A replay never reads the briefing again. The reading happens once, before the batch exists, and is stored with it.
+    const read = await dependencies.interpretBrief({ briefing })
+    const editorialRequest = Object.freeze({
+      request: createEditorialRequest({ briefing, interpretation: read.interpretation }),
+      interpretationAudit: read.audit as unknown as Readonly<Record<string, unknown>>,
+    })
     const createdAt = instant(dependencies.clock)
     const batch = createProductionBatch({
       id: identity(dependencies.createBatchId(), 'created batch ID'),
@@ -231,6 +252,7 @@ export function createProductionBatchService(dependencies: {
       recipes: request.recipes,
       variants: request.variants,
       budget: request.budget,
+      editorialRequest,
       itemDefinitions: request.items.map((item) => ({
         ...item,
         id: identity(dependencies.createItemId(), 'created item ID'),
@@ -271,6 +293,23 @@ export function readProductionBatchService(dependencies: {
       )
     }
     return batch
+  }
+}
+
+/**
+ * ADR-160 F8. The editorial request of one batch as it stands now: the briefing as written and how it was read. The batch document does not carry
+ * it (it is an input of the batch, and a later request is a revision stored beside it), so this is the one read of it. A batch created before the
+ * request existed has none.
+ */
+export function readProductionBatchEditorialRequestService(dependencies: {
+  repository: ProductionBatchRepository
+}) {
+  return async function execute(request: {
+    workspaceId: string
+    batchId: string
+  }) {
+    const batch = await readProductionBatchService(dependencies)(request)
+    return describeBatchEditorialRequest(batch, await currentBatchEditorialRequest(dependencies.repository, batch))
   }
 }
 
@@ -539,6 +578,8 @@ export function actOnProductionBatchItemService(dependencies: {
       'VERSION_CONFLICT',
       'Production batch item revision is stale',
     )
+    // Starting, retrying or resuming a step is the generation itself: it does not start while the request of the batch is blocked.
+    if (request.action === 'start-step' || request.action === 'retry-step' || request.action === 'resume') await assertBatchRequestAllowsGeneration(dependencies.repository, batch)
     const stepAction = [
       'start-step',
       'complete-step',
@@ -667,6 +708,8 @@ export function actOnProductionBatchService(dependencies: {
       'VERSION_CONFLICT',
       'Production batch revision is stale',
     )
+    // Resuming restarts work: it does not start while the request of the batch has an open question or something the Apollo cannot do.
+    if (request.action === 'resume') await assertBatchRequestAllowsGeneration(dependencies.repository, batch)
     const now = instant(dependencies.clock)
     const next = request.action === 'cancel'
       ? cancelProductionBatch({ batch, now })

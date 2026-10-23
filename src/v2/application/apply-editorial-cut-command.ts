@@ -1,3 +1,4 @@
+import { planMovementPolicyUnder, requestlessEditorialPolicies } from '../domain/editorial-policy-resolution.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import {
   createEditCommand,
@@ -21,7 +22,7 @@ import {
   deriveEditorialPhraseMatches,
   type EditorialExclusionRange,
   type SourceTimeRange,
-} from './recovery-project-acceptance.ts'
+} from './editorial-phrase-rules.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 import type { ManualCropRegion } from '../domain/manual-editing.ts'
 import type { EditorialCutImpactV1 } from '../domain/editorial-cut-impact.ts'
@@ -165,13 +166,12 @@ export interface EditorialCutEditPlan {
     words: readonly Readonly<RetimedTranscriptWord>[]
   }>
   movementPolicy: Readonly<{
-    automaticZoom: false
+    automaticZoom: boolean
     protectedOpeningFrames: number
   }>
   subtitlePolicy: Readonly<{
     faceProtection: true
     anchor: 'bottom'
-    maxCharactersPerBlock: 42
   }>
   createdAt: string
 }
@@ -502,11 +502,9 @@ function compileEditPlan(input: {
       sourceTranscriptHash: input.transcript.transcriptHash,
       words: retimedWords,
     }),
-    movementPolicy: Object.freeze({
-      automaticZoom: false as const,
-      protectedOpeningFrames: Math.round(input.fps * 4),
-    }),
-    subtitlePolicy: Object.freeze({ faceProtection: true as const, anchor: 'bottom' as const, maxCharactersPerBlock: 42 }),
+    // A cut of the source is made without an editorial request of its own: its movement is that of a silent request, resolved like any other.
+    movementPolicy: planMovementPolicyUnder(requestlessEditorialPolicies(), input.fps),
+    subtitlePolicy: Object.freeze({ faceProtection: true as const, anchor: 'bottom' as const }),
     createdAt: input.createdAt,
   })
 }

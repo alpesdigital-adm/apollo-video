@@ -176,3 +176,4 @@ Total: 158 ADRs.
 - [ADR-156 — O gate da fase é derivado de linhas persistidas, e o hash tem três estados](./ADR-156-phase-gate-derived-from-persisted-evidence.md)
 - [ADR-157 — Crítico de cor: a ação vem de uma tabela de causa, e a intenção declarada tem teto](./ADR-157-colour-critic-cause-table-and-declared-intent-ceiling.md)
 - [ADR-158 — O binário de mídia é resolvido em quatro passos, e binário ausente é falha de implantação](./ADR-158-media-binary-resolution-and-deployment-fault.md)
+- [ADR-160 — Nada é fixo: a política editorial vem do pedido de cada vídeo, e o silêncio do pedido tem uma regra nomeada](./ADR-160-request-driven-editorial-policy.md)

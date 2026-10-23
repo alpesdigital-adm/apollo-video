@@ -1,3 +1,4 @@
+import { PROJECT_SUBTITLE_STYLES } from '../domain/project-overrides.ts'
 import { PUBLISHED_CAPTURE_PROTOCOLS } from '../domain/capture-protocol-catalog.ts'
 import { evaluateCaptureProtocol } from '../domain/capture-protocol-evaluation.ts'
 import { createCaptureSession } from '../domain/capture-session.ts'
@@ -20,6 +21,11 @@ import {
 import type { PublicSchemaDefinition } from './schema-registry.ts'
 import { createCompareActionImpact } from '../domain/compare-action-impact.ts'
 import { createProjectPolicyOverridesImpact } from '../domain/project-policy-overrides-impact.ts'
+import { createEditorialRequestRevisionImpact } from '../domain/editorial-request-revision-impact.ts'
+import { createBriefInterpretation } from '../domain/editorial-request.ts'
+import { createDesiredAction } from '../domain/desired-action.ts'
+import { createProductionBrief } from '../domain/production-brief.ts'
+import { describeEditorialRequest } from '../application/revise-editorial-request.ts'
 import {
   createProjectSubtitleConfiguration,
   createProjectSubtitleConfigurationImpact,
@@ -120,6 +126,21 @@ import {
   presentPlaybackMapRead,
   presentPlaybackPieceListing,
 } from './react-playback-map-contract.ts'
+import { planMovementPolicyUnder, requestlessEditorialPolicies } from '../domain/editorial-policy-resolution.ts'
+
+// What a plan of the examples declares of its movement: the policy of a request that asks for none. Documentation values come from the resolution too.
+const EXAMPLE_PLAN_AUTOMATIC_ZOOM = planMovementPolicyUnder(requestlessEditorialPolicies(), 30).automaticZoom
+
+// The v1 refs keep the shape they were published with: a preset whose OutputSpec states a language. The hashes of these examples are placeholders.
+const LEGACY_FORMAT_PRESET_V1_EXAMPLE = (ratio: keyof typeof OUTPUT_FORMAT_REGISTRY.presets) => ({
+  ...OUTPUT_FORMAT_REGISTRY.presets[ratio], schemaVersion: 'output-format-preset/v1', version: 1,
+  spec: { ...OUTPUT_FORMAT_REGISTRY.presets[ratio].spec, locale: 'pt-BR' },
+})
+const LEGACY_FORMAT_REGISTRY_V1_EXAMPLE = {
+  ...OUTPUT_FORMAT_REGISTRY, schemaVersion: 'output-format-registry/v1', registryVersion: 1,
+  presets: Object.fromEntries((Object.keys(OUTPUT_FORMAT_REGISTRY.presets) as (keyof typeof OUTPUT_FORMAT_REGISTRY.presets)[]).map((ratio) => [ratio, LEGACY_FORMAT_PRESET_V1_EXAMPLE(ratio)])),
+}
+
 
 const createdAt = '2026-07-12T20:00:00.000Z'
 
@@ -326,11 +347,11 @@ const canonicalProjectBriefExample = {
   productionBrief: {
     schemaVersion: 1,
     ownerInput: {
-      text: 'Público: gestores. Oferta: guia. Tom: direto.',
+      text: 'Público: <público>. Oferta: <oferta>. Tom: <tom>.',
       trust: 'owner-authorized',
     },
     summary: {
-      text: 'Público: gestores. Oferta: guia. Tom: direto.', supplied: true,
+      text: 'Público: <público>. Oferta: <oferta>. Tom: <tom>.', supplied: true,
       coverage: { audience: true, offer: true, tone: true },
     },
     assumptions: [], readyForExpensiveGeneration: false,
@@ -345,13 +366,13 @@ const compiledProjectBriefExample = {
     compiled: {
       schemaVersion: 1,
       fields: {
-        audience: ['gestores'], offer: ['guia'], constraints: [], mustUse: [],
-        avoid: [], tone: ['direto'], successCriteria: [],
+        audience: ['<público>'], offer: ['<oferta>'], constraints: [], mustUse: [],
+        avoid: [], tone: ['<tom>'], successCriteria: [],
       },
       evidence: [
-        { field: 'audience', start: 9, end: 17, quote: 'gestores', confidence: 0.98 },
-        { field: 'offer', start: 27, end: 31, quote: 'guia', confidence: 0.98 },
-        { field: 'tone', start: 38, end: 44, quote: 'direto', confidence: 0.98 },
+        { field: 'audience', start: 9, end: 18, quote: '<público>', confidence: 0.98 },
+        { field: 'offer', start: 28, end: 36, quote: '<oferta>', confidence: 0.98 },
+        { field: 'tone', start: 43, end: 48, quote: '<tom>', confidence: 0.98 },
       ],
       conflicts: [], requiresReview: false,
       assumptions: ['constraints-not-specified', 'mustUse-not-specified', 'avoid-not-specified', 'successCriteria-not-specified'],
@@ -360,7 +381,7 @@ const compiledProjectBriefExample = {
       schemaVersion: 1, promptVersion: 'brief-compiler/v1',
       modelId: 'apollo-evidence-bound-brief-compiler', modelVersion: '1.0.0',
       compilerSchemaVersion: 1, inputHash: '1'.repeat(64),
-      inputRedacted: 'Publico: gestores. Oferta: guia. Tom: direto.',
+      inputRedacted: 'Publico: <publico>. Oferta: <oferta>. Tom: <tom>.',
       outputRedacted: '{"schemaVersion":1}', outputHash: '2'.repeat(64),
     },
   },
@@ -1245,7 +1266,7 @@ const proxyReviewExampleV1 = {
   criticIssues: proxyReviewExample.criticIssues.map(({ outputSpecId: _o, outputPresetHash: _p, placementPlanHash: _l, reframePlanHash: _f, format: _a, evidenceRange: _r, elementIds: _e, evidenceIds: _v, ...issue }) => issue),
 }
 const assetBriefExample = {
-  intention: 'Reforçar visualmente o ganho de clareza sem interromper a fala.',
+  intention: 'Intenção editorial de exemplo.',
   content: ['dashboard', 'resultado'],
   style: ['clean', 'editorial'],
   durationMs: { min: 1200, max: 3500 },
@@ -1830,8 +1851,8 @@ const evidenceObservationProvenanceExample = {
   observedAt: createdAt,
 }
 const evidenceObservationExample = {
-  value: 'A conversão aumentou vinte por cento',
-  normalizedValue: 'a conversao aumentou vinte por cento',
+  value: 'afirmação de exemplo',
+  normalizedValue: 'afirmacao de exemplo',
   provenance: evidenceObservationProvenanceExample,
 }
 const evidenceSegmentExample = {
@@ -1852,24 +1873,24 @@ const evidenceSegmentExample = {
   speakerId: speechSegmentExample.speakerId,
   claim: evidenceObservationExample,
   result: {
-    value: 'Vinte por cento no período medido',
-    normalizedValue: 'vinte por cento no periodo medido',
+    value: 'resultado de exemplo',
+    normalizedValue: 'resultado de exemplo',
     provenance: {
       ...evidenceObservationProvenanceExample,
       confidence: 0.94,
     },
   },
   context: {
-    value: 'Resultado observado no período medido',
-    normalizedValue: 'resultado observado no periodo medido',
+    value: 'contexto de exemplo',
+    normalizedValue: 'contexto de exemplo',
     provenance: {
       ...evidenceObservationProvenanceExample,
       confidence: 0.95,
     },
   },
   qualifiers: [{
-    value: 'Sem atribuição causal',
-    normalizedValue: 'sem atribuicao causal',
+    value: 'ressalva de exemplo',
+    normalizedValue: 'ressalva de exemplo',
     provenance: {
       ...evidenceObservationProvenanceExample,
       confidence: 0.98,
@@ -1884,8 +1905,8 @@ const evidenceSegmentExample = {
     },
   },
   attribution: {
-    value: 'Depoimento do Cliente A',
-    normalizedValue: 'depoimento do cliente a',
+    value: 'atribuição de exemplo',
+    normalizedValue: 'atribuicao de exemplo',
     provenance: {
       ...evidenceObservationProvenanceExample,
       confidence: 0.99,
@@ -1947,8 +1968,8 @@ const longFormChapterTrafficExample = {
   indexRunId: 'long-form-index-run-example-1',
   sourceArtifactId: 'artifact-long-form-example-1',
   sourceChapterId: 'source-chapter-traffic',
-  title: longFormObservation('Tráfego pago', 'trafego pago'),
-  topicPath: ['Marketing', 'Tráfego pago'],
+  title: longFormObservation('Capítulo de exemplo 1', 'capitulo de exemplo 1'),
+  topicPath: ['Tema de exemplo', 'Capítulo de exemplo 1'],
   rangeMs: [0, 3_600_000],
   momentIds: [longFormMomentTrafficId],
   physicalMaterialized: false,
@@ -1964,8 +1985,8 @@ const longFormChapterOfferExample = {
   indexRunId: 'long-form-index-run-example-1',
   sourceArtifactId: 'artifact-long-form-example-1',
   sourceChapterId: 'source-chapter-offer',
-  title: longFormObservation('Construção da oferta', 'construcao da oferta'),
-  topicPath: ['Marketing', 'Oferta'],
+  title: longFormObservation('Capítulo de exemplo 2', 'capitulo de exemplo 2'),
+  topicPath: ['Tema de exemplo', 'Capítulo de exemplo 2'],
   rangeMs: [3_600_000, 7_200_000],
   momentIds: [longFormMomentOfferId],
   physicalMaterialized: false,
@@ -1982,14 +2003,14 @@ const longFormMomentTrafficExample = {
   chapterId: longFormChapterTrafficId,
   sourceArtifactId: 'artifact-long-form-example-1',
   sourceMomentId: 'source-moment-traffic-analysis',
-  topic: longFormObservation('Análise de campanhas', 'analise de campanhas'),
+  topic: longFormObservation('Tópico de exemplo 1', 'topico de exemplo 1'),
   summary: longFormObservation(
-    'Como identificar uma campanha que precisa de ajuste.',
-    'como identificar uma campanha que precisa de ajuste',
+    'Resumo de exemplo 1.',
+    'resumo de exemplo 1',
   ),
   keyQuote: longFormObservation(
-    'O contexto muda a leitura da métrica.',
-    'o contexto muda a leitura da metrica',
+    'Citação de exemplo 1.',
+    'citacao de exemplo 1',
   ),
   speakerIds: ['person-specialist'],
   rangesMs: [[100_000, 130_000]],
@@ -2017,14 +2038,14 @@ const longFormMomentOfferExample = {
   chapterId: longFormChapterOfferId,
   sourceArtifactId: 'artifact-long-form-example-1',
   sourceMomentId: 'source-moment-offer-construction',
-  topic: longFormObservation('Oferta', 'oferta'),
+  topic: longFormObservation('Tópico de exemplo 2', 'topico de exemplo 2'),
   summary: longFormObservation(
-    'Construção da oferta a partir do problema central.',
-    'construcao da oferta a partir do problema central',
+    'Resumo de exemplo 2.',
+    'resumo de exemplo 2',
   ),
   keyQuote: longFormObservation(
-    'A oferta organiza a transformação.',
-    'a oferta organiza a transformacao',
+    'Citação de exemplo 2.',
+    'citacao de exemplo 2',
   ),
   speakerIds: ['person-specialist', 'person-host'],
   rangesMs: [[4_000_000, 4_030_000]],
@@ -2116,7 +2137,7 @@ const validatedSegmentExample = {
     sourceRangeMs: [1000, 8000],
     sourceSpeechSegmentId: 'speech-segment-validated-example-1',
     sourceSpeechSegmentHash: 'e'.repeat(64),
-    exactCopy: 'Este hook foi observado no material publicado.',
+    exactCopy: 'Fala de exemplo do gancho.',
     speakerId: 'person-specialist',
     protectedAspects: ['copy', 'take', 'timing', 'opening'],
     copyProtected: true,
@@ -2177,9 +2198,9 @@ const semanticSearchDocumentExample = {
   locale: 'pt-BR',
   personIds: ['person-specialist'],
   transcriptText: '',
-  ocrText: 'Custo por lead caiu 31 por cento',
+  ocrText: 'texto de exemplo da tela',
   intentions: ['proof', 'lead-generation'],
-  description: 'Captura de tela com resultado comprovado da campanha.',
+  description: 'Captura de tela de exemplo.',
   metadata: {
     atmosphere: 'confiante',
     campaign: 'captacao',
@@ -2212,12 +2233,12 @@ const semanticSearchDocumentExample = {
 }
 const hybridSearchQueryExample = {
   scope: 'workspace',
-  text: 'custo por lead',
+  text: 'texto de exemplo',
   intention: 'proof',
   atmosphere: 'confiante',
   personIds: ['person-specialist'],
-  speech: 'custo por lead caiu',
-  visual: 'dashboard com gráfico positivo',
+  speech: 'fala de exemplo',
+  visual: 'descrição visual de exemplo',
   rightsUse: 'social-ad',
   filters: {
     kinds: ['image'],
@@ -2679,7 +2700,7 @@ const sourceDeconstructionRequestExample = {
   desiredRole: 'hook',
   validationScope: 'full',
   targetComposition: {
-    objective: 'content-distribution',
+    objective: 'discovery',
     outputSpecId: '9:16',
     targetDurationMs: 15_000,
   },
@@ -2696,8 +2717,8 @@ const sourceDeconstructionSegmentsExample = [
     id: 'source-analysis-segment-opening',
     sourceSpeechSegmentId: 'speech-segment-opening',
     sourceSegmentId: 0,
-    exactText: 'Antes de começar, deixa eu me apresentar.',
-    normalizedText: 'antes de comecar deixa eu me apresentar',
+    exactText: 'Fala de exemplo da abertura.',
+    normalizedText: 'fala de exemplo da abertura',
     rangeMs: [0, 900],
     role: 'opening',
     roleConfidence: 0.94,
@@ -2714,8 +2735,8 @@ const sourceDeconstructionSegmentsExample = [
     id: 'source-analysis-segment-hook',
     sourceSpeechSegmentId: 'speech-segment-hook',
     sourceSegmentId: 1,
-    exactText: 'Se o seu anúncio não prende atenção, ninguém ouve a oferta.',
-    normalizedText: 'se o seu anuncio nao prende atencao ninguem ouve a oferta',
+    exactText: 'Fala de exemplo do gancho.',
+    normalizedText: 'fala de exemplo do gancho',
     rangeMs: [900, 2300],
     role: 'hook',
     roleConfidence: 0.97,
@@ -2732,8 +2753,8 @@ const sourceDeconstructionSegmentsExample = [
     id: 'source-analysis-segment-body',
     sourceSpeechSegmentId: 'speech-segment-body',
     sourceSegmentId: 2,
-    exactText: 'No restante deste vídeo eu explico três formas de estruturar a mensagem.',
-    normalizedText: 'no restante deste video eu explico tres formas de estruturar a mensagem',
+    exactText: 'Fala de exemplo do corpo.',
+    normalizedText: 'fala de exemplo do corpo',
     rangeMs: [2300, 4000],
     role: 'body',
     roleConfidence: 0.93,
@@ -2750,8 +2771,8 @@ const sourceDeconstructionSegmentsExample = [
     id: 'source-analysis-segment-cta',
     sourceSpeechSegmentId: 'speech-segment-cta',
     sourceSegmentId: 3,
-    exactText: 'Clique no link e entre para a aula.',
-    normalizedText: 'clique no link e entre para a aula',
+    exactText: 'Fala de exemplo da chamada para ação.',
+    normalizedText: 'fala de exemplo da chamada para acao',
     rangeMs: [4000, 5100],
     role: 'cta',
     roleConfidence: 0.96,
@@ -2768,8 +2789,8 @@ const sourceDeconstructionSegmentsExample = [
     id: 'source-analysis-segment-tail',
     sourceSpeechSegmentId: 'speech-segment-tail',
     sourceSegmentId: 4,
-    exactText: 'Nos vemos lá, um abraço.',
-    normalizedText: 'nos vemos la um abraco',
+    exactText: 'Fala de exemplo do encerramento.',
+    normalizedText: 'fala de exemplo do encerramento',
     rangeMs: [5100, 6200],
     role: 'tail',
     roleConfidence: 0.91,
@@ -2946,7 +2967,7 @@ const contaminationObservationsExample = [
     confidence: 0.98,
     detector: contaminationDetectorExample,
     signals: {
-      text: 'Se o seu anúncio não prende atenção',
+      text: 'Fala de exemplo do gancho',
       textTrackMatch: 0.99,
       frameCoverage: 0.96,
       foregroundContrast: 0.92,
@@ -3408,7 +3429,7 @@ const validationEnvelopeRecordExample = {
 const productionBatchCreateRequestExample = {
   projectId,
   name: 'Campanha de descoberta — julho',
-  objective: 'content-distribution',
+  objective: 'discovery',
   sourceGroups: [
     {
       id: 'source-group-hooks',
@@ -3644,10 +3665,10 @@ const scriptAlignmentCreateRequestExample = {
   title: 'Roteiro de descoberta',
   locale: 'pt-BR',
   rawText: [
-    'HOOK 1: Pare de perder dinheiro com anuncios.',
-    'CORPO 1: Alinhe oferta, publico e mensagem.',
-    'PROVA 1: Mais de cem clientes aplicaram este metodo.',
-    'CTA 1: Clique no link e agende uma conversa.',
+    'HOOK 1: Texto de exemplo do gancho.',
+    'CORPO 1: Texto de exemplo do corpo.',
+    'PROVA 1: Texto de exemplo da prova.',
+    'CTA 1: Texto de exemplo do CTA.',
   ].join('\n'),
   sources: [
     {
@@ -3669,8 +3690,8 @@ const scriptAlignmentCandidateExample = {
   kind: 'near',
   sourceRangeMs: [1240, 3380],
   evidenceWordIndices: [4, 5, 6, 7, 8, 9],
-  spokenText: 'Pare de perder dinheiro com seus anuncios',
-  normalizedSpokenText: 'pare de perder dinheiro com seus anuncios',
+  spokenText: 'Texto de exemplo do gancho',
+  normalizedSpokenText: 'texto de exemplo do gancho',
   metrics: {
     semanticSimilarity: 0.91,
     lexicalCoverage: 1,
@@ -3703,15 +3724,15 @@ const scriptAlignmentRunExample = {
     schemaVersion: 'script-document/v1',
     title: 'Roteiro de descoberta',
     locale: 'pt-BR',
-    rawText: 'HOOK 1: Pare de perder dinheiro com anuncios.',
-    normalizedText: 'hook 1 pare de perder dinheiro com anuncios',
+    rawText: 'HOOK 1: Texto de exemplo do gancho.',
+    normalizedText: 'hook 1 texto de exemplo do gancho',
     blocks: [
       {
         id: 'script-block-1',
         role: 'hook',
         originalLabel: 'HOOK 1',
-        plannedText: 'Pare de perder dinheiro com anuncios.',
-        normalizedText: 'pare de perder dinheiro com anuncios',
+        plannedText: 'Texto de exemplo do gancho.',
+        normalizedText: 'texto de exemplo do gancho',
         documentOrder: 0,
         blockHash: 'b'.repeat(64),
       },
@@ -4221,6 +4242,63 @@ const compatibilityGraphRunExample = {
   createdAt,
   runHash: 'c'.repeat(64),
 }
+// ADR-160 F8 (compatibility graph v2). The requester states only what the batch briefing said (here the offer and the audience); every other
+// semantic field is unspecified, the checks that need it are not evaluable, and the dimensions that need it are left out of the score.
+const compatibilityContextsExampleV2 = compatibilityContextsExample.map((context) => ({
+  takeId: context.takeId,
+  expectedTakeHash: context.expectedTakeHash,
+  offerId: 'offer-apollo-example',
+  audienceTags: ['audience-placeholder'],
+  claims: [],
+  continuityProvides: context.continuityProvides,
+  continuityRequires: context.continuityRequires,
+  evidenceRefs: context.evidenceRefs,
+}))
+const compatibilityUnspecifiedFieldsExample = ['desiredAction', 'energy', 'experiment', 'locale', 'narrativeTags', 'personaId', 'tone', 'visual']
+const compatibilityNodesExampleV2 = compatibilityNodesExample.map(({ desiredAction: _stated, ...node }) => ({
+  ...node,
+  audienceTags: ['audience-placeholder'],
+  claims: [],
+  personaId: 'unspecified',
+  locale: 'und',
+  narrativeTags: ['unspecified'],
+  tone: null,
+  energy: null,
+  visual: null,
+  experiment: null,
+  unspecified: compatibilityUnspecifiedFieldsExample,
+}))
+const compatibilityGraphRunExampleV2 = {
+  ...compatibilityGraphRunExample,
+  schemaVersion: 'compatibility-graph/v2',
+  ruleVersion: 'compatibility-rules/v2',
+  softScoreVersion: 'compatibility-soft-score/v2',
+  nodes: compatibilityNodesExampleV2,
+  edges: compatibilityGraphRunExample.edges.map((edge, edgeIndex) => ({
+    ...edge,
+    decision: 'blocked',
+    eligible: false,
+    softScores: edge.softScores.map((score) => score.dimension === 'duration'
+      ? score
+      : { ...score, score: null, weight: 0, reasonCode: `${String(score.dimension).toUpperCase()}_NOT_EVALUABLE` }),
+    softScore: 49.231,
+    reasonCodes: ['CONTEXT_NOT_EVALUABLE', 'LOW_SOFT_SCORE'],
+    notEvaluable: [
+      { check: 'PERSONA_MISMATCH', fields: ['personaId'] },
+      { check: 'LOCALE_MISMATCH', fields: ['locale'] },
+      ...(edge.relation.endsWith('cta') ? [{ check: 'CTA_ACTION_MISMATCH', fields: ['desiredAction'] }] : []),
+    ],
+    evidence: { ...edge.evidence, ruleVersion: 'compatibility-rules/v2', softScoreVersion: 'compatibility-soft-score/v2' },
+    edgeHash: String(edgeIndex + 7).repeat(64),
+  })),
+  summary: {
+    ...compatibilityGraphRunExample.summary,
+    acceptedCount: 0,
+    blockedCount: 2,
+    averageSoftScore: 49.231,
+    notEvaluableEdgeCount: 2,
+  },
+}
 const variantRecipeSourceSegmentsExample =
   compatibilityNodesExample.map((node, index) => ({
     id: `variant-source-segment-${index + 1}`,
@@ -4475,10 +4553,10 @@ const proofNeedCreateRequestExample = {
     {
       storyBlockId: variantStoryBlocksExample[1].id,
       claimId: variantStoryBlocksExample[1].content.claimIds[0],
-      claimText: 'Clientes recuperaram confiança para falar em público.',
+      claimText: 'Afirmação de exemplo do resultado.',
       claimKind: 'outcome',
-      offerId: 'offer-immersao-example-1',
-      objection: 'Ainda não acredito que funciona para mim.',
+      offerId: 'offer-example-1',
+      objection: 'Objeção de exemplo.',
     },
   ],
 }
@@ -4594,7 +4672,7 @@ const proofIntegrityRecipeContextExample = {
   contextHash: 'd'.repeat(64),
   claimId: proofNeedItemExample.claimId,
   claimText: proofNeedItemExample.claimText,
-  productId: 'offer-immersao-example-1',
+  productId: 'offer-example-1',
   person: 'Cliente verificado',
   period: '2025',
   audienceTags: ['profissionais'],
@@ -4644,8 +4722,8 @@ const proofIntegrityEvaluationExample = {
     },
     {
       dimension: 'product',
-      expected: ['offer-immersao-example-1'],
-      actual: ['offer-immersao-example-1'],
+      expected: ['offer-example-1'],
+      actual: ['offer-example-1'],
       outcome: 'match',
     },
     {
@@ -5340,7 +5418,7 @@ const contiguousExtractionExample = {
       'evidence-contiguous-self-contained',
     ],
     movementPolicy: {
-      automaticZoom: false,
+      automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM,
       reason: 'contiguous-source-preservation',
     },
     selectionHash: contiguousCandidateHash,
@@ -5491,8 +5569,8 @@ const projectPolicyWorkspaceDefaultsExample = {
   professionalName: 'Apollo Studio',
   companyName: 'Alpes Digital',
   colors: ['#d9ad44', '#070707'],
-  guardrails: ['Nunca cobrir rosto ou olhos com legenda.'],
-  subtitleStyle: 'clean-color',
+  guardrails: ['Regra de exemplo da marca.'],
+  subtitleStyle: PROJECT_SUBTITLE_STYLES[0],
   gradePreset: 'natural',
 }
 const projectPolicyOverridesExample = {
@@ -5557,6 +5635,109 @@ const projectPolicyAppliedExample = {
   },
   ...currentProjectPolicyExample,
   impact: projectPolicyImpactExample,
+  invalidations: [],
+  nextRequiredCapability: 'apollo.projects.commands.apply:run-director',
+  replayed: false,
+}
+// The editorial request examples carry placeholders, never a sentence a requester could take for advice: the text of a request is the requester's.
+const editorialRequestBriefingExample = '<texto do pedido>'
+const editorialRequestInterpretationExample = createBriefInterpretation({
+  briefingText: editorialRequestBriefingExample,
+  interpreter: { provider: '<provedor>', model: '<modelo>', promptVersion: 'brief-interpreter/v1' },
+  directives: [{
+    id: 'd1', kind: 'avoid', value: 'subject', param: '<assunto>',
+    excerpt: { start: 0, end: editorialRequestBriefingExample.length, text: editorialRequestBriefingExample },
+  }],
+})
+const editorialRequestAuditExample = {
+  schemaVersion: 'brief-interpretation-audit/v1', provider: '<provedor>', model: '<modelo>', resolvedModel: null,
+  promptVersion: 'brief-interpreter/v1', providerVersion: null, costBasis: 'api-metered', promptHash: '6'.repeat(64), inputHash: '7'.repeat(64), modelInputHash: null, responseHash: '8'.repeat(64),
+  usage: null, costMinorUnits: null, signals: [], directivesMovedToUnsupported: 0, directivesWithdrawnAsAmbiguous: 0,
+}
+const editorialRequestViewExample = describeEditorialRequest({
+  objective: 'discovery',
+  briefSnapshot: {
+    id: 'project-snapshot-editorial-request-example-2', contentHash: '9'.repeat(64),
+    content: {
+      schemaVersion: 1, objective: 'discovery', desiredAction: createDesiredAction({ objective: 'discovery' }),
+      productionBrief: createProductionBrief({ ownerText: editorialRequestBriefingExample, interpretedCoverage: [] }),
+      editorialRequest: { interpretation: editorialRequestInterpretationExample, interpretationAudit: editorialRequestAuditExample },
+    },
+  },
+})
+const editorialRequestImpactExample = createEditorialRequestRevisionImpact({
+  commandId: 'project-editorial-request-command-example-1',
+  baseVersionId: 'project-version-example-1',
+  resultVersionId: 'project-version-editorial-request-example-2',
+  briefSnapshotId: 'project-snapshot-editorial-request-example-2',
+  briefSnapshotHash: '9'.repeat(64),
+  previousRequestHash: '3'.repeat(64),
+  resultRequestHash: editorialRequestViewExample.hashes.requestHash,
+  durationFrames: 180,
+  outputReferences: [],
+})
+const currentEditorialRequestExample = {
+  version: {
+    id: editorialRequestImpactExample.resultVersionId, sequence: 2, parentVersionId: editorialRequestImpactExample.baseVersionId,
+    baseHash: '5'.repeat(64), createdAt, visibleState: currentProjectVersionVisibleStateExample,
+  },
+  state: editorialRequestViewExample.state,
+  request: {
+    schemaVersion: editorialRequestViewExample.request.schemaVersion,
+    briefing: editorialRequestViewExample.request.briefing,
+    objective: editorialRequestViewExample.request.objective,
+    desiredAction: editorialRequestViewExample.request.desiredAction,
+    directives: editorialRequestViewExample.request.directives,
+    variantOverrides: editorialRequestViewExample.request.variantOverrides,
+    requestHash: editorialRequestViewExample.request.requestHash,
+  },
+  interpretation: editorialRequestViewExample.interpretation,
+  interpretationAudit: editorialRequestViewExample.interpretationAudit,
+  unsupported: editorialRequestViewExample.unsupported,
+  openQuestions: editorialRequestViewExample.openQuestions,
+  blocksDirector: editorialRequestViewExample.blocksDirector,
+  hashes: editorialRequestViewExample.hashes,
+}
+// v2: a question with closed answers offers them as choices (the placeholders are neutral; the choices are the directives of the closed vocabulary).
+const editorialRequestChoicesExample = [
+  { id: 'c1', label: '<primeira opção>', directive: { id: 'c1', kind: 'layout', value: 'source-native' } },
+  { id: 'c2', label: '<segunda opção>', directive: { id: 'c2', kind: 'layout', value: 'fit-with-backdrop' } },
+]
+const editorialRequestInterpretationExampleV2 = createBriefInterpretation({
+  briefingText: editorialRequestBriefingExample,
+  interpreter: { provider: '<provedor>', model: '<modelo>', promptVersion: 'brief-interpreter/v1' },
+  directives: [],
+  questions: [{
+    id: 'q1', status: 'open', question: '<pergunta de resposta fechada>',
+    excerpt: { start: 0, end: editorialRequestBriefingExample.length, text: editorialRequestBriefingExample },
+    choices: editorialRequestChoicesExample as never,
+  }],
+})
+const editorialRequestOpenQuestionsExampleV2 = [{ id: 'q1', question: '<pergunta de resposta fechada>', excerpt: editorialRequestBriefingExample, choices: editorialRequestChoicesExample }]
+const batchEditorialRequestExample = {
+  batch: { id: 'production-batch-example-1', projectId: 'project-example-1', name: '<nome do lote>' },
+  state: 'interpreted',
+  blocksGeneration: true,
+  revision: { sequence: 0, createdAt },
+  request: currentEditorialRequestExample.request,
+  interpretation: editorialRequestViewExample.interpretation,
+  interpretationAudit: editorialRequestViewExample.interpretationAudit,
+  unsupported: editorialRequestViewExample.unsupported,
+  openQuestions: editorialRequestViewExample.openQuestions,
+  hashes: {
+    requestHash: editorialRequestViewExample.hashes.requestHash, briefingSha256: editorialRequestViewExample.hashes.briefingSha256,
+    interpretationHash: editorialRequestViewExample.hashes.interpretationHash,
+  },
+}
+const editorialRequestRevisedExample = {
+  command: {
+    id: editorialRequestImpactExample.commandId, type: 'revise-editorial-request', baseVersionId: editorialRequestImpactExample.baseVersionId,
+    author: { type: 'api-client', id: clientId }, reason: '<motivo da revisão>', createdAt,
+  },
+  ...currentEditorialRequestExample,
+  change: { briefing: 'replaced', directives: 'kept', variantOverrides: 'kept', desiredAction: 'kept', answeredQuestionIds: [] },
+  interpreted: true,
+  impact: editorialRequestImpactExample,
   invalidations: [],
   nextRequiredCapability: 'apollo.projects.commands.apply:run-director',
   replayed: false,
@@ -5681,7 +5862,7 @@ const subtitleSegmentOverrideExample = createSubtitleSegmentOverride({
   action: 'set',
   dimensions: [
     { kind: 'position', anchor: 'upper-third' },
-    { kind: 'text', text: 'O dono some do negócio em 90 dias.' },
+    { kind: 'text', text: 'Texto de exemplo da legenda.' },
   ],
   protected: true,
   previousOverrideId: null,
@@ -5727,7 +5908,7 @@ const subtitleSegmentResolutionOf = (value: typeof subtitleSegmentOverrideExampl
   protected: value.protected, createdAt: value.createdAt,
 })
 const subtitleSegmentOverrideResultExample = {
-  command: { id: subtitleSegmentOverrideExample.commandId, type: 'apply-subtitle-segment-override', baseVersionId: subtitleSegmentOverrideExample.baseVersionId, author: { type: 'api-client', id: clientId }, reason: 'Subir a legenda do gancho para não cobrir o rosto.', createdAt },
+  command: { id: subtitleSegmentOverrideExample.commandId, type: 'apply-subtitle-segment-override', baseVersionId: subtitleSegmentOverrideExample.baseVersionId, author: { type: 'api-client', id: clientId }, reason: 'Ajuste de exemplo da legenda.', createdAt },
   version: { id: subtitleSegmentOverrideExample.resultVersionId, sequence: 4, parentVersionId: subtitleSegmentOverrideExample.baseVersionId, baseHash: 'f'.repeat(64), current: true, previewAvailable: false, createdAt },
   subtitleOverride: subtitleSegmentOverrideExample,
   resolution: subtitleSegmentResolutionOf(subtitleSegmentOverrideExample),
@@ -5954,10 +6135,9 @@ const syntheticCriticMeasurementsExample = [
   criticMeasured('temporal-integrity', 'ffprobe-media-integrity', 0, 'ms-drift', 34),
   criticMeasured('audiovisual-integrity', 'ffprobe-media-integrity', 1, 'live-signal', 1),
 ]
-// F3.013 / FR-113 — the canonical example from spec 06 §17: a specialist filmed
-// against a controlled background, placed in a medieval British village to
-// illustrate medieval traffic management. The person, their speech and their
-// wardrobe are protected; only the background may change.
+// F3.013 / FR-113 — a generative transformation example: a person filmed against a
+// controlled background, placed in another background described by the request.
+// The person, their speech and their wardrobe are protected; only the background may change.
 const transformationBriefRequestExample = {
   projectVersionId: 'project-version-medieval-01',
   storyPlanId: 'story-plan-medieval-01',
@@ -5966,13 +6146,13 @@ const transformationBriefRequestExample = {
   sourceArtifactHash: 'c'.repeat(64),
   sourceRange: { startFrame: 30, endFrame: 210 },
   intent: 'world-shift',
-  editorialIntent: 'Colocar o especialista numa vila medieval britânica para ilustrar gestão de tráfego medieval.',
+  editorialIntent: 'Intenção editorial de exemplo para a troca de fundo.',
   mode: 'background-replacement',
-  prompt: 'Medieval British village street at midday, packed earth road, timber-framed houses, market carts.',
-  negativeConstraints: ['no weapons', 'no crowd violence', 'no modern signage'],
+  prompt: 'Example background scene description.',
+  negativeConstraints: ['no logos', 'no on-screen text'],
   preserve: ['identity', 'lips', 'expression', 'body-motion', 'wardrobe', 'speech', 'foreground'],
   allowedChanges: ['background', 'ambient-light'],
-  target: { era: 'medieval', region: 'britain', timeOfDay: 'midday' },
+  target: { era: 'example-era', region: 'example-region', timeOfDay: 'midday' },
   outputSpecIds: ['output-spec-16x9-1080p'],
   intensityBps: 6_500,
   noveltyBps: 7_000,
@@ -6315,7 +6495,7 @@ const captureSessionExample = Object.freeze({
     actorKind: 'human',
     actorId: 'user-editor-1',
     occurredAt: '2029-04-01T09:21:00.000Z',
-    note: 'Card filled at 10:09:58; the recorder wrote a second file.',
+    note: 'Example operator note.',
   },
   staleDerivations: ['track-coverage', 'session-clock-map'],
   sessionHash: 'c'.repeat(64),
@@ -6883,7 +7063,7 @@ const w20MatchPlanOverriddenExample = addMulticamMatchRangeOverride(w20MatchPlan
     cameraId: 'camera-b',
     range: createTickInterval(w20Ticks(120), w20Ticks(180)),
     parameters: { brightness: 0.04, contrast: 1, saturation: 1 },
-    reason: 'The wide shot sits under the window; the practical behind the guest reads a third of a stop hotter there than anywhere else.',
+    reason: 'Example reason for the measured difference.',
     actor: { kind: 'human', id: 'user-colourist-1' },
   },
 })
@@ -7075,7 +7255,7 @@ const w20AnchoredPlaybackMapExample = applyPlaybackAnchor(w20PlaybackMapExample,
     referenceTick: w20Ticks(20),
     mode: 'playing',
     actorId: 'user-editor-1',
-    note: 'The player was off-screen here; the timecode in the corner reads 00:20 when it comes back.',
+    note: 'Example operator note.',
     createdAt: w20At(400),
   },
 })
@@ -7473,6 +7653,11 @@ const syntheticPhaseGateExample = {
 const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
     'apollo://schemas/create-project-request/v4': [{ name: 'Projeto sem formato implícito', objective: 'discovery', locale: 'pt-BR' }],
+    'apollo://schemas/create-project-request/v5': [{ name: '<nome do projeto>', objective: 'discovery', briefing: '<texto do pedido>' }],
+    'apollo://schemas/create-project-request/v6': [
+      { name: '<nome do projeto>', briefing: '<texto do pedido>' },
+      { name: '<nome do projeto>', objective: 'discovery', briefing: '<texto do pedido>' },
+    ],
     'apollo://schemas/project-created/v5': [{ data: {
       projectAtCreation: { id: projectId, workspaceId, name: 'Projeto vazio explícito', status: 'draft',
         objective: 'discovery', locale: 'pt-BR', ownerId: clientId, createdAt,
@@ -7779,10 +7964,10 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       locale: 'pt-BR', scriptText: 'Primeira ideia completa. Segunda ideia forte!', use: 'ads', market: 'BRA',
     }],
     'apollo://schemas/insert-synthetic-script-block-request/v1': [{
-      ...scriptPlanCommandContextExample, position: 1, text: 'Ideia inserida no meio.',
+      ...scriptPlanCommandContextExample, position: 1, text: 'Texto de exemplo do bloco inserido.',
     }],
     'apollo://schemas/update-synthetic-script-block-request/v1': [{
-      ...scriptPlanCommandContextExample, text: 'Primeira ideia reescrita do zero.',
+      ...scriptPlanCommandContextExample, text: 'Texto de exemplo do bloco reescrito.',
     }],
     'apollo://schemas/remove-synthetic-script-block-request/v1': [{ ...scriptPlanCommandContextExample }],
     'apollo://schemas/reorder-synthetic-script-blocks-request/v1': [{
@@ -7910,8 +8095,8 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     'apollo://schemas/synthetic-audio-master-read/v2': [{ data: { audioMaster: syntheticAudioMasterV2Example }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/create-synthetic-production-run-request/v1': [{
       projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1',
-      audio: { artifactId: 'artifact-audio-example-1', durationMs: 2000, locale: 'pt-BR', scriptHash: 'e'.repeat(64), alignment: [{ text: 'Olá mundo', startMs: 0, endMs: 2000 }] },
-      blocks: [{ id: 'synthetic-block-example-1', text: 'Olá mundo', rangeMs: [0, 2000], cacheKey: 'f'.repeat(64), providerJobId: 'provider-job-example-1', audioSha256: '1'.repeat(64), artifactId: 'artifact-avatar-example-1', critic: { id: 'critic-example-1', resultHash: '2'.repeat(64), status: 'approved' } }],
+      audio: { artifactId: 'artifact-audio-example-1', durationMs: 2000, locale: 'pt-BR', scriptHash: 'e'.repeat(64), alignment: [{ text: 'texto de exemplo', startMs: 0, endMs: 2000 }] },
+      blocks: [{ id: 'synthetic-block-example-1', text: 'texto de exemplo', rangeMs: [0, 2000], cacheKey: 'f'.repeat(64), providerJobId: 'provider-job-example-1', audioSha256: '1'.repeat(64), artifactId: 'artifact-avatar-example-1', critic: { id: 'critic-example-1', resultHash: '2'.repeat(64), status: 'approved' } }],
       bRoll: [], overlays: [], captions: true, use: 'ads', market: 'BRA',
     }],
     'apollo://schemas/synthetic-production-run-mutated/v1': [{
@@ -8017,16 +8202,18 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     }],
     'apollo://schemas/provider-job-mutated/v1': [{ data: { job: providerJobExample, replayed: false }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/provider-job-read/v1': [{ data: { job: providerJobExample }, meta: { apiVersion: 'v1' } }],
-    'apollo://schemas/output-format-preset/v1': [OUTPUT_FORMAT_REGISTRY.presets['9:16']],
-    'apollo://schemas/output-format-registry/v1': [OUTPUT_FORMAT_REGISTRY],
+    'apollo://schemas/output-format-preset/v1': [LEGACY_FORMAT_PRESET_V1_EXAMPLE('9:16')],
+    'apollo://schemas/output-format-registry/v1': [LEGACY_FORMAT_REGISTRY_V1_EXAMPLE],
+    'apollo://schemas/output-format-preset/v2': [OUTPUT_FORMAT_REGISTRY.presets['9:16']],
+    'apollo://schemas/output-format-registry/v2': [OUTPUT_FORMAT_REGISTRY],
     'apollo://schemas/responsive-placement-request/v1': [{
-      outputSpec: OUTPUT_FORMAT_REGISTRY.presets['9:16'].spec,
+      outputSpec: { ...OUTPUT_FORMAT_REGISTRY.presets['9:16'].spec, locale: 'pt-BR' },
       elements: [{ id: 'subtitle-example-1', kind: 'subtitle', anchor: 'auto', priority: 10, readingOrder: 0, minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.3 }],
       protectedRegions: [{ id: 'face-example-1', kind: 'face', x: 0.35, y: 0.15, width: 0.3, height: 0.35 }],
     }],
     'apollo://schemas/responsive-placement-result/v1': [{ data: responsivePlacementResultV1Example, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/responsive-placement-request/v2': [{
-      outputSpec: OUTPUT_FORMAT_REGISTRY.presets['9:16'].spec,
+      outputSpec: { ...OUTPUT_FORMAT_REGISTRY.presets['9:16'].spec, locale: 'pt-BR' },
       elements: [{ id: 'subtitle-example-1', kind: 'subtitle', anchor: 'auto', priority: 10, readingOrder: 0, minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.3 }],
       protectedRegions: [{ id: 'face-example-1', kind: 'face', x: 0.35, y: 0.15, width: 0.3, height: 0.35 }],
       subtitlePresetId: 'kinetic',
@@ -8034,8 +8221,8 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     'apollo://schemas/responsive-placement-result/v2': [{ data: RESPONSIVE_VISUAL_GOLDENS[0]!.placement, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/subtitle-style-registry/v1': [SUBTITLE_STYLE_REGISTRY_V1],
     'apollo://schemas/subtitle-style-registry/v2': [SUBTITLE_STYLE_REGISTRY],
-    'apollo://schemas/subtitle-css-preview-request/v1': [{ presetId: 'kinetic', text: 'Ação com clareza', format: '9:16', background: 'dark' }],
-    'apollo://schemas/subtitle-css-preview/v1': [quickSubtitlePreview('kinetic', { text: 'Ação com clareza', format: '9:16', background: 'dark' })],
+    'apollo://schemas/subtitle-css-preview-request/v1': [{ presetId: 'kinetic', text: 'texto de exemplo da legenda', format: '9:16', background: 'dark' }],
+    'apollo://schemas/subtitle-css-preview/v1': [quickSubtitlePreview('kinetic', { text: 'texto de exemplo da legenda', format: '9:16', background: 'dark' })],
     'apollo://schemas/create-montage-alternatives-request/v1': [{ policyVersion: 'montage-alternatives-2026-08-v1', storyPlanRef: montageStoryPlanRefExample, seeds: [montageCandidateInputExample] }],
     'apollo://schemas/montage-alternatives-created/v1': [{ data: { run: montageRunExample, replayed: false }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/montage-alternatives-read/v1': [{ data: { run: montageRunExample }, meta: { apiVersion: 'v1' } }],
@@ -8071,13 +8258,13 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     'apollo://schemas/editorial-beat-set/v1': [{ data: { schemaVersion: 'editorial-beat-set/v1', id: 'beat-set-example-1', workspaceId, projectId, projectVersionId: 'project-version-example-1', transcriptId: 'transcript-example-1', transcriptHash: 'a'.repeat(64), derivationVersion: 'editorial-beat-derivation/v1', pauseBoundaryMs: 450, maxDurationMs: 8000, words: [{ id: 'word-example-000001', index: 0, text: 'Olá.', startMs: 0, endMs: 500 }], wordsHash: 'b'.repeat(64), signals: [{ wordId: 'word-example-000001', intent: 'explain', argumentId: 'argument-a', visualContext: 'speaker' }], signalsHash: 'c'.repeat(64), beats: [{ schemaVersion: 'editorial-beat/v1', id: 'beat-example-1', ordinal: 0, startMs: 0, endMs: 500, wordIds: ['word-example-000001'], intent: 'explain', argumentId: 'argument-a', visualContext: 'speaker', boundaryReasons: ['sentence-end'], beatHash: 'd'.repeat(64) }], beatsHash: 'e'.repeat(64), idempotencyKey: 'beat-example-key-1', requestFingerprint: 'f'.repeat(64), actor: { clientId }, replayed: false, createdAt, recordHash: '1'.repeat(64) }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/editorial-beat-adjustment-request/v1': [{ beatId: 'beat-example-1', directorRunId: 'director-run-example-1', startWordId: 'word-example-000001', endWordId: 'word-example-000001', reason: 'Preserve the complete argument.' }],
     'apollo://schemas/editorial-beat-adjustment/v1': [{ data: { schemaVersion: 'editorial-beat-adjustment-record/v1', id: 'beat-adjustment-example-1', workspaceId, projectId, beatSetId: 'beat-set-example-1', sourceBeatId: 'beat-example-1', directorRunId: 'director-run-example-1', reason: 'Preserve the complete argument.', startWordId: 'word-example-000001', endWordId: 'word-example-000001', sourceBeatHash: 'd'.repeat(64), adjustedBeat: { schemaVersion: 'editorial-beat/v1', id: 'beat-example-2', ordinal: 0, startMs: 0, endMs: 500, wordIds: ['word-example-000001'], intent: 'explain', argumentId: 'argument-a', visualContext: 'speaker', boundaryReasons: ['sentence-end'], beatHash: '2'.repeat(64) }, wordAlignmentHash: 'b'.repeat(64), wordAlignmentUnchanged: true, adjustmentHash: '3'.repeat(64), idempotencyKey: 'beat-adjust-example-key-1', requestFingerprint: '4'.repeat(64), actor: { clientId }, replayed: false, createdAt, recordHash: '5'.repeat(64) }, meta: { apiVersion: 'v1' } }],
-    'apollo://schemas/image-analysis/v1': [{ data: { schemaVersion: 'image-analysis/v1', id: 'image-analysis-example-1', workspaceId, artifactId, manifestId: 'manifest-image-example-1', sourceSha256: 'a'.repeat(64), dimensions: { width: 1080, height: 1350 }, orientation: 'portrait', dominantColors: ['#102030'], ocr: { state: 'available', values: [{ text: 'Oferta válida hoje', language: 'pt-BR', box: [0.1, 0.75, 0.8, 0.1], confidence: 0.91, importance: 'high' }], producer: { provider: 'tesseract', model: 'por-eng', version: 'v5' }, reasonCodes: [] }, faces: { state: 'unavailable', values: [], producer: { provider: 'not-configured', model: 'none', version: 'v1' }, reasonCodes: ['FACE_PROVIDER_NOT_CONFIGURED'] }, objects: { state: 'unavailable', values: [], producer: { provider: 'not-configured', model: 'none', version: 'v1' }, reasonCodes: ['OBJECT_PROVIDER_NOT_CONFIGURED'] }, observedDescription: 'Imagem portrait 1080×1350 com texto “Oferta válida hoje”.', inferredTags: [{ value: 'oferta', confidence: 0.91, provenance: 'tesseract:por-eng@v5:ocr:pt-BR' }], derivatives: { thumbnailArtifactId: 'artifact-image-thumbnail-example-1', previewArtifactId: 'artifact-image-preview-example-1', immutableOriginal: true }, createdAt, analysisHash: 'b'.repeat(64) }, meta: { apiVersion: 'v1' } }],
-    'apollo://schemas/media-segment-create-request/v1': [{ label: 'Promessa central', description: 'Trecho reutilizável', startMs: 1200, endMs: 4800 }],
-    'apollo://schemas/media-segment/v1': [{ data: { id: 'segment-example-1', workspaceId, parentAssetId: artifactId, label: 'Promessa central', description: 'Trecho reutilizável', semanticRange: { startMs: 1200, endMs: 4800 }, sourceTimeMapping: { sourceStartMs: 1200, sourceEndMs: 4800, rate: 1 }, physicalObjectKey: null, sourceDurationMs: 12000, segmentHash: 'a'.repeat(64), createdAt }, meta: { apiVersion: 'v1' } }],
-    'apollo://schemas/media-segment-page/v1': [{ data: { items: [{ id: 'segment-example-1', workspaceId, parentAssetId: artifactId, label: 'Promessa central', description: 'Trecho reutilizável', semanticRange: { startMs: 1200, endMs: 4800 }, sourceTimeMapping: { sourceStartMs: 1200, sourceEndMs: 4800, rate: 1 }, physicalObjectKey: null, sourceDurationMs: 12000, segmentHash: 'a'.repeat(64), createdAt }] }, meta: { apiVersion: 'v1' } }],
-    'apollo://schemas/image-reuse-search-result/v1': [{ data: { query: 'oferta premium', usage: 'card', items: [{ artifactId, manifestId: 'manifest-image-example-1', analysisId: 'image-analysis-example-1', analysisHash: 'b'.repeat(64), label: 'Oferta premium.png', usage: 'card', score: 0.941, matchedTerms: ['oferta', 'premium'], orientation: 'portrait', previewArtifactId: 'artifact-image-preview-example-1', rightsSnapshotId: 'rights-example-1', rightsSnapshotHash: 'c'.repeat(64), rightsValidUntil: '2026-08-12T12:05:00.000Z' }] }, meta: { apiVersion: 'v1' } }],
-    'apollo://schemas/image-reuse-request/v1': [{ artifactId, query: 'oferta premium', usage: 'card' }],
-    'apollo://schemas/image-reuse-reference/v1': [{ data: { schemaVersion: 'image-reuse-reference/v1', id: 'image-reuse-example-1', workspaceId, projectId, artifactId, manifestId: 'manifest-image-example-1', mediaAssetReferenceId: '123e4567-e89b-42d3-a456-426614174077', analysisId: 'image-analysis-example-1', analysisHash: 'b'.repeat(64), rightsSnapshotId: 'rights-example-1', rightsSnapshotHash: 'c'.repeat(64), usage: 'card', query: 'oferta premium', score: 0.941, bytesDuplicated: false, lineageHash: 'd'.repeat(64), replayed: false, createdAt }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/image-analysis/v1': [{ data: { schemaVersion: 'image-analysis/v1', id: 'image-analysis-example-1', workspaceId, artifactId, manifestId: 'manifest-image-example-1', sourceSha256: 'a'.repeat(64), dimensions: { width: 1080, height: 1350 }, orientation: 'portrait', dominantColors: ['#102030'], ocr: { state: 'available', values: [{ text: 'texto de exemplo', language: 'pt-BR', box: [0.1, 0.75, 0.8, 0.1], confidence: 0.91, importance: 'high' }], producer: { provider: 'tesseract', model: 'por-eng', version: 'v5' }, reasonCodes: [] }, faces: { state: 'unavailable', values: [], producer: { provider: 'not-configured', model: 'none', version: 'v1' }, reasonCodes: ['FACE_PROVIDER_NOT_CONFIGURED'] }, objects: { state: 'unavailable', values: [], producer: { provider: 'not-configured', model: 'none', version: 'v1' }, reasonCodes: ['OBJECT_PROVIDER_NOT_CONFIGURED'] }, observedDescription: 'Imagem portrait 1080×1350 com texto “texto de exemplo”.', inferredTags: [{ value: 'oferta', confidence: 0.91, provenance: 'tesseract:por-eng@v5:ocr:pt-BR' }], derivatives: { thumbnailArtifactId: 'artifact-image-thumbnail-example-1', previewArtifactId: 'artifact-image-preview-example-1', immutableOriginal: true }, createdAt, analysisHash: 'b'.repeat(64) }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/media-segment-create-request/v1': [{ label: 'Segmento de exemplo', description: 'Descrição de exemplo', startMs: 1200, endMs: 4800 }],
+    'apollo://schemas/media-segment/v1': [{ data: { id: 'segment-example-1', workspaceId, parentAssetId: artifactId, label: 'Segmento de exemplo', description: 'Descrição de exemplo', semanticRange: { startMs: 1200, endMs: 4800 }, sourceTimeMapping: { sourceStartMs: 1200, sourceEndMs: 4800, rate: 1 }, physicalObjectKey: null, sourceDurationMs: 12000, segmentHash: 'a'.repeat(64), createdAt }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/media-segment-page/v1': [{ data: { items: [{ id: 'segment-example-1', workspaceId, parentAssetId: artifactId, label: 'Segmento de exemplo', description: 'Descrição de exemplo', semanticRange: { startMs: 1200, endMs: 4800 }, sourceTimeMapping: { sourceStartMs: 1200, sourceEndMs: 4800, rate: 1 }, physicalObjectKey: null, sourceDurationMs: 12000, segmentHash: 'a'.repeat(64), createdAt }] }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/image-reuse-search-result/v1': [{ data: { query: 'consulta de exemplo', usage: 'card', items: [{ artifactId, manifestId: 'manifest-image-example-1', analysisId: 'image-analysis-example-1', analysisHash: 'b'.repeat(64), label: 'Oferta premium.png', usage: 'card', score: 0.941, matchedTerms: ['oferta', 'premium'], orientation: 'portrait', previewArtifactId: 'artifact-image-preview-example-1', rightsSnapshotId: 'rights-example-1', rightsSnapshotHash: 'c'.repeat(64), rightsValidUntil: '2026-08-12T12:05:00.000Z' }] }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/image-reuse-request/v1': [{ artifactId, query: 'consulta de exemplo', usage: 'card' }],
+    'apollo://schemas/image-reuse-reference/v1': [{ data: { schemaVersion: 'image-reuse-reference/v1', id: 'image-reuse-example-1', workspaceId, projectId, artifactId, manifestId: 'manifest-image-example-1', mediaAssetReferenceId: '123e4567-e89b-42d3-a456-426614174077', analysisId: 'image-analysis-example-1', analysisHash: 'b'.repeat(64), rightsSnapshotId: 'rights-example-1', rightsSnapshotHash: 'c'.repeat(64), usage: 'card', query: 'consulta de exemplo', score: 0.941, bytesDuplicated: false, lineageHash: 'd'.repeat(64), replayed: false, createdAt }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/media-library-item/v1': [
       {
         data: {
@@ -8125,13 +8312,13 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       {
         data: {
           items: [{
-            id: 'segment-example-1', workspaceId, kind: 'segment', label: 'Promessa central',
+            id: 'segment-example-1', workspaceId, kind: 'segment', label: 'Segmento de exemplo',
             people: ['Ana Martins'], topics: ['Produto premium'], status: 'usable',
             rights: { status: 'eligible', snapshotId: 'rights-example-1', reasonCodes: [] },
             origin: { type: 'derived', parentArtifactId: artifactId },
             preview: { thumbnail: { status: 'available', artifactId: 'artifact-thumbnail-example-1' }, waveform: { status: 'unavailable' } },
             technical: { mediaType: 'video', container: 'mp4', byteSize: '82463372' },
-            source: { type: 'segment', artifactId, description: 'Trecho reutilizável', semanticRange: { startMs: 1200, endMs: 4800 }, sourceTimeMapping: { sourceStartMs: 1200, sourceEndMs: 4800, rate: 1 }, physicalObjectKey: null, sourceDurationMs: 12000, segmentHash: 'a'.repeat(64), virtual: true, bytesDuplicated: false }, createdAt,
+            source: { type: 'segment', artifactId, description: 'Descrição de exemplo', semanticRange: { startMs: 1200, endMs: 4800 }, sourceTimeMapping: { sourceStartMs: 1200, sourceEndMs: 4800, rate: 1 }, physicalObjectKey: null, sourceDurationMs: 12000, segmentHash: 'a'.repeat(64), virtual: true, bytesDuplicated: false }, createdAt,
           }],
           nextCursor: null,
         },
@@ -9060,9 +9247,9 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         objective: 'sale',
         desiredAction: {
           destination: { type: 'url', value: 'https://checkout.example/oferta' },
-          verbalCta: 'Garanta sua vaga',
-          visualCta: 'Comprar agora',
-          disclosures: ['Condições no site'],
+          verbalCta: 'CTA falado de exemplo',
+          visualCta: 'CTA visual de exemplo',
+          disclosures: ['Aviso de exemplo'],
         },
         reason: 'Conduzir a direção aprovada para a oferta explícita.',
       },
@@ -9477,7 +9664,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         region: { x: 0.18, y: 0.12, width: 0.42, height: 0.28 },
         targetIds: [],
         screenshotRef: `data:image/jpeg;base64,${Buffer.from('apollo-review-frame').toString('base64')}`,
-        text: 'Reposicionar a legenda abaixo do rosto.',
+        text: 'Comentário de exemplo.',
       },
     ],
     'apollo://schemas/create-review-annotation-request/v2': [
@@ -9492,7 +9679,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         targetIds: [],
         applicationScope: { kind: 'scene', global: false },
         screenshotRef: `data:image/jpeg;base64,${Buffer.from('apollo-review-frame').toString('base64')}`,
-        text: 'Reposicionar a legenda abaixo do rosto.',
+        text: 'Comentário de exemplo.',
       },
     ],
     'apollo://schemas/project-review/v1': [
@@ -9520,7 +9707,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             scope: 'region',
             region: { x: 0.18, y: 0.12, width: 0.42, height: 0.28 },
             targetIds: [],
-            text: 'Reposicionar a legenda abaixo do rosto.',
+            text: 'Comentário de exemplo.',
             author: { id: clientId, name: 'Editor Apollo', type: 'api-client' },
             status: 'open',
             createdAt,
@@ -9577,7 +9764,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             targetIds: [],
             applicationScope: { kind: 'scene', targetIds: ['scene:clip-example-1'], formatIds: ['9:16'], localeIds: ['pt-BR'], recipeIds: ['project-final-export'], global: false },
             affectedCount: 1,
-            text: 'Reposicionar a legenda abaixo do rosto.',
+            text: 'Comentário de exemplo.',
             author: { id: clientId, name: 'Editor Apollo', type: 'api-client' },
             status: 'open',
             createdAt,
@@ -9640,7 +9827,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             scope: 'region',
             region: { x: 0.18, y: 0.12, width: 0.42, height: 0.28 },
             targetIds: [],
-            text: 'Reposicionar a legenda abaixo do rosto.',
+            text: 'Comentário de exemplo.',
             author: { id: clientId, name: 'Editor Apollo', type: 'api-client' },
             status: 'open',
             createdAt,
@@ -9666,7 +9853,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             targetIds: [],
             applicationScope: { kind: 'scene', targetIds: ['scene:clip-example-1'], formatIds: ['9:16'], localeIds: ['pt-BR'], recipeIds: ['project-final-export'], global: false },
             affectedCount: 1,
-            text: 'Reposicionar a legenda abaixo do rosto.',
+            text: 'Comentário de exemplo.',
             author: { id: clientId, name: 'Editor Apollo', type: 'api-client' },
             status: 'open',
             createdAt,
@@ -10091,12 +10278,12 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
           version: { id: 'project-version-example-2', sequence: 2, baseHash: 'b'.repeat(64), createdAt },
           editPlan: {
             id: 'edit-plan-example-2', state: 'compiled', fps: 30, durationFrames: 2683,
-            clipCount: 4, cutCount: 3, automaticZoom: false, subtitleFaceProtection: true,
+            clipCount: 4, cutCount: 3, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, subtitleFaceProtection: true,
           },
           commands: [{
             id: 'edit-command-example-1', type: 'remove-spoken-content',
             baseVersionId: 'project-version-example-1', resultVersionId: 'project-version-example-2',
-            reason: 'Remover datas e duração obsoletas.', createdAt,
+            reason: 'Remover o trecho pedido.', createdAt,
           }],
           media: [], transcripts: [], operationIds: [], operations: [],
         },
@@ -10108,7 +10295,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         data: {
           project: { id: projectId, workspaceId, name: 'Anuncio de descoberta', status: 'draft', objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt },
           version: { id: 'project-version-example-3', sequence: 3, baseHash: 'c'.repeat(64), createdAt },
-          editPlan: { id: 'edit-plan-example-3', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: false, subtitleFaceProtection: true },
+          editPlan: { id: 'edit-plan-example-3', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, subtitleFaceProtection: true },
           commands: [],
           media: [{
             id: 'project-media-editorial-example-1', role: 'editorial-proxy', originalFileName: 'video-editorial.mp4',
@@ -10125,7 +10312,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         data: {
           project: { id: projectId, workspaceId, name: 'Anuncio de descoberta', status: 'draft', objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt },
           version: { id: 'project-version-example-4', sequence: 4, baseHash: 'd'.repeat(64), createdAt },
-          editPlan: { id: 'edit-plan-example-4', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: false, subtitleFaceProtection: true },
+          editPlan: { id: 'edit-plan-example-4', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, subtitleFaceProtection: true },
           commands: [{
             id: 'edit-command-director-example-1', type: 'run-director', baseVersionId: 'project-version-example-3',
             resultVersionId: 'project-version-example-4', reason: 'Planejar e revisar a composicao completa.', createdAt,
@@ -10135,7 +10322,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             baseVersionId: 'project-version-example-3', resultVersionId: 'project-version-example-4',
             treatmentSnapshotId: 'project-snapshot-treatment-1', storySnapshotId: 'project-snapshot-story-1', qualitySnapshotId: 'project-snapshot-quality-1',
             qualityStatus: 'approved-with-warnings', qualityScore: 0.9, decisionCount: 6, assumptionCount: 2,
-            subtitleCueCount: 28, transitionCount: 2, automaticZoom: false, createdAt,
+            subtitleCueCount: 28, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, createdAt,
           }],
           media: [{
             id: 'project-media-editorial-example-1', role: 'editorial-proxy', originalFileName: 'video-editorial.mp4',
@@ -10152,7 +10339,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         data: {
           project: { id: projectId, workspaceId, name: 'Anuncio de descoberta', status: 'completed', objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt },
           version: { id: 'project-version-example-4', sequence: 4, baseHash: 'd'.repeat(64), createdAt },
-          editPlan: { id: 'edit-plan-example-4', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: false, subtitleFaceProtection: true },
+          editPlan: { id: 'edit-plan-example-4', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, subtitleFaceProtection: true },
           commands: [{
             id: 'edit-command-director-example-1', type: 'run-director', baseVersionId: 'project-version-example-3',
             resultVersionId: 'project-version-example-4', reason: 'Planejar e revisar a composicao completa.', createdAt,
@@ -10162,7 +10349,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             baseVersionId: 'project-version-example-3', resultVersionId: 'project-version-example-4',
             treatmentSnapshotId: 'project-snapshot-treatment-1', storySnapshotId: 'project-snapshot-story-1', qualitySnapshotId: 'project-snapshot-quality-1',
             qualityStatus: 'approved-with-warnings', qualityScore: 0.9, decisionCount: 6, assumptionCount: 2,
-            subtitleCueCount: 28, transitionCount: 2, automaticZoom: false, createdAt,
+            subtitleCueCount: 28, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, createdAt,
           }],
           media: [{
             id: 'project-media-final-example-1', role: 'final-output', originalFileName: 'video-final-1080x1920.mp4',
@@ -10820,7 +11007,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         objective: 'discovery',
         format: '9:16',
         locale: 'pt-BR',
-        briefing: 'Apresentar a ideia com ritmo natural e sem efeitos gratuitos.',
+        briefing: 'Briefing de exemplo.',
       },
     ],
     'apollo://schemas/project-created/v1': [
@@ -10960,11 +11147,11 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     'apollo://schemas/create-project-request/v3': [
       {
         name: 'Campanha de venda', objective: 'sale', format: '9:16', locale: 'pt-BR',
-        briefing: 'Apresentar a oferta com ritmo natural e sem efeitos gratuitos.',
+        briefing: 'Briefing de exemplo.',
         desiredAction: {
           destination: { type: 'url', value: 'https://checkout.example/oferta' },
-          verbalCta: 'Garanta sua vaga', visualCta: 'Comprar agora',
-          disclosures: ['Condições no site'],
+          verbalCta: 'CTA falado de exemplo', visualCta: 'CTA visual de exemplo',
+          disclosures: ['Aviso de exemplo'],
         },
       },
     ],
@@ -11380,7 +11567,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     ],
     'apollo://schemas/narrative-safety-preflight-request/v1': [{
       projectVersionId: 'project-version-narrative-1', expectedBaseHash: 'a'.repeat(64), storyPlanId: 'story-plan-narrative-1',
-      edit: [{ statementId: 'statement-promise', speakerId: 'speaker-expert', sourceArtifactId: artifactId, sourceRangeMs: [4000, 7000], preservedText: 'O método pode melhorar a clareza em até 30 dias.' }],
+      edit: [{ statementId: 'statement-promise', speakerId: 'speaker-expert', sourceArtifactId: artifactId, sourceRangeMs: [4000, 7000], preservedText: 'Afirmação de exemplo.' }],
     }],
     'apollo://schemas/narrative-safety-preflight/v1': [{ data: { decision: {
       schemaVersion: 'narrative-safety-decision/v1', projectVersionId: 'project-version-narrative-1', projectVersionBaseHash: 'a'.repeat(64), storyPlanId: 'story-plan-narrative-1', storySnapshotHash: 'b'.repeat(64), contextHash: 'c'.repeat(64), safe: false,
@@ -11780,7 +11967,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
           commandId: 'command-open-session-1',
           actorKind: 'human',
           actorId: 'user-editor-1',
-          note: 'Two cameras, one phone, one lav recorder.',
+          note: 'Example session note.',
         },
       },
     ],
@@ -11807,7 +11994,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
           commandId: 'command-add-phone-part-2',
           actorKind: 'human',
           actorId: 'user-editor-1',
-          note: 'Card filled at 10:09:58; the recorder wrote a second file.',
+          note: 'Example operator note.',
         },
       },
     ],
@@ -11820,7 +12007,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
           commandId: 'command-change-reference-1',
           actorKind: 'human',
           actorId: 'user-editor-1',
-          note: 'The lav recorder was the reference by mistake; the A camera has timecode.',
+          note: 'Example correction note.',
         },
       },
     ],
@@ -12141,7 +12328,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
                     confidence: 'high',
                     residualBoundTicks: '44',
                     openedBy: 'recorder-restart',
-                    openedByDetail: 'card full at 10:09:58; the recorder wrote a new file ten seconds later',
+                    openedByDetail: 'example detail of the opened gap',
                     anchorIds: ['anchor-phone-7', 'anchor-phone-8'],
                     evidenceRefs: ['probe-phone-fingerprint-2'],
                   },
@@ -12308,6 +12495,21 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     'apollo://schemas/create-production-batch-request/v1': [
       productionBatchCreateRequestExample,
     ],
+    'apollo://schemas/create-production-batch-request/v2': [
+      { ...productionBatchCreateRequestExample, briefing: '<texto do pedido>' },
+    ],
+    // ADR-160: the versions whose batch may state no objective; the examples that state one are still valid under them, and one states none.
+    'apollo://schemas/create-production-batch-request/v3': [
+      { ...productionBatchCreateRequestExample, briefing: '<texto do pedido>' },
+      (() => { const { objective: _omitted, ...withoutObjective } = productionBatchCreateRequestExample; void _omitted; return { ...withoutObjective, briefing: '<texto do pedido>' } })(),
+    ],
+    'apollo://schemas/production-batch-mutated/v3': [
+      { data: { batch: productionBatchVisibleExample, replayed: false }, meta: { apiVersion: 'v1' } },
+      (() => { const { objective: _omitted, ...withoutObjective } = productionBatchVisibleExample; void _omitted; return { data: { batch: withoutObjective, replayed: false }, meta: { apiVersion: 'v1' } } })(),
+    ],
+    'apollo://schemas/production-batch-read/v3': [{ data: { batch: productionBatchVisibleExample }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/production-batch-page/v3': [{ data: { batches: [productionBatchVisibleExample], nextCursor: productionBatchVisibleExample.id }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/batch-partial-retry-mutated/v3': [{ data: { batch: productionBatchVisibleExample, partialRetry: batchPartialRetryExample, replayed: false }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/production-batch-mutated/v1': [
       {
         data: {
@@ -12339,7 +12541,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             },
           },
           version: { id: 'project-version-example-4', sequence: 4, baseHash: 'd'.repeat(64), createdAt },
-          editPlan: { id: 'edit-plan-example-4', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: false, subtitleFaceProtection: true },
+          editPlan: { id: 'edit-plan-example-4', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, subtitleFaceProtection: true },
           commands: [{
             id: 'edit-command-director-example-1', type: 'run-director', baseVersionId: 'project-version-example-3',
             resultVersionId: 'project-version-example-4', reason: 'Planejar e revisar a composicao completa.', createdAt,
@@ -12349,7 +12551,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             baseVersionId: 'project-version-example-3', resultVersionId: 'project-version-example-4',
             treatmentSnapshotId: 'project-snapshot-treatment-1', storySnapshotId: 'project-snapshot-story-1', qualitySnapshotId: 'project-snapshot-quality-1',
             qualityStatus: 'approved-with-warnings', qualityScore: 0.9, decisionCount: 6, assumptionCount: 2,
-            subtitleCueCount: 28, transitionCount: 2, automaticZoom: false, createdAt,
+            subtitleCueCount: 28, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, createdAt,
           }],
           media: [{
             id: 'project-media-final-example-1', role: 'final-output', originalFileName: 'video-final-1080x1920.mp4',
@@ -12424,7 +12626,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             treatmentSnapshotId: 'project-snapshot-treatment-2', storySnapshotId: 'project-snapshot-story-2',
             qualitySnapshotId: 'project-snapshot-quality-2', qualityStatus: 'approved-with-warnings',
             qualityScore: 0.9, decisionCount: 6, assumptionCount: 2,
-            subtitleCueCount: 28, transitionCount: 2, automaticZoom: false, createdAt,
+            subtitleCueCount: 28, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, createdAt,
           }],
           commands: [], media: [], transcripts: [], operationIds: [], operations: [],
         },
@@ -12520,7 +12722,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
               band: 'review', value: 0.72, reasonCodes: ['DIRECTOR_LAYOUT'],
               calibrationVersion: 'director-confidence-2026-08-v1', evidenceCount: 2,
             }],
-            subtitleCueCount: 22, transitionCount: 2, automaticZoom: false, createdAt,
+            subtitleCueCount: 22, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, createdAt,
           }],
           commands: [], media: [], transcripts: [], operationIds: [], operations: [],
         },
@@ -12562,7 +12764,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
               band: 'review', value: 0.72, reasonCodes: ['DIRECTOR_LAYOUT'],
               calibrationVersion: 'director-confidence-2026-08-v1', evidenceCount: 2,
             }],
-            subtitleCueCount: 22, transitionCount: 2, automaticZoom: false, createdAt,
+            subtitleCueCount: 22, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, createdAt,
           }],
           commands: [], media: [], transcripts: [], operationIds: [], operations: [],
         },
@@ -12606,7 +12808,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
               band: 'review', value: 0.72, reasonCodes: ['DIRECTOR_LAYOUT'],
               calibrationVersion: 'director-confidence-2026-08-v1', evidenceCount: 2,
             }],
-            subtitleCueCount: 22, transitionCount: 2, automaticZoom: false, createdAt,
+            subtitleCueCount: 22, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM, createdAt,
           }],
           reviewAvailability: {
             schemaVersion: 'project-review-availability/v1', requestedVersionId: 'project-version-confidence-1',
@@ -12945,7 +13147,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             blockId: 'script-block-1',
             resolution: 'select-alternative',
             candidateId: 'script-candidate-example-2',
-            note: 'Segundo take tem uma entrega mais direta.',
+            note: 'Motivo de exemplo.',
           },
           {
             targetKind: 'extra-take',
@@ -13024,6 +13226,22 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         acceptThreshold: 70,
         reviewThreshold: 60,
       },
+    ],
+    'apollo://schemas/create-compatibility-graph-request/v2': [
+      {
+        takeLibraryId: takeLibraryRunExample.id,
+        expectedTakeLibraryRunHash: takeLibraryRunExample.runHash,
+        contexts: compatibilityContextsExampleV2,
+      },
+    ],
+    'apollo://schemas/compatibility-graph-mutated/v2': [
+      { data: { graph: compatibilityGraphRunExampleV2, replayed: false }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/compatibility-graph-read/v2': [
+      { data: { graph: compatibilityGraphRunExampleV2 }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/compatibility-graph-page/v2': [
+      { data: { graphs: [compatibilityGraphRunExampleV2], nextCursor: compatibilityGraphRunExampleV2.id }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/compatibility-graph-mutated/v1': [
       {
@@ -13225,9 +13443,8 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       {
         type: 'remove-spoken-content', baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-example-1',
         rules: [
-          { id: 'date-january-31', label: '31 de janeiro', alternatives: ['31 de janeiro', 'trinta e um de janeiro'] },
-          { id: 'date-february-1', label: '1 de fevereiro', alternatives: ['1 de fevereiro', 'primeiro de fevereiro'] },
-          { id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] },
+          { id: 'phrase-rule-example-1', label: 'frase de exemplo', alternatives: ['frase de exemplo'] },
+          { id: 'phrase-rule-example-2', label: 'outra frase de exemplo', alternatives: ['outra frase de exemplo', 'segunda frase de exemplo'] },
         ],
       },
     ],
@@ -13238,15 +13455,14 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         baseHash: 'a'.repeat(64),
         sourceTranscriptId: 'transcript-example-1',
         rules: [
-          { id: 'date-january-31', label: '31 de janeiro', alternatives: ['31 de janeiro', 'trinta e um de janeiro'] },
-          { id: 'date-february-1', label: '1 de fevereiro', alternatives: ['1 de fevereiro', 'primeiro de fevereiro'] },
-          { id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] },
+          { id: 'phrase-rule-example-1', label: 'frase de exemplo', alternatives: ['frase de exemplo'] },
+          { id: 'phrase-rule-example-2', label: 'outra frase de exemplo', alternatives: ['outra frase de exemplo', 'segunda frase de exemplo'] },
         ],
         exclusionOverrides: [
-          { sourceStartSeconds: 36.26, sourceEndSeconds: 58.12, ruleIds: ['date-january-31', 'date-february-1'], reason: 'Remover o bloco de agenda sem deixar uma frase quebrada.' },
-          { sourceStartSeconds: 86.58, sourceEndSeconds: 87.76, ruleIds: ['duration-two-days'], reason: 'Remover apenas a duração, preservando o restante da promessa.' },
+          { sourceStartSeconds: 12.0, sourceEndSeconds: 15.66, ruleIds: ['phrase-rule-example-1'], reason: 'Remover o trecho pedido.' },
+          { sourceStartSeconds: 40.0, sourceEndSeconds: 41.2, ruleIds: ['phrase-rule-example-2'], reason: 'Remover o trecho pedido.' },
         ],
-        reason: 'Remover informações de data e duração que não pertencem à nova composição.',
+        reason: 'Remover o trecho pedido.',
       },
     ],
     'apollo://schemas/apply-project-edit-command-request/v3': [
@@ -13255,8 +13471,8 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         baseVersionId: 'project-version-example-1',
         baseHash: 'a'.repeat(64),
         sourceTranscriptId: 'transcript-example-1',
-        rules: [{ id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] }],
-        reason: 'Remover a duracao obsoleta.',
+        rules: [{ id: 'phrase-rule-example-1', label: 'frase de exemplo', alternatives: ['frase de exemplo'] }],
+        reason: 'Remover o trecho pedido.',
       },
       {
         type: 'run-director',
@@ -13269,7 +13485,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       {
         type: 'remove-spoken-content', baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64),
         sourceTranscriptId: 'transcript-example-1',
-        rules: [{ id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] }],
+        rules: [{ id: 'phrase-rule-example-1', label: 'frase de exemplo', alternatives: ['frase de exemplo'] }],
       },
       {
         type: 'replace-source-transcript', baseVersionId: 'project-version-example-4', baseHash: 'd'.repeat(64),
@@ -13293,7 +13509,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
           clipId: 'clip-example-1',
           atMs: 3120,
         },
-        reason: 'Separar a frase para ajustar o ritmo.',
+        reason: 'Motivo de exemplo.',
       },
       {
         action: 'undo',
@@ -13331,7 +13547,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         baseHash: 'e'.repeat(64),
         expectedRevision: 5,
         variantId: 'output-spec-9x16',
-        reason: 'A versão depois resolve o problema sem introduzir bloqueios.',
+        reason: 'Motivo de exemplo da seleção.',
       },
       {
         action: 'restore',
@@ -13362,16 +13578,16 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
           editorial: {
             sourceTranscriptId: 'transcript-example-1', sourceArtifactId: artifactId,
             exclusions: [{
-              sourceStartSeconds: 39.02, sourceEndSeconds: 42.68,
-              ruleIds: ['date-january-31', 'date-february-1'],
-              labels: ['31 de janeiro', '1 de fevereiro'],
-              matchedText: '31 de janeiro | 1 de fevereiro',
+              sourceStartSeconds: 12.0, sourceEndSeconds: 15.66,
+              ruleIds: ['phrase-rule-example-1'],
+              labels: ['frase de exemplo'],
+              matchedText: 'frase de exemplo',
             }],
             retainedSourceRanges: [
-              { sourceStartSeconds: 0, sourceEndSeconds: 39.02 },
-              { sourceStartSeconds: 42.68, sourceEndSeconds: 102.166 },
+              { sourceStartSeconds: 0, sourceEndSeconds: 12.0 },
+              { sourceStartSeconds: 15.66, sourceEndSeconds: 102.166 },
             ],
-            outputDurationFrames: 2955, fps: 30, automaticZoom: false,
+            outputDurationFrames: 2955, fps: 30, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM,
             protectedOpeningFrames: 120, subtitleFaceProtection: true,
           },
           replayed: false,
@@ -13400,7 +13616,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             perception: { snapshotId: 'project-snapshot-perception-1', summary: { speechCoverage: 0.78, visualCoverage: 'partial', faceCoverage: 'absent' } },
             treatmentPlan: { snapshotId: 'project-snapshot-treatment-1', plan: { mode: 'talking-head', objective: 'discovery' } },
             storyPlan: { snapshotId: 'project-snapshot-story-1', plan: { objective: 'discovery', blockCount: 3 } },
-            editPlan: { snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4', durationFrames: 2380, fps: 30, subtitleCueCount: 28, transitionCount: 2, automaticZoom: false },
+            editPlan: { snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4', durationFrames: 2380, fps: 30, subtitleCueCount: 28, transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM },
             qualityReport: { snapshotId: 'project-snapshot-quality-1', report: { status: 'approved-with-warnings', score: 0.9 } },
             decisions: [
               { id: 'decision-narrative-linear', category: 'narrative', choice: 'preserve-linear-narrative' },
@@ -13457,8 +13673,8 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       {
         baseVersionId: 'project-version-example-subtitle-3', baseHash: 'e'.repeat(64), variantId: EXAMPLE_VERTICAL_VARIANT_ID,
         segmentId: 'subtitle-cue-example-hook',
-        dimensions: [{ kind: 'position', anchor: 'upper-third' }, { kind: 'text', text: 'O dono some do negócio em 90 dias.' }],
-        protected: true, reason: 'Subir a legenda do gancho para não cobrir o rosto.',
+        dimensions: [{ kind: 'position', anchor: 'upper-third' }, { kind: 'text', text: 'Texto de exemplo da legenda.' }],
+        protected: true, reason: 'Ajuste de exemplo da legenda.',
       },
       {
         baseVersionId: 'project-version-example-subtitle-3', baseHash: 'e'.repeat(64), variantId: EXAMPLE_VERTICAL_VARIANT_ID,
@@ -13480,16 +13696,16 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         presets: SUBTITLE_PRESET_IDS.map((presetId) => subtitlePresetReference(presetId)),
         segments: [
           {
-            segmentId: subtitleSegmentOverrideExample.segmentId, startFrame: 90, endFrame: 150, text: 'O dono some do negócio em 90 dias', state: 'overridden',
+            segmentId: subtitleSegmentOverrideExample.segmentId, startFrame: 90, endFrame: 150, text: 'Texto de exemplo da legenda', state: 'overridden',
             override: {
               overrideId: subtitleSegmentOverrideExample.id, overrideHash: subtitleSegmentOverrideExample.overrideHash, action: 'set', dimensions: subtitleSegmentOverrideExample.dimensions,
               protected: true, previousOverrideId: null, createdAt,
             },
-            effective: { text: 'O dono some do negócio em 90 dias.', visible: true, pinnedAnchor: 'upper-third', presetId: null },
+            effective: { text: 'Texto de exemplo da legenda.', visible: true, pinnedAnchor: 'upper-third', presetId: null },
           },
           {
-            segmentId: 'subtitle-cue-example-cta', startFrame: 2200, endFrame: 2380, text: 'Chame no WhatsApp', state: 'inherited', override: null,
-            effective: { text: 'Chame no WhatsApp', visible: true, pinnedAnchor: null, presetId: null },
+            segmentId: 'subtitle-cue-example-cta', startFrame: 2200, endFrame: 2380, text: 'Texto de exemplo do CTA', state: 'inherited', override: null,
+            effective: { text: 'Texto de exemplo do CTA', visible: true, pinnedAnchor: null, presetId: null },
           },
         ],
       },
@@ -13568,16 +13784,16 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             sourceTranscriptId: editorialCutImpactExample.sourceTranscriptId,
             sourceArtifactId: artifactId,
             exclusions: [{
-              sourceStartSeconds: 39.02, sourceEndSeconds: 42.68,
-              ruleIds: ['date-january-31', 'date-february-1'],
-              labels: ['31 de janeiro', '1 de fevereiro'],
-              matchedText: '31 de janeiro | 1 de fevereiro',
+              sourceStartSeconds: 12.0, sourceEndSeconds: 15.66,
+              ruleIds: ['phrase-rule-example-1'],
+              labels: ['frase de exemplo'],
+              matchedText: 'frase de exemplo',
             }],
             retainedSourceRanges: [
-              { sourceStartSeconds: 0, sourceEndSeconds: 39.02 },
-              { sourceStartSeconds: 42.68, sourceEndSeconds: 102.166 },
+              { sourceStartSeconds: 0, sourceEndSeconds: 12.0 },
+              { sourceStartSeconds: 15.66, sourceEndSeconds: 102.166 },
             ],
-            outputDurationFrames: 2955, fps: 30, automaticZoom: false,
+            outputDurationFrames: 2955, fps: 30, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM,
             protectedOpeningFrames: 120, subtitleFaceProtection: true,
             impact: editorialCutImpactExample,
             invalidations: [editorialCutInvalidationExample],
@@ -13621,7 +13837,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             editPlan: {
               snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4',
               durationFrames: 2380, fps: 30, subtitleCueCount: 28,
-              transitionCount: 2, automaticZoom: false,
+              transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM,
             },
             qualityReport: { snapshotId: 'project-snapshot-quality-1', report: { status: 'approved-with-warnings', score: 0.9 } },
             decisions: [
@@ -13657,8 +13873,8 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         objective: 'sale',
         desiredAction: {
           destination: { type: 'url', value: 'https://checkout.example/oferta' },
-          verbalCta: 'Garanta sua vaga', visualCta: 'Comprar agora',
-          disclosures: ['Condições no site'],
+          verbalCta: 'CTA falado de exemplo', visualCta: 'CTA visual de exemplo',
+          disclosures: ['Aviso de exemplo'],
         },
         reason: 'A direção aprovada agora precisa conduzir à oferta explícita.',
       },
@@ -13699,7 +13915,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             editPlan: {
               snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4',
               durationFrames: 2380, fps: 30, subtitleCueCount: 28,
-              transitionCount: 2, automaticZoom: false,
+              transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM,
             },
             qualityReport: { snapshotId: 'project-snapshot-quality-1', report: { status: 'approved-with-warnings', score: 0.9 } },
             decisions: [
@@ -13721,7 +13937,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       {
         type: 'remove-spoken-content', baseVersionId: 'project-version-example-3', baseHash: 'c'.repeat(64),
         sourceTranscriptId: 'transcript-example-1', variantId: 'variant-example-16x9',
-        rules: [{ id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] }],
+        rules: [{ id: 'phrase-rule-example-1', label: 'frase de exemplo', alternatives: ['frase de exemplo'] }],
       },
       {
         type: 'replace-source-transcript', baseVersionId: 'project-version-example-4', baseHash: 'd'.repeat(64),
@@ -13735,8 +13951,8 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         objective: 'sale',
         desiredAction: {
           destination: { type: 'url', value: 'https://checkout.example/oferta' },
-          verbalCta: 'Garanta sua vaga', visualCta: 'Comprar agora',
-          disclosures: ['Condições no site'],
+          verbalCta: 'CTA falado de exemplo', visualCta: 'CTA visual de exemplo',
+          disclosures: ['Aviso de exemplo'],
         },
         reason: 'A direção aprovada agora precisa conduzir à oferta explícita.',
       },
@@ -13767,14 +13983,14 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             sourceTranscriptId: editorialCutImpactExample.sourceTranscriptId,
             sourceArtifactId: artifactId,
             exclusions: [{
-              sourceStartSeconds: 39.02, sourceEndSeconds: 42.68,
-              ruleIds: ['date-january-31', 'date-february-1'],
+              sourceStartSeconds: 12.0, sourceEndSeconds: 15.66,
+              ruleIds: ['phrase-rule-example-1'],
             }],
             retainedSourceRanges: [
-              { sourceStartSeconds: 0, sourceEndSeconds: 39.02 },
-              { sourceStartSeconds: 42.68, sourceEndSeconds: 102.166 },
+              { sourceStartSeconds: 0, sourceEndSeconds: 12.0 },
+              { sourceStartSeconds: 15.66, sourceEndSeconds: 102.166 },
             ],
-            outputDurationFrames: 2955, fps: 30, automaticZoom: false,
+            outputDurationFrames: 2955, fps: 30, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM,
             protectedOpeningFrames: 120, subtitleFaceProtection: true,
             impact: editorialCutImpactExample,
             invalidations: [editorialCutInvalidationExample],
@@ -13824,7 +14040,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             editPlan: {
               snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4',
               durationFrames: 2380, fps: 30, subtitleCueCount: 28,
-              transitionCount: 2, automaticZoom: false,
+              transitionCount: 2, automaticZoom: EXAMPLE_PLAN_AUTOMATIC_ZOOM,
             },
             qualityReport: { snapshotId: 'project-snapshot-quality-1', report: { status: 'approved-with-warnings', score: 0.9 } },
             decisions: [
@@ -14487,6 +14703,54 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     }],
     'apollo://schemas/project-policy-overrides-response/v1': [{ data: currentProjectPolicyExample, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/project-policy-overrides-applied/v1': [{ data: projectPolicyAppliedExample, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/editorial-request-revision-impact/v1': [editorialRequestImpactExample],
+    'apollo://schemas/editorial-request-revise-request/v1': [{
+      baseVersionId: editorialRequestImpactExample.baseVersionId,
+      baseHash: 'a'.repeat(64),
+      briefing: editorialRequestBriefingExample,
+      reason: '<motivo da revisão>',
+    }],
+    'apollo://schemas/editorial-request-response/v1': [{ data: currentEditorialRequestExample, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/editorial-request-response/v2': [{
+      data: { ...currentEditorialRequestExample, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2, blocksDirector: true },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/editorial-request-revise-request/v2': [
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), briefing: editorialRequestBriefingExample, reason: '<motivo da revisão>' },
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), answers: [{ questionId: 'q1', choiceId: 'c1' }] },
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), answers: [{ questionId: 'q2', answer: '<resposta do dono>' }] },
+    ],
+    'apollo://schemas/editorial-request-revise-request/v3': [
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), briefing: editorialRequestBriefingExample, reason: '<motivo da revisão>' },
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), objective: 'discovery', reason: '<motivo da revisão>' },
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), answers: [{ questionId: 'q1', choiceId: 'c1' }] },
+    ],
+    'apollo://schemas/editorial-request-revised/v3': [{
+      data: { ...editorialRequestRevisedExample, change: { ...editorialRequestRevisedExample.change, objective: 'kept' }, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2, blocksDirector: true },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/editorial-request-revised/v2': [{
+      data: { ...editorialRequestRevisedExample, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2, blocksDirector: true },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/batch-editorial-request-response/v1': [{
+      data: { ...batchEditorialRequestExample, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2 },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/batch-editorial-request-revise-request/v1': [
+      { expectedRequestHash: editorialRequestViewExample.hashes.requestHash, answers: [{ questionId: 'q1', choiceId: 'c1' }] },
+      { expectedRequestHash: editorialRequestViewExample.hashes.requestHash, briefing: '<briefing do lote>' },
+    ],
+    'apollo://schemas/batch-editorial-request-revised/v1': [{
+      data: {
+        ...batchEditorialRequestExample, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2,
+        blocksGeneration: false, revision: { sequence: 1, createdAt },
+        change: { previousRequestHash: editorialRequestViewExample.hashes.requestHash, briefing: 'kept', answeredQuestionIds: ['q1'], interpreted: false },
+        replayed: false,
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/editorial-request-revised/v1': [{ data: editorialRequestRevisedExample, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/project-proxy-review-response/v1': [
       {
         data: { review: proxyReviewExampleV1 },
@@ -15116,7 +15380,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         baseHash: w20Digest('1'),
         format: { aspectRatio: '16:9' },
         range: { sessionStartTicks: w20Ticks(1).toString(), sessionEndTicks: w20Ticks(300).toString() },
-        reason: 'Re-cut the panel across both cameras now that the second camera is synced.',
+        reason: 'Example reason for the new cut.',
       },
     ],
     'apollo://schemas/protect-multicam-selection-request/v1': [
@@ -15130,7 +15394,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
             trackId: 'track-camera-b',
             sessionStartTicks: w20Ticks(60).toString(),
             sessionEndTicks: w20Ticks(90).toString(),
-            note: 'Hold on camera B through the demo: the scorer prefers the speaker, and the thing being demonstrated is on the other side of the table.',
+            note: 'Example note for the held shot.',
           },
         ],
       },
@@ -15176,7 +15440,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
         baseHash: w20DirectionSessionExample.sessionHash,
         projectBaseVersionId: 'project-version-panel-8',
         projectBaseHash: w20DirectedProjectVersionExample.baseHash,
-        note: 'Camera A is the one lit for the guest; B is the wide.',
+        note: 'Example note about the cameras.',
       },
     ],
     'apollo://schemas/add-multicam-match-override-request/v1': [
@@ -15282,7 +15546,7 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
           reactionTick: ((w20PlaybackUncoveredExample.range.start + w20PlaybackUncoveredExample.range.end) / BigInt(2)).toString(),
           referenceTick: w20Ticks(20).toString(),
           mode: 'playing',
-          note: 'The player was off-screen here; the timecode in the corner reads 00:20 when it comes back.',
+          note: 'Example operator note.',
         },
       },
     ],
@@ -15471,6 +15735,29 @@ const directorQualityReadExamplesV3: readonly ExampleNode[] = (() => {
   }
   return Object.freeze([legacy!, current])
 })()
+// ADR-160: the same report read as the version that also carries `director-quality-report/v5` - the v3/v4 examples unchanged, and a v5 report
+// whose hard checks are the list tied to the sealed policy resolution.
+const directorQualityReadExamplesV4: readonly ExampleNode[] = (() => {
+  const [legacy, evidence] = structuredClone([...directorQualityReadExamplesV3]) as ExampleNode[]
+  const current = structuredClone(evidence!) as ExampleNode
+  const qualityReport = exampleNode(current, 'data', 'qualityReport')
+  exampleNode(qualityReport, 'qualitySnapshot').contentSchemaVersion = 5
+  const report = exampleNode(qualityReport, 'report')
+  report.schemaVersion = 'director-quality-report/v5'
+  report.requestHash = 'a'.repeat(64)
+  report.policyResolutionHash = 'b'.repeat(64)
+  report.criticVersion = 'apollo-director-critic/v5'
+  const ref = (key: string) => `policy:${key}:${'b'.repeat(16)}`
+  report.hardChecks = [
+    { id: 'requestHonored', kind: 'request', passed: true, policyRef: null, evidence: [`resolution:${'b'.repeat(64)}`, 'unsupported=0', 'open-questions=0'] },
+    { id: 'movementMatchesPolicy', kind: 'request', passed: true, policyRef: ref('movement'), evidence: ['policy-mode=none', 'effect-tracks=0', 'automatic-zoom=false'] },
+    { id: 'forbiddenSpeechAbsent', kind: 'request', passed: true, policyRef: ref('speechRemovals'), evidence: ['removal-rules=0', 'matches-in-captions=0'] },
+    { id: 'captionsFitMeasured', kind: 'invariant', passed: true, policyRef: ref('captions'), evidence: ['cues=28', 'longest-cue-characters=30', 'policy-max-characters=32'] },
+    { id: 'timelineContinuous', kind: 'invariant', passed: true, policyRef: null, evidence: ['clips=3', 'duration-frames=2380'] },
+    { id: 'sourceRightsCertain', kind: 'invariant', passed: true, policyRef: null, evidence: ['rights-all-sources:certain=1/1'] },
+  ]
+  return Object.freeze([legacy!, evidence!, current])
+})()
 const MULTI_OUTPUT_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> = (() => {
   const annotationRequests = clonedExamples('apollo://schemas/create-review-annotation-request/v2')
   const reviews = clonedExamples('apollo://schemas/project-review/v3')
@@ -15503,7 +15790,18 @@ const MULTI_OUTPUT_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>>
     'apollo://schemas/project-workspace/v14': workspaces,
     // W64: the version whose uncertainty `type` also names crop, caption and insert; same examples, one more accepted value.
     'apollo://schemas/project-workspace/v15': structuredClone(workspaces),
+    // ADR-160: the version whose brief may state no objective; the same examples are still valid under it.
+    'apollo://schemas/project-workspace/v16': structuredClone(workspaces),
+    'apollo://schemas/create-variant-recipe-request/v2': clonedExamples('apollo://schemas/create-variant-recipe-request/v1'),
+    'apollo://schemas/create-variant-portfolio-preflight-request/v2': clonedExamples('apollo://schemas/create-variant-portfolio-preflight-request/v1'),
     'apollo://schemas/director-quality-report-read/v3': directorQualityReadExamplesV3,
+    'apollo://schemas/director-quality-report-read/v4': directorQualityReadExamplesV4,
+    // ADR-160 F4: a cut of the source applies no movement, so its opening has no window to protect.
+    'apollo://schemas/project-edit-command-applied/v9': clonedExamples('apollo://schemas/project-edit-command-applied/v8').map((example) => {
+      const cloned = structuredClone(example) as Record<string, unknown>
+      exampleNode(cloned, 'data', 'editorial').protectedOpeningFrames = 0
+      return cloned
+    }),
   })
 })()
 

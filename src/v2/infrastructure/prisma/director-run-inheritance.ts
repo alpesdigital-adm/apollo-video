@@ -101,7 +101,7 @@ export async function readEffectiveDirectorRun(
   const directorResultVersionId = walk.kind === 'direct' ? walk.directorResultVersionId : walk.inheritance.directorResultVersionId
   const run = await client.v2DirectorRun.findFirst({
     where: { workspaceId: input.workspaceId, projectId: input.projectId, resultVersionId: directorResultVersionId, status: 'succeeded' },
-    include: { qualitySnapshot: true, perceptionSnapshot: true },
+    include: { qualitySnapshot: true, perceptionSnapshot: true, policySnapshot: true },
   })
   if (!run) return null
   return Object.freeze({

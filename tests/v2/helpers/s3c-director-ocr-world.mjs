@@ -1,6 +1,9 @@
 import { resetDisposableDatabase } from './disposable-database.mjs'
 import { persistRecording, testActor } from './pg-output-world.mjs'
 import { seedReviewProject } from './review-edit-world.mjs'
+import { briefInterpreterDouble } from './editorial-request-fixture.mjs'
+
+const BRIEFING = 'Público: equipes criativas. Tom: direto e natural.'
 
 /**
  * The world the PostgreSQL Director/OCR suite runs on: a workspace with one project whose single output is the explicit
@@ -32,7 +35,10 @@ export async function seedDirectorOcrWorld(db, { suffix, artifactKey, sourceSha2
   await db.v2Workspace.create({ data: { id: otherWorkspaceId, slug: otherWorkspaceId, name: 'W61 other' } })
   const sealed = await seedReviewProject(db, { workspaceId, actor, prefix: 'w61', ids: { project: projectId, 'output-variant': variantId },
     name: 'Director OCR project', objective: 'discovery', aspectRatio,
-    briefing: 'Público: equipes criativas. Tom: direto e natural.' })
+    briefing: BRIEFING,
+    // The briefing is read when the project is created, as the product does (a briefing nobody has read is refused by the Director).
+    interpretBrief: await briefInterpreterDouble({ directives: [], unsupported: [], questions: [], coverage: [
+      { topic: 'audience', quote: 'equipes criativas' }, { topic: 'tone', quote: 'direto e natural' }] }) })
   // The master's grant is the one the product's own ingest writes (media ingest worker): no library reuse.
   const recording = await persistRecording(db, { workspaceId, projectId, actor, slug: `w61-source-${suffix}`, durationFrames,
     sourceSha256, sourceByteSize: Number(byteSize), sourceKey: artifactKey,

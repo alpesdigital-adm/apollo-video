@@ -23,7 +23,7 @@ import {
   resolveQualityReferenceDataset,
 } from '../../application/run-quality-iteration.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
-import { evaluateAssetUse } from '../../domain/asset-rights.ts'
+import { evaluateAssetUse, UNDETERMINED_LOCALE } from '../../domain/asset-rights.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
   resolveStrategicRubric,
@@ -591,12 +591,11 @@ export class PrismaQualityIterationRepository implements QualityIterationReposit
     if (
       !project.currentVersion ||
       !project.objective ||
-      !project.locale ||
       selectionRows.length !== input.assetSelectionIds.length
     ) {
       throw new DomainError(
         'PRECONDITION_REQUIRED',
-        'Quality iteration requires current version, objective, locale and exact evidence',
+        'Quality iteration requires current version, objective and exact evidence',
       )
     }
     // The iteration scores the output of the Version the review was about. The persisted consumption reader admits that exact
@@ -635,7 +634,7 @@ export class PrismaQualityIterationRepository implements QualityIterationReposit
       objective: project.objective,
       format: consumption.formatId,
       outputConsumption: Object.freeze({ sealHash: consumption.sealHash, seal: consumption.seal }),
-      locale: project.locale,
+      locale: project.locale ?? UNDETERMINED_LOCALE,
       proxyReview: hydrateProxyReview(proxyRow),
       assetSelections: Object.freeze(selectionRows.map(hydrateAssetSelection)),
       currentRightsByArtifact,
@@ -719,7 +718,6 @@ export class PrismaQualityIterationRepository implements QualityIterationReposit
         ])
         if (
           !project?.currentVersion ||
-          !project.locale ||
           project.currentVersion.id !== iteration.projectVersionId ||
           project.currentVersion.baseHash !== iteration.projectVersionHash
         ) {
@@ -763,7 +761,7 @@ export class PrismaQualityIterationRepository implements QualityIterationReposit
           const use = evaluateAssetUse(snapshot, {
             workspaceId: iteration.workspaceId,
             use: 'rendering',
-            locale: project.locale,
+            locale: project.locale ?? UNDETERMINED_LOCALE,
           }, new Date(iteration.createdAt))
           if (
             !artifact ||

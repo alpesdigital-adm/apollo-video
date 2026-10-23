@@ -754,7 +754,8 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
       assert.ok(directed.run.decisions.some((decision) => decision.evidenceRefs.includes(envelopeId)))
       assert.equal(directed.run.qualityReport.status, 'review-required')
       assert.equal(directed.run.qualityReport.faceSafety.status, 'unknown')
-      assert.equal(directed.run.qualityReport.hardChecks.subtitlesFaceSafe, false)
+      assert.equal(directed.run.qualityReport.hardChecks.find((check) => check.id === 'subtitlesFaceSafe'), undefined, 'face safety is claimed by nobody: no check of the v5 list says it, the faceSafety object does')
+      assert.equal(directed.run.qualityReport.faceSafety.status, 'unknown')
       const proxy = new PrismaProjectProxyRenderRepository(db)
       const proxySource = await proxy.readCurrentSource({ workspaceId, projectId: world.projectId })
       assert.equal(proxySource?.trustedOcr?.envelopeId, envelopeId,

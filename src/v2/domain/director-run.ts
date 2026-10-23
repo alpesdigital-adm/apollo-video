@@ -24,6 +24,7 @@ import {
 } from './decision-confidence.ts'
 import { parseDecisionPerceptionEvidence, requiredModalitiesFor, type DecisionPerceptionEvidence } from './director-evidence-rubric.ts'
 import type { DirectorPerceptionEvidenceReport } from './director-perception-evidence.ts'
+import { assertPlanHonorsResolution, type EditorialPolicyResolutionV1 } from './editorial-policy-resolution.ts'
 
 interface RetimedTranscriptWord {
   text: string
@@ -80,8 +81,10 @@ interface DirectorSourceEditPlan {
     retainedSourceRanges: readonly Readonly<{ sourceStartSeconds: number; sourceEndSeconds: number }>[]
   }>
   retimedTranscript: Readonly<{ sourceTranscriptId: string; words: readonly Readonly<RetimedTranscriptWord>[] }>
-  movementPolicy: Readonly<{ automaticZoom: false; protectedOpeningFrames: number }>
-  subtitlePolicy: Readonly<{ faceProtection: true; anchor: 'bottom'; maxCharactersPerBlock: number }>
+  /** What the plan declares of its movement. Both values come from the resolved policies (`planMovementPolicyUnder`), never from a constant of the producer. */
+  movementPolicy: Readonly<{ automaticZoom: boolean; protectedOpeningFrames: number }>
+  /** A source plan states no caption capacity: it is a cut, and the capacity is the policy of whoever directs it. */
+  subtitlePolicy: Readonly<{ faceProtection: true; anchor: 'bottom' }>
   createdAt: string
 }
 
@@ -241,50 +244,110 @@ export interface DirectorQualityReportBase {
   }>
   score: number
   strategic: Readonly<StrategicQualityReport>
-  hardChecks: Readonly<{
-    openingMotionProtected: boolean
-    automaticZoomDisabled: boolean
-    subtitlesFaceSafe: boolean
-    subtitlesBounded: boolean
-    forbiddenSpeechAbsent: boolean
-    timelineContinuous: boolean
-  }>
   issues: readonly Readonly<DirectorQualityIssue>[]
   criticVersion: string
   evaluatedAt: string
 }
 
+/** The fixed-name hard checks of report v3 and v4: editorial names a report of the request-driven era no longer carries. Read, never written. */
+export interface DirectorLegacyHardChecks {
+  openingMotionProtected: boolean
+  automaticZoomDisabled: boolean
+  subtitlesFaceSafe: boolean
+  subtitlesBounded: boolean
+  /**
+   * True when none of the speech THIS project asked to remove (the rules of its `remove-spoken-content` Commands) appears in the
+   * captions, and when nothing was asked (since `apollo-director-critic/v3`; earlier critics tested a fixed list). The public schema
+   * is immutable per ref, so this meaning lives here and in docs/specs/09, not in the schema description.
+   */
+  forbiddenSpeechAbsent: boolean
+  timelineContinuous: boolean
+}
+
+/**
+ * One hard check of report v5. `request` checks verify that the plan honours what the request resolved to; `invariant` checks are the
+ * product's own limits. `policyRef` names the policy of the sealed resolution the check is about (null: the check is about no policy).
+ */
+export interface DirectorHardCheck {
+  id: string
+  kind: 'request' | 'invariant'
+  passed: boolean
+  policyRef: string | null
+  evidence: readonly string[]
+}
+
 /** A report born before the evidence rubric (W64): no perception evidence section. Still readable, never written. */
 export interface DirectorQualityReportV3 extends DirectorQualityReportBase {
   schemaVersion: 'director-quality-report/v3'
+  hardChecks: Readonly<DirectorLegacyHardChecks>
   perceptionEvidence?: undefined
 }
 
-/** W64. The report whose critic states, per modality and per crop/caption/insert decision, how much perception stood behind the plan. */
+/** W64. The report whose critic states, per modality and per crop/caption/insert decision, how much perception stood behind the plan. Read, never written. */
 export interface DirectorQualityReportV4 extends DirectorQualityReportBase {
   schemaVersion: 'director-quality-report/v4'
+  hardChecks: Readonly<DirectorLegacyHardChecks>
   perceptionEvidence: Readonly<DirectorPerceptionEvidenceReport>
 }
 
-export type DirectorQualityReport = DirectorQualityReportV3 | DirectorQualityReportV4
+/**
+ * ADR-160. The report of a plan made from a sealed editorial request: it names the request (`requestHash`) and the policy resolution
+ * (`policyResolutionHash`) it was judged against, and its hard checks are a list tied to those policies. Only v5 is admitted to a final export.
+ */
+export interface DirectorQualityReportV5 extends DirectorQualityReportBase {
+  schemaVersion: 'director-quality-report/v5'
+  hardChecks: readonly Readonly<DirectorHardCheck>[]
+  perceptionEvidence: Readonly<DirectorPerceptionEvidenceReport>
+  requestHash: string
+  policyResolutionHash: string
+}
+
+export type DirectorQualityReport = DirectorQualityReportV3 | DirectorQualityReportV4 | DirectorQualityReportV5
+
+/**
+ * Validates the hard-check list of a report v5: a bounded list of uniquely named checks, each with its kind, its verdict, the policy it is
+ * about (a reference of the sealed resolution, or null) and at least one line of evidence. Fail closed on anything else.
+ */
+export function parseDirectorHardChecks(value: unknown): readonly Readonly<DirectorHardCheck>[] {
+  assertDomain(Array.isArray(value) && value.length >= 1 && value.length <= 32, 'PERSISTENCE_CONFLICT', 'Director hard checks are not a bounded non-empty list')
+  const ids = new Set<string>()
+  return Object.freeze((value as unknown[]).map((candidate) => {
+    assertDomain(typeof candidate === 'object' && candidate !== null && !Array.isArray(candidate) &&
+      Object.keys(candidate).sort().join('|') === 'evidence|id|kind|passed|policyRef', 'PERSISTENCE_CONFLICT', 'Director hard check is malformed')
+    const check = candidate as Record<string, unknown>
+    assertDomain(typeof check.id === 'string' && /^[A-Za-z][A-Za-z0-9]{2,63}$/.test(check.id) && !ids.has(check.id) &&
+      (check.kind === 'request' || check.kind === 'invariant') && typeof check.passed === 'boolean' &&
+      (check.policyRef === null || (typeof check.policyRef === 'string' && /^policy:[A-Za-z]+:[a-f0-9]{16}$/.test(check.policyRef))) &&
+      Array.isArray(check.evidence) && check.evidence.length >= 1 && check.evidence.length <= 16 &&
+      check.evidence.every((line) => typeof line === 'string' && line.length >= 1 && line.length <= 500),
+    'PERSISTENCE_CONFLICT', 'Director hard check is invalid')
+    ids.add(check.id as string)
+    return Object.freeze({ id: check.id as string, kind: check.kind as 'request' | 'invariant', passed: check.passed as boolean,
+      policyRef: check.policyRef as string | null, evidence: Object.freeze([...(check.evidence as string[])]) })
+  }))
+}
 
 export function hasConsistentFaceSafetyClaim(value: Readonly<Record<string, unknown>>): boolean {
   const faceSafety = value.faceSafety as Record<string, unknown> | null
-  const hardChecks = value.hardChecks as Record<string, unknown> | null
+  const hardChecks = value.hardChecks as Record<string, unknown> | readonly unknown[] | null
+  // Report v5 keeps no face-safety flag among its hard checks: the claim is the `faceSafety` object alone (a global face safety is never
+  // granted by the Director; per-cue certification decides at the final).
+  const listed = Array.isArray(hardChecks)
   if (!faceSafety || typeof faceSafety !== 'object' || Array.isArray(faceSafety) ||
-      !hardChecks || typeof hardChecks !== 'object' || Array.isArray(hardChecks) ||
+      !hardChecks || typeof hardChecks !== 'object' ||
       Object.keys(faceSafety).sort().join('|') !== 'evidenceRefs|reasonCode|status' ||
       !['unknown', 'verified'].includes(String(faceSafety.status)) ||
       typeof faceSafety.reasonCode !== 'string' || !/^[A-Z][A-Z0-9_]{2,63}$/.test(faceSafety.reasonCode) ||
       !Array.isArray(faceSafety.evidenceRefs) || faceSafety.evidenceRefs.length > 128 ||
       faceSafety.evidenceRefs.some((ref) => typeof ref !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(ref)) ||
       new Set(faceSafety.evidenceRefs).size !== faceSafety.evidenceRefs.length ||
-      typeof hardChecks.subtitlesFaceSafe !== 'boolean') return false
+      (!listed && typeof (hardChecks as Record<string, unknown>).subtitlesFaceSafe !== 'boolean')) return false
+  const subtitlesFaceSafe = listed ? null : (hardChecks as Record<string, unknown>).subtitlesFaceSafe
   if (faceSafety.status === 'unknown') {
-    return faceSafety.evidenceRefs.length === 0 && hardChecks.subtitlesFaceSafe === false &&
+    return faceSafety.evidenceRefs.length === 0 && (listed || subtitlesFaceSafe === false) &&
       ['review-required', 'blocked'].includes(String(value.status))
   }
-  return faceSafety.evidenceRefs.length > 0 && hardChecks.subtitlesFaceSafe === true &&
+  return faceSafety.evidenceRefs.length > 0 && (listed || subtitlesFaceSafe === true) &&
     ['approved', 'approved-with-warnings', 'blocked'].includes(String(value.status))
 }
 
@@ -305,7 +368,7 @@ export type DirectedEditPlan = Omit<DirectorSourceEditPlan, 'storyPlanId' | 'ove
     presetId: SubtitlePresetId
     anchor: SubtitleAnchor
     faceProtection: true
-    maxLines: 2
+    maxLines: number
     maxCharactersPerBlock: number
     desiredActionRef: Readonly<DesiredActionReference>
     cues: readonly Readonly<DirectedSubtitleCue>[]
@@ -314,8 +377,9 @@ export type DirectedEditPlan = Omit<DirectorSourceEditPlan, 'storyPlanId' | 'ove
   audioTracks: readonly Readonly<DirectedMusicTrack>[]
   transitions: readonly Readonly<DirectedTransition>[]
   composition: Readonly<{
-    layout: 'landscape-inset'
-    background: 'blurred-source'
+    /** `source-native`: the source frame has the shape of the output and is used as it is (no backdrop). `landscape-inset`: the whole frame over a blurred copy of it. */
+    layout: 'landscape-inset' | 'source-native'
+    background: 'blurred-source' | 'none'
     foregroundScale: 1
     verticalPosition: 0.5
     faceSafeFallback: readonly [number, number, number, number]
@@ -353,6 +417,9 @@ export interface DirectorRun {
   storyPlan: Readonly<StoryPlan> & Readonly<{ id: string }>
   editPlan: Readonly<DirectedEditPlan>
   qualityReport: Readonly<DirectorQualityReport>
+  /** ADR-160. The hash of the editorial request this run was made for (absent on a run born before it) and the sealed resolution of its policies. */
+  requestHash?: string
+  policyResolution?: Readonly<EditorialPolicyResolutionV1>
   decisions: readonly Readonly<DirectorDecision>[]
   assumptions: readonly string[]
   initiatedBy: Readonly<{ type: 'api-client'; id: string }>
@@ -378,6 +445,8 @@ export interface RunDirectorCommandPayload {
     story: string
     editPlan: string
     quality: string
+    /** ADR-160. The snapshot of the sealed policy resolution; absent on a run born before it. */
+    policyResolution?: string
   }>
   impact: Readonly<DirectorRunImpactV1>
 }
@@ -513,8 +582,8 @@ export function validateDirectedEditPlan(plan: DirectedEditPlan): Readonly<Direc
     'INVALID_RENDER_INPUT',
     'Director consumers do not share the canonical desired action reference',
   )
-  assertDomain(plan.movementPolicy.automaticZoom === false && plan.movementPolicy.protectedOpeningFrames >= Math.round(plan.fps * 4), 'INVALID_RENDER_INPUT', 'Opening motion protection is invalid')
-  assertDomain(plan.effectTracks.length === 0, 'INVALID_RENDER_INPUT', 'Unjustified camera effects are forbidden')
+  // The renderer executes no effect: a plan that declares one is not a plan it can render. What the plan must honour beyond that is its resolution (assertPlanHonorsResolution).
+  assertPlanHonorsResolution(plan, null)
   const clips = plan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
   assertDomain(clips.length > 0, 'INVALID_RENDER_INPUT', 'Director EditPlan needs source clips')
   assertDomain(plan.audioTimelineHash === createDirectedAudioTimelineHash({ fps: plan.fps, clips, musicTracks: plan.audioTracks ?? [] }), 'INVALID_RENDER_INPUT', 'Director audio timeline hash is inconsistent')

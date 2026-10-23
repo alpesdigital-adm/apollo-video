@@ -312,7 +312,7 @@ async function assertCreationContext(
     readonly Readonly<ProductionBatchVariant>[]
   >(batch.variantsJson, 'production batch variants')
   if (
-    batch.objective !== run.objective ||
+    (batch.objective !== null && batch.objective !== run.objective) ||
     variants.length !== run.batchVariantCount ||
     Math.max(
       0,
@@ -434,7 +434,7 @@ implements VariantPortfolioPreflightRepository {
       ))
     return Object.freeze({
       projectId: batch.projectId,
-      objective: batch.objective,
+      ...(batch.objective !== null ? { objective: batch.objective } : {}),
       compatibilityGraph: hydrateCompatibilityGraphRow(graph),
       batchVariantCount: variants.length,
       budgetRemainingMinorUnits: Math.max(

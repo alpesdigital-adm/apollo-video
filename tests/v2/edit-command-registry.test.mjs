@@ -49,6 +49,10 @@ import {
   parseProjectPolicyOverridesImpact,
 } from '../../src/v2/domain/project-policy-overrides-impact.ts'
 import {
+  createEditorialRequestRevisionImpact,
+  parseEditorialRequestRevisionImpact,
+} from '../../src/v2/domain/editorial-request-revision-impact.ts'
+import {
   createProjectSubtitleConfigurationImpact,
   parseProjectSubtitleConfigurationImpact,
 } from '../../src/v2/domain/project-subtitle-configuration.ts'
@@ -371,6 +375,20 @@ async function outputStateImpactFixtures() {
 const OUTPUT_STATE_IMPACTS = await outputStateImpactFixtures()
 
 /** Real impact document plus its real parser, per registered Command type. */
+function editorialRequestImpact() {
+  return createEditorialRequestRevisionImpact({
+    commandId: 'edit-command-registry-editorial-request',
+    baseVersionId,
+    resultVersionId,
+    briefSnapshotId: 'project-brief-snapshot-registry-1',
+    briefSnapshotHash: hashA,
+    previousRequestHash: hashA,
+    resultRequestHash: hashB,
+    durationFrames,
+    outputReferences: outputs,
+  })
+}
+
 const IMPACT_FIXTURES = {
   ...OUTPUT_STATE_IMPACTS,
   'attach-media-library-reference': { build: () => createMediaLibraryAttachmentImpact({ commandId: 'command-library', baseVersionId: 'version-base', resultVersionId: 'version-result', preservedEditPlanSnapshotId: 'snapshot-edit', selectionKind: 'asset', selectionId: 'asset-source', parentArtifactId: 'asset-source', sourceSha256: 'a'.repeat(64), rightsSnapshotId: 'rights-source' }), parse: parseMediaLibraryAttachmentImpact },
@@ -389,6 +407,7 @@ const IMPACT_FIXTURES = {
   'set-project-subtitle-mode': { build: () => subtitleConfigurationImpact(), parse: parseProjectSubtitleConfigurationImpact },
   'replace-source-transcript': { build: sourceTranscriptImpact, parse: parseSourceTranscriptReplacementImpact },
   'set-project-policy-overrides': { build: projectPolicyImpact, parse: parseProjectPolicyOverridesImpact },
+  'revise-editorial-request': { build: editorialRequestImpact, parse: parseEditorialRequestRevisionImpact },
 }
 
 function command(type, overrides = {}) {
@@ -410,7 +429,7 @@ function command(type, overrides = {}) {
 
 test('T-F0-027 the registry is frozen, exhaustive and internally consistent', () => {
   assert.ok(Object.isFrozen(EDIT_COMMAND_POLICIES))
-  assert.equal(EDIT_COMMAND_TYPES.length, 18)
+  assert.equal(EDIT_COMMAND_TYPES.length, 19)
   assert.deepEqual([...EDIT_COMMAND_TYPES], Object.keys(EDIT_COMMAND_POLICIES).toSorted())
 
   for (const type of EDIT_COMMAND_TYPES) {
@@ -511,7 +530,7 @@ test('T-F0-027 every registered type is produced by an application service and v
       discovered.add(literals[0])
     }
   }
-  assert.equal(callSites, 16, 'expected one createEditCommand call site per classic Command type')
+  assert.equal(callSites, 17, 'expected one createEditCommand call site per classic Command type')
   assert.equal(outputFactorySites, 1, 'expected one application call site of the output Command constructor')
   assert.deepEqual(
     [...NOT_YET_PRODUCED_BY_AN_APPLICATION_SERVICE.keys()].filter((type) => discovered.has(type)), [],
@@ -581,7 +600,7 @@ test('T-F0-027 full-timeline types always invalidate from frame zero', () => {
 test('T-F0-027 deferred types enqueue no render before their unblocking event', () => {
   assert.deepEqual(
     [...editCommandTypesByRenderPolicy('deferred')],
-    ['direct-multicam-session', 'replace-source-transcript', 'set-project-policy-overrides'],
+    ['direct-multicam-session', 'replace-source-transcript', 'revise-editorial-request', 'set-project-policy-overrides'],
   )
   const policy = editCommandPolicy('replace-source-transcript')
   assert.equal(policy.deferralReason, 'director-run')

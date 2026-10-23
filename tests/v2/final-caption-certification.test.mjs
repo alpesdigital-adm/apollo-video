@@ -5,7 +5,7 @@ import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createCaptionProjection } from '../../src/v2/domain/caption-canvas-projection.ts'
 import { evaluateCaptionPixels } from '../../src/v2/domain/caption-pixel-verdict.ts'
 import {
-  admitDirectorQualityForFinal, certifyFinalCaptions, FINAL_CAPTION_ANCHOR_POLICY, FINAL_CAPTION_CERTIFICATION_POLICY,
+  admitDirectorQualityForFinal, certifyFinalCaptions, MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION, ADMITTED_DIRECTOR_QUALITY_REPORT_SCHEMA, REQUIRED_HARD_CHECKS, FINAL_CAPTION_ANCHOR_POLICY, FINAL_CAPTION_CERTIFICATION_POLICY,
   FINAL_CAPTION_CERTIFICATION_POLICY_SHA256,
 } from '../../src/v2/domain/final-caption-certification.ts'
 import { collectFaceSourceEvidenceStream } from '../../src/v2/domain/face-source-evidence-stream.ts'
@@ -38,14 +38,20 @@ function plan({ source = LANDSCAPE, evidence = [], cues = [CUE_A, CUE_B], policy
   })
 }
 const completed = (issues) => ({ measurement: 'completed', issues })
+const REQUEST_HASH = 'a'.repeat(64)
+const RESOLUTION_HASH = 'b'.repeat(64)
+const check = (id, kind = 'invariant', passed = true, policyRef = null) => ({ id, kind, passed, policyRef, evidence: [`${id}=${passed}`] })
 const quality = (overrides = {}) => ({
-  schemaVersion: 'director-quality-report/v3', id: 'quality-1', status: 'review-required',
+  schemaVersion: 'director-quality-report/v5', id: 'quality-1', status: 'review-required', criticVersion: 'apollo-director-critic/v5',
   faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
   strategic: { passed: true, score: 91, gateFailures: [], rubric: { threshold: 70 } },
-  hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true, subtitlesFaceSafe: false, subtitlesBounded: true, forbiddenSpeechAbsent: true, timelineContinuous: true },
+  hardChecks: [check('requestHonored', 'request'), check('forbiddenSpeechAbsent', 'request', true, `policy:speechRemovals:${'b'.repeat(16)}`), check('timelineContinuous'), check('sourceRightsCertain')],
+  requestHash: REQUEST_HASH, policyResolutionHash: RESOLUTION_HASH,
   issues: [{ code: 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED', severity: 'warning', category: 'editorial', message: 'x', correctable: true }],
   score: 0.91, ...overrides,
 })
+const BOUND = { currentRequestHash: REQUEST_HASH, sealedRequestHash: REQUEST_HASH, sealedPolicyResolutionHash: RESOLUTION_HASH }
+const withCheck = (id, passed) => quality().hardChecks.map((item) => item.id === id ? { ...item, passed } : item)
 const pixelHard = (code, cueId = 'cue-a') => ({ code, severity: 'hard', cueId, evidenceRange: { startFrame: 30, endFrame: 31 },
   elementIds: [`subtitle:${cueId}`], evidenceIds: [], message: 'x' })
 
@@ -64,20 +70,23 @@ test('the policy is pinned and versioned, and it never claims a global face safe
 })
 
 test('a Director report that is review-required ONLY because face safety is unknown is admitted per cue; anything else is not', () => {
-  assert.deepEqual(admitDirectorQualityForFinal(quality()), { admitted: true, basis: 'per-cue-caption-certification' })
-  const refused = (report, pattern) => {
-    const verdict = admitDirectorQualityForFinal(report)
+  assert.deepEqual(admitDirectorQualityForFinal(quality(), BOUND), { admitted: true, basis: 'per-cue-caption-certification' })
+  const refused = (report, pattern, binding = BOUND) => {
+    const verdict = admitDirectorQualityForFinal(report, binding)
     assert.equal(verdict.admitted, false)
     assert.match(verdict.reason, pattern)
   }
   refused(quality({ status: 'blocked' }), /status/)
-  refused(quality({ hardChecks: { ...quality().hardChecks, timelineContinuous: false } }), /hard check/)
-  refused(quality({ hardChecks: { ...quality().hardChecks, subtitlesBounded: false } }), /hard check/)
-  refused(quality({ hardChecks: { ...quality().hardChecks, forbiddenSpeechAbsent: false } }), /hard check/)
+  // every check of the list must hold, whatever its name: the admission knows no editorial name
+  refused(quality({ hardChecks: withCheck('timelineContinuous', false) }), /hard check timelineContinuous did not hold/)
+  refused(quality({ hardChecks: withCheck('forbiddenSpeechAbsent', false) }), /hard check forbiddenSpeechAbsent did not hold/)
+  refused(quality({ hardChecks: [...quality().hardChecks, check('someOtherRequestCheck', 'request', false)] }), /hard check someOtherRequestCheck did not hold/)
+  refused(quality({ hardChecks: quality().hardChecks.filter((item) => item.id !== 'sourceRightsCertain') }), /sourceRightsCertain is missing/)
+  refused(quality({ hardChecks: [] }), /no hard check list/)
+  refused(quality({ hardChecks: undefined }), /no hard check list/)
   refused(quality({ strategic: { ...quality().strategic, passed: false } }), /strategic/)
   refused(quality({ issues: [{ code: 'STRATEGIC_RIGHTS_FAILED', severity: 'hard', category: 'policy', message: 'x', correctable: true }] }), /hard issue/)
-  // the unknown claim must be exactly that: a report that says unknown but also claims face-safe subtitles is inconsistent
-  refused(quality({ hardChecks: { ...quality().hardChecks, subtitlesFaceSafe: true } }), /face safety/)
+  // the unknown claim must be exactly that: a report that says unknown but cites evidence is inconsistent
   refused(quality({ faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: ['perception-1'] } }), /face safety/)
   // approved without a verified face safety is not a thing
   refused(quality({ status: 'approved' }), /status/)
@@ -85,8 +94,63 @@ test('a Director report that is review-required ONLY because face safety is unkn
   // a verified one keeps its own (legacy) basis
   assert.deepEqual(admitDirectorQualityForFinal(quality({
     status: 'approved', faceSafety: { status: 'verified', reasonCode: 'FACE_VERIFIED', evidenceRefs: ['perception-1'] },
-    hardChecks: { ...quality().hardChecks, subtitlesFaceSafe: true },
-  })), { admitted: true, basis: 'verified-face-safety' })
+  }), BOUND), { admitted: true, basis: 'verified-face-safety' })
+})
+
+test('the admission is bound to the request now in the brief and to the resolution the run sealed (ADR-160)', () => {
+  const refused = (report, binding, pattern) => {
+    const verdict = admitDirectorQualityForFinal(report, binding)
+    assert.equal(verdict.admitted, false)
+    assert.match(verdict.reason, pattern)
+  }
+  refused(quality(), undefined, /cannot be bound/)
+  refused(quality(), { ...BOUND, currentRequestHash: 'c'.repeat(64) }, /request changed/)
+  refused(quality(), { ...BOUND, sealedRequestHash: null }, /did not seal/)
+  refused(quality(), { ...BOUND, sealedRequestHash: 'c'.repeat(64) }, /did not seal/)
+  refused(quality(), { ...BOUND, sealedPolicyResolutionHash: null }, /policy resolution sealed/)
+  refused(quality(), { ...BOUND, sealedPolicyResolutionHash: 'c'.repeat(64) }, /policy resolution sealed/)
+  refused(quality({ requestHash: undefined }), BOUND, /does not name/)
+  refused(quality({ policyResolutionHash: 'short' }), BOUND, /does not name/)
+})
+
+test('only the v5 report with critic v5 or later is admitted: older reports and critics are never inherited', () => {
+  assert.equal(MINIMUM_ADMITTED_APOLLO_DIRECTOR_CRITIC_VERSION, 5)
+  assert.equal(ADMITTED_DIRECTOR_QUALITY_REPORT_SCHEMA, 'director-quality-report/v5')
+  for (const criticVersion of ['apollo-director-critic/v1', 'apollo-director-critic/v2', 'apollo-director-critic/v3', 'apollo-director-critic/v4']) {
+    const verdict = admitDirectorQualityForFinal(quality({ criticVersion }), BOUND)
+    assert.equal(verdict.admitted, false, String(criticVersion))
+    assert.match(verdict.reason, /superseded/)
+  }
+  // a critic the Apollo does not name at all is refused for that reason (allow-list), never read as an older Apollo critic
+  for (const criticVersion of ['critic-e2e-1.0.0', 'project-director-critic/v2', '', undefined]) {
+    const verdict = admitDirectorQualityForFinal(quality({ criticVersion }), BOUND)
+    assert.equal(verdict.admitted, false, String(criticVersion))
+    assert.match(verdict.reason, /not a critic the Apollo admits/)
+  }
+  for (const schemaVersion of ['director-quality-report/v3', 'director-quality-report/v4', undefined]) {
+    const verdict = admitDirectorQualityForFinal(quality({ schemaVersion }), BOUND)
+    assert.equal(verdict.admitted, false, String(schemaVersion))
+    assert.match(verdict.reason, /new Director run is required/)
+  }
+  assert.deepEqual(admitDirectorQualityForFinal(quality({ criticVersion: 'apollo-director-critic/v5' }), BOUND), { admitted: true, basis: 'per-cue-caption-certification' })
+  assert.deepEqual(admitDirectorQualityForFinal(quality({ criticVersion: 'apollo-director-critic/v10' }), BOUND), { admitted: true, basis: 'per-cue-caption-certification' })
+  // the required checks carry no editorial name
+  assert.deepEqual([...REQUIRED_HARD_CHECKS], ['requestHonored', 'timelineContinuous', 'sourceRightsCertain'])
+})
+
+test('only a critic the Apollo names is admitted: any other name, or none, is refused (an allow-list, not a list of the superseded)', () => {
+  for (const criticVersion of [
+    'project-director-critic/v2', 'critic-e2e-1.0.0', 'apollo-director-critic/v3-beta', 'apollo-director-critic/v03',
+    'apollo-director-critic/v', 'apollo-director-critic/v-3', 'apollo-director-critic/v3 ', 'x-apollo-director-critic/v3', '',
+  ]) {
+    const verdict = admitDirectorQualityForFinal(quality({ criticVersion }))
+    assert.equal(verdict.admitted, false, criticVersion)
+    assert.match(verdict.reason, /not a critic the Apollo admits/, criticVersion)
+  }
+  const { criticVersion: _omitted, ...withoutCritic } = quality()
+  const verdict = admitDirectorQualityForFinal(withoutCritic)
+  assert.equal(verdict.admitted, false)
+  assert.match(verdict.reason, /not a critic the Apollo admits/)
 })
 
 test('every burned cue is placed in a free-certified band and confirmed in pixels; the receipt names how each band was certified', () => {

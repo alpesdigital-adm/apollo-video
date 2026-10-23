@@ -128,6 +128,7 @@ import type { SubtitleSegmentOverrideRepository } from '../application/ports/sub
 import type { VariantReframeOverrideRepository } from '../application/ports/variant-reframe-override-repository.ts'
 import type { VariantReframePlanRepository } from '../application/ports/variant-reframe-plan-repository.ts'
 import type { ProjectPolicyOverridesRepository } from '../application/ports/project-policy-overrides-repository.ts'
+import type { EditorialRequestRepository } from '../application/ports/editorial-request-repository.ts'
 import type { ContiguousEvidenceRepository } from '../application/ports/contiguous-evidence-repository.ts'
 import type { ContiguousEvaluationRepository } from '../application/ports/contiguous-evaluation-provider.ts'
 import type { LongFormIndexWorkflowRepository } from '../application/ports/long-form-index-workflow-repository.ts'
@@ -372,6 +373,7 @@ import { PrismaSubtitleSegmentOverrideRepository } from './prisma/subtitle-segme
 import { PrismaVariantReframeOverrideRepository } from './prisma/variant-reframe-override-repository.ts'
 import { PrismaVariantReframePlanRepository } from './prisma/variant-reframe-plan-repository.ts'
 import { PrismaProjectPolicyOverridesRepository } from './prisma/project-policy-overrides-repository.ts'
+import { PrismaEditorialRequestRepository } from './prisma/editorial-request-repository.ts'
 import { PrismaContiguousEvidenceRepository } from './prisma/contiguous-evidence-repository.ts'
 import { PrismaContiguousEvaluationRepository } from './prisma/contiguous-evaluation-repository.ts'
 import {
@@ -732,6 +734,10 @@ export function createVariantReframePlanRepository(): VariantReframePlanReposito
 
 export function createVariantReframeOverrideRepository(): VariantReframeOverrideRepository {
   return new PrismaVariantReframeOverrideRepository(resolveV2Client())
+}
+
+export function createEditorialRequestRepository(): EditorialRequestRepository {
+  return new PrismaEditorialRequestRepository(resolveV2Client())
 }
 
 export function createProjectPolicyOverridesRepository(): ProjectPolicyOverridesRepository {

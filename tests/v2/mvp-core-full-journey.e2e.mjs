@@ -18,6 +18,9 @@ import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
+import { createProjectWithVariant } from './helpers/explicit-project-http.mjs'
+import { measureStateAssertion } from './helpers/state-assertion-timing.mjs'
+import { commitSealedChild, persistReceiptForExistingVideo, testActor } from './helpers/pg-output-world.mjs'
 
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
@@ -113,6 +116,12 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
   const { createMediaTranscript } = await import(
     '../../src/v2/domain/media-transcript.ts'
   )
+  const { createMediaColorProbe } = await import(
+    '../../src/v2/domain/color-and-export.ts'
+  )
+  const { compileInitialSourceEditPlan } = await import(
+    '../../src/v2/application/apply-editorial-cut-command.ts'
+  )
   const { createMediaArtifactManifestV2 } = await import(
     '../../src/v2/domain/media-artifact.ts'
   )
@@ -144,11 +153,12 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
   const primaryBrollInput = join(artifactRoot, 'inputs', 'primary-broll.mp4')
   const companionBrollInput = join(artifactRoot, 'inputs', 'companion-broll.mp4')
   const generatedRejectedInput = join(artifactRoot, 'inputs', 'generated-rejected.mp4')
-  const companionAudioInput = join(artifactRoot, 'inputs', 'companion-audio.m4a')
+  const companionVoiceoverInput = join(artifactRoot, 'inputs', 'companion-voiceover.mp4')
   const createdAt = new Date('2026-07-27T03:00:00.000Z')
   const protectedKey = Buffer.alloc(32, 17).toString('base64url')
   let server
   let serverLogs = ''
+  let governanceWaits = 0
   let journeyCompleted = false
 
   const artifactIds = {
@@ -199,8 +209,13 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       ], { windowsHide: true, timeout: 60_000 }),
       execFileAsync(ffmpegStatic, [
         '-hide_banner', '-loglevel', 'error', '-y',
-        '-i', sourceMasterPath, '-t', '5', '-vn',
-        '-c:a', 'aac', '-b:a', '160k', companionAudioInput,
+        // A voiceover with no person on screen: the first seconds of the master's speech over a plain picture. Audio-only masters
+        // are cataloged by ingest without a transcript or an initial plan, so the project's source is a recording with a picture.
+        '-f', 'lavfi', '-i', 'color=c=0x1c2433:s=1280x720:r=30',
+        '-i', sourceMasterPath, '-t', '5', '-map', '0:v:0', '-map', '1:a:0',
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '160k', '-shortest',
+        '-movflags', '+faststart', companionVoiceoverInput,
       ], { windowsHide: true, timeout: 60_000 }),
     ])
 
@@ -305,16 +320,28 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       key,
       expected = [200],
     }) {
-      const response = await fetch(`${baseUrl}${path}`, {
-        method,
-        headers: {
-          authorization,
-          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-          ...(key ? { 'idempotency-key': key } : {}),
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      })
-      const payload = await response.json()
+      let response
+      let payload
+      // Governance admission judges the requests of the last minute against the five minutes before it, and answers a burst with a retryable 429
+      // that executes nothing. A journey whose long steps got faster meets that burst sooner, so the client does what the error says: it waits for
+      // the window to move and sends the same request again (same idempotency key). The thresholds are the product's, untouched.
+      for (let attempt = 0; ; attempt += 1) {
+        response = await fetch(`${baseUrl}${path}`, {
+          method,
+          headers: {
+            authorization,
+            ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+            ...(key ? { 'idempotency-key': key } : {}),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        })
+        payload = await response.json()
+        const governed = response.status === 429 &&
+          payload?.error?.code === 'GOVERNANCE_LIMIT_EXCEEDED' && payload.error.retryable === true
+        if (!governed || attempt >= 18) break
+        governanceWaits += 1
+        await new Promise((resolve) => setTimeout(resolve, 5_000))
+      }
       assert.ok(
         expected.includes(response.status),
         `${method} ${path} returned ${response.status}: ${JSON.stringify(payload)}\n${serverLogs.slice(-8_000)}`,
@@ -322,41 +349,57 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       return { response, payload: payload.data }
     }
 
+    // The 6.0.0 contract: a project has no format of its own. The output a journey edits is an explicit variant created on
+    // top of the creation Version, so the journey states the aspect ratio it means and edits against the variant Version.
     async function createProject({
       name,
       objective,
-      format,
+      aspectRatio,
       destination,
+      briefing,
       key,
     }) {
-      return (await api({
+      const call = async (path, body, idempotencyKey) => (await api({
         method: 'POST',
-        path: '/v1/projects',
+        path,
+        key: idempotencyKey,
+        expected: [200, 201],
+        body,
+      })).payload
+      const made = await createProjectWithVariant(call, {
         key,
-        expected: [201],
-        body: {
+        aspectRatio,
+        project: {
           name,
           objective,
-          format,
           locale: 'pt-BR',
+          ...(briefing ? { briefing } : {}),
           ...(destination ? { desiredAction: {
             destination: { type: 'url', value: destination },
           } } : {}),
         },
-      })).payload
+      })
+      return {
+        project: { id: made.projectId },
+        version: made.version,
+        variant: made.variant,
+      }
     }
 
     const primary = await createProject({
       name: 'Imersão — edição final 9:16',
       objective: 'discovery',
-      format: '9:16',
+      aspectRatio: '9:16',
       key: `mvp-primary-${suffix}`,
     })
     const companion = await createProject({
       name: 'Voiceover sem pessoa — 16:9',
       objective: 'sale',
-      format: '16:9',
+      aspectRatio: '16:9',
       destination: 'https://example.com/checkout',
+      // Without an owner briefing the Director treats a project as media-only (evidence-bound, no treatment mode of its own to claim); the montage this
+      // journey proves is the one the owner asked for: a voiceover over the visual source, no person on screen.
+      briefing: 'Público: quem decide a compra. Oferta: o material de comunicação. Tom: claro e direto. Voiceover sobre a imagem, sem pessoa em cena.',
       key: `mvp-companion-${suffix}`,
     })
 
@@ -458,7 +501,8 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       sourcePath: sourceMasterPath,
       mediaType: 'video',
       container: 'mp4',
-      probe: sourceProbe,
+      // The controlled receipt below measures the master at its nominal 30 fps, so the manifest states the same rate.
+      probe: { ...sourceProbe, fps: 30 },
       originalFileName: 'imersao-master.mp4',
     })
     const primaryBrollProbe = await probeVideo(primaryBrollInput)
@@ -482,19 +526,11 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       artifactId: artifactIds.companionMaster,
       projectId: companion.project.id,
       role: 'source-master',
-      sourcePath: companionAudioInput,
-      mediaType: 'audio',
-      container: 'm4a',
-      probe: {
-        width: 1,
-        height: 1,
-        duration: 5,
-        fps: 30,
-        codec: 'none',
-        audioCodec: 'aac',
-        container: 'mov,mp4,m4a,3gp,3g2,mj2',
-      },
-      originalFileName: 'companion-audio.m4a',
+      sourcePath: companionVoiceoverInput,
+      mediaType: 'video',
+      container: 'mp4',
+      probe: { ...await probeVideo(companionVoiceoverInput), fps: 30 },
+      originalFileName: 'companion-voiceover.mp4',
     })
     const companionBroll = await seedArtifact({
       artifactId: artifactIds.companionBroll,
@@ -538,7 +574,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       return transcript
     }
 
-    await seedTranscript({
+    const primaryTranscript = await seedTranscript({
       id: transcriptIds.primary,
       projectId: primary.project.id,
       sourceArtifact: primaryMaster,
@@ -575,13 +611,14 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
         },
       ],
     })
-    await seedTranscript({
+    const companionTranscript = await seedTranscript({
       id: transcriptIds.companion,
       projectId: companion.project.id,
       sourceArtifact: companionMaster,
       entries: [
         {
-          text: 'Uma mensagem clara aproxima pessoas e oportunidades',
+          // A sale video says its call to action: the Director refuses (cta-required) a conversion objective whose action is not spoken.
+          text: 'Uma mensagem clara aproxima pessoas e oportunidades garanta a sua vaga no link',
           start: 0.2,
           end: 4.2,
         },
@@ -611,7 +648,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
         body: JSON.stringify(status === 'approved'
           ? {
               status: 'approved',
-              allowedUses: ['rendering'],
+              allowedUses: ['editorial-reuse', 'rendering'],
               prohibitedUses: [],
               allowedLocales: ['pt-BR'],
               consent: { status: 'not-required', allowedUses: [] },
@@ -633,6 +670,208 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
     await setRights(rejectedGenerated.artifactId, 'revoked')
     await setRights(companionMaster.artifactId)
     await setRights(companionBroll.artifactId)
+
+    // Every video the renderer plays needs its measured colour and an exact colour pipeline compilation. The controlled sources are
+    // limited BT.709 SDR, so each gets its probe and the identity pipeline is compiled for the project that plays it.
+    const colorMetadata = {
+      colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709', range: 'limited', bitDepth: 8,
+    }
+    const colorStage = (id, kind, enabled, provider, parameters) => ({
+      id,
+      kind,
+      version: 'v1',
+      enabled,
+      output: colorMetadata,
+      implementation: { provider, version: 'v1', parameters, parametersHash: sha256(JSON.stringify(parameters)) },
+    })
+    async function compileColor(world, source) {
+      const colorProbe = createMediaColorProbe({
+        id: `mvp-color-probe-${source.artifactId}`,
+        workspaceId,
+        artifactId: source.artifactId,
+        manifestId: source.manifestId,
+        detection: { state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
+        producer: { provider: 'ffprobe', version: '7.1.1', binaryDigest: sha256('mvp-core-ffprobe') },
+        createdAt: createdAt.toISOString(),
+      })
+      await client.v2MediaColorProbe.create({
+        data: {
+          id: colorProbe.id,
+          workspaceId,
+          artifactId: source.artifactId,
+          manifestId: source.manifestId,
+          schemaVersion: colorProbe.schemaVersion,
+          state: 'ready',
+          metadataJson: stableSerialize(colorMetadata),
+          pixelFormat: 'yuv420p',
+          hdrMode: 'sdr',
+          reasonsJson: '[]',
+          producerProvider: 'ffprobe',
+          producerVersion: colorProbe.producer.version,
+          producerBinaryDigest: colorProbe.producer.binaryDigest,
+          createdAt,
+          probeHash: colorProbe.probeHash,
+        },
+      })
+      await api({
+        method: 'POST',
+        path: `/v1/projects/${world.project.id}/color-pipeline-compilations`,
+        key: `mvp-color-${source.artifactId}-${world.project.id}`,
+        expected: [201],
+        body: {
+          sourceArtifactId: source.artifactId,
+          sourceManifestId: source.manifestId,
+          outputMetadata: colorMetadata,
+          stages: [
+            colorStage('technical-rec709', 'technical', true, 'ffmpeg-zscale', { mode: 'identity' }),
+            colorStage('match-source', 'match', false, 'apollo-match', { mode: 'bypass' }),
+            colorStage('creative-none', 'creative-lut', false, 'apollo-lut', { mode: 'none' }),
+            colorStage('output-rec709', 'output', true, 'ffmpeg-zscale', { dither: true }),
+          ],
+        },
+      })
+    }
+
+    // 6.0.0: a source enters a project through ingest, which leaves its receipt and the compiled initial EditPlan as the Version the
+    // editorial Command builds on. This journey seeds the source bytes itself, so it persists what the ingest leaves (the receipt)
+    // and commits the initial plan as the child Command the ingest worker commits; the variant's Version is no longer the head.
+    const ingestActor = testActor({
+      workspaceId,
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      environment: 'production',
+      scopes: ['projects:write', 'media:write'],
+    })
+    async function commitIngestedSource({ world, label, receipt, master, insert, insertOwnAudio = false, transcript, transcriptId, durationSeconds, fps }) {
+      await receipt()
+      const bundle = await commitSealedChild(client, {
+        workspaceId,
+        projectId: world.project.id,
+        actor: ingestActor,
+        suffix: `mvp-ingest-${label}-${suffix}`,
+        mutatePlan: (parentPlan) => {
+          const initial = JSON.parse(stableSerialize(compileInitialSourceEditPlan({
+            id: parentPlan.id,
+            projectVersionId: parentPlan.projectVersionId,
+            transcriptId,
+            transcript,
+            sourceArtifactId: master.artifactId,
+            sourceDurationSeconds: durationSeconds,
+            fps,
+            createdAt: parentPlan.createdAt,
+          })))
+          // After an editorial cut a project can only play recordings its State already observed (a cut copy owns no recording to
+          // adopt), so the project's second recording is observed by the plan the ingest leaves: it follows the master on the
+          // timeline, and the cut, which recompiles the plan from the master's transcript, keeps the observation.
+          const insertFrames = insertFramesByArtifact.get(insert.artifactId)
+          const [track] = initial.videoTracks
+          return {
+            ...initial,
+            durationFrames: initial.durationFrames + insertFrames,
+            videoTracks: [{
+              ...track,
+              clips: [...track.clips, {
+                id: `ingest-insert-${label}`,
+                sourceArtifactId: insert.artifactId,
+                sourceInFrame: 0,
+                sourceOutFrame: insertFrames,
+                timelineInFrame: initial.durationFrames,
+                timelineOutFrame: initial.durationFrames + insertFrames,
+                rate: 1,
+                // The Director treats a project as a montage only when every clip names the recording its sound comes from.
+                ...(insertOwnAudio
+                  ? { audioSourceArtifactId: insert.artifactId, audioSourceInFrame: 0, audioSourceOutFrame: insertFrames }
+                  : {}),
+              }],
+            }],
+            sources: [...initial.sources, {
+              id: insert.artifactId,
+              artifactId: insert.artifactId,
+              kind: 'video',
+              durationSeconds: insertFrames / fps,
+            }],
+            lineageRefs: [...initial.lineageRefs, insert.artifactId],
+          }
+        },
+        // The insert is observed with the master: the cut binds every recording of the project, so a later replace can play it.
+        adopt: [master.artifactId, insert.artifactId],
+      })
+      world.version = bundle.version
+    }
+    // The inserts are part of their projects the way ingest leaves them: linked to the project, with the receipt of their normalization
+    // and their colour pipeline, all before the cut binds the project's recordings.
+    const insertFramesByArtifact = new Map()
+    for (const [world, broll, brollInput, fileName] of [
+      [primary, primaryBroll, primaryBrollInput, 'primary-broll.mp4'],
+      [companion, companionBroll, companionBrollInput, 'companion-broll.mp4'],
+    ]) {
+      const brollProbe = await probeVideo(brollInput)
+      insertFramesByArtifact.set(broll.artifactId, Math.round(brollProbe.duration * 30))
+      await client.v2ProjectMediaAsset.create({
+        data: {
+          id: randomUUID(),
+          workspaceId,
+          projectId: world.project.id,
+          artifactId: broll.artifactId,
+          role: 'selected-insert',
+          originalFileName: fileName,
+          createdAt,
+        },
+      })
+      await persistReceiptForExistingVideo(client, {
+        workspaceId,
+        projectId: world.project.id,
+        actor: ingestActor,
+        artifactId: broll.artifactId,
+        createdAt: new Date(createdAt.getTime() - 60_000).toISOString(),
+        nativeFps: 30,
+        durationFrames: Math.round(brollProbe.duration * 30),
+      })
+      await compileColor(world, broll)
+    }
+    await commitIngestedSource({
+      world: primary,
+      label: 'primary',
+      receipt: () => persistReceiptForExistingVideo(client, {
+        workspaceId,
+        projectId: primary.project.id,
+        actor: ingestActor,
+        artifactId: primaryMaster.artifactId,
+        createdAt: new Date(createdAt.getTime() - 60_000).toISOString(),
+        // The master's average rate is 30 fps to within the container's rounding; the receipt states the 30 fps it plays at.
+        nativeFps: 30,
+        durationFrames: Math.round(sourceProbe.duration * 30),
+      }),
+      master: primaryMaster,
+      insert: primaryBroll,
+      transcript: primaryTranscript,
+      transcriptId: transcriptIds.primary,
+      durationSeconds: sourceProbe.duration,
+      fps: 30,
+    })
+    await commitIngestedSource({
+      world: companion,
+      label: 'companion',
+      receipt: () => persistReceiptForExistingVideo(client, {
+        workspaceId,
+        projectId: companion.project.id,
+        actor: ingestActor,
+        artifactId: companionMaster.artifactId,
+        createdAt: new Date(createdAt.getTime() - 60_000).toISOString(),
+        nativeFps: 30,
+        durationFrames: 150,
+      }),
+      master: companionMaster,
+      insert: companionBroll,
+      insertOwnAudio: true,
+      transcript: companionTranscript,
+      transcriptId: transcriptIds.companion,
+      durationSeconds: 5,
+      fps: 30,
+    })
+
+    await compileColor(primary, primaryMaster)
+    await compileColor(companion, companionMaster)
 
     const primaryRules = [
       {
@@ -660,6 +899,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
         type: 'remove-spoken-content',
         baseVersionId: primary.version.id,
         baseHash: primary.version.baseHash,
+        variantId: primary.variant.id,
         sourceTranscriptId: transcriptIds.primary,
         rules: primaryRules,
         exclusionOverrides: [
@@ -688,7 +928,8 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
     )
     assert.equal(primaryCut.editorial.automaticZoom, false)
     assert.equal(primaryCut.editorial.subtitleFaceProtection, true)
-    assert.equal(primaryCut.editorial.impact.schemaVersion, 'editorial-cut-impact/v1')
+    assert.equal(primaryCut.editorial.impact.schemaVersion, 'editorial-cut-impact/v2')
+    assert.deepEqual(primaryCut.editorial.impact.affectedVariantIds, [primary.variant.id])
     assert.equal(primaryCut.editorial.impact.commandId, primaryCut.command.id)
     assert.equal(primaryCut.editorial.impact.renderSemanticsChanged, true)
     assert.equal(primaryCut.editorial.impact.affectedRanges[0].startFrame, 0)
@@ -699,6 +940,11 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
     assert.equal(primaryCut.editorial.invalidations.length, 0)
     assert.equal(primaryCut.operation.type, 'project-proxy-render')
     assert.equal(primaryCut.operation.status, 'queued')
+    // The cut of the real master is a multi-megabyte State; its integrity assertion runs twice inside the 10 s commit, so its cost is measured here.
+    const cutStateAssertion = await measureStateAssertion(client, primaryCut.version.id)
+    console.log(`STATE_ASSERTION_TIMING ${JSON.stringify(cutStateAssertion)}`)
+    // The cut leaves its proxy render queued; the worker takes the oldest queued render, and this journey renders the Director's, so the cut's is canceled.
+    await cancelOperation(primaryCut.operation.id)
 
     const companionCut = (await api({
       method: 'POST',
@@ -709,6 +955,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
         type: 'remove-spoken-content',
         baseVersionId: companion.version.id,
         baseHash: companion.version.baseHash,
+        variantId: companion.variant.id,
         sourceTranscriptId: transcriptIds.companion,
         rules: [{
           id: 'companion-tail',
@@ -723,6 +970,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
         }],
       },
     })).payload
+    await cancelOperation(companionCut.operation.id)
 
     const selectionBrief = {
       intention: 'Criar uma quebra de padrão curta sem interromper a fala.',
@@ -823,7 +1071,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
     assert.equal(preliminaryDirector.directorRun.impact.resultVersionId, preliminaryDirector.version.id)
     assert.deepEqual(preliminaryDirector.directorRun.impact.dependencyTypes, ['audio', 'content', 'policy', 'timing', 'visual'])
     assert.deepEqual(preliminaryDirector.directorRun.impact.minimalRenders, [{
-      kind: 'proxy', variantId: '9:16',
+      kind: 'proxy', variantId: primary.variant.id,
       ranges: [{ startFrame: 0, endFrame: preliminaryDirector.directorRun.editPlan.durationFrames }],
     }])
     assert.deepEqual(preliminaryDirector.directorRun.invalidations, [])
@@ -849,7 +1097,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
           baseVersionId: current.timeline.versionId,
           baseHash: current.baseHash,
           expectedRevision: current.timeline.revision,
-          variantId: projectId === primary.project.id ? '9:16' : '16:9',
+          variantId: projectId === primary.project.id ? primary.variant.id : companion.variant.id,
           targetId,
           ...(operation ? { operation } : {}),
           ...(targetVersionId ? { targetVersionId } : {}),
@@ -861,8 +1109,11 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
     }
 
     let primaryTimeline = await timeline(primary.project.id)
-    const lastPrimaryClip = primaryTimeline.timeline.clips.at(-1)
-    assert.equal(lastPrimaryClip.id, 'clip-3')
+    // The cut kept three stretches of the master and left the insert the ingest placed after them, so the timeline has four clips; the ids of
+    // the stretches are derived by the product, the insert keeps the id the ingest gave it. The edits below work on the last stretch of the master.
+    assert.equal(primaryTimeline.timeline.clips.length, 4)
+    assert.equal(primaryTimeline.timeline.clips.at(-1).id, 'ingest-insert-primary')
+    const lastPrimaryClip = primaryTimeline.timeline.clips[2]
     const splitAtMs = lastPrimaryClip.startMs + 3000
     await manual(
       primary.project.id,
@@ -876,14 +1127,14 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       primaryTimeline,
       {
         kind: 'replace',
-        clipId: 'clip-3:a',
+        clipId: `${lastPrimaryClip.id}:a`,
         sourceId: artifactIds.primaryBroll,
       },
       `primary-replace-${suffix}`,
     )
     primaryTimeline = await timeline(primary.project.id)
     const trailingClip = primaryTimeline.timeline.clips.find(
-      (clip) => clip.id === 'clip-3:b',
+      (clip) => clip.id === `${lastPrimaryClip.id}:b`,
     )
     await manual(
       primary.project.id,
@@ -902,7 +1153,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       primaryTimeline,
       {
         kind: 'inspect',
-        clipId: 'clip-1',
+        clipId: primaryTimeline.timeline.clips[0].id,
         patch: {
           layout: 'face-safe-landscape-inset',
           text: 'Comunicação que gera impacto.',
@@ -920,7 +1171,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       primaryTimeline,
       {
         kind: 'inspect',
-        clipId: 'clip-1',
+        clipId: primaryTimeline.timeline.clips[0].id,
         patch: { color: 'temporary-cool-test' },
       },
       `primary-inspect-temporary-${suffix}`,
@@ -935,19 +1186,39 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
     )
 
     let companionTimeline = await timeline(companion.project.id)
-    assert.equal(companionTimeline.timeline.clips.length, 1)
+    // The companion's cut kept its one stretch of the master and left the insert the ingest placed after it.
+    assert.equal(companionTimeline.timeline.clips.length, 2)
+    assert.equal(companionTimeline.timeline.clips.at(-1).id, 'ingest-insert-companion')
     await manual(
       companion.project.id,
       companionTimeline,
       {
         kind: 'replace',
-        clipId: 'clip-1',
+        clipId: companionTimeline.timeline.clips[0].id,
         sourceId: artifactIds.companionBroll,
       },
       `companion-replace-${suffix}`,
     )
 
     await new Promise((resolve) => setTimeout(resolve, 10))
+    // A Version renders only under an explicit project LUT selection (the renderer refuses to guess a grade); this journey grades nothing and says so.
+    async function selectNoLut(projectId, key) {
+      const current = await timeline(projectId)
+      const selected = (await api({
+        method: 'POST',
+        path: `/v1/projects/${projectId}/lut-selection`,
+        key,
+        expected: [201],
+        body: {
+          baseVersionId: current.timeline.versionId,
+          baseHash: current.baseHash,
+          selection: { mode: 'none' },
+          reason: 'MVP Core E2E renders the sources as they are, without a creative LUT.',
+        },
+      })).payload
+      if (selected.operation) await cancelOperation(selected.operation.id)
+    }
+    await selectNoLut(primary.project.id, `primary-no-lut-${suffix}`)
     primaryTimeline = await timeline(primary.project.id)
     const primaryDirector = (await api({
       method: 'POST',
@@ -972,6 +1243,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
         decision.choice === 'use_selected_insert'),
       true,
     )
+    await selectNoLut(companion.project.id, `companion-no-lut-${suffix}`)
     companionTimeline = await timeline(companion.project.id)
     const companionDirector = (await api({
       method: 'POST',
@@ -986,7 +1258,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       },
     })).payload
     assert.equal(companionDirector.directorRun.treatmentPlan.plan.mode, 'visual-montage')
-    assert.equal(companionDirector.directorRun.impact.minimalRenders[0].variantId, '16:9')
+    assert.equal(companionDirector.directorRun.impact.minimalRenders[0].variantId, companion.variant.id)
 
     async function runProxyUntilTerminal(expectedOperationId) {
       for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -1239,6 +1511,8 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
         check.passed && check.references.length > 0)), true)
 
     const evidence = {
+      cutStateAssertion,
+      governanceWaits,
       schemaVersion: 'mvp-core-full-e2e-evidence/v1',
       workspaceId,
       primaryProjectId: primary.project.id,

@@ -1,3 +1,4 @@
+import { assertPlanHonorsResolution } from '../domain/editorial-policy-resolution.ts'
 import { createHash } from 'node:crypto'
 
 import { artifactOutputStoragePrefix } from '../domain/artifact-storage-identity.ts'
@@ -241,10 +242,10 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         ? calculateVersionHash({ type: 'renderable-snapshot-proxy/v1', snapshot: context.renderableSnapshot, renderInputHash: baseInputHash })
         : baseInputHash
       if (
-        immutableInputHash !== context.inputHash ||
-        source.editPlan.movementPolicy.automaticZoom || clips.length < 1 ||
-        source.editPlan.movementPolicy.protectedOpeningFrames < Math.round(source.editPlan.fps * 4)
+        immutableInputHash !== context.inputHash || clips.length < 1
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Compiled EditPlan is not safe to render')
+      // ADR-160. The plan is judged against the resolution it was made from (its movement and opening window), not against values of the worker.
+      assertPlanHonorsResolution(source.editPlan, source.policyResolution)
       // W70 readiness (R2). The content address written at enqueue is what a later Version carries this render by: it must be the address
       // of what is rendered now, or the carry would vouch for inputs nobody rendered. Recomputed here from the sealed source; a row written
       // before the address existed has none (and is never a carry source).

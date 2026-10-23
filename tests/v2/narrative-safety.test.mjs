@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { NARRATIVE_POLICY_FIXTURES, createNarrativeSafetyContext, validateNarrativeEdit } from '../../src/v2/domain/narrative-safety.ts'
+import { createNarrativeSafetyContext, validateNarrativeEdit } from '../../src/v2/domain/narrative-safety.ts'
+import { NARRATIVE_POLICY_FIXTURES } from './helpers/narrative-policy-fixtures.mjs'
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { preflightNarrativeSafetyService } from '../../src/v2/application/preflight-narrative-safety.ts'
 import { parseNarrativeSafetyPreflightBody } from '../../src/v2/public-api/narrative-safety-contract.ts'
