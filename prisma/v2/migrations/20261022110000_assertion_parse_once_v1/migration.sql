@@ -328,7 +328,7 @@ BEGIN
   END IF;
  END LOOP;
 EXCEPTION WHEN no_data_found OR too_many_rows THEN RAISE EXCEPTION 'W66v3 reciprocal bundle missing/ambiguous at COMMIT' USING ERRCODE='23514';
-END 
+END
 $$;
 
 CREATE OR REPLACE FUNCTION w66_assert_child_command_state_v1(p_state text) RETURNS void LANGUAGE plpgsql AS $$
@@ -553,7 +553,7 @@ BEGIN
   END IF;
  END LOOP;
 EXCEPTION WHEN no_data_found OR too_many_rows THEN RAISE EXCEPTION 'W66v3 reciprocal bundle missing/ambiguous at COMMIT' USING ERRCODE='23514';
-END 
+END
 $$;
 
 CREATE OR REPLACE FUNCTION w66_assert_renderable_compile_state_v1(p_state text) RETURNS void LANGUAGE plpgsql AS $$
@@ -733,7 +733,7 @@ BEGIN
   END IF;
  END LOOP;
 EXCEPTION WHEN no_data_found OR too_many_rows THEN RAISE EXCEPTION 'W66v3 reciprocal bundle missing/ambiguous at COMMIT' USING ERRCODE='23514';
-END 
+END
 $$;
 
 CREATE OR REPLACE FUNCTION w66_assert_editorial_binding_v1(p_binding json, p_project text, p_workspace text, p_parent text, p_result text) RETURNS void LANGUAGE plpgsql AS $$
@@ -821,7 +821,7 @@ BEGIN
   END IF;
  END LOOP;
 EXCEPTION WHEN no_data_found OR too_many_rows THEN RAISE EXCEPTION 'W66 editorial source authority missing/ambiguous' USING ERRCODE='23514';
-END 
+END
 $$;
 
 CREATE OR REPLACE FUNCTION w66_assert_normalization_v3(p_id text, p_project text, p_workspace text) RETURNS void LANGUAGE plpgsql AS $$
@@ -896,5 +896,5 @@ BEGIN
  END IF;
 EXCEPTION WHEN no_data_found OR too_many_rows OR invalid_text_representation OR numeric_value_out_of_range THEN
  RAISE EXCEPTION 'W66v3 normalization factual row/shape missing' USING ERRCODE='23514';
-END 
+END
 $$;
