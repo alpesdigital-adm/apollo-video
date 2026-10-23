@@ -2,7 +2,7 @@
 // schema work together, how long a reading takes and what the Apollo's own checks do with what comes back.
 //
 //   APOLLO_BRIEF_INTERPRETER_LIVE=1 \
-//   APOLLO_V2_BRIEF_INTERPRETER_PROVIDER=codex-cli APOLLO_V2_CODEX_BIN=<codex executable or codex.js> APOLLO_V2_BRIEF_INTERPRETER_MODEL=<model> \
+//   APOLLO_V2_BRIEF_INTERPRETER_PROVIDER=codex-cli APOLLO_V2_CODEX_BIN=<codex executable or codex.js> APOLLO_V2_CODEX_HOME=<CODEX_HOME of the Apollo, signed in> APOLLO_V2_BRIEF_INTERPRETER_MODEL=<model> \
 //     node --test tests/v2/brief-interpreter.live.mjs
 //   (or PROVIDER=openai-api with OPENAI_API_KEY; `codex-cli` uses the sign-in of the machine: no key exists for it)
 //   optional: APOLLO_BRIEF_INTERPRETER_LIVE_RUNS=<n per briefing, default 3>  APOLLO_BRIEF_INTERPRETER_LIVE_REPORT=<file for the JSON report>

@@ -24,7 +24,7 @@ import { seedSealedProject, testActor } from './helpers/pg-output-world.mjs'
 const enabled = process.env.APOLLO_EDITORIAL_REQUEST_PG === '1'
 
 const BRIEFING = 'alpha beta gamma delta'
-const CONFIGURATION = ['APOLLO_V2_BRIEF_INTERPRETER_PROVIDER', 'APOLLO_V2_CODEX_BIN', 'APOLLO_V2_BRIEF_INTERPRETER_MODEL', 'OPENAI_API_KEY', 'APOLLO_V2_BRIEF_INTERPRETER_BASE_URL']
+const CONFIGURATION = ['APOLLO_V2_BRIEF_INTERPRETER_PROVIDER', 'APOLLO_V2_CODEX_BIN', 'APOLLO_V2_CODEX_HOME', 'APOLLO_V2_BRIEF_INTERPRETER_MODEL', 'OPENAI_API_KEY', 'APOLLO_V2_BRIEF_INTERPRETER_BASE_URL']
 
 /** The stand-in Codex, scripted per briefing: `script.set(briefing, answer)` changes what it answers; `calls` is what it was asked. */
 function scriptedCodex() {
@@ -32,6 +32,7 @@ function scriptedCodex() {
   const fake = installFakeCodex({ answers })
   return Object.freeze({
     binary: fake.binary,
+    codexHome: fake.codexHome,
     script: { set: (briefing, answer) => { answers[briefing] = answer; fake.configure({ answers }) } },
     get calls() { return fake.executions() },
     close: async () => fake.remove(),
@@ -115,6 +116,7 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     process.env.APOLLO_V2_BRIEF_INTERPRETER_PROVIDER = 'codex-cli'
     process.env.APOLLO_V2_BRIEF_INTERPRETER_MODEL = 'stand-in-model'
     process.env.APOLLO_V2_CODEX_BIN = interpreter.binary
+    process.env.APOLLO_V2_CODEX_HOME = interpreter.codexHome
 
     // 3a. A reading that cites words the briefing does not contain is refused whole; nothing is written.
     interpreter.script.set(BRIEFING, { directives: [{ kind: 'cta', value: 'none', param: null, quote: 'words that are nowhere in the briefing' }], unsupported: [], questions: [], coverage: [] })
@@ -178,6 +180,43 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     assert.equal(stored.payload.data.state, 'interpreted')
     assert.equal(stored.payload.data.interpretation.directives[0].excerpt.text, 'epsilon')
     assert.equal(seeded.versions.base !== directed.version.id, true)
+
+    // 6. Rendering is blocked until a new Director run: after the request is revised, the report the Director sealed no longer admits the final.
+    const { admitDirectorQualityForFinal } = await import('../../src/v2/domain/final-caption-certification.ts')
+    const { deriveEditorialRequestFromBrief } = await import('../../src/v2/domain/editorial-request.ts')
+    const briefOfHead = async () => {
+      const row = await db.v2ProjectVersion.findUniqueOrThrow({ where: { id: (await db.v2Project.findUniqueOrThrow({ where: { id: projectId } })).currentVersionId }, include: { briefSnapshot: true } })
+      return JSON.parse(row.briefSnapshot.contentJson)
+    }
+    const binding = async () => ({ currentRequestHash: deriveEditorialRequestFromBrief(await briefOfHead()).requestHash, sealedRequestHash: directed.run.requestHash,
+      sealedPolicyResolutionHash: directed.run.policyResolution.policyResolutionHash })
+    assert.equal(admitDirectorQualityForFinal(directed.run.qualityReport, await binding()).admitted, true, 'the report the run sealed admits the final of the request it judged')
+    const revised = await revise({ ...(await headOf()), directives: [{ id: 'f6-after', kind: 'movement', value: 'none' }] }, `f6req-${run}-after`)
+    assert.equal(revised.status, 201, JSON.stringify(revised.payload))
+    assert.equal(revised.payload.data.impact.renderBlockedUntilDirectorRun, true)
+    assert.equal(revised.payload.data.impact.renderSemanticsChanged, true)
+    const refusal = admitDirectorQualityForFinal(directed.run.qualityReport, await binding())
+    assert.equal(refusal.admitted, false)
+    assert.match(refusal.reason, /editorial request changed after this Director run/)
+    // ... and a new Director run over the revised request is admitted again.
+    const redirected = await director(await headOf(), 'redirected')
+    assert.equal(redirected.run.requestHash, revised.payload.data.hashes.requestHash)
+    assert.equal(admitDirectorQualityForFinal(redirected.run.qualityReport, { currentRequestHash: redirected.run.requestHash, sealedRequestHash: redirected.run.requestHash, sealedPolicyResolutionHash: redirected.run.policyResolution.policyResolutionHash }).admitted, true)
+
+    // 7. A project that states no language (no locale is assumed) is read by the repositories that judge rights under the undetermined locale; none
+    // of them stops on the missing one any more, and none answers with another error for it.
+    const { UNDETERMINED_LOCALE } = await import('../../src/v2/domain/asset-rights.ts')
+    const { PrismaAssetSelectionRepository } = await import('../../src/v2/infrastructure/prisma/asset-selection-repository.ts')
+    const { PrismaQualityIterationRepository } = await import('../../src/v2/infrastructure/prisma/quality-iteration-repository.ts')
+    const { PrismaMusicAnalysisRunRepository } = await import('../../src/v2/infrastructure/prisma/music-analysis-run-repository.ts')
+    const silent = await seedSealedProject(db, { workspaceId, actor: seedActor, prefix: 'f6nolocale', name: 'A project with no language', locale: null })
+    assert.equal((await db.v2Project.findUniqueOrThrow({ where: { id: silent.projectId } })).locale, null)
+    const selection = await new PrismaAssetSelectionRepository(db).readProjectContext({ workspaceId, projectId: silent.projectId })
+    assert.equal(selection.locale, UNDETERMINED_LOCALE)
+    const iteration = await new PrismaQualityIterationRepository(db).readContext({ workspaceId, projectId: silent.projectId, projectVersionId: silent.head.version.id, proxyReviewId: 'f6-no-such-review', assetSelectionIds: [] })
+    assert.equal(iteration, null, 'the missing proxy review is the only thing it can say')
+    await assert.rejects(new PrismaMusicAnalysisRunRepository(db).resolveRequestAuthority({ workspaceId, projectId: silent.projectId, projectVersionId: silent.head.version.id, artifactId: 'f6-no-such-artifact', at: new Date().toISOString() }),
+      (error) => error.code === 'ASSET_NOT_USABLE' && !/localized/.test(error.message))
   } finally {
     await interpreter.close()
     for (const name of CONFIGURATION) {

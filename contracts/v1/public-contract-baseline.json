@@ -61081,6 +61081,7 @@
                     "promptVersion",
                     "promptHash",
                     "inputHash",
+                    "modelInputHash",
                     "responseHash",
                     "usage",
                     "costBasis",
@@ -61145,6 +61146,17 @@
                     "inputHash": {
                       "type": "string",
                       "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "modelInputHash": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "responseHash": {
                       "type": "string",
@@ -62395,6 +62407,7 @@
                     "promptVersion",
                     "promptHash",
                     "inputHash",
+                    "modelInputHash",
                     "responseHash",
                     "usage",
                     "costBasis",
@@ -62459,6 +62472,17 @@
                     "inputHash": {
                       "type": "string",
                       "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "modelInputHash": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "responseHash": {
                       "type": "string",

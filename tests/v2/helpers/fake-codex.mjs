@@ -30,12 +30,13 @@ process.stdin.on('data', (chunk) => chunks.push(chunk))
 process.stdin.on('end', async () => {
   const stdin = Buffer.concat(chunks).toString('utf8')
   const cwd = process.cwd()
-  log({ command: 'exec', args, cwd, listing: readdirSync(cwd).sort(), environmentKeys: Object.keys(process.env).sort(), stdin, schemaExists: existsSync(flag('--output-schema') ?? '') })
+  log({ command: 'exec', args, cwd, listing: readdirSync(cwd).sort(), environmentKeys: Object.keys(process.env).sort(), codexHome: process.env.CODEX_HOME ?? null, stdin, schemaExists: existsSync(flag('--output-schema') ?? '') })
   if (config.hang) { setInterval(() => undefined, 1_000); return }
   if (config.delayMs) await new Promise((resolve) => setTimeout(resolve, config.delayMs))
   const emit = (event) => process.stdout.write(`${JSON.stringify(event)}\n`)
   emit({ type: 'thread.started', thread_id: 'fake-thread' })
   emit({ type: 'turn.started' })
+  if (config.routerError) process.stderr.write('2026-10-23T02:27:38.357966Z ERROR codex_core::tools::router: error=code-mode host is disabled\n')
   if (config.fail) { emit({ type: 'turn.failed', error: { message: 'refused' } }); process.exit(1) }
   if (config.tool) emit({ type: 'item.completed', item: { id: 'item_0', type: 'command_execution', command: 'whoami' } })
   const briefing = JSON.parse(stdin.slice(stdin.lastIndexOf('{"briefing":'))).briefing
