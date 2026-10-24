@@ -437,14 +437,14 @@ test('T-FR-236 project LUT read and set expose the current selection version sta
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
   assert.equal(capabilities.get('apollo.projects.lut-selection.read').version, '3.0.0')
   assert.equal(capabilities.get('apollo.projects.lut-selection.read').outputSchemaRef, 'apollo://schemas/project-lut-selection-response/v3')
-  assert.equal(capabilities.get('apollo.projects.lut-selection.set').version, '3.0.0')
-  assert.equal(capabilities.get('apollo.projects.lut-selection.set').outputSchemaRef, 'apollo://schemas/project-lut-selection-applied/v3')
+  assert.equal(capabilities.get('apollo.projects.lut-selection.set').version, '4.0.0')
+  assert.equal(capabilities.get('apollo.projects.lut-selection.set').outputSchemaRef, 'apollo://schemas/project-lut-selection-applied/v4')
   assert.equal(getPublicSchema('apollo://schemas/project-lut-selection-response/v2').ref, 'apollo://schemas/project-lut-selection-response/v2')
   assert.equal(getPublicSchema('apollo://schemas/project-lut-selection-applied/v2').ref, 'apollo://schemas/project-lut-selection-applied/v2')
 
   for (const ref of [
     'apollo://schemas/project-lut-selection-response/v3',
-    'apollo://schemas/project-lut-selection-applied/v3',
+    'apollo://schemas/project-lut-selection-applied/v4',
   ]) {
     const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
       .compile(getPublicSchema(ref).schema)

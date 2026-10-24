@@ -22,6 +22,7 @@ import { ACCEPTED_FACE_PRODUCERS } from '../domain/face-producer-registry.ts'
 import { createProjectOutputVariantRequestSchema, outputBoundVersionSchemaFields,
   outputConsumptionSummarySchema } from './project-output-variant-contract.ts'
 import { PUBLIC_DATE_TIME_SCHEMA, PUBLIC_ID_SCHEMA } from './conventions.ts'
+import { COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA } from './command-proxy-render-contract.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import { PROJECT_DASHBOARD_EVENT_TYPES } from '../domain/public-event-feed.ts'
 import { PUBLIC_ERROR_CODES } from './public-error-catalog.ts'
@@ -30334,18 +30335,20 @@ const PROJECT_WORKSPACE_V15 = derivedSchema('apollo://schemas/project-workspace/
   uncertainty.enum = [...(uncertainty.enum as string[]), 'crop', 'caption', 'insert']
 }, [PROJECT_WORKSPACE_V14])
 
+// ADR-160 F4: the opening window of an EditPlan is the one the editorial policy resolved - none when no movement is applied and the request
+// names no window - so `protectedOpeningFrames` may be 0. The refs before this one keep the minimum of 1 they were published with.
+const PROJECT_EDIT_COMMAND_APPLIED_V9 = derivedSchema('apollo://schemas/project-edit-command-applied/v8', {
+  id: 'project-edit-command-applied', version: 9,
+  title: 'Applied edit command response whose opening window is the one the editorial policy resolved (possibly none)',
+}, (body) => {
+  const data = schemaNode(body, 'properties', 'data')
+  const branches = data.oneOf as SchemaNode[]
+  schemaNode(branches[0]!, 'properties', 'editorial', 'properties').protectedOpeningFrames = { type: 'integer', minimum: 0 }
+})
+
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   ...PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS,
-  // ADR-160 F4: the opening window of an EditPlan is the one the editorial policy resolved - none when no movement is applied and the request
-  // names no window - so `protectedOpeningFrames` may be 0. The refs before this one keep the minimum of 1 they were published with.
-  derivedSchema('apollo://schemas/project-edit-command-applied/v8', {
-    id: 'project-edit-command-applied', version: 9,
-    title: 'Applied edit command response whose opening window is the one the editorial policy resolved (possibly none)',
-  }, (body) => {
-    const data = schemaNode(body, 'properties', 'data')
-    const branches = data.oneOf as SchemaNode[]
-    schemaNode(branches[0]!, 'properties', 'editorial', 'properties').protectedOpeningFrames = { type: 'integer', minimum: 0 }
-  }),
+  PROJECT_EDIT_COMMAND_APPLIED_V9,
   derivedSchema('apollo://schemas/project-subtitle-configuration-set-request/v1', {
     id: 'project-subtitle-configuration-set-request', version: 2,
     title: 'Set one closed subtitle mode for ONE output of the project (named by its stable variant id), or revert it',
@@ -30469,6 +30472,52 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     title: 'Count, filter, rank and bound the variant space before any paid job is created, against the objective of the batch or the one the request names',
   }, (body) => {
     schemaNode(body, 'properties').objective = { ...strategicObjectiveSchema, description: 'The objective the portfolio is judged against. Required when the batch was created with none (refused with the reason objective-required); never different from the batch objective when it has one.' }
+  }),
+  // Found by the W70 rehearsal: a project-wide Command on a project with SEVERAL outputs committed and then answered
+  // 428 output-variant-required, because the proxy it enqueues is rendered for one output and no Command chooses. It now answers
+  // success: `operation` is present when the Version has one output and absent when it has several, and `proxyRenders` then
+  // says which outputs' proxies are still to be requested. A published schema never changes under its ref: these are the versions that
+  // state it (the editorial and Director branches no longer require `operation`; LUT and ColorPlan only gain the field).
+  derivedSchema('apollo://schemas/project-edit-command-applied/v9', {
+    id: 'project-edit-command-applied', version: 10,
+    title: 'Applied edit command response whose proxy render is enqueued for a one-output project and left to be requested per output otherwise',
+  }, (body) => {
+    const branches = schemaNode(body, 'properties', 'data').oneOf as SchemaNode[]
+    for (const branch of [branches[0]!, branches[1]!]) {
+      branch.required = (branch.required as string[]).filter((key) => key !== 'operation')
+      schemaNode(branch, 'properties').proxyRenders = COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA
+    }
+  }, [PROJECT_EDIT_COMMAND_APPLIED_V9]),
+  derivedSchema('apollo://schemas/project-lut-selection-applied/v3', {
+    id: 'project-lut-selection-applied', version: 4,
+    title: 'Applied project LUT selection whose proxy is enqueued for a one-output project and left to be requested per output otherwise',
+  }, (body) => {
+    schemaNode(body, 'properties', 'data', 'properties').proxyRenders = COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA
+  }),
+  // The same defect and the same answer for a confirmed review patch (single and batch): the patch committed its Version and then enqueued "the" proxy, which
+  // a project with several outputs refuses (output-variant-required). `operation` (and the render attached to the proposal or batch) exists when the project has
+  // one output; `proxyRenders` says which outputs' proxies remain to be requested otherwise.
+  derivedSchema('apollo://schemas/review-patch-applied/v3', {
+    id: 'review-patch-applied', version: 4,
+    title: 'Confirmed patch result whose proxy is enqueued for a one-output project and left to be requested per output otherwise',
+  }, (body) => {
+    const data = schemaNode(body, 'properties', 'data')
+    data.required = (data.required as string[]).filter((key) => key !== 'operation')
+    schemaNode(data, 'properties').proxyRenders = COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA
+  }),
+  derivedSchema('apollo://schemas/review-patch-batch-applied/v3', {
+    id: 'review-patch-batch-applied', version: 4,
+    title: 'Confirmed batch patch result whose proxy is enqueued for a one-output project and left to be requested per output otherwise',
+  }, (body) => {
+    const data = schemaNode(body, 'properties', 'data')
+    data.required = (data.required as string[]).filter((key) => key !== 'operation')
+    schemaNode(data, 'properties').proxyRenders = COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA
+  }),
+  derivedSchema('apollo://schemas/project-color-plan-applied/v1', {
+    id: 'project-color-plan-applied', version: 2,
+    title: 'Applied content-addressed ColorPlan whose proxy is enqueued for a one-output project and left to be requested per output otherwise',
+  }, (body) => {
+    schemaNode(body, 'properties', 'data', 'properties').proxyRenders = COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA
   }),
 ])
 

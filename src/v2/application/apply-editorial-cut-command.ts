@@ -9,7 +9,7 @@ import type { DirectedSubtitleCue } from '../domain/director-run.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createEditorialSourceBindingV1 } from '../domain/output-materialization.ts'
 import { materializeEditorialCutPlanV3, createEditorialAudioProjectionV1, createEditorialCutImpactV2, isSpeechRemovalConfirmationRecord, type EditorialCutPayloadV3, type SpeechRemovalConfirmationRecord } from '../domain/editorial-cut-impact.ts'
-import { buildOperationalOutputVersionBundleV3, operationalBundlePlanV3 } from '../domain/output-version-bundle.ts'
+import { buildOperationalOutputVersionBundleV3, forkAuthorityPendingV3, operationalBundlePlanV3 } from '../domain/output-version-bundle.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import type {
   EditorialCommandRepository,
@@ -633,7 +633,8 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
       id:dependencies.createId('editorial-source-binding'),parentVersionId:context.currentVersion.id,
       parentStateId:context.parent.state.document.id,parentStateHash:context.parent.state.stateHash,resultVersionId:versionId,createdAt})
     const editPlan=materializeEditorialCutPlanV3({before:JSON.parse(operationalBundlePlanV3(context.parent).contentJson),
-      versionId,planId:'edit-plan-'+versionId,commandId,createdAt,sourceBinding,exclusions})
+      versionId,planId:'edit-plan-'+versionId,commandId,createdAt,sourceBinding,exclusions,
+      adoptsAppliedCut:forkAuthorityPendingV3(context.parent)})
     const editPlanJson = stableSerialize(editPlan)
     const editPlanHash = calculateVersionHash(editPlan)
     const impact = createEditorialCutImpactV2({

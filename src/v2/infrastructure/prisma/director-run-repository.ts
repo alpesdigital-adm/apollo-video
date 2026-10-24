@@ -54,6 +54,7 @@ import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { parseEditorialPolicyResolution, POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION, resolutionOwnsPolicyRef, type EditorialPolicyResolutionV1 } from '../../domain/editorial-policy-resolution.ts'
 import { readRequestedSpeechRemovals } from './speech-removal-lineage.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { COPY_REQUIRES_EDITORIAL_CUT_REASON } from '../../domain/output-child-command.ts'
 import { readEditorialSourceBindingV1 } from './output-version-materializer.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import { parseStrategicQualityReport } from '../../domain/strategic-rubric.ts'
@@ -677,7 +678,14 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       ? Object.freeze({ id: boundTranscript.id, sourceArtifactId: boundTranscript.sourceArtifactId, language: boundTranscript.document.language,
         provider: boundTranscript.document.provider, model: boundTranscript.document.model, transcriptHash: boundTranscript.document.transcriptHash })
       : null)
-    if (!transcriptRow) return null
+    if (!transcriptRow) {
+      // A copy that has not been cut owns no transcript (it is the original's, bound by the copy's own editorial cut): the Director cannot run
+      // on it yet, and the answer says so - with the reason every other child Command of an uncut copy gives - instead of "project not found".
+      if (project.duplicatedFromProjectId !== null) {
+        throw new DomainError('PRECONDITION_REQUIRED', 'A copy needs its own editorial cut before the Director can run on it: ask remove-spoken-content with the removals already requested (speech the copy already had removed adopts that cut), or with new ones', { reason: COPY_REQUIRES_EDITORIAL_CUT_REASON })
+      }
+      return null
+    }
     // The observed transcript's words, in transcript order: what lets the Director name the words of every caption it generates.
     const transcriptWords: readonly Readonly<{ word: string; start: number; end: number }>[] = ownTranscriptRow !== null
       ? (JSON.parse(ownTranscriptRow.transcriptJson) as { words: readonly Readonly<{ word: string; start: number; end: number }>[] }).words

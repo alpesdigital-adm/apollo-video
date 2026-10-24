@@ -319,6 +319,20 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
       }
     })
 
+    // The copy answers the very editorial request the original was given (its briefing and what was read of it): the correction an owner asks
+    // for is a new, explicit request made on the copy, never something the duplication writes for them. Only the identities differ.
+    const readEditorialRequest = async (projectId) => {
+      const response = await fetch(`${baseUrl}/v1/projects/${projectId}/editorial-request`, { headers: { authorization } })
+      assert.equal(response.status, 200, await response.clone().text())
+      const { data } = await response.json()
+      const withoutIdentities = (value) => Array.isArray(value) ? value.map(withoutIdentities)
+        : value !== null && typeof value === 'object'
+          ? Object.fromEntries(Object.entries(value).filter(([key]) => !['version', 'id', 'snapshotId', 'briefSnapshotId'].includes(key)).map(([key, item]) => [key, withoutIdentities(item)]))
+          : value
+      return withoutIdentities(data)
+    }
+    assert.deepEqual(await readEditorialRequest(duplicateProjectId), await readEditorialRequest(sourceProject.id))
+
     const replayResponse = await fetch(
       `${baseUrl}/v1/projects/${sourceProject.id}/duplicates`,
       {

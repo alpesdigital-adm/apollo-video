@@ -2006,7 +2006,7 @@
     {
       "uiAction": "src/app/projects/[id]/page.tsx:2963",
       "capabilityId": "apollo.projects.review-patches.apply",
-      "capabilityVersion": "3.0.0",
+      "capabilityVersion": "4.0.0",
       "endpoint": "POST /v1/projects/{projectId}/patch-proposals/{proposalId}/apply",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2014,7 +2014,7 @@
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "calculateVersionHash",
-        "enqueueProjectProxyRenderService",
+        "enqueueProjectProxyRenderAfterCommandService",
         "governanceAnomalyPolicyFromEnvironment",
         "governanceDefaultLimitsFromEnvironment",
         "requireScope"
@@ -2068,7 +2068,7 @@
     {
       "uiAction": "src/app/projects/[id]/page.tsx:3043",
       "capabilityId": "apollo.projects.review-patch-batches.apply",
-      "capabilityVersion": "3.0.0",
+      "capabilityVersion": "4.0.0",
       "endpoint": "POST /v1/projects/{projectId}/patch-batches/{batchId}/apply",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2076,7 +2076,7 @@
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "calculateVersionHash",
-        "enqueueProjectProxyRenderService",
+        "enqueueProjectProxyRenderAfterCommandService",
         "governanceAnomalyPolicyFromEnvironment",
         "governanceDefaultLimitsFromEnvironment",
         "requireScope"
@@ -2255,7 +2255,7 @@
     {
       "uiAction": "src/app/projects/[id]/page.tsx:3273",
       "capabilityId": "apollo.projects.commands.apply",
-      "capabilityVersion": "11.0.0",
+      "capabilityVersion": "12.0.0",
       "endpoint": "POST /v1/projects/{projectId}/commands",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2264,7 +2264,7 @@
         "authenticateUiSessionService",
         "briefCompilerService",
         "enqueueFaceSourceWindowRunAsAudit",
-        "enqueueProjectProxyRenderService",
+        "enqueueProjectProxyRenderAfterCommandService",
         "ensureServerPerceptionSnapshotService",
         "governanceAnomalyPolicyFromEnvironment",
         "governanceDefaultLimitsFromEnvironment",
@@ -2960,14 +2960,14 @@
     {
       "uiAction": "src/components/SpeechCutConfirmation.tsx:61",
       "capabilityId": "apollo.projects.speech-removals.confirm",
-      "capabilityVersion": "2.0.0",
+      "capabilityVersion": "3.0.0",
       "endpoint": "POST /v1/projects/{projectId}/speech-removals",
       "applicationServices": [
         "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "confirmSpeechRemovalService",
-        "enqueueProjectProxyRenderService",
+        "enqueueProjectProxyRenderAfterCommandService",
         "governanceAnomalyPolicyFromEnvironment",
         "governanceDefaultLimitsFromEnvironment",
         "requireScope"
@@ -4074,7 +4074,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/patch-proposals/{proposalId}/apply",
       "inputSchemaRef": "apollo://schemas/apply-review-patch-request/v1",
-      "outputSchemaRef": "apollo://schemas/review-patch-applied/v3",
+      "outputSchemaRef": "apollo://schemas/review-patch-applied/v4",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -4107,7 +4107,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/patch-batches/{batchId}/apply",
       "inputSchemaRef": "apollo://schemas/apply-review-patch-batch-request/v1",
-      "outputSchemaRef": "apollo://schemas/review-patch-batch-applied/v3",
+      "outputSchemaRef": "apollo://schemas/review-patch-batch-applied/v4",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -6461,7 +6461,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/commands",
       "inputSchemaRef": "apollo://schemas/apply-project-edit-command-request/v7",
-      "outputSchemaRef": "apollo://schemas/project-edit-command-applied/v9",
+      "outputSchemaRef": "apollo://schemas/project-edit-command-applied/v10",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -6472,7 +6472,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/speech-removals",
       "inputSchemaRef": "apollo://schemas/confirm-speech-removal-request/v2",
-      "outputSchemaRef": "apollo://schemas/project-edit-command-applied/v9",
+      "outputSchemaRef": "apollo://schemas/project-edit-command-applied/v10",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -6780,7 +6780,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/lut-selection",
       "inputSchemaRef": "apollo://schemas/project-lut-selection-set-request/v1",
-      "outputSchemaRef": "apollo://schemas/project-lut-selection-applied/v3",
+      "outputSchemaRef": "apollo://schemas/project-lut-selection-applied/v4",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -6802,7 +6802,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/color-plan",
       "inputSchemaRef": "apollo://schemas/project-color-plan-set-request/v1",
-      "outputSchemaRef": "apollo://schemas/project-color-plan-applied/v1",
+      "outputSchemaRef": "apollo://schemas/project-color-plan-applied/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

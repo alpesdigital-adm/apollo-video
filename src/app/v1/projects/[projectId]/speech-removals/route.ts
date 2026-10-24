@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
 import { confirmSpeechRemovalService } from '@/v2/application/confirm-speech-removal'
-import { enqueueProjectProxyRenderService } from '@/v2/application/enqueue-project-proxy-render'
+import { enqueueProjectProxyRenderAfterCommandService } from '@/v2/application/enqueue-project-proxy-render'
 import { DomainError } from '@/v2/domain/errors'
 import {
   createColorPipelineCompilationRepository,
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       actor,
       idempotency: { clientId: actor.clientId, key: idempotencyKey },
     })
-    const proxy = await enqueueProjectProxyRenderService({
+    const proxy = await enqueueProjectProxyRenderAfterCommandService({
       projects: createProjectProxyRenderRepository(),
       operations: createPublicOperationRepository(),
       colorPipelines: createColorPipelineCompilationRepository(),

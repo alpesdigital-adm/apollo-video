@@ -70,7 +70,7 @@ function fixture({ role = 'selected-insert', mediaType = 'video', rights = { all
       editPlanSnapshot: { workspaceId, projectId, contentJson: JSON.stringify(plan),
         contentHash: calculateVersionHash(plan) }, command: null, directorRunAsResult: null }] }
   const hash = calculateRenderablePlanHash(plan)
-  const client = { async $queryRaw() { return [{ now: new Date() }] }, $queryRawUnsafe: world.queryRawUnsafe, v2VariantReframePlan: { async findFirst() { return null } }, v2SubtitleSegmentOverrideHead: { async findMany() { return [] } },
+  const client = { async $queryRaw() { return [{ now: new Date() }] }, $queryRawUnsafe: world.queryRawUnsafe, v2VariantReframePlan: { async findFirst() { return null } }, v2ProjectVersion: { async findFirst() { return null } }, v2SubtitleSegmentOverrideHead: { async findMany() { return [] } },
     v2MediaArtifactManifest: { async findFirst() { return { manifestJson: JSON.stringify({ sources: links.map((link) => ({
       artifactKey: link.artifactId + '.mp4', sha256: link.artifact.sha256,
       role: music && link.artifactId === secondId ? 'approved-music' : link.role === 'selected-insert' ? 'selected-insert' : 'source-master' })) }) } } },
@@ -150,7 +150,7 @@ test('publication fences lock project then all video/audio/music/output identiti
   const expected = ['artifact-rights-master', 'artifact-rights-music', 'artifact-rights-output', secondId,
     'artifact-\uE000', 'artifact-\u{10000}'].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
   const order = []
-  const tx = { $queryRawUnsafe: world.queryRawUnsafe, v2VariantReframePlan: { async findFirst() { return null } }, v2SubtitleSegmentOverrideHead: { async findMany() { return [] } }, v2Project: { async findFirst() { return project } }, async $queryRaw(strings, ...values) {
+  const tx = { $queryRawUnsafe: world.queryRawUnsafe, v2VariantReframePlan: { async findFirst() { return null } }, v2ProjectVersion: { async findFirst() { return null } }, v2SubtitleSegmentOverrideHead: { async findMany() { return [] } }, v2Project: { async findFirst() { return project } }, async $queryRaw(strings, ...values) {
     const sql = strings.join('?')
     if (sql.includes('FROM projects')) {
       order.push('project')

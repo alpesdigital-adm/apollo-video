@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireScope } from '@/v2/application/authenticate-api-client'
-import { enqueueProjectProxyRenderService } from '@/v2/application/enqueue-project-proxy-render'
+import { enqueueProjectProxyRenderAfterCommandService } from '@/v2/application/enqueue-project-proxy-render'
 import { readProjectLutSelectionService, setProjectLutSelectionService } from '@/v2/application/project-lut-selections'
 import { createColorPipelineCompilationRepository, createProjectLutSelectionRepository, createProjectProxyRenderRepository, createPublicOperationRepository } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { parseSetProjectLutSelectionBody, presentProjectLutSelectionResult } from '@/v2/public-api/project-lut-selection-contract'
-import { presentPublicOperation, presentSuccess } from '@/v2/public-api/presenters'
+import { presentSuccess } from '@/v2/public-api/presenters'
+import { commandProxyRenderReplayed, presentCommandProxyRender } from '@/v2/public-api/command-proxy-render-contract'
 import { isCopyRequiresEditorialCutRefusal } from '@/v2/domain/output-child-command'
 import { calculateVersionHash } from '@/v2/application/version-hash'
 
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     if (result.impact.renderDeferredUntilTimeline) {
       return NextResponse.json(presentSuccess(presented), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
     }
-    const proxy = await enqueueProjectProxyRenderService({
+    const proxy = await enqueueProjectProxyRenderAfterCommandService({
       projects: createProjectProxyRenderRepository(), operations: createPublicOperationRepository(),
       colorPipelines: createColorPipelineCompilationRepository(), clock: () => new Date(),
       createId: (kind) => `${kind}-${randomUUID()}`,
@@ -49,8 +50,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     })
     if (proxy === null) return NextResponse.json(presentSuccess(presented), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
     return NextResponse.json(presentSuccess({
-      ...presented, operation: presentPublicOperation(proxy.operation),
-      replayed: result.replayed && proxy.replayed,
+      ...presented, ...presentCommandProxyRender(proxy),
+      replayed: result.replayed && commandProxyRenderReplayed(proxy),
     }), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
   } catch (error) { return respondPublicError(error, requestId) }
 }

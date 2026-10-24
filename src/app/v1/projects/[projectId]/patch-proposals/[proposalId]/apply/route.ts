@@ -3,14 +3,15 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { applyReviewPatchService } from '@/v2/application/review-patch'
 import { requireScope } from '@/v2/application/authenticate-api-client'
-import { enqueueProjectProxyRenderService } from '@/v2/application/enqueue-project-proxy-render'
+import { enqueueProjectProxyRenderAfterCommandService } from '@/v2/application/enqueue-project-proxy-render'
 import { calculateVersionHash } from '@/v2/application/version-hash'
 import { DomainError } from '@/v2/domain/errors'
 import { createColorPipelineCompilationRepository, createProjectProxyRenderRepository, createPublicOperationRepository, createReviewPatchRepository } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { presentReviewPatchProposal } from '@/v2/public-api/collaborative-review-presenters'
-import { presentProjectVersionV2, presentPublicOperation, presentSuccess } from '@/v2/public-api/presenters'
+import { presentProjectVersionV2, presentSuccess } from '@/v2/public-api/presenters'
+import { commandProxyRenderReplayed, presentCommandProxyRender } from '@/v2/public-api/command-proxy-render-contract'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       actor,
       idempotencyKey,
     })
-    const render = await enqueueProjectProxyRenderService({
+    const render = await enqueueProjectProxyRenderAfterCommandService({
       projects: createProjectProxyRenderRepository(),
       operations: createPublicOperationRepository(),
       colorPipelines: createColorPipelineCompilationRepository(),
@@ -49,11 +50,16 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     })({
       workspaceId: actor.workspaceId,
       projectId,
+      expectedProjectVersionId: result.version.id,
       actor,
       idempotencyKey: `patch-proxy:${calculateVersionHash(idempotencyKey).slice(0, 64)}`,
       traceId: requestId,
     })
-    const proposal = await repository.attachRenderOperation({ workspaceId: actor.workspaceId, projectId, proposalId, renderOperationId: render.operation.id })
+    // A project with several outputs has no single proxy to attach: the patch is answered as committed and the proxies are requested per output.
+    const proposal = render.status === 'enqueued'
+      ? await repository.attachRenderOperation({ workspaceId: actor.workspaceId, projectId, proposalId, renderOperationId: render.operation.id })
+      : await repository.readProposal({ workspaceId: actor.workspaceId, projectId, proposalId })
+    if (!proposal) throw new DomainError('PROJECT_NOT_FOUND', 'Review patch proposal was not found')
     return NextResponse.json(presentSuccess({
       proposal: presentReviewPatchProposal(proposal),
       command: { id: result.command.id, type: result.command.type, baseVersionId: result.command.baseVersionId, resultVersionId: result.version.id, createdAt: result.command.createdAt },
@@ -64,8 +70,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       comparison: result.comparison,
       impact: result.impact,
       invalidations: result.invalidations,
-      operation: presentPublicOperation(render.operation),
-      replayed: result.replayed && render.replayed,
+      ...presentCommandProxyRender(render),
+      replayed: result.replayed && commandProxyRenderReplayed(render),
     }), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
   } catch (error) {
     return respondPublicError(error, requestId)
