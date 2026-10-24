@@ -119,9 +119,10 @@ function probeFromManifest(manifest: Readonly<MediaArtifactManifest>): ProjectWo
  * no aspect ratio is `output-not-consumable` for it (the same refusal the critic readers publish). Never throws for a blocked
  * entry; the consumer still evaluates its own fences when it is asked.
  */
-function describeOutputConsumption(state: OutputConsumptionState, entry: OutputConsumptionEntry, aspectRatio: string | null): ProjectWorkspaceOutput['consumption'] {
+function describeOutputConsumption(state: OutputConsumptionState, entry: OutputConsumptionEntry, aspectRatio: string | null,
+  targetPerceptionAuthority: boolean): ProjectWorkspaceOutput['consumption'] {
   const describe = (purpose: OutputConsumptionPurpose): ProjectWorkspaceOutputPurposeVerdict => {
-    const verdict = outputConsumptionVerdictV3(state, entry.variantId, purpose)
+    const verdict = outputConsumptionVerdictV3(state, entry.variantId, purpose, purpose === 'final' && targetPerceptionAuthority)
     if (verdict.status === 'blocked') return Object.freeze({ status: 'blocked' as const, reason: publishedConsumptionReason(verdict.reasons) })
     if (purpose === 'critic' && aspectRatio === null) return Object.freeze({ status: 'blocked' as const, reason: 'output-not-consumable' })
     return Object.freeze({ status: 'allowed' as const })
@@ -149,13 +150,14 @@ async function readHeadOutputs(client: Pick<Prisma.TransactionClient, '$queryRaw
     throw error
   }
   if (!stored) return Object.freeze([])
+  const targetPerceptionAuthority = stored.targetPerceptionAuthority
   // A Creation fork root (State2) still lists the outputs it was copied with, every purpose blocked by the reason its State records.
   return Object.freeze(stored.state.document.entries.map((entry) => {
     const aspectRatio = outputEntryAspectRatio(entry as OutputConsumptionEntry)
     return Object.freeze({
       variantId: entry.variantId,
       ...(aspectRatio === null ? {} : { aspectRatio }),
-      consumption: describeOutputConsumption(stored.state, entry as OutputConsumptionEntry, aspectRatio),
+      consumption: describeOutputConsumption(stored.state, entry as OutputConsumptionEntry, aspectRatio, targetPerceptionAuthority),
     })
   }))
 }

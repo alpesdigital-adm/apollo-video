@@ -31,7 +31,7 @@ import { persistCurrentRights, RECORDING_ALLOWED_USES, seedSealedProject, testAc
  *   2. the cut the copy asks for with the removals the request already names ADOPTS the applied cut: nothing is cut again, the clips and the
  *      duration stay, and the Version carries the editorial binding (the very authority a first cut of a copy binds: the Creation fork);
  *   3. a cut with a rule of its own removes ADDITIONAL speech from what is left (the speech is already retimed);
- *   4. the Director then runs on the copy, from the transcript the binding names, and the copy is admitted for a render.
+ *   4. the Director then runs on the copy, from the transcript the binding names, and the copy is admitted for a render, and (its Director run being the perception authority the copy owned none of) for the final export.
  * Every Version reads back from PostgreSQL exactly as it was built.
  */
 const enabled = process.env.APOLLO_RUN_W70_COPY_OF_CUT_PG === '1'
@@ -129,7 +129,9 @@ test('W70 PostgreSQL a copy of a cut project adopts the cut, takes additional cu
     assert.ok(further.editPlan.durationFrames < adopted.editPlan.durationFrames, 'additional speech left the timeline')
     assert.equal(serializeOutputCanonicalJson(await operational.read({ ...copyScope, versionId: further.version.id })), serializeOutputCanonicalJson(further.outputBundle))
 
-    // 4. The Director runs on the copy, from the transcript its binding names, and the copy is admitted for a render.
+    // 4. The Director runs on the copy, from the transcript its binding names, and the copy is admitted for a render, and (its Director run being the perception authority the copy owned none of) for the final export.
+    await assert.rejects(requirePersistedOutputConsumptionV3(db, { ...copyScope, versionId: further.version.id, purpose: 'final' }),
+      (error) => error.code === 'PRECONDITION_REQUIRED' && error.details?.reason === 'derived-source-perception-authority-required', 'before its own Director the copy owns no perception authority: no final')
     const rerun = await direct(further.outputBundle, 'rerun')
     assert.equal(rerun.run.baseVersionId, further.version.id)
     const stored = await operational.read({ ...copyScope, versionId: rerun.version.id })
@@ -138,5 +140,7 @@ test('W70 PostgreSQL a copy of a cut project adopts the cut, takes additional cu
     assert.equal((await db.v2Project.findUnique({ where: { id: copy.project.id } })).currentVersionId, rerun.version.id)
     const verdict = await requirePersistedOutputConsumptionV3(db, { ...copyScope, versionId: rerun.version.id, purpose: 'render' })
     assert.ok(verdict, 'the copy is admitted for a render')
+    assert.ok(await requirePersistedOutputConsumptionV3(db, { ...copyScope, versionId: rerun.version.id, purpose: 'final' }), 'its own Director run is the perception authority: the final export is admitted')
+    assert.ok(await db.v2ServerPerceptionSnapshot.count({ where: copyScope }) > 0)
   } finally { await db.$disconnect() }
 })
