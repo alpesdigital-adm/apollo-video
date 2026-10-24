@@ -145,7 +145,8 @@ test('the capability needs human approval for an agent: the general Command does
   assert.equal(capability.confirmation, 'human-approval')
   assert.equal(capability.operationKind, 'command')
   assert.equal(capability.idempotency, 'required')
-  assert.deepEqual(capability.requiredScopes, ['projects:write', 'speech-removals:confirm'])
+  // The gateway admits whoever may write; the scope that proves a granted client is enforced by the service, which exempts the user session (a person).
+  assert.deepEqual(capability.requiredScopes, ['projects:write'])
   assert.deepEqual(capability.endpoint, { method: 'POST', path: '/v1/projects/{projectId}/speech-removals' })
   assert.equal(capability.toolName, 'apollo.projects.speech-removals.confirm')
   assert.equal(capability.inputSchemaRef, 'apollo://schemas/confirm-speech-removal-request/v1')

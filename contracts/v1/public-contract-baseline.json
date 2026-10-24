@@ -8975,8 +8975,7 @@
       "operationKind": "command",
       "authMode": "required",
       "requiredScopes": [
-        "projects:write",
-        "speech-removals:confirm"
+        "projects:write"
       ],
       "inputSchemaRef": "apollo://schemas/confirm-speech-removal-request/v1",
       "outputSchemaRef": "apollo://schemas/project-edit-command-applied/v9",
