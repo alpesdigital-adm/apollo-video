@@ -292,6 +292,30 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       true,
     )
 
+    // A heartbeat that finds the row held by another transaction (the owner's own persistence of a multi-megabyte Version holds it for
+    // seconds) does not wait for that lock and does not lose the lease: it is answered as alive while the lease is still this owner's
+    // and unexpired, and a lease that is not this owner's is still refused under the same contention.
+    let release
+    let holding
+    const held = new Promise((resolve) => { release = resolve })
+    const taken = new Promise((resolve) => { holding = resolve })
+    const holder = client.$transaction(async (transaction) => {
+      await transaction.$queryRawUnsafe('SELECT id FROM public_operations WHERE id = $1 FOR UPDATE', operationId)
+      holding()
+      await held
+    }, { timeout: 30_000 })
+    await taken
+    try {
+      const startedAt = Date.now()
+      assert.equal(await repository.heartbeat({ operationId, leaseOwner: firstOwner, attempt: 1, now: '2026-01-01T15:31:10.500Z', leaseUntil: '2026-01-01T15:31:40.500Z' }), true)
+      assert.ok(Date.now() - startedAt < 5_000, 'the heartbeat did not wait for the lock')
+      assert.equal(await repository.heartbeat({ operationId, leaseOwner: recoveryOwner, attempt: 1, now: '2026-01-01T15:31:10.600Z', leaseUntil: '2026-01-01T15:31:40.600Z' }), false)
+      assert.equal(await repository.heartbeat({ operationId, leaseOwner: firstOwner, attempt: 0, now: '2026-01-01T15:31:10.700Z', leaseUntil: '2026-01-01T15:31:40.700Z' }), false)
+    } finally {
+      release()
+      await holder
+    }
+
     const waiting = await repository.wait({
       operationId,
       leaseOwner: firstOwner,
