@@ -493,7 +493,7 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     // ---- gateway of the cut confirmation (real HTTP, real authentication) ----
     // The UI client here has the scopes of a workspace that existed before the scope speech-removals:confirm: a person on the screen is admitted anyway.
     const cutPath = `/v1/projects/${world.projectId}/speech-removals`
-    const cutBody = { baseVersionId: 'version-none', baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-none', variantId: 'variant-none', subject: 'assunto que o pedido nao tem' }
+    const cutBody = { baseVersionId: 'version-none', baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-none', variantId: 'variant-none', subject: 'assunto que o pedido nao tem', proposalHash: 'a'.repeat(64) }
     const cutFromScreen = await page.evaluate(async ({ path, body }) => {
       const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'gateway-screen-1' }, body: JSON.stringify(body) })
       return { status: response.status, payload: await response.json() }
