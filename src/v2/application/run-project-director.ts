@@ -374,19 +374,24 @@ function buildSubtitleCues(input: {
 /**
  * Where the call to action is spoken: the sentence, in the last clip that has it, in which the words of the language of the speech (or the exact
  * text the requester gave) ask for the action. Nothing is assumed about where a call usually is: it is found or it is not.
+ *
+ * A spoken call the requester declared (`verbalCta`) is looked for whatever the kind of the action: an objective whose action only asks the
+ * viewer to keep watching has no lexicon of its own, but the requester still named the words to find, and a visual call drawn "where it is
+ * spoken" needs them found.
  */
-function locateSpokenCta(input: {
+export function locateSpokenCta(input: {
   action: Readonly<DesiredAction>
   language?: string
   fps: number
   words: readonly Readonly<{ text: string; timelineStartFrame: number; timelineEndFrame: number }>[]
   clips: readonly Readonly<{ id: string; timelineInFrame: number; timelineOutFrame: number }>[]
 }): Readonly<{ clipId: string; startSeconds: number; endSeconds: number }> | undefined {
-  if (input.action.kind === 'continue-viewing') return undefined
-  const lexicon = ctaLexiconFor(input.language)
   const verbal = input.action.verbalCta?.trim() ? normalizeSpeechForLexicon(input.action.verbalCta) : ''
+  if (input.action.kind === 'continue-viewing' && !verbal) return undefined
+  const lexicon = ctaLexiconFor(input.language)
   if (!verbal && lexicon === null) return undefined
-  const pattern = lexicon?.patterns[input.action.kind]
+  // An action that only keeps the viewer watching has no words of its own in any lexicon: only the declared text is looked for.
+  const pattern = input.action.kind === 'continue-viewing' ? undefined : lexicon?.patterns[input.action.kind]
   for (const clip of [...input.clips].reverse()) {
     const words = input.words.filter((word) => word.timelineStartFrame >= clip.timelineInFrame && word.timelineEndFrame <= clip.timelineOutFrame)
     if (words.length === 0) continue
