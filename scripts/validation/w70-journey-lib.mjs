@@ -58,6 +58,7 @@ const OPTIONS = Object.freeze({
   'poll-ms': { type: 'int', min: 100, default: 5000, help: 'decision file poll interval' },
   'operation-poll-ms': { type: 'int', min: 100, default: 2000, help: 'operation poll interval' },
   'decision-timeout-ms': { type: 'int', min: 1, default: 3_600_000, help: 'how long one decision is awaited before the run stops (exit 3)' },
+  'request-timeout-ms': { type: 'int', min: 1000, default: 300_000, help: 'how long one API request is awaited (a Command can take minutes on a loaded host)' },
   'operation-timeout-ms': { type: 'int', min: 1, default: 1_800_000, help: 'how long one operation is awaited' },
   'max-revisions': { type: 'int', min: 0, default: 3, help: 'revise-editorial-request rounds allowed across the journey' },
   'max-review-rounds': { type: 'int', min: 1, default: 3, help: 'proxy review rounds allowed' },

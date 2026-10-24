@@ -170,7 +170,7 @@ async function runLocked(config, { secrets, logPath }) {
         method,
         headers: { ...authHeaders, ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(key ? { 'idempotency-key': key } : {}), ...headers },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        signal: AbortSignal.timeout(120_000),
+        signal: AbortSignal.timeout(config['request-timeout-ms']),
       })
       text = await response.text()
       let parsed
