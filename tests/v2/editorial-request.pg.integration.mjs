@@ -279,6 +279,7 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     // 9. A subject spoken in a PASSAGE (ADR-160): the Director asks to confirm the whole stretch of speech, not the loose sentences that carry the word; the person moves
     // where it starts; an adjustment outside the limits writes nothing; the confirmation is a remove-spoken-content Command that records the passage as cut, and the Director
     // reads it back from PostgreSQL as the answer to the question.
+    {
     const CUT_BRIEFING = 'tire o trecho sobre venda'
     const sentences = [
       [0, 2, 'Bem-vindos ao curso.'], [2, 4, 'Hoje falamos da venda do produto.'], [4, 6, 'Vender bem exige confiança,'], [6, 8, 'e ouvir o cliente com calma.'],
@@ -341,14 +342,15 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     // The person starts the passage a sentence earlier (the start of a segment, inside the limits); the cut is exactly that.
     const cut = await confirm(await cutRequest('cut-confirmed', { adjustments: [{ passageId: passage.id, startSeconds: 0, endSeconds: 10 }] }))
     assert.deepEqual(cut.exclusions.map((range) => [range.sourceStartSeconds, range.sourceEndSeconds]), [[0, 10]])
-    const stored = JSON.parse((await db.v2EditCommand.findFirstOrThrow({ where: { projectId: cutProjectId, type: 'remove-spoken-content' } })).payloadJson)
-    assert.equal(stored.confirmation.medium, 'api-key-scope')
-    assert.deepEqual(stored.confirmation.passages.map(({ id, ...rest }) => rest), [{ startSeconds: 0, endSeconds: 10, proposedStartSeconds: 2, proposedEndSeconds: 10, adjusted: true }])
-    assert.equal(stored.confirmation.search.matching, 'stem')
-    assert.deepEqual(stored.exclusionOverrides.map((override) => [override.sourceStartSeconds, override.sourceEndSeconds]), [[0, 10]])
+    const storedCut = JSON.parse((await db.v2EditCommand.findFirstOrThrow({ where: { projectId: cutProjectId, type: 'remove-spoken-content' } })).payloadJson)
+    assert.equal(storedCut.confirmation.medium, 'api-key-scope')
+    assert.deepEqual(storedCut.confirmation.passages.map(({ id, ...rest }) => rest), [{ startSeconds: 0, endSeconds: 10, proposedStartSeconds: 2, proposedEndSeconds: 10, adjusted: true }])
+    assert.equal(storedCut.confirmation.search.matching, 'stem')
+    assert.deepEqual(storedCut.exclusionOverrides.map((override) => [override.sourceStartSeconds, override.sourceEndSeconds]), [[0, 10]])
     // The Director reads the confirmation back from the stored Command: the question is answered.
     const answered = await cutDirector('cut-answered')
     assert.ok(answered.run.policyResolution.satisfied.some((item) => item.kind === 'remove-speech' && item.how === 'confirmed-removal'))
+    }
   } finally {
     await interpreter.close()
     for (const name of CONFIGURATION) {
