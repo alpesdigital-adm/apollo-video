@@ -1,6 +1,6 @@
 import { captionLayoutOverflows } from '../domain/caption-burn-layout.ts'
 import { DomainError } from '../domain/errors.ts'
-import { assertReframePlanCoherentWithLayout, assertReframePlanForFill } from '../domain/editorial-policy-resolution.ts'
+import { assertOutputIsProduced, assertReframePlanCoherentWithLayout, assertReframePlanForFill } from '../domain/editorial-policy-resolution.ts'
 import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import {
   validateRenderPlacementPlan,
@@ -125,6 +125,7 @@ export async function deriveEditorialRenderGeometry(input: Readonly<{
   // ADR-160. A request that fills the frame of THIS output asks for the reframe trajectory of that output. Rendering it without that plan would draw the whole
   // frame over a backdrop - something the request did not ask for, told to nobody - so the render is refused and says what is missing.
   if (source.policyResolution?.policies.layout.value.perOutput !== undefined) {
+    assertOutputIsProduced(source.policyResolution, sourceOutputVariantId(source))
     assertReframePlanForFill(source.policyResolution, sourceOutputVariantId(source), reframePlan !== undefined)
     assertReframePlanCoherentWithLayout(source.policyResolution, sourceOutputVariantId(source), reframePlan)
   }

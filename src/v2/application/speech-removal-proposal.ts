@@ -49,7 +49,9 @@ export function proposeSpeechRemoval(
 ): Readonly<SpeechRemovalProposal> {
   const proposal = proposeWithoutConfirmation(subject, transcript)
   const words = (alternatives: readonly (readonly string[])[]) => JSON.stringify(alternatives.map((tokens) => tokens.join(' ')).toSorted())
-  const confirmed = proposal.searchable && (options.requested ?? []).some((rule) => rule.id === proposal.ruleId &&
+  // Confirmed only by a removal Command that CONFIRMED this proposal (it carries the subject it answers): the id and the words of a proposal can be computed, so an
+  // explicit Command of the client with the same rule is a valid cut and still not the confirmation.
+  const confirmed = proposal.searchable && (options.requested ?? []).some((rule) => rule.id === proposal.ruleId && rule.confirmation?.subject === subject &&
     words(rule.alternatives) === words(defineEditorialPhraseRules([{ id: proposal.ruleId, label: proposal.label, alternatives: proposal.alternatives }])[0]!.alternatives))
   return Object.freeze({ ...proposal, ...(options.sourceTranscriptId !== undefined ? { sourceTranscriptId: options.sourceTranscriptId } : {}), ...(confirmed ? { confirmed: true } : {}) })
 }

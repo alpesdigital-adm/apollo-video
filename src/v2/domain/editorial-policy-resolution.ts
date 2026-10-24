@@ -3,6 +3,7 @@ import { assertDomain, DomainError } from './errors.ts'
 import {
   createEditorialRequest,
   EDITORIAL_EXECUTABLE_VALUES,
+  OUTPUT_NOT_PRODUCED_REASON,
   REFRAME_PLAN_CONTRADICTS_LAYOUT_REASON,
   REFRAME_PLAN_REQUIRED_REASON,
   orientationOfAspect,
@@ -19,6 +20,7 @@ import {
   musicAlreadyInVideoSummary,
   notExecutableSummary,
   outputNotAskedQuestion,
+  outputOmitWithoutOutputQuestion,
   variantOverrideAloneSummary,
   variantOverrideWithoutOutputSummary,
   outputLayoutNativeMismatchQuestion,
@@ -114,7 +116,7 @@ export interface EditorialPolicies {
  * a backdrop). `perOutput` is present only when the request speaks about the frame of an output: it says what each output gets, and `fill-following-face`
  * is the reframe trajectory (W66r) - which exists as a plan of that output on the Version this run makes, and without which a render is refused.
  */
-export type OutputLayoutMode = 'fill-following-face' | 'source-native' | 'fit-with-backdrop'
+export type OutputLayoutMode = 'fill-following-face' | 'source-native' | 'fit-with-backdrop' | 'not-produced'
 export interface LayoutPolicyValue {
   mode: 'fit-with-backdrop' | 'source-native'
   perOutput?: readonly Readonly<{ variantId: string; aspectRatio: string | null; mode: OutputLayoutMode }>[]
@@ -198,7 +200,7 @@ export interface SatisfiedRequestItem {
   value: string
   source: 'variant-override' | 'request-field' | 'request-briefing'
   /** `invariant`: the product guarantees it. `default`: the Apollo adds nothing it was not asked for. `project-outputs`: the outputs of the project already are what was asked. `confirmed-removal`: the owner confirmed the cut. */
-  how: 'invariant' | 'default' | 'project-outputs' | 'confirmed-removal'
+  how: 'invariant' | 'default' | 'project-outputs' | 'confirmed-removal' | 'omitted-output'
   origin: PolicyOrigin
   rule: PolicyRuleId
   reason: string
@@ -632,11 +634,18 @@ export function resolveEditorialPolicies(
   // The request speaks about the frame of an output (or asks every output to be filled): each output gets its own layout, and a fill is the reframe path.
   const outputLayoutSelections = distinctSelections(selectAll(request, outputSpec, 'output-layout'))
   const fillEveryOutput = layoutSelection?.directive.value === 'fill-crop'
-  if (outputLayoutSelections.length > 0 || fillEveryOutput) {
+  // A version the request says must not be produced stays in the project and is left out of this edition: it has an entry of its own and its render is refused.
+  const omitSelections = distinctSelections(selectAll(request, outputSpec, 'output')).filter((selection) => selection.directive.value === 'omit')
+  if (outputLayoutSelections.length > 0 || fillEveryOutput || omitSelections.length > 0) {
     const modeOfGlobal: Readonly<Record<string, OutputLayoutMode>> = { 'fill-crop': 'fill-following-face', 'source-native': 'source-native', 'fit-with-backdrop': 'fit-with-backdrop' }
     const entries: { variantId?: string; aspectRatio: string | null; mode: OutputLayoutMode; by?: Selection }[] = []
     for (const output of outputs) {
       const aspectRatio = output.aspectRatio ?? output.spec?.aspectRatio
+      const omittedBy = omitSelections.find((selection) => outputReferenceMatches(String(selection.directive.param), aspectRatio))
+      if (omittedBy !== undefined) {
+        entries.push({ ...(output.variantId !== undefined ? { variantId: output.variantId } : {}), aspectRatio: aspectRatio ?? null, mode: 'not-produced', by: omittedBy })
+        continue
+      }
       const shape = aspectOf(aspectRatio)
       const sameShapeAsSource = sourceAspect !== undefined && shape !== undefined && Math.abs(shape - sourceAspect) < 0.005
       // Of the directives that point at this output the most specific one is about it (an aspect ratio beats a shape, a shape beats "all").
@@ -664,15 +673,22 @@ export function resolveEditorialPolicies(
         openQuestions.push(Object.freeze({ id: `output-layout-without-output-${reference.replace(':', 'x')}`, question: outputLayoutWithoutOutputQuestion(reference), source: 'resolution' as const }))
       }
     }
-    const nonFill = entries.filter((entry) => entry.mode !== 'fill-following-face')
+    for (const selection of omitSelections) {
+      const reference = String(selection.directive.param)
+      if (!outputs.some((output) => outputReferenceMatches(reference, output.aspectRatio ?? output.spec?.aspectRatio))) {
+        openQuestions.push(Object.freeze({ id: `output-omit-without-output-${reference.replace(':', 'x')}`, question: outputOmitWithoutOutputQuestion(reference), source: 'resolution' as const }))
+      }
+    }
+    const nonFill = entries.filter((entry) => entry.mode !== 'fill-following-face' && entry.mode !== 'not-produced')
     const planMode: LayoutPolicyValue['mode'] = nonFill.length > 0 && nonFill.every((entry) => entry.mode === 'source-native') ? 'source-native' : 'fit-with-backdrop'
     const perOutput = entries.flatMap((entry) => entry.variantId === undefined ? [] : [Object.freeze({ variantId: entry.variantId, aspectRatio: entry.aspectRatio, mode: entry.mode })])
     // Everything the request said about the frame: even a directive that points at no output of the project is in the reason (and is asked about above).
-    const used = [...new Set([...outputLayoutSelections, ...(fillEveryOutput && layoutSelection !== undefined ? [layoutSelection] : [])])]
+    const used = [...new Set([...outputLayoutSelections, ...omitSelections, ...(fillEveryOutput && layoutSelection !== undefined ? [layoutSelection] : [])])]
     const effects: Readonly<Record<OutputLayoutMode, string>> = {
       'fill-following-face': 'the picture fills the whole frame following the face (the reframe trajectory of that output, which has to exist on the Version this run makes: a render without it is refused)',
       'source-native': 'the recorded frame is used as it is',
       'fit-with-backdrop': 'the whole recorded frame stays visible over a backdrop',
+      'not-produced': 'the request says this version is not to be produced: it stays in the project, this edition leaves it out and its render is refused',
     }
     layout = Object.freeze({
       key: 'layout' as const, status: 'applied' as const, value: Object.freeze({ mode: planMode, ...(perOutput.length > 0 ? { perOutput: Object.freeze(perOutput) } : {}) }),
@@ -785,6 +801,7 @@ export function resolveEditorialPolicies(
   // The versions the request asks for are the outputs of the project: satisfied when they exist, a question (create the output?) when they do not.
   for (const selection of distinctSelections(selectAll(request, outputSpec, 'output'))) {
     const directive = selection.directive
+    if (directive.value === 'omit') continue
     const matching = outputs.filter((output) => {
       const aspectRatio = output.aspectRatio ?? output.spec?.aspectRatio
       return directive.value === 'aspect' ? aspectRatio === directive.param : orientationOfAspect(aspectRatio) === directive.value
@@ -801,12 +818,13 @@ export function resolveEditorialPolicies(
     }
   }
   // The project has an output the request, which speaks about the versions it wants, does not ask for: the Apollo neither drops it nor keeps it on its own.
-  const askedOutputs = distinctSelections(selectAll(request, outputSpec, 'output'))
+  const askedOutputs = distinctSelections(selectAll(request, outputSpec, 'output')).filter((selection) => selection.directive.value !== 'omit')
   if (askedOutputs.length > 0) {
     for (const output of outputs) {
       const aspectRatio = output.aspectRatio ?? output.spec?.aspectRatio
       const asked = askedOutputs.some(({ directive }) => directive.value === 'aspect' ? aspectRatio === directive.param : orientationOfAspect(aspectRatio) === directive.value)
-      if (!asked) {
+      const left = omitSelections.some((selection) => outputReferenceMatches(String(selection.directive.param), aspectRatio))
+      if (!asked && !left) {
         openQuestions.push(Object.freeze({ id: `output-not-asked-${output.variantId ?? output.id ?? aspectRatio ?? 'unknown'}`, question: outputNotAskedQuestion(aspectRatio ?? 'formato desconhecido'), source: 'resolution' as const }))
       }
     }
@@ -980,6 +998,12 @@ export function assertResolutionPlannable(resolution: Readonly<EditorialPolicyRe
 
 // ---- Consumers of the policies: the facts a plan must show for a policy to hold. Pure, so the Director and the gates read them one way.
 
+/** A render of an output the request says is not to be produced is refused, and says so. A resolution that does not name the output asks nothing. */
+export function assertOutputIsProduced(resolution: Readonly<Pick<EditorialPolicyResolutionV1, 'policies'>> | null | undefined, variantId: string): void {
+  const omitted = resolution?.policies.layout.value.perOutput?.find((entry) => entry.variantId === variantId)?.mode === 'not-produced'
+  assertDomain(!omitted, 'PRECONDITION_REQUIRED', 'The request says this version is not to be produced in this edition, so it is not rendered', { reason: OUTPUT_NOT_PRODUCED_REASON, variantId })
+}
+
 /**
  * A reframe plan that crops the frame by itself (the automatic trajectory) on an output whose resolved layout is the source frame or the whole frame over a backdrop
  * contradicts what the request asked for: the render is refused. (An editor's own crop is an explicit Command and stays; a resolution that said nothing about the
@@ -991,6 +1015,7 @@ export function assertReframePlanCoherentWithLayout(
   reframePlan: Readonly<{ ranges: readonly Readonly<{ source: string }>[] }> | null | undefined,
 ): void {
   const mode = resolution?.policies.layout.value.perOutput?.find((entry) => entry.variantId === variantId)?.mode
+  if (mode === 'not-produced') return
   const crops = reframePlan?.ranges.some((range) => range.source === 'plan') === true
   assertDomain(mode === undefined || mode === 'fill-following-face' || !crops, 'PRECONDITION_REQUIRED',
     'The request keeps the frame of this output as it is, and the reframe plan of this Version crops it by itself; the plan has to agree with the resolved layout of the output',

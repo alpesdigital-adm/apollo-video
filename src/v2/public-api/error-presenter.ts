@@ -250,7 +250,7 @@ function presentPreconditionReason(details: Readonly<Record<string, unknown>>) {
     const blockers = presentEditorialRequestBlockers(details)
     return blockers ? { reason: details.reason, blockers } : { reason: details.reason }
   }
-  if (details.reason === 'reframe-plan-required' && typeof details.variantId === 'string' && BLOCKER_ID.test(details.variantId)) {
+  if ((details.reason === 'reframe-plan-required' || details.reason === 'output-not-produced') && typeof details.variantId === 'string' && BLOCKER_ID.test(details.variantId)) {
     return { reason: details.reason, variantId: details.variantId }
   }
   return { reason: details.reason }

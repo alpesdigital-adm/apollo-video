@@ -321,6 +321,9 @@ test('ADR-160 coverage: the screens say what a statement does (nothing), put the
   const reframe = describeRequestFailure(428, { error: { code: 'PRECONDITION_REQUIRED', details: { reason: 'reframe-plan-required', variantId: 'variant-1' } } })
   assert.match(reframe.message, /preenche a tela desta saída acompanhando o rosto/)
   assert.doesNotMatch(reframe.message, /reframe|variant/i)
+  const omitted = describeRequestFailure(428, { error: { code: 'PRECONDITION_REQUIRED', details: { reason: 'output-not-produced', variantId: 'variant-1' } } })
+  assert.match(omitted.message, /manda não produzir esta versão nesta edição/)
+  assert.doesNotMatch(omitted.message, /variant/i)
 })
 
 test('ADR-160 coverage: the screen offers the confirmation only for a proposal that found the subject in the speech, with the transcript it was searched in', async () => {
@@ -339,4 +342,33 @@ test('ADR-160 coverage: the screen offers the confirmation only for a proposal t
   assert.match(component, /speech-removals/)
   assert.doesNotMatch(component, /alternatives|rules/)
   assert.match(readFileSync('src/app/projects/[id]/page.tsx', 'utf8'), /<SpeechCutConfirmation/)
+})
+
+test('ADR-160 coverage: the words of a written call are the ones inside the citation of the directive, not the first occurrence anywhere in the briefing', async () => {
+  const briefing = 'No final ele fala "agende já". Mostre o texto "AGENDE JÁ" na tela nesse momento.'
+  const { interpretation } = await interpret({
+    directives: [
+      { kind: 'cta', value: 'overlay-at-spoken-cta', param: null, quote: 'na tela nesse momento' },
+      { kind: 'cta-text', value: 'set', param: 'AGENDE JÁ', quote: 'Mostre o texto "AGENDE JÁ"' }],
+    unsupported: [], questions: [], coverage: [{ topic: 'context', quote: 'No final ele fala "agende já".' }],
+  }, briefing)
+  const text = interpretation.directives.find((directive) => directive.kind === 'cta-text')
+  assert.equal(text.param, 'AGENDE JÁ', 'the occurrence in the citation, with its capitals, and not the one the speech says')
+  // The same words only in the speech (not in the citation of the directive) are not the words of the directive.
+  const outside = await interpret({
+    directives: [{ kind: 'cta-text', value: 'set', param: 'agende já', quote: 'Mostre o texto na tela' }],
+    unsupported: [], questions: [], coverage: [{ topic: 'context', quote: 'No final ele fala "agende já".' }],
+  }, 'No final ele fala "agende já". Mostre o texto na tela nesse momento.').catch((error) => error)
+  assert.ok(outside instanceof Error || outside.interpretation.directives.every((directive) => directive.kind !== 'cta-text' || directive.param !== 'agende já'), 'a literal that is not in the citation is not taken from elsewhere')
+})
+
+test('ADR-160 coverage: "do not produce this version" is a directive the Apollo executes; it names one version and never all of them', async () => {
+  assert.ok(EDITORIAL_DIRECTIVE_VOCABULARY.output.values.includes('omit'))
+  assert.ok(EDITORIAL_EXECUTABLE_VALUES.output.includes('omit'))
+  assert.ok(BRIEF_INTERPRETER_SYSTEM_PROMPT.includes('omit'))
+  assert.equal(parseEditorialDirective({ id: 'a', kind: 'output', value: 'omit', param: '16:9' }, 'test').param, '16:9')
+  assert.equal(parseEditorialDirective({ id: 'a', kind: 'output', value: 'omit', param: 'horizontal' }, 'test').param, 'horizontal')
+  assert.throws(() => parseEditorialDirective({ id: 'a', kind: 'output', value: 'omit', param: 'all' }, 'test'), (error) => error.code === 'INVALID_ARGUMENT')
+  assert.throws(() => parseEditorialDirective({ id: 'a', kind: 'output', value: 'omit' }, 'test'), (error) => error.code === 'INVALID_ARGUMENT')
+  assert.match(describeDirectiveLine('output', 'omit', '16:9'), /Não produzir/)
 })

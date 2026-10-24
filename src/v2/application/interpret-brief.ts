@@ -92,6 +92,7 @@ const VALUE_GUIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = 
   output: Object.freeze({
     vertical: 'a version of the video whose frame is taller than wide', horizontal: 'a version whose frame is wider than tall', square: 'a version whose frame is square',
     aspect: 'a version in an aspect ratio the briefing names (param: 9:16, 16:9, 4:5, 1:1 or 21:9)',
+    omit: 'a version the briefing says must NOT be produced (the param names it)',
   }),
   'output-layout': Object.freeze({
     'fill-following-face': "in ONE version, fill the whole frame with the picture, keeping the speaker's face in view",
@@ -264,7 +265,9 @@ function shortText(value: unknown, field: string): string {
  * The words of the briefing that a name the model wrote stands for: found without regard to case, accents or the spaces between words, and returned as the
  * briefing has them (offsets are the Apollo's own). Surrounding quotation marks of the name are not part of it. Undefined when the briefing does not say it.
  */
-export function literalFromBriefing(briefing: string, name: string): string | undefined {
+export function literalFromBriefing(briefing: string, name: string, within?: Readonly<{ start: number; end: number }>): string | undefined {
+  // The words are looked for INSIDE the citation of the directive that carries them: the same words earlier in the briefing are another sentence.
+  if (within !== undefined) return literalFromBriefing(briefing.slice(within.start, within.end), name)
   const trimmedName = name.trim().replace(/^["'“”‘’«»]([^]*)["'“”‘’«»]$/u, '$1')
   const needle = folded(trimmedName)
   if (needle.length === 0) return undefined
@@ -352,7 +355,7 @@ export function interpretationFromModelText(input: Readonly<{
       // The words of the written call and the subject to cut are the OWNER's: what is kept is the stretch of the briefing, found by the Apollo, with the
       // case and accents the owner wrote - never the text the model gave back, which may differ in both.
       if (directive.kind === 'cta-text' || directive.kind === 'remove-speech') {
-        const literal = literalFromBriefing(input.briefingText, String(directive.param))
+        const literal = literalFromBriefing(input.briefingText, String(directive.param), excerpt)
         if (literal === undefined) throw new DomainError('INVALID_ARGUMENT', 'subject is not in the briefing')
         accepted.push(Object.freeze({ ...parseEditorialDirective({ id: directive.id, kind: directive.kind, value: directive.value, param: literal }, 'brief interpretation'), excerpt }) as InterpretedDirective)
         return

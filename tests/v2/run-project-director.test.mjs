@@ -2154,7 +2154,11 @@ test('ADR-160 coverage: a subject the request takes out of the speech is searche
   assert.match(question.question, /Achei trechos sobre “relâmpago” na fala/)
   assert.equal(asked.repository.lastBundle, undefined, 'nothing is persisted, nothing is cut')
   // The owner confirms with the removal Command carrying the proposed rule: the lineage now holds it, and the Director plans.
-  const requestedSpeechRemovals = defineEditorialPhraseRules([{ id: question.removal.ruleId, label: question.removal.label, alternatives: question.removal.alternatives }])
+  const [proposedRule] = defineEditorialPhraseRules([{ id: question.removal.ruleId, label: question.removal.label, alternatives: question.removal.alternatives }])
+  // The same cut sent through the general Command (no confirmation) is a valid cut that answers nothing: the Director still asks.
+  const explicit = fixture({ transcript, editorialRequest, requestedSpeechRemovals: [proposedRule] })
+  await assert.rejects(explicit.service(request({ idempotency: { key: 'coverage-removal-explicit' } })), (error) => error.details.openQuestions[0].id === 'speech-removal-1')
+  const requestedSpeechRemovals = [{ ...proposedRule, confirmation: { subject: 'relâmpago', medium: 'ui-session' } }]
   const confirmed = fixture({ transcript, editorialRequest, requestedSpeechRemovals })
   const { run } = await confirmed.service(request({ idempotency: { key: 'coverage-removal-confirmed' } }))
   assert.deepEqual(run.policyResolution.policies.speechRemovals.value.ruleIds, [question.removal.ruleId])

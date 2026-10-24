@@ -6,7 +6,7 @@ import { defineEditorialPhraseRules } from '../../src/v2/application/editorial-p
 import { interpretBriefService } from '../../src/v2/application/interpret-brief.ts'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
 import {
-  assertReframePlanCoherentWithLayout, assertReframePlanForFill, assertResolutionPlannable, overlayTextOf, parseEditorialPolicyResolution, resolveEditorialPolicies,
+  assertOutputIsProduced, assertReframePlanCoherentWithLayout, assertReframePlanForFill, assertResolutionPlannable, overlayTextOf, parseEditorialPolicyResolution, resolveEditorialPolicies,
 } from '../../src/v2/domain/editorial-policy-resolution.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createEditorialRequest } from '../../src/v2/domain/editorial-request.ts'
@@ -21,7 +21,11 @@ const MEDIA = {
   timelineDurationSeconds: 90, spokenCta: { startSeconds: 40, endSeconds: 44 }, backgroundMusicTrackCount: 0,
 }
 const proposalsFor = (subjects, requested = []) => subjects.map((subject) => proposeSpeechRemoval(subject, w70Transcript(), { sourceTranscriptId: 'transcript-1', requested }))
-const ruleOf = (proposal, alternatives = proposal.alternatives) => defineEditorialPhraseRules([{ id: proposal.ruleId, label: proposal.label, alternatives }])[0]
+/** The rule of a removal Command. `medium` is how its confirmation was made; without it the Command came from the general Command (an explicit cut, never a confirmation). */
+const ruleOf = (proposal, alternatives = proposal.alternatives, medium = 'ui-session') => {
+  const [rule] = defineEditorialPhraseRules([{ id: proposal.ruleId, label: proposal.label, alternatives }])
+  return medium === null ? rule : { ...rule, confirmation: { subject: proposal.subject, medium } }
+}
 
 async function w70Request(extra = {}) {
   const { interpretation } = await interpretBriefService({ model: model(W70_COVERAGE_MODEL_ANSWER) })({ briefing: W70_BRIEFING })
@@ -93,6 +97,15 @@ test('ADR-160 coverage W70: the owner confirms the cut by the removal Command, a
   assert.deepEqual(forged.map((proposal) => proposal.confirmed), [undefined, undefined])
   const stillAsked = resolveEditorialPolicies(await w70Request({ requestedRemovals: asked.map((proposal) => proposal.ruleId) }), { ...MEDIA, speechRemovalProposals: forged }, [VERTICAL, HORIZONTAL])
   assert.deepEqual(ids(stillAsked.openQuestions), ['speech-removal-1', 'speech-removal-2'])
+  // The general Command carries the id and the words a proposal computes (and a Director refusal shows) and still confirms nothing: it is a valid cut, not the answer.
+  const general = proposalsFor(['sorteio', 'formulário de inscrição'], asked.map((proposal) => ruleOf(proposal, proposal.alternatives, null)))
+  assert.deepEqual(general.map((proposal) => proposal.confirmed), [undefined, undefined])
+  const generalResolution = resolveEditorialPolicies(await w70Request({ requestedRemovals: asked.map((proposal) => proposal.ruleId) }), { ...MEDIA, speechRemovalProposals: general }, [VERTICAL, HORIZONTAL])
+  assert.deepEqual(ids(generalResolution.openQuestions), ['speech-removal-1', 'speech-removal-2'])
+  assert.deepEqual(generalResolution.policies.speechRemovals.value.ruleIds, asked.map((proposal) => proposal.ruleId).toSorted(), 'the explicit cut stays honored by the captions, and still answers no question')
+  // A confirmation made for another subject answers that subject only.
+  const swapped = proposalsFor(['sorteio'], [{ ...ruleOf(asked[0]), confirmation: { subject: 'formulário de inscrição', medium: 'api-key-scope' } }])
+  assert.equal(swapped[0].confirmed, undefined)
   // The same words under another id confirm nothing either.
   const other = proposalsFor(['sorteio'], [defineEditorialPhraseRules([{ id: 'another-rule', label: 'sorteio', alternatives: ['sorteio'] }])[0]])
   assert.equal(other[0].confirmed, undefined)
@@ -333,7 +346,10 @@ test('ADR-160 coverage: an output the project has and a briefing that names the 
   const resolved = resolveEditorialPolicies(only, MEDIA, [VERTICAL, HORIZONTAL])
   assert.deepEqual(ids(resolved.openQuestions), ['output-not-asked-variant-horizontal'])
   assert.match(resolved.openQuestions[0].question, /Este projeto tem uma saída 16:9 que o briefing não pede/)
-  assert.match(resolved.openQuestions[0].question, /O Apollo não tira nem mantém saída por conta própria/)
+  // Only the options that exist are offered: keep and produce, or leave this version out of the edition. Nothing is said about taking the output out of the project.
+  assert.match(resolved.openQuestions[0].question, /manter e produzir esta saída/)
+  assert.match(resolved.openQuestions[0].question, /não produzir esta saída nesta edição/)
+  assert.doesNotMatch(resolved.openQuestions[0].question, /tire a saída do projeto/)
   assert.deepEqual(ids(resolveEditorialPolicies(createEditorialRequest({}), MEDIA, [VERTICAL, HORIZONTAL]).openQuestions), [])
   assert.deepEqual(ids(resolveEditorialPolicies(createEditorialRequest({ directives: [{ id: 'a', kind: 'output', value: 'vertical' }, { id: 'b', kind: 'output', value: 'horizontal' }] }), MEDIA, [VERTICAL, HORIZONTAL]).openQuestions), [])
 })
@@ -351,4 +367,24 @@ test('ADR-160 coverage: a reframe plan that crops by itself an output whose layo
   const silent = resolveEditorialPolicies(createEditorialRequest({}), MEDIA, [VERTICAL, HORIZONTAL])
   assert.doesNotThrow(() => assertReframePlanCoherentWithLayout(silent, 'variant-horizontal', automatic))
   assert.doesNotThrow(() => assertReframePlanCoherentWithLayout(null, 'variant-horizontal', automatic))
+})
+
+test('ADR-160 coverage: a version the request says not to produce stays in the project, is left out of this edition, answers the question, and its render is refused', () => {
+  const request = createEditorialRequest({ directives: [{ id: 'a', kind: 'output', value: 'vertical' }, { id: 'b', kind: 'output', value: 'omit', param: '16:9' }] })
+  const resolution = resolveEditorialPolicies(request, MEDIA, [VERTICAL, HORIZONTAL])
+  assert.deepEqual(ids(resolution.openQuestions), [], 'the version the request leaves out is not asked about')
+  assert.equal(resolution.blocked, false)
+  assert.deepEqual(resolution.policies.layout.value.perOutput.map((entry) => [entry.variantId, entry.mode]), [['variant-vertical', 'fit-with-backdrop'], ['variant-horizontal', 'not-produced']])
+  assert.ok(resolution.satisfied.some((item) => item.kind === 'output' && item.how === 'project-outputs'), 'the version that is asked for is still satisfied by the project outputs')
+  assert.throws(() => assertOutputIsProduced(resolution, 'variant-horizontal'), (error) =>
+    error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'output-not-produced' && error.details.variantId === 'variant-horizontal')
+  assert.doesNotThrow(() => assertOutputIsProduced(resolution, 'variant-vertical'))
+  assert.doesNotThrow(() => assertOutputIsProduced(null, 'variant-horizontal'), 'a resolution that does not name the output asks nothing')
+  assert.doesNotThrow(() => assertReframePlanCoherentWithLayout(resolution, 'variant-horizontal', { ranges: [{ source: 'plan' }] }), 'an output that is not produced has no frame to contradict')
+  assert.doesNotThrow(() => parseEditorialPolicyResolution(JSON.parse(JSON.stringify(resolution))))
+  assert.deepEqual(presentPublicDomainError(new DomainError('PRECONDITION_REQUIRED', 'x', { reason: 'output-not-produced', variantId: 'variant-horizontal', secret: 'C:/x' }), 'request-1').error.details, { reason: 'output-not-produced', variantId: 'variant-horizontal' })
+  // A request that leaves out a version the project has not got is a question, not a silent no-op.
+  const ghost = resolveEditorialPolicies(createEditorialRequest({ directives: [{ id: 'a', kind: 'output', value: 'omit', param: '4:5' }] }), MEDIA, [VERTICAL, HORIZONTAL])
+  assert.deepEqual(ids(ghost.openQuestions), ['output-omit-without-output-4x5'])
+  assert.match(ghost.openQuestions[0].question, /não tem uma saída assim/)
 })

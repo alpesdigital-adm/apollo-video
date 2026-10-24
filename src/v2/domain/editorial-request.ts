@@ -86,8 +86,9 @@ export const EDITORIAL_DIRECTIVE_VOCABULARY: Readonly<Record<EditorialDirectiveK
   'cta-text': Object.freeze({ values: Object.freeze(['set']), params: Object.freeze({ set: 'text' as const }) }),
   // The versions of the video the request asks for, by the shape of the frame or by an aspect ratio. They are checked against the outputs of the project.
   output: Object.freeze({
-    values: Object.freeze(['vertical', 'horizontal', 'square', 'aspect']),
-    params: Object.freeze({ aspect: 'aspect-ratio' as const }),
+    // `omit` is a version the briefing says must NOT be produced (the param names it): the output stays in the project and this edition leaves it out - its render is refused.
+    values: Object.freeze(['vertical', 'horizontal', 'square', 'aspect', 'omit']),
+    params: Object.freeze({ aspect: 'aspect-ratio' as const, omit: 'output-ref' as const }),
   }),
   // How the frame of ONE output is laid out (the param names the output): the face-following fill, the source frame as it is, or the whole frame over a backdrop.
   'output-layout': Object.freeze({
@@ -119,7 +120,7 @@ export const EDITORIAL_EXECUTABLE_VALUES: Readonly<Record<EditorialDirectiveKind
   keep: Object.freeze([]),
   avoid: Object.freeze([]),
   'cta-text': Object.freeze(['set']),
-  output: Object.freeze(['vertical', 'horizontal', 'square', 'aspect']),
+  output: Object.freeze(['vertical', 'horizontal', 'square', 'aspect', 'omit']),
   'output-layout': Object.freeze(['fill-following-face', 'source-native', 'fit-with-backdrop']),
   'remove-speech': Object.freeze(['about']),
   invariant: Object.freeze(['captions-clear-of-face']),
@@ -280,6 +281,7 @@ export function parseEditorialDirective(value: unknown, where: string, allowExce
     assertDomain(typeof param === 'string' && (OUTPUT_ASPECT_RATIOS as readonly string[]).includes(param), 'INVALID_ARGUMENT', `${where}: ${kind} ${directiveValue} needs an aspect ratio of the output catalog`)
   } else if (paramKind === 'output-ref') {
     assertDomain(typeof param === 'string' && (OUTPUT_REFERENCES as readonly string[]).includes(param), 'INVALID_ARGUMENT', `${where}: ${kind} ${directiveValue} needs the output it is about (vertical, horizontal, square, an aspect ratio or all)`)
+    assertDomain(!(kind === 'output' && directiveValue === 'omit' && param === 'all'), 'INVALID_ARGUMENT', `${where}: output omit names one version, not all of them`)
   } else {
     assertDomain(typeof param === 'string' && param.trim().length > 0 && param.length <= 200, 'INVALID_ARGUMENT', `${where}: ${kind} ${directiveValue} needs a short subject`)
   }
@@ -596,8 +598,10 @@ export const BRIEF_INTERPRETATION_INVALID_REASON = 'brief-interpretation-invalid
 export const REFRAME_PLAN_REQUIRED_REASON = 'reframe-plan-required' as const
 /** The request keeps the frame of an output as it is and the reframe plan of the Version crops it by itself: the render is refused. */
 export const REFRAME_PLAN_CONTRADICTS_LAYOUT_REASON = 'reframe-plan-contradicts-layout' as const
+/** The request says this version is not to be produced, and its render was asked for: the render is refused. */
+export const OUTPUT_NOT_PRODUCED_REASON = 'output-not-produced' as const
 /** The `reason` codes the public error envelope publishes for the editorial request (PRECONDITION_REQUIRED). */
-export const EDITORIAL_REQUEST_PUBLISHED_REASONS = Object.freeze([BRIEF_INTERPRETATION_REQUIRED_REASON, EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON, EDITORIAL_REQUEST_BLOCKED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON, BRIEF_INTERPRETATION_FAILED_REASON, DIRECTOR_OBJECTIVE_REQUIRED_REASON, OBJECTIVE_REQUIRED_REASON, BRIEF_INTERPRETATION_INVALID_REASON, REFRAME_PLAN_REQUIRED_REASON, REFRAME_PLAN_CONTRADICTS_LAYOUT_REASON] as const)
+export const EDITORIAL_REQUEST_PUBLISHED_REASONS = Object.freeze([BRIEF_INTERPRETATION_REQUIRED_REASON, EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON, EDITORIAL_REQUEST_BLOCKED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON, BRIEF_INTERPRETATION_FAILED_REASON, DIRECTOR_OBJECTIVE_REQUIRED_REASON, OBJECTIVE_REQUIRED_REASON, BRIEF_INTERPRETATION_INVALID_REASON, REFRAME_PLAN_REQUIRED_REASON, REFRAME_PLAN_CONTRADICTS_LAYOUT_REASON, OUTPUT_NOT_PRODUCED_REASON] as const)
 
 /**
  * A briefing with text and no interpretation of exactly that text is NOT an empty briefing: it is a request nobody has read. The Director

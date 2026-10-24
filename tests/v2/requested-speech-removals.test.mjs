@@ -141,3 +141,19 @@ test('a caption hidden by an exception says nothing, and a text exception that r
   const rewritten = exception('cue-a', { startFrame: 20, endFrame: 50 }, [{ kind: 'text', text: 'fala sem o pedido' }])
   assert.deepEqual(requestedSpeechReintroducedByCaptions({ rules: requested, cues, overrides: [rewritten], variantId: VARIANT }), [])
 })
+
+test('the origin of a removal is read back from its Command: only a Command that carries the confirmation of the capability marks its rules as confirmed', async () => {
+  const confirmed = { id: 'c2', type: 'remove-spoken-content', payload: { schemaVersion: 3, rules: [rule('speech-aaaaaaaaaaaa', 'sorteio')], confirmation: { subject: 'sorteio', medium: 'ui-session' } } }
+  const explicit = removal('c3', rule('speech-bbbbbbbbbbbb', 'garantia'))
+  const malformed = { id: 'c4', type: 'remove-spoken-content', payload: { schemaVersion: 3, rules: [rule('speech-cccccccccccc', 'bônus')], confirmation: { subject: 'bônus', medium: 'a-person-said-so' } } }
+  const lineage = project(
+    [version('v1', null), version('v2', 'v1', 'c2'), version('v3', 'v2', 'c3'), version('v4', 'v3', 'c4')],
+    [confirmed, explicit, malformed],
+  )
+  const rules = await collectRequestedSpeechRemovals({ projectId: 'p1', headVersionId: 'v4', load: async () => lineage })
+  assert.deepEqual(rules.map((item) => [item.id, item.confirmation?.subject, item.confirmation?.medium]), [
+    ['speech-cccccccccccc', undefined, undefined],
+    ['speech-bbbbbbbbbbbb', undefined, undefined],
+    ['speech-aaaaaaaaaaaa', 'sorteio', 'ui-session'],
+  ])
+})

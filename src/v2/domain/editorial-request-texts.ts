@@ -71,6 +71,7 @@ export const DIRECTIVE_VALUE_LABELS: Readonly<Record<string, Readonly<Record<str
     horizontal: 'Uma versão horizontal',
     square: 'Uma versão quadrada',
     aspect: 'Uma versão na proporção pedida',
+    omit: 'Não produzir uma versão',
   }),
   'output-layout': Object.freeze({
     'fill-following-face': 'Preencher a tela acompanhando o rosto',
@@ -114,6 +115,7 @@ export function describeDirectiveWords(kind: string, value: string, param?: stri
   if (kind === 'keep' || kind === 'avoid') return { label, text: String(param ?? '') }
   if (kind === 'cta-text') return { label, text: `“${String(param ?? '')}”` }
   if (kind === 'remove-speech') return { label, text: `tirar da fala o que fala de “${String(param ?? '')}”` }
+  if (kind === 'output' && value === 'omit') return { label, text: `Não produzir ${describeOutputReference(String(param ?? ''))}` }
   if (kind === 'output' && value === 'aspect') return { label, text: `Uma versão na proporção ${String(param ?? '')}` }
   if (kind === 'output-layout') return { label, text: `${DIRECTIVE_VALUE_LABELS['output-layout']?.[value] ?? value}, ${inOutputReference(String(param ?? ''))}` }
   const base = DIRECTIVE_VALUE_LABELS[kind]?.[value] ?? value
@@ -206,7 +208,12 @@ export function ctaTextWithoutOverlayQuestion(text: string, placement: string): 
 
 /** The project has an output the request, which names the versions it wants, does not name. */
 export function outputNotAskedQuestion(aspectRatio: string): string {
-  return `Este projeto tem uma saída ${aspectRatio} que o briefing não pede. Se ela deve ficar, diga no briefing que quer essa versão; se não deve, tire a saída do projeto. O Apollo não tira nem mantém saída por conta própria.`
+  return `Este projeto tem uma saída ${aspectRatio} que o briefing não pede. Escolha: manter e produzir esta saída (diga no briefing que quer essa versão) ou não produzir esta saída nesta edição (diga no briefing que essa versão não deve ser feita: o Apollo a deixa de fora e recusa o render dela). O Apollo não escolhe por você, e ainda não tem como apagar uma saída do projeto.`
+}
+
+/** The request leaves out a version the project has not got. */
+export function outputOmitWithoutOutputQuestion(reference: string): string {
+  return `O pedido manda não produzir ${describeOutputReference(reference)}, e este projeto não tem uma saída assim. Tire o pedido do briefing ou confira a versão.`
 }
 
 /** A request for an output the project does not have, in a field that names the output. */

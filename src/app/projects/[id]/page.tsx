@@ -2186,7 +2186,7 @@ export default function ProjectWorkspacePage() {
     if (!response.ok || !payload.data) {
       // The Director's refusals about the request come with the reasons in the Apollo's words (and the cuts it asks the owner to confirm).
       const reason = payload.error?.details?.reason
-      if (reason === 'editorial-request-blocked' || reason === 'reframe-plan-required' || reason === 'reframe-plan-contradicts-layout') {
+      if (reason === 'editorial-request-blocked' || reason === 'reframe-plan-required' || reason === 'reframe-plan-contradicts-layout' || reason === 'output-not-produced') {
         throw new RefusedWithBlockers(describeRequestFailure(response.status, payload as never).message, payload.error?.details?.blockers)
       }
       throw new Error(apiError(payload, 'A API recusou a operação.'))

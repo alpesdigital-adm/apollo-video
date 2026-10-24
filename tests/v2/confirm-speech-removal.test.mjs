@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { confirmSpeechRemovalService } from '../../src/v2/application/confirm-speech-removal.ts'
-import { speechRemovalRuleId } from '../../src/v2/application/speech-removal-proposal.ts'
+import { defineEditorialPhraseRules } from '../../src/v2/application/editorial-phrase-rules.ts'
+import { proposeSpeechRemoval, speechRemovalRuleId } from '../../src/v2/application/speech-removal-proposal.ts'
+import { API_SCOPE_MATRIX } from '../../src/v2/domain/api-client.ts'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
@@ -28,9 +31,22 @@ const current = (directives, version = 'version-1') => ({
     editorialRequest: { directives },
   } },
 })
+function actorOf(kind, scopes) {
+  const auditContext = createExternalAuditContext({ clientId: 'client-1', credentialId: 'credential-1', workspaceId: 'workspace-1', environment: 'production' })
+  return Object.freeze({
+    ...auditContext, scopes: new Set(scopes), authenticationKind: kind, clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+  })
+}
+/** A person on a screen: the user session. */
+const UI_ACTOR = actorOf('ui-session', ['projects:write'])
+/** A client the owner granted the confirmation to (the REST API key, or the key an MCP adapter calls with after the human approval of the tool). */
+const GRANTED_ACTOR = actorOf('bearer', ['projects:write', 'speech-removals:confirm'])
+/** A client that can write to the project and was never granted the confirmation. */
+const UNGRANTED_ACTOR = actorOf('bearer', ['projects:write'])
 const request = (overrides = {}) => ({
   workspaceId: 'workspace-1', projectId: 'project-1', baseVersionId: 'version-1', baseHash: 'b'.repeat(64), sourceTranscriptId: 'transcript-1', variantId: 'variant-1',
-  subject: 'sorteio', actor: { clientId: 'client-1' }, idempotency: { clientId: 'client-1', key: 'confirm-cut-1' }, ...overrides,
+  subject: 'sorteio', actor: UI_ACTOR, idempotency: { clientId: 'client-1', key: 'confirm-cut-1' }, ...overrides,
 })
 function world(directives = [directive('sorteio')], version = 'version-1') {
   const applied = []
@@ -51,6 +67,31 @@ test('the cut that is applied is the Apollo\'s proposal for the subject: its id,
   assert.equal(applied[0].reason, 'conferido')
   assert.equal(applied[0].sourceTranscriptId, 'transcript-1')
   assert.equal(applied[0].variantId, 'variant-1')
+  assert.deepEqual(applied[0].confirmation, { subject: 'sorteio', medium: 'ui-session' })
+  assert.equal(applied[0].actor, UI_ACTOR, 'the actor of the audit is the one who confirmed')
+})
+
+test('the media that confirm: the screen session and the granted client key (REST, or MCP behind the human approval of the tool) - each one recorded; an ungranted client is refused', async () => {
+  for (const [label, actor, medium] of [['screen', UI_ACTOR, 'ui-session'], ['key with the scope', GRANTED_ACTOR, 'api-key-scope']]) {
+    const { service, applied } = world()
+    await service(request({ actor }))
+    assert.deepEqual(applied.map((item) => item.confirmation), [{ subject: 'sorteio', medium }], label)
+  }
+  const { service, applied } = world()
+  await assert.rejects(service(request({ actor: UNGRANTED_ACTOR })), (error) => error.code === 'AUTH_SCOPE_REQUIRED' && error.details.requiredScope === 'speech-removals:confirm')
+  const noWrite = actorOf('bearer', ['speech-removals:confirm'])
+  await assert.rejects(service(request({ actor: noWrite })), (error) => error.code === 'AUTH_SCOPE_REQUIRED' && error.details.requiredScope === 'projects:write')
+  assert.deepEqual(applied, [], 'nothing was applied for the ungranted')
+  assert.ok(API_SCOPE_MATRIX['speech-removals'].includes('confirm'))
+})
+
+test('the general Command never carries the confirmation: a cut sent through it is a valid cut, and the proposal it matches is still asked', () => {
+  const proposal = proposeSpeechRemoval('sorteio', transcript, { sourceTranscriptId: 'transcript-1' })
+  const rule = () => defineEditorialPhraseRules([{ id: proposal.ruleId, label: proposal.label, alternatives: [...proposal.alternatives] }])[0]
+  const ask = (requested) => proposeSpeechRemoval('sorteio', transcript, { sourceTranscriptId: 'transcript-1', requested }).confirmed
+  assert.equal(ask([rule()]), undefined, 'the id and the words of a proposal are computable, so they prove nothing')
+  assert.equal(ask([{ ...rule(), confirmation: { subject: 'sorteio', medium: 'ui-session' } }]), true)
+  assert.equal(ask([{ ...rule(), confirmation: { subject: 'outro', medium: 'ui-session' } }]), undefined, 'a confirmation answers the subject it was given for')
 })
 
 test('nothing is applied for a subject the request does not ask to cut, one the speech does not say, an unsearchable one, or a base that moved', async () => {
@@ -70,10 +111,33 @@ test('nothing is applied for a subject the request does not ask to cut, one the 
   // A request for one output of the project is a request of the project: the subject is found there too.
   const overridden = confirmSpeechRemovalService({
     requests: { async readCurrent() { const value = current([]); value.briefSnapshot.content.editorialRequest = { variantOverrides: { 'variant-1': [directive('sorteio')] } }; return value } },
-    cuts: { async readContext() { return { transcript } } }, clock: () => new Date(), createId: (kind) => kind, createEventId: () => 'event',
+    cuts: { async readContext() { return { transcript, parent: { state: { document: { entries: [{ variantId: 'variant-1' }] } } } } } }, clock: () => new Date(), createId: (kind) => kind, createEventId: () => 'event',
     apply: () => async (input) => input,
   })
   assert.equal((await overridden(request())).rules[0].alternatives[0], 'sorteio')
+})
+
+test('a cut asked for one output among several is refused: the cut takes the stretches out of the video every output plays', async () => {
+  const build = (variantIds, editorialRequest) => {
+    const applied = []
+    const service = confirmSpeechRemovalService({
+      requests: { async readCurrent() { const value = current([]); value.briefSnapshot.content.editorialRequest = editorialRequest; return value } },
+      cuts: { async readContext() { return { transcript, parent: { state: { document: { entries: variantIds.map((variantId) => ({ variantId })) } } } } } },
+      clock: () => new Date(), createId: (kind) => kind, createEventId: () => 'event',
+      apply: () => async (input) => { applied.push(input); return { applied: true } },
+    })
+    return { service, applied }
+  }
+  const forOne = { variantOverrides: { 'variant-vertical': [directive('sorteio')] } }
+  const several = build(['variant-vertical', 'variant-horizontal'], forOne)
+  await assert.rejects(several.service(request({ variantId: 'variant-horizontal' })), (error) => error.code === 'INVALID_COMMAND' && /one output of several/.test(error.message))
+  assert.deepEqual(several.applied, [])
+  const only = build(['variant-vertical'], forOne)
+  await only.service(request({ variantId: 'variant-vertical' }))
+  assert.equal(only.applied.length, 1, 'the only output of the project is the plan')
+  const forAll = build(['variant-vertical', 'variant-horizontal'], { directives: [directive('sorteio')] })
+  await forAll.service(request({ variantId: 'variant-vertical' }))
+  assert.equal(forAll.applied.length, 1, 'a request for the whole project cuts the video every output plays')
 })
 
 test('the capability needs human approval for an agent: the general Command does not carry the cut, and the proposal read from a refusal is not enough', () => {
@@ -81,7 +145,7 @@ test('the capability needs human approval for an agent: the general Command does
   assert.equal(capability.confirmation, 'human-approval')
   assert.equal(capability.operationKind, 'command')
   assert.equal(capability.idempotency, 'required')
-  assert.deepEqual(capability.requiredScopes, ['projects:write'])
+  assert.deepEqual(capability.requiredScopes, ['projects:write', 'speech-removals:confirm'])
   assert.deepEqual(capability.endpoint, { method: 'POST', path: '/v1/projects/{projectId}/speech-removals' })
   assert.equal(capability.toolName, 'apollo.projects.speech-removals.confirm')
   assert.equal(capability.inputSchemaRef, 'apollo://schemas/confirm-speech-removal-request/v1')

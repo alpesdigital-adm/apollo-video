@@ -118,6 +118,12 @@ export function describeRequestFailure(status: number, payload: { error?: { code
       message: 'O pedido preenche a tela desta saída acompanhando o rosto, e esta versão ainda não tem o plano de enquadramento dela. Peça o plano de enquadramento da saída antes de gerar o vídeo.',
     }
   }
+  if (payload?.error?.code === 'PRECONDITION_REQUIRED' && reason === 'output-not-produced') {
+    return {
+      kind: 'refused', status, code: 'PRECONDITION_REQUIRED', requestId: payload?.error?.requestId ?? null,
+      message: 'O pedido manda não produzir esta versão nesta edição, então o Apollo não gera o vídeo dela. Se quiser a versão, mude o pedido.',
+    }
+  }
   if (payload?.error?.code === 'PRECONDITION_REQUIRED' && reason === 'editorial-request-needs-output') {
     return {
       kind: 'refused', status, code: 'PRECONDITION_REQUIRED', requestId: payload?.error?.requestId ?? null,
