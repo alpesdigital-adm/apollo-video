@@ -137,16 +137,31 @@ test('remove-spoken-content is either a recorded skip or rules requested through
   refused('remove-spoken-content', { variant: '16:9', rules: [{ id: 'x', label: 'y', alternatives: ['z'], extra: 1 }] }, /unknown fields/)
 })
 
-test('speech-removal-confirm names subjects and outputs, once each, and never words to cut', () => {
-  const decision = decide('speech-removal-confirm', { confirmations: [{ subject: 'subject placeholder', variant: '9:16', reason: 'r' }, { subject: 'other subject', variant: '16:9' }] })
+test('speech-removal-confirm names subject, output and proposal; adjustments and discards are only what the file says', () => {
+  const proposalHash = 'a'.repeat(64)
+  const decision = decide('speech-removal-confirm', { confirmations: [
+    { subject: 'subject placeholder', variant: '9:16', proposalHash, adjustments: [{ passageId: 'passage-1', startSeconds: 1.5, endSeconds: 4 }], discardedPassageIds: ['passage-2'], reason: 'r' },
+    { subject: 'other subject', variant: '16:9', proposalHash },
+  ] })
   assert.equal(decision.confirmations.length, 2)
-  assert.equal(decision.confirmations[1].reason, undefined)
+  assert.deepEqual(decision.confirmations[0].adjustments, [{ passageId: 'passage-1', startSeconds: 1.5, endSeconds: 4 }])
+  assert.deepEqual(decision.confirmations[0].discardedPassageIds, ['passage-2'])
+  assert.equal(decision.confirmations[1].adjustments, undefined)
+  const one = (extra) => ({ confirmations: [{ subject: 'a', variant: '9:16', proposalHash, ...extra }] })
   refused('speech-removal-confirm', {}, /non-empty/)
   refused('speech-removal-confirm', { confirmations: [] }, /non-empty/)
-  refused('speech-removal-confirm', { confirmations: [{ subject: 'a', variant: '1:1' }] }, /"variant"/)
-  refused('speech-removal-confirm', { confirmations: [{ variant: '9:16' }] }, /"subject"/)
-  refused('speech-removal-confirm', { confirmations: [{ subject: 'a', variant: '9:16' }, { subject: 'a', variant: '16:9' }] }, /once/)
-  refused('speech-removal-confirm', { confirmations: [{ subject: 'a', variant: '9:16', rules: [] }] }, /unknown fields/)
+  refused('speech-removal-confirm', one({ variant: '1:1' }), /"variant"/)
+  refused('speech-removal-confirm', one({ subject: undefined }), /"subject"/)
+  refused('speech-removal-confirm', one({ proposalHash: 'xyz' }), /proposalHash/)
+  refused('speech-removal-confirm', one({ proposalHash: undefined }), /proposalHash/)
+  refused('speech-removal-confirm', one({ rules: [] }), /unknown fields/)
+  refused('speech-removal-confirm', one({ adjustments: [] }), /1 to 64/)
+  refused('speech-removal-confirm', one({ adjustments: [{ passageId: 'p', startSeconds: 5, endSeconds: 4 }] }), /start < end/)
+  refused('speech-removal-confirm', one({ adjustments: [{ passageId: 'p', startSeconds: 1, endSeconds: 2, extra: 1 }] }), /unknown fields/)
+  refused('speech-removal-confirm', one({ adjustments: [{ passageId: 'p', startSeconds: 1, endSeconds: 2 }, { passageId: 'p', startSeconds: 3, endSeconds: 4 }] }), /once/)
+  refused('speech-removal-confirm', one({ discardedPassageIds: ['p', 'p'] }), /distinct/)
+  refused('speech-removal-confirm', one({ adjustments: [{ passageId: 'p', startSeconds: 1, endSeconds: 2 }], discardedPassageIds: ['p'] }), /adjusted and discarded/)
+  refused('speech-removal-confirm', { confirmations: [{ subject: 'a', variant: '9:16', proposalHash }, { subject: 'a', variant: '16:9', proposalHash }] }, /once/)
   assert.equal(decisionFileName('speech-removal-confirm', 2), 'speech-removal-confirm-2.json')
 })
 

@@ -329,12 +329,38 @@ export const DECISION_PARSERS = Object.freeze({
     const confirmations = record.confirmations.map((entry, index) => {
       const where = `${name} confirmations[${index}]`
       if (!isRecord(entry)) throw new JourneyError('INVALID_DECISION', `decision "${where}" must be an object`)
-      rejectUnknown(where, entry, ['subject', 'variant', 'reason'])
+      rejectUnknown(where, entry, ['subject', 'variant', 'proposalHash', 'adjustments', 'discardedPassageIds', 'reason'])
       if (!nonEmptyString(entry.subject) || entry.subject.length > 200) throw new JourneyError('INVALID_DECISION', `decision "${where}": "subject" must be the subject exactly as the request states it (up to 200 characters)`)
+      // The cut is one Command on the project's single EditPlan; `variant` names the output it is requested through.
       if (typeof entry.variant !== 'string' || !context.outputKeys.includes(entry.variant)) throw new JourneyError('INVALID_DECISION', `decision "${where}": "variant" must name one output of the journey (${context.outputKeys.join(', ')})`)
+      // The hash of the proposal the person read: a proposal that changed since is refused by the Apollo (VERSION_CONFLICT), never confirmed by accident.
+      if (typeof entry.proposalHash !== 'string' || !/^[a-f0-9]{64}$/.test(entry.proposalHash)) throw new JourneyError('INVALID_DECISION', `decision "${where}": "proposalHash" must be the proposalHash of the proposal that was read (64 lowercase hex characters)`)
+      let adjustments
+      if (entry.adjustments !== undefined) {
+        if (!Array.isArray(entry.adjustments) || entry.adjustments.length === 0 || entry.adjustments.length > 64) throw new JourneyError('INVALID_DECISION', `decision "${where}": "adjustments" must be a list of 1 to 64 passages`)
+        adjustments = entry.adjustments.map((item, at) => {
+          if (!isRecord(item) || !nonEmptyString(item.passageId) || typeof item.startSeconds !== 'number' || typeof item.endSeconds !== 'number' || !(item.startSeconds >= 0) || !(item.endSeconds > item.startSeconds)) {
+            throw new JourneyError('INVALID_DECISION', `decision "${where}": adjustments[${at}] must be { passageId, startSeconds, endSeconds } with 0 <= start < end`)
+          }
+          rejectUnknown(`${where} adjustments[${at}]`, item, ['passageId', 'startSeconds', 'endSeconds'])
+          return Object.freeze({ passageId: item.passageId, startSeconds: item.startSeconds, endSeconds: item.endSeconds })
+        })
+        if (new Set(adjustments.map((item) => item.passageId)).size !== adjustments.length) throw new JourneyError('INVALID_DECISION', `decision "${where}": a passage may be adjusted once`)
+      }
+      let discarded
+      if (entry.discardedPassageIds !== undefined) {
+        if (!Array.isArray(entry.discardedPassageIds) || entry.discardedPassageIds.length === 0 || entry.discardedPassageIds.length > 64 || !entry.discardedPassageIds.every(nonEmptyString) || new Set(entry.discardedPassageIds).size !== entry.discardedPassageIds.length) {
+          throw new JourneyError('INVALID_DECISION', `decision "${where}": "discardedPassageIds" must be a list of 1 to 64 distinct passage ids`)
+        }
+        discarded = Object.freeze([...entry.discardedPassageIds])
+        if (adjustments?.some((item) => discarded.includes(item.passageId))) throw new JourneyError('INVALID_DECISION', `decision "${where}": a passage cannot be adjusted and discarded`)
+      }
       if (subjects.has(entry.subject)) throw new JourneyError('INVALID_DECISION', `decision "${name}": a subject may be confirmed once`)
       subjects.add(entry.subject)
-      return Object.freeze({ subject: entry.subject, variant: entry.variant, ...(nonEmptyString(entry.reason) ? { reason: entry.reason.trim() } : {}) })
+      return Object.freeze({
+        subject: entry.subject, variant: entry.variant, proposalHash: entry.proposalHash, ...(adjustments ? { adjustments: Object.freeze(adjustments) } : {}),
+        ...(discarded ? { discardedPassageIds: discarded } : {}), ...(nonEmptyString(entry.reason) ? { reason: entry.reason.trim() } : {}),
+      })
     })
     return Object.freeze({ confirmations: Object.freeze(confirmations) })
   },

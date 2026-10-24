@@ -172,7 +172,14 @@ const human = (async () => {
     for (const line of lines.slice(offset)) {
       const entry = JSON.parse(line)
       if (entry.event === 'awaiting-decision' && !written.has(entry.decision)) {
-        const content = decisionContent[entry.decision]
+        let content = decisionContent[entry.decision]
+        if (entry.decision === 'speech-removal-confirm.json') {
+          // The person reads the proposal the driver wrote to the evidence and confirms it by its hash.
+          const proposal = JSON.parse(await readFile(join(evidence, 'speech-removal', 'candidates-1.json'), 'utf8')).candidates[0]
+          content = { confirmations: [{ subject: proposal.subject, variant: '9:16', proposalHash: proposal.proposalHash, reason: 'The owner confirms the cut of the placeholder subject (rehearsal).' }] }
+          result.proposalRead = { subject: proposal.subject, proposalHash: proposal.proposalHash, passages: (proposal.passages ?? []).map((passage) => ({ id: passage.id, startSeconds: passage.startSeconds, endSeconds: passage.endSeconds, mentions: passage.mentions?.length, segments: passage.segments?.length })) }
+          await save()
+        }
         if (!content) { result.unplannedDecision = entry.decision; await save(); continue }
         if (OWNER_DECISIONS.has(entry.decision) && !ownerPhases) { result.leftAwaiting = entry.decision; await save(); continue }
         written.add(entry.decision)

@@ -448,15 +448,24 @@ async function runLocked(config, { secrets, logPath }) {
   async function confirmSpeechRemovals(removals, label) {
     state.speechRemovalDecisions ??= []
     const attempt = state.speechRemovalDecisions.length + 1
-    const candidates = removals.map((item) => ({ questionId: item.id, text: item.text, subject: item.removal.subject, ruleId: item.removal.ruleId, label: item.removal.label, alternatives: item.removal.alternatives, matches: item.removal.matches }))
+    // For the person who decides: the whole proposal as the Apollo made it (passages with start, end, text and mentions, the context segments with
+    // time and text, the proposalHash the confirmation must carry), written to the evidence before the driver pauses.
+    const candidates = removals.map((item) => ({ questionId: item.id, text: item.text, ...item.removal }))
     await writeEvidence(join('speech-removal', `candidates-${attempt}.json`), { label, candidates })
-    await log('speech-removal-proposed', { label, subjects: candidates.map((item) => item.subject).join(' | '), stretches: candidates.map((item) => item.matches.length).join(',') })
-    const decision = await awaitDecision('speech-removal-confirm', attempt, { candidates: candidates.map((item) => ({ subject: item.subject, stretches: item.matches.map((match) => `${match.startSeconds}-${match.endSeconds}`) })) })
+    await log('speech-removal-proposed', {
+      label, subjects: candidates.map((item) => item.subject).join(' | '), passages: candidates.map((item) => (item.passages ?? item.matches ?? []).length).join(','),
+      proposalHashes: candidates.map((item) => item.proposalHash).join(','), evidence: join(config.evidence, 'speech-removal', `candidates-${attempt}.json`),
+    })
+    const decision = await awaitDecision('speech-removal-confirm', attempt, {
+      candidates: candidates.map((item) => ({ subject: item.subject, proposalHash: item.proposalHash, passages: (item.passages ?? []).map((passage) => ({ id: passage.id ?? passage.passageId, start: passage.startSeconds, end: passage.endSeconds })) })),
+    })
     for (const confirmation of decision.confirmations) {
       const current = await head()
       const body = {
         baseVersionId: current.versionId, baseHash: current.baseHash, sourceTranscriptId: state.transcript.id, variantId: state.variants[confirmation.variant].id,
-        subject: confirmation.subject, ...(confirmation.reason ? { reason: confirmation.reason } : {}),
+        subject: confirmation.subject, proposalHash: confirmation.proposalHash,
+        ...(confirmation.adjustments ? { adjustments: confirmation.adjustments } : {}), ...(confirmation.discardedPassageIds ? { discardedPassageIds: confirmation.discardedPassageIds } : {}),
+        ...(confirmation.reason ? { reason: confirmation.reason } : {}),
       }
       const response = await call({ method: 'POST', path: `${projectPath()}/speech-removals`, key: keyFor('confirm-removal', confirmation.subject, current.versionId, decision.sha256), body, expect: [200, 201], allowError: true, label: `speech-removal-confirm:${confirmation.variant}` })
       let entry
