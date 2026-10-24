@@ -504,7 +504,19 @@ async function runLocked(config, { secrets, logPath }) {
       const existing = await call({ path: `${projectPath()}/reframe-plans?variantId=${encodeURIComponent(variantId)}&projectVersionId=${encodeURIComponent(current.versionId)}`, allowError: true, label: `reframe-plan-read:${key}` })
       // The read answers 200 with `plan: null` when nothing was planned for this Version and output.
       const has = existing.ok && existing.data?.plan !== null && existing.data?.plan !== undefined
-      const planned = has ? existing : await call({ method: 'POST', path: `${projectPath()}/reframe-plans`, key: keyFor('reframe', key, current.versionId), body: { baseVersionId: current.versionId, variantId }, expect: [200, 201], label: `reframe-plan:${key}` })
+      let planned = has ? existing : null
+      // The plan follows the face: while the face evidence of the source is not sealed the answer is `plan: null` (FACE_PERCEPTION_UNAVAILABLE, with the
+      // windows it needs). The face worker produces them; the driver asks again until the plan exists or the operation timeout passes.
+      const deadline = Date.now() + config['operation-timeout-ms']
+      for (let attempt = 1; !planned || planned.data?.plan == null; attempt += 1) {
+        planned = await call({ method: 'POST', path: `${projectPath()}/reframe-plans`, key: keyFor('reframe', key, current.versionId, attempt), body: { baseVersionId: current.versionId, variantId }, expect: [200, 201], label: `reframe-plan:${key}#${attempt}` })
+        if (planned.data?.plan != null) break
+        if (Date.now() > deadline) {
+          throw new JourneyError('REFRAME_PLAN_UNAVAILABLE', `output ${key} fills the frame following the face and its reframe plan cannot be made: ${planned.data?.status}/${planned.data?.reasonCode}. The face worker (APOLLO_V2_FACE_PROFILE=openvino-face0204-v9-source) must seal the face windows of the source first`, { requiredFaceWindows: planned.data?.requiredFaceWindows })
+        }
+        if (attempt === 1) await log('reframe-plan-waiting', { key, status: planned.data?.status, reasonCode: planned.data?.reasonCode, windows: (planned.data?.requiredFaceWindows ?? []).flatMap((item) => item.windows).length })
+        await delay(Math.max(5_000, config['operation-poll-ms']))
+      }
       state.reframePlans[key] = { versionId: current.versionId, variantId, reused: has }
       await log('reframe-plan', { key, versionId: current.versionId, reused: has, status: planned.status })
     }

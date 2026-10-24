@@ -60,8 +60,12 @@ const masterSha = hash(masterBytes)
 // ---- placeholders of the scripted world
 const WORDS = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima', 'mike', 'november', 'oscar']
 const SUBJECT = WORDS.slice(6, 9).join(' ')
-const briefingFirst = `Zoom in slowly at the start. Make the vertical version fill the frame following the face. Remove the part that says ${SUBJECT}.`
-const briefingSecond = `Make the vertical version fill the frame following the face. Remove the part that says ${SUBJECT}.`
+// The face-following fill needs the V9 face runtime (a Python/OpenVINO worker) that this machine does not run: the plan answers FACE_PERCEPTION_UNAVAILABLE
+// and the journey correctly waits and then fails closed. W70_REHEARSAL_FILL=1 puts that request in the briefing to see exactly that.
+const FILL = process.env.W70_REHEARSAL_FILL === '1'
+const FILL_SENTENCE = 'Make the vertical version fill the frame following the face. '
+const briefingFirst = `Zoom in slowly at the start. ${FILL ? FILL_SENTENCE : ''}Remove the part that says ${SUBJECT}.`
+const briefingSecond = `${FILL ? FILL_SENTENCE : ''}Remove the part that says ${SUBJECT}.`
 await writeFile(join(inputs, 'briefing.txt'), briefingFirst)
 // The final export delivers the product's format preset geometry (a custom width/height in the variant is not what comes out: the journey's inspection catches that), so the rehearsal asks for none.
 await writeFile(join(inputs, 'output-spec.json'), JSON.stringify({ '9:16': { subtitles: { mode: 'none' } } }))
@@ -78,7 +82,7 @@ const standIn = await startBriefInterpreterStandIn()
 const answerFor = (text) => ({
   directives: [
     ...(text.includes('Zoom in') ? [{ kind: 'movement', value: 'zoom-in', param: null, quote: 'Zoom in slowly at the start' }] : []),
-    { kind: 'output-layout', value: 'fill-following-face', param: 'vertical', quote: 'Make the vertical version fill the frame following the face' },
+    ...(FILL ? [{ kind: 'output-layout', value: 'fill-following-face', param: 'vertical', quote: 'Make the vertical version fill the frame following the face' }] : []),
     { kind: 'remove-speech', value: 'about', param: SUBJECT, quote: `Remove the part that says ${SUBJECT}` },
   ],
   unsupported: [], questions: [], coverage: [],
