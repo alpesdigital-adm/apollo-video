@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { parseDesiredAction, type DesiredAction } from './desired-action.ts'
 import { assertDomain } from './errors.ts'
+import { OUTPUT_ASPECT_RATIOS } from './output-spec.ts'
 import { resolveStrategicObjective, type StrategicObjectiveId } from './strategic-objective.ts'
 import { SUBTITLE_PRESET_IDS } from './subtitle-style-tokens.ts'
 
@@ -17,13 +18,46 @@ import { SUBTITLE_PRESET_IDS } from './subtitle-style-tokens.ts'
 export const EDITORIAL_REQUEST_SCHEMA = 'editorial-request/v1' as const
 export const BRIEF_INTERPRETATION_SCHEMA = 'brief-interpretation/v1' as const
 
+// The first nine are the vocabulary of the first reading; the rest teach it what the Apollo already knew how to do (ADR-160, "vocabulário de
+// cobertura"): the outputs of the video, the frame of one output, the text of the written call to action, a spoken subject to take out, and the
+// two ways a request is satisfied without any work (a guarantee of the product, or something the Apollo never adds). New kinds go at the end: the
+// ids of a reading (`d1`, `d2`...) follow the order of the kinds.
 export const EDITORIAL_DIRECTIVE_KINDS = Object.freeze([
   'movement', 'opening', 'structure', 'cta', 'layout', 'caption-language', 'caption-style', 'keep', 'avoid',
+  'cta-text', 'output', 'output-layout', 'remove-speech', 'invariant', 'absent',
 ] as const)
 export type EditorialDirectiveKind = (typeof EDITORIAL_DIRECTIVE_KINDS)[number]
 
-/** What the parameter of a value is: seconds (a positive number), a BCP-47 language tag, or a short free subject. */
-export type EditorialDirectiveParamKind = 'seconds' | 'language' | 'text'
+/**
+ * What the parameter of a value is: seconds (a positive number), a BCP-47 language tag, a short free subject, an aspect ratio of the output
+ * catalog (`9:16`), or the reference to an output (`vertical`, `horizontal`, `square`, an aspect ratio, or `all`).
+ */
+export type EditorialDirectiveParamKind = 'seconds' | 'language' | 'text' | 'aspect-ratio' | 'output-ref'
+
+/** The words by which a request points at the output it is about: the shape of the frame (or every output), or one aspect ratio of the catalog. */
+export const OUTPUT_ORIENTATIONS = Object.freeze(['vertical', 'horizontal', 'square'] as const)
+export type OutputOrientation = (typeof OUTPUT_ORIENTATIONS)[number]
+export const OUTPUT_REFERENCES = Object.freeze([...OUTPUT_ORIENTATIONS, 'all', ...OUTPUT_ASPECT_RATIOS] as const)
+
+/** The shape of a frame of `W:H`: taller than wide, wider than tall, or (within half a percent) square. Undefined when the ratio is not `W:H`. */
+export function orientationOfAspect(aspectRatio: string | undefined): OutputOrientation | undefined {
+  const match = /^(\d+):(\d+)$/u.exec(aspectRatio ?? '')
+  if (!match || Number(match[1]) === 0 || Number(match[2]) === 0) return undefined
+  const ratio = Number(match[1]) / Number(match[2])
+  return ratio < 0.995 ? 'vertical' : ratio > 1.005 ? 'horizontal' : 'square'
+}
+
+/** True when a reference (`vertical`, `9:16`, `all`...) names an output of this aspect ratio. */
+export function outputReferenceMatches(reference: string, aspectRatio: string | undefined): boolean {
+  if (reference === 'all') return true
+  if ((OUTPUT_ORIENTATIONS as readonly string[]).includes(reference)) return orientationOfAspect(aspectRatio) === reference
+  return reference === aspectRatio
+}
+
+/** How specific a reference is: an aspect ratio beats a shape, a shape beats `all`. Of two directives that point at one output, the more specific one is about it. */
+export function outputReferenceSpecificity(reference: string): number {
+  return reference === 'all' ? 0 : (OUTPUT_ORIENTATIONS as readonly string[]).includes(reference) ? 1 : 2
+}
 
 /**
  * The closed vocabulary. `values` lists what an interpreter (or a structured field) may say about each kind; `params` names the
@@ -33,7 +67,8 @@ export const EDITORIAL_DIRECTIVE_VOCABULARY: Readonly<Record<EditorialDirectiveK
   values: readonly string[]
   params: Readonly<Record<string, EditorialDirectiveParamKind>>
 }>>> = Object.freeze({
-  movement: Object.freeze({ values: Object.freeze(['none', 'punch-in', 'zoom-in', 'zoom-out', 'pan', 'tilt', 'parallax']), params: Object.freeze({}) }),
+  // `zoom` is a zoom the briefing asks for without saying whether it closes in or pulls away: the Apollo executes neither, so there is nothing to ask.
+  movement: Object.freeze({ values: Object.freeze(['none', 'punch-in', 'zoom', 'zoom-in', 'zoom-out', 'pan', 'tilt', 'parallax']), params: Object.freeze({}) }),
   opening: Object.freeze({ values: Object.freeze(['none', 'protect-first-sentence', 'protect-seconds']), params: Object.freeze({ 'protect-seconds': 'seconds' as const }) }),
   structure: Object.freeze({ values: Object.freeze(['source-order', 'hook-first']), params: Object.freeze({}) }),
   // `overlay-whole-video` and `overlay-from-seconds` are the structured placement of the visual call to action: where the requester says it goes,
@@ -47,6 +82,25 @@ export const EDITORIAL_DIRECTIVE_VOCABULARY: Readonly<Record<EditorialDirectiveK
   'caption-style': Object.freeze({ values: Object.freeze([...SUBTITLE_PRESET_IDS]), params: Object.freeze({}) }),
   keep: Object.freeze({ values: Object.freeze(['subject']), params: Object.freeze({ subject: 'text' as const }) }),
   avoid: Object.freeze({ values: Object.freeze(['subject']), params: Object.freeze({ subject: 'text' as const }) }),
+  // The words of the written call to action, as the briefing quotes them. Where it is drawn is the `cta` directive's.
+  'cta-text': Object.freeze({ values: Object.freeze(['set']), params: Object.freeze({ set: 'text' as const }) }),
+  // The versions of the video the request asks for, by the shape of the frame or by an aspect ratio. They are checked against the outputs of the project.
+  output: Object.freeze({
+    // `omit` is a version the briefing says must NOT be produced (the param names it): the output stays in the project and this edition leaves it out - its render is refused.
+    values: Object.freeze(['vertical', 'horizontal', 'square', 'aspect', 'omit']),
+    params: Object.freeze({ aspect: 'aspect-ratio' as const, omit: 'output-ref' as const }),
+  }),
+  // How the frame of ONE output is laid out (the param names the output): the face-following fill, the source frame as it is, or the whole frame over a backdrop.
+  'output-layout': Object.freeze({
+    values: Object.freeze(['fill-following-face', 'source-native', 'fit-with-backdrop']),
+    params: Object.freeze({ 'fill-following-face': 'output-ref' as const, 'source-native': 'output-ref' as const, 'fit-with-backdrop': 'output-ref' as const }),
+  }),
+  // A subject of the speech to take out: the Apollo searches the transcript for it and the owner confirms what it found before anything is cut.
+  'remove-speech': Object.freeze({ values: Object.freeze(['about']), params: Object.freeze({ about: 'text' as const }) }),
+  // Something the product guarantees whatever the request: it is recorded as satisfied, with the guarantee that satisfies it.
+  invariant: Object.freeze({ values: Object.freeze(['captions-clear-of-face']), params: Object.freeze({}) }),
+  // Something the Apollo does not add unless it is asked to (and the vocabulary has no way to ask): recorded as satisfied by default.
+  absent: Object.freeze({ values: Object.freeze(['music', 'effects', 'transitions']), params: Object.freeze({}) }),
 })
 
 /**
@@ -59,12 +113,34 @@ export const EDITORIAL_EXECUTABLE_VALUES: Readonly<Record<EditorialDirectiveKind
   opening: Object.freeze(['none', 'protect-first-sentence', 'protect-seconds']),
   structure: Object.freeze(['source-order']),
   cta: Object.freeze(['none', 'verbal-only', 'overlay-closing', 'overlay-at-spoken-cta', 'overlay-whole-video', 'overlay-from-seconds']),
-  layout: Object.freeze(['fit-with-backdrop', 'source-native']),
+  // `fill-crop` is the face-following fill (the reframe trajectory) on every output whose frame is not the source's.
+  layout: Object.freeze(['fit-with-backdrop', 'source-native', 'fill-crop']),
   'caption-language': Object.freeze(['set']),
   'caption-style': Object.freeze([...SUBTITLE_PRESET_IDS]),
   keep: Object.freeze([]),
   avoid: Object.freeze([]),
+  'cta-text': Object.freeze(['set']),
+  output: Object.freeze(['vertical', 'horizontal', 'square', 'aspect', 'omit']),
+  'output-layout': Object.freeze(['fill-following-face', 'source-native', 'fit-with-backdrop']),
+  'remove-speech': Object.freeze(['about']),
+  invariant: Object.freeze(['captions-clear-of-face']),
+  absent: Object.freeze(['music', 'effects', 'transitions']),
 })
+
+/**
+ * The kinds that may state several things at once (several subjects, several outputs, several guarantees). Every other kind is one meaning: two
+ * directives of one kind that disagree are a question.
+ */
+export const EDITORIAL_MULTIPLE_KINDS: ReadonlySet<EditorialDirectiveKind> = new Set<EditorialDirectiveKind>(
+  ['keep', 'avoid', 'output', 'output-layout', 'remove-speech', 'invariant', 'absent'])
+
+/**
+ * What a directive is about, for the kinds that may be stated several times: the output a layout is for, the subject kept. Two directives of
+ * such a kind disagree only when they are about the same thing and mean different things; a kind with no scope never disagrees with itself.
+ */
+export function directiveScope(directive: Readonly<Pick<EditorialDirective, 'kind' | 'value' | 'param'>>): string | undefined {
+  return directive.kind === 'output-layout' ? String(directive.param) : undefined
+}
 
 export interface EditorialDirective {
   /** Unique within its source (the interpretation, the structured fields, one variant override). */
@@ -101,8 +177,16 @@ export interface UnsupportedBriefItem {
 export interface BriefQuestionChoice {
   id: string
   label: string
-  directive: Readonly<EditorialDirective>
+  /** The structured directive the choice makes (the common case). */
+  directive?: Readonly<EditorialDirective>
+  /**
+   * Or what the choice does to the reading itself, for a sentence the Apollo could not place: `statement-context` records it as a statement that asks nothing
+   * of the video; `unsupported-request` records it as something asked that the Apollo does not know how to do. Exactly one of the two is present.
+   */
+  effect?: BriefChoiceEffect
 }
+export const BRIEF_CHOICE_EFFECTS = Object.freeze(['statement-context', 'unsupported-request'] as const)
+export type BriefChoiceEffect = (typeof BRIEF_CHOICE_EFFECTS)[number]
 
 export interface BriefQuestion {
   id: string
@@ -117,8 +201,14 @@ export interface BriefQuestion {
 /** What a briefing may be said to state about itself, beyond directives: the production-brief coverage the interpreter (never a regex) answers. */
 export const BRIEF_COVERAGE_TOPICS = Object.freeze(['audience', 'offer', 'tone'] as const)
 export type BriefCoverageTopic = (typeof BRIEF_COVERAGE_TOPICS)[number]
+/**
+ * What a sentence of the briefing may be, beyond a request: one of the production-brief topics, or `context` - a statement of fact about the video or
+ * its situation that asks nothing of the editing. It is read and recorded; it changes nothing, and the screens say so.
+ */
+export const BRIEF_STATEMENT_TOPICS = Object.freeze([...BRIEF_COVERAGE_TOPICS, 'context'] as const)
+export type BriefStatementTopic = (typeof BRIEF_STATEMENT_TOPICS)[number]
 export interface BriefCoverageItem {
-  topic: BriefCoverageTopic
+  topic: BriefStatementTopic
   excerpt: Readonly<BriefExcerpt>
 }
 
@@ -187,6 +277,11 @@ export function parseEditorialDirective(value: unknown, where: string, allowExce
     assertDomain(typeof param === 'number' && Number.isFinite(param) && param > 0 && param <= maxSeconds, 'INVALID_ARGUMENT', `${where}: ${kind} ${directiveValue} needs seconds between 0 and ${maxSeconds}`)
   } else if (paramKind === 'language') {
     assertDomain(typeof param === 'string' && LANGUAGE_TAG.test(param), 'INVALID_ARGUMENT', `${where}: ${kind} ${directiveValue} needs a language tag`)
+  } else if (paramKind === 'aspect-ratio') {
+    assertDomain(typeof param === 'string' && (OUTPUT_ASPECT_RATIOS as readonly string[]).includes(param), 'INVALID_ARGUMENT', `${where}: ${kind} ${directiveValue} needs an aspect ratio of the output catalog`)
+  } else if (paramKind === 'output-ref') {
+    assertDomain(typeof param === 'string' && (OUTPUT_REFERENCES as readonly string[]).includes(param), 'INVALID_ARGUMENT', `${where}: ${kind} ${directiveValue} needs the output it is about (vertical, horizontal, square, an aspect ratio or all)`)
+    assertDomain(!(kind === 'output' && directiveValue === 'omit' && param === 'all'), 'INVALID_ARGUMENT', `${where}: output omit names one version, not all of them`)
   } else {
     assertDomain(typeof param === 'string' && param.trim().length > 0 && param.length <= 200, 'INVALID_ARGUMENT', `${where}: ${kind} ${directiveValue} needs a short subject`)
   }
@@ -197,12 +292,19 @@ function parseDirectiveList(value: unknown, where: string, allowExcerpt = false)
   assertDomain(Array.isArray(value) && value.length <= MAX_DIRECTIVES, 'INVALID_ARGUMENT', `${where}: directives must be a bounded list`)
   const directives = value.map((item) => parseEditorialDirective(item, where, allowExcerpt))
   assertDomain(new Set(directives.map((item) => item.id)).size === directives.length, 'INVALID_ARGUMENT', `${where}: directive ids repeat`)
-  // One kind, one meaning: two directives of a kind that disagree are a question for the requester, never a pick made here.
+  // One kind, one meaning: two directives of a kind that disagree are a question for the requester, never a pick made here. A kind that may state
+  // several things (the subjects kept, the outputs) disagrees with itself only about one and the same thing: the output a layout is for.
   const byKind = new Map<string, string>()
   for (const directive of directives) {
     const meaning = `${directive.value}\u0000${String(directive.param ?? '')}`
-    assertDomain(!byKind.has(directive.kind) || byKind.get(directive.kind) === meaning || directive.kind === 'keep' || directive.kind === 'avoid', 'INVALID_ARGUMENT', `${where}: two directives disagree about ${directive.kind}; that is a question, not a directive`)
-    byKind.set(directive.kind, meaning)
+    const scope = directiveScope(directive)
+    const key = EDITORIAL_MULTIPLE_KINDS.has(directive.kind) ? (scope === undefined ? undefined : `${directive.kind}\u0000${scope}`) : directive.kind
+    if (key === undefined) continue
+    // Of a scoped directive only the value is compared: its param IS the scope.
+    const compared = scope === undefined ? meaning : directive.value
+    const previous = byKind.get(key)
+    assertDomain(previous === undefined || previous === compared, 'INVALID_ARGUMENT', `${where}: two directives disagree about ${directive.kind}; that is a question, not a directive`)
+    byKind.set(key, compared)
   }
   return Object.freeze(directives)
 }
@@ -210,8 +312,13 @@ function parseDirectiveList(value: unknown, where: string, allowExcerpt = false)
 function parseQuestionChoices(value: unknown, questionId: string): readonly Readonly<BriefQuestionChoice>[] {
   assertDomain(Array.isArray(value) && value.length >= 2 && value.length <= 8, 'INVALID_ARGUMENT', `question ${questionId}: closed answers are 2 to 8 choices`)
   const choices = (value as unknown[]).map((item) => {
-    assertDomain(isRecord(item) && onlyKeys(item, ['id', 'label', 'directive']) && typeof item.id === 'string' && MAX_ID.test(item.id) &&
-      typeof item.label === 'string' && item.label.trim().length > 0 && item.label.length <= 200, 'INVALID_ARGUMENT', `question ${questionId}: a choice is malformed`)
+    assertDomain(isRecord(item) && onlyKeys(item, ['id', 'label', 'directive', 'effect']) && typeof item.id === 'string' && MAX_ID.test(item.id) &&
+      typeof item.label === 'string' && item.label.trim().length > 0 && item.label.length <= 200 && (item.directive === undefined) !== (item.effect === undefined),
+    'INVALID_ARGUMENT', `question ${questionId}: a choice is malformed (it makes a directive or has an effect, never both)`)
+    if (item.effect !== undefined) {
+      assertDomain((BRIEF_CHOICE_EFFECTS as readonly unknown[]).includes(item.effect), 'INVALID_ARGUMENT', `question ${questionId}: a choice has an effect outside the vocabulary`)
+      return Object.freeze({ id: item.id, label: item.label, effect: item.effect as BriefChoiceEffect })
+    }
     return Object.freeze({ id: item.id, label: item.label, directive: parseEditorialDirective(item.directive, `question ${questionId} choice ${item.id}`) })
   })
   assertDomain(new Set(choices.map((item) => item.id)).size === choices.length, 'INVALID_ARGUMENT', `question ${questionId}: choices repeat`)
@@ -316,14 +423,15 @@ export function parseBriefInterpretation(value: unknown, briefingText: string): 
   })
   const ids = [...directives.map((item) => item.id), ...unsupported.map((item) => item.id), ...questions.map((item) => item.id)]
   assertDomain(new Set(ids).size === ids.length, 'INVALID_ARGUMENT', 'brief interpretation ids repeat')
-  assertDomain(value.coverage === undefined || (Array.isArray(value.coverage) && value.coverage.length >= 1 && value.coverage.length <= BRIEF_COVERAGE_TOPICS.length),
+  assertDomain(value.coverage === undefined || (Array.isArray(value.coverage) && value.coverage.length >= 1 && value.coverage.length <= MAX_DIRECTIVES),
     'INVALID_ARGUMENT', 'brief interpretation coverage is not a bounded, non-empty list (an interpretation that found none states no coverage)')
   const coverage = value.coverage === undefined ? undefined : (value.coverage as unknown[]).map((item) => {
-    assertDomain(isRecord(item) && onlyKeys(item, ['topic', 'excerpt']) && typeof item.topic === 'string' && (BRIEF_COVERAGE_TOPICS as readonly string[]).includes(item.topic),
+    assertDomain(isRecord(item) && onlyKeys(item, ['topic', 'excerpt']) && typeof item.topic === 'string' && (BRIEF_STATEMENT_TOPICS as readonly string[]).includes(item.topic),
       'INVALID_ARGUMENT', 'brief coverage item is malformed')
-    return Object.freeze({ topic: item.topic as BriefCoverageTopic, excerpt: parseExcerpt(item.excerpt, briefingText, `coverage ${item.topic}`) })
+    return Object.freeze({ topic: item.topic as BriefStatementTopic, excerpt: parseExcerpt(item.excerpt, briefingText, `coverage ${item.topic}`) })
   })
-  assertDomain(coverage === undefined || new Set(coverage.map((item) => item.topic)).size === coverage.length, 'INVALID_ARGUMENT', 'brief coverage topics repeat')
+  // A briefing may state several things of one topic (two sentences of context): each is its own item, with its own words. The same words twice are one.
+  assertDomain(coverage === undefined || new Set(coverage.map((item) => `${item.topic}\u0000${item.excerpt.start}\u0000${item.excerpt.end}`)).size === coverage.length, 'INVALID_ARGUMENT', 'brief coverage items repeat')
   const body = {
     schemaVersion: BRIEF_INTERPRETATION_SCHEMA, briefingSha256: value.briefingSha256 as string,
     interpreter: Object.freeze({ provider: interpreter.provider as string, model: interpreter.model as string, promptVersion: interpreter.promptVersion as string }),
@@ -350,6 +458,42 @@ export function createBriefInterpretation(input: Readonly<{
     ...(input.coverage !== undefined && input.coverage.length > 0 ? { coverage: input.coverage } : {}),
   }
   return parseBriefInterpretation({ ...JSON.parse(JSON.stringify(body)) as object, interpretationHash: calculateCanonicalHash(JSON.parse(JSON.stringify(body))) }, input.briefingText)
+}
+
+/**
+ * The sentences of a briefing, with their offsets: a sentence ends at `.`, `!`, `?` or `…` (with any closing quote) before a space or the end, or at
+ * a line break. A piece with no letter or digit is no sentence. It knows no language: it only reads punctuation.
+ */
+export function briefingSentences(briefingText: string, options: Readonly<{ clauses?: boolean }> = {}): readonly Readonly<BriefExcerpt>[] {
+  const sentences: BriefExcerpt[] = []
+  // With `clauses` a semicolon ends a piece too: the halves of one sentence that ask different things.
+  const ending = options.clauses ? /[.!?…]+["'”’)\]]*(?=\s|$)|;|\n+/gu : /[.!?…]+["'”’)\]]*(?=\s|$)|\n+/gu
+  let from = 0
+  const take = (to: number) => {
+    const raw = briefingText.slice(from, to)
+    const trimmed = raw.trim()
+    if (/[\p{L}\p{N}]/u.test(trimmed)) {
+      const start = from + raw.indexOf(trimmed)
+      sentences.push(Object.freeze({ start, end: start + trimmed.length, text: trimmed }))
+    }
+    from = to
+  }
+  for (const match of briefingText.matchAll(ending)) take(match.index! + match[0].length)
+  take(briefingText.length)
+  return Object.freeze(sentences)
+}
+
+/**
+ * The sentences of a briefing that no item of a reading stands on. A sentence is accounted for when any quoted item (a directive, an unsupported
+ * item, a question or a statement) overlaps it, wherever in the sentence: one request may be quoted by the words that carry it.
+ */
+export function unaccountedSentences(
+  briefingText: string,
+  items: readonly Readonly<{ excerpt?: Readonly<Pick<BriefExcerpt, 'start' | 'end'>> }>[],
+  options: Readonly<{ clauses?: boolean }> = {},
+): readonly Readonly<BriefExcerpt>[] {
+  const cited = items.flatMap((item) => item.excerpt ? [item.excerpt] : [])
+  return Object.freeze(briefingSentences(briefingText, options).filter((sentence) => !cited.some((excerpt) => excerpt.start < sentence.end && excerpt.end > sentence.start)))
 }
 
 /** The hash of the request: of what the brief says (everything but `requestedRemovals` and the hash itself). */
@@ -447,8 +591,17 @@ export const OBJECTIVE_REQUIRED_REASON = 'objective-required' as const
  * briefing was not read; what exactly was wrong stays in the internal details (a field and an index), never in the public error.
  */
 export const BRIEF_INTERPRETATION_INVALID_REASON = 'brief-interpretation-invalid' as const
+/**
+ * The request fills the frame of an output following the face, and the Version being rendered has no reframe plan for that output: the render is refused
+ * instead of drawing the frame over a backdrop the request did not ask for.
+ */
+export const REFRAME_PLAN_REQUIRED_REASON = 'reframe-plan-required' as const
+/** The request keeps the frame of an output as it is and the reframe plan of the Version crops it by itself: the render is refused. */
+export const REFRAME_PLAN_CONTRADICTS_LAYOUT_REASON = 'reframe-plan-contradicts-layout' as const
+/** The request says this version is not to be produced, and its render was asked for: the render is refused. */
+export const OUTPUT_NOT_PRODUCED_REASON = 'output-not-produced' as const
 /** The `reason` codes the public error envelope publishes for the editorial request (PRECONDITION_REQUIRED). */
-export const EDITORIAL_REQUEST_PUBLISHED_REASONS = Object.freeze([BRIEF_INTERPRETATION_REQUIRED_REASON, EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON, EDITORIAL_REQUEST_BLOCKED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON, BRIEF_INTERPRETATION_FAILED_REASON, DIRECTOR_OBJECTIVE_REQUIRED_REASON, OBJECTIVE_REQUIRED_REASON, BRIEF_INTERPRETATION_INVALID_REASON] as const)
+export const EDITORIAL_REQUEST_PUBLISHED_REASONS = Object.freeze([BRIEF_INTERPRETATION_REQUIRED_REASON, EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON, EDITORIAL_REQUEST_BLOCKED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON, BRIEF_INTERPRETATION_FAILED_REASON, DIRECTOR_OBJECTIVE_REQUIRED_REASON, OBJECTIVE_REQUIRED_REASON, BRIEF_INTERPRETATION_INVALID_REASON, REFRAME_PLAN_REQUIRED_REASON, REFRAME_PLAN_CONTRADICTS_LAYOUT_REASON, OUTPUT_NOT_PRODUCED_REASON] as const)
 
 /**
  * A briefing with text and no interpretation of exactly that text is NOT an empty briefing: it is a request nobody has read. The Director
@@ -495,11 +648,31 @@ export function answerBriefQuestions(
     const question = interpretation.questions.find((item) => item.id === id)
     assertDomain(question !== undefined && question.status === 'open', 'INVALID_ARGUMENT', 'only an open question of the current interpretation can be answered', { questionId: id })
   }
+  // A choice that is not a directive says what the sentence IS: a statement that asks nothing of the video, or something the Apollo does not know how to do.
+  const coverage: BriefCoverageItem[] = [...(interpretation.coverage ?? [])]
+  const unsupported: UnsupportedBriefItem[] = [...interpretation.unsupported]
+  const taken = new Set([...interpretation.directives.map((item) => item.id), ...unsupported.map((item) => item.id), ...interpretation.questions.map((item) => item.id)])
+  for (const item of answers) {
+    if (typeof item.choiceId !== 'string') continue
+    const question = interpretation.questions.find((candidate) => candidate.id === item.questionId)!
+    const effect = question.choices?.find((candidate) => candidate.id === item.choiceId)?.effect
+    if (effect === undefined || question.excerpt === undefined) continue
+    if (effect === 'statement-context') {
+      if (!coverage.some((existing) => existing.topic === 'context' && existing.excerpt.start === question.excerpt!.start && existing.excerpt.end === question.excerpt!.end)) {
+        coverage.push(Object.freeze({ topic: 'context' as const, excerpt: question.excerpt }))
+      }
+    } else {
+      let n = unsupported.length + 1
+      while (taken.has(`u${n}`)) n += 1
+      taken.add(`u${n}`)
+      unsupported.push(Object.freeze({ id: `u${n}`, excerpt: question.excerpt, reason: 'outside-vocabulary' as const, summary: 'O briefing pede algo que o Apollo não sabe fazer.' }))
+    }
+  }
   return createBriefInterpretation({
-    briefingText, interpreter: interpretation.interpreter, directives: interpretation.directives, unsupported: interpretation.unsupported,
+    briefingText, interpreter: interpretation.interpreter, directives: interpretation.directives, unsupported,
     questions: interpretation.questions.map((question) => byId.has(question.id)
       ? Object.freeze({ ...question, status: 'answered' as const, answer: byId.get(question.id)! }) : question),
-    ...(interpretation.coverage ? { coverage: interpretation.coverage } : {}),
+    ...(coverage.length > 0 ? { coverage } : {}),
   })
 }
 
@@ -515,6 +688,7 @@ export function directivesOfChoices(
     if (typeof item.choiceId !== 'string') return []
     const choice = interpretation.questions.find((question) => question.id === item.questionId)?.choices?.find((candidate) => candidate.id === item.choiceId)
     assertDomain(choice !== undefined, 'INVALID_ARGUMENT', 'the choice is not one of the answers of this question', { questionId: item.questionId })
-    return [Object.freeze({ ...choice!.directive, id: `answer-${item.questionId}` })]
+    // A choice with an effect on the reading makes no directive.
+    return choice!.directive === undefined ? [] : [Object.freeze({ ...choice!.directive, id: `answer-${item.questionId}` })]
   }))
 }

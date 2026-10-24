@@ -47,6 +47,7 @@ test('service-account identity owns canonical grants, environments and credentia
     localization: ['read', 'run'],
     operations: ['cancel', 'read', 'retry'],
     projects: ['approve', 'read', 'write'],
+    'speech-removals': ['confirm'],
     webhooks: ['admin'],
   })
   assert.equal(Object.isFrozen(API_SCOPE_MATRIX), true)

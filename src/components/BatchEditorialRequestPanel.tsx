@@ -12,6 +12,7 @@ import {
 } from '@/v2/ui/briefing-guidance'
 import {
   COVERAGE_LABELS,
+  COVERAGE_NOTE,
   UNSUPPORTED_REASON_LABELS,
   buildAnswersBody,
   describeBatchGenerationBlock,
@@ -196,11 +197,14 @@ export default function BatchEditorialRequestPanel({
       ) : null}
 
       {interpretation?.coverage && interpretation.coverage.length > 0 ? (
-        <ul className="space-y-1" data-testid="batch-request-coverage">
-          {interpretation.coverage.map((item) => (
-            <li className="text-xs leading-5 text-[#b5afa5]" key={item.topic}><strong className="font-semibold text-[#d1cbc1]">{COVERAGE_LABELS[item.topic]}:</strong> “{item.excerpt.text}”</li>
-          ))}
-        </ul>
+        <div data-testid="batch-request-coverage">
+          <ul className="space-y-1">
+            {interpretation.coverage.map((item) => (
+              <li className="text-xs leading-5 text-[#b5afa5]" key={item.topic}><strong className="font-semibold text-[#d1cbc1]">{COVERAGE_LABELS[item.topic]}:</strong> “{item.excerpt.text}”</li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] leading-5 text-[#8f897f]">{COVERAGE_NOTE}</p>
+        </div>
       ) : null}
 
       {answered.length > 0 ? (

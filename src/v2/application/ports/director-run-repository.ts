@@ -73,6 +73,8 @@ export interface DirectorRunContext {
      * the transcript words the cue is made of (`sourceWordIndices`); without them its cues carry no such authority.
      */
     words?: readonly Readonly<{ word: string; start: number; end: number }>[]
+    /** The segments the transcript was made in: what an editorial cut expands a match to, so a stretch proposed for removal is the stretch the cut would take. */
+    segments?: readonly Readonly<{ id: number; start: number; end: number; text: string }>[]
   }>
   /**
    * The speech this project asked to have removed: the phrase rules of the `remove-spoken-content` Commands in the lineage of the

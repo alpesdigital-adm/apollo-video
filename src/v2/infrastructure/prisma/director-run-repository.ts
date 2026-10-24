@@ -690,6 +690,9 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     const transcriptWords: readonly Readonly<{ word: string; start: number; end: number }>[] = ownTranscriptRow !== null
       ? (JSON.parse(ownTranscriptRow.transcriptJson) as { words: readonly Readonly<{ word: string; start: number; end: number }>[] }).words
       : boundTranscript!.document.words
+    const transcriptSegments: readonly Readonly<{ id: number; start: number; end: number; text: string }>[] | undefined = ownTranscriptRow !== null
+      ? (JSON.parse(ownTranscriptRow.transcriptJson) as { segments?: readonly Readonly<{ id: number; start: number; end: number; text: string }>[] }).segments
+      : boundTranscript!.document.segments
     if (master.artifactId !== transcriptRow.sourceArtifactId) throw new DomainError('PERSISTENCE_CONFLICT', 'Current transcript does not belong to the project source master')
     const planTranscriptHash = 'sourceTranscriptHash' in retimedTranscript
       ? String(retimedTranscript.sourceTranscriptHash)
@@ -789,6 +792,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
         model: transcriptRow.model,
         transcriptHash: transcriptRow.transcriptHash,
         words: Object.freeze(transcriptWords.map((word) => Object.freeze({ word: word.word, start: word.start, end: word.end }))),
+        ...(Array.isArray(transcriptSegments) ? { segments: Object.freeze(transcriptSegments.map((segment) => Object.freeze({ id: segment.id, start: segment.start, end: segment.end, text: segment.text }))) } : {}),
       }),
       requestedSpeechRemovals,
       ...(ocrEnvelope ? { ocrEnvelope } : {}),

@@ -517,7 +517,16 @@ test('T-FR-242 capability grants and route enforcement share one closed resource
   const capabilityScopes = [...new Set(
     FOUNDATION_CAPABILITIES.flatMap((capability) => capability.requiredScopes),
   )].sort()
-  assert.deepEqual(capabilityScopes, [...API_SCOPES].sort())
+  // A scope the gateway does not ask for may exist only if a service asks for it of the clients that are not a person, and says so here (one per scope, no more).
+  const SERVICE_ENFORCED_SCOPES = new Map([['speech-removals:confirm', 'confirmSpeechRemovalService']])
+  assert.deepEqual([...capabilityScopes, ...SERVICE_ENFORCED_SCOPES.keys()].sort(), [...API_SCOPES].sort())
+  for (const [scope, service] of SERVICE_ENFORCED_SCOPES) {
+    assert.equal(capabilityScopes.includes(scope), false, `${scope} is enforced by its service, not by the gateway`)
+    const owner = exportedApplicationFiles.get(service)
+    assert.ok(owner, `${service} exists`)
+    assert.match(applicationSourceClosure(owner), new RegExp(`requireScope\\([^,]+,\\s*['"]${scope}['"]\\)`), `${service} must enforce ${scope}`)
+    assert.match(applicationSourceClosure(owner), /authenticationKind === 'ui-session'/, `${service} exempts only the user session`)
+  }
 
   for (const capability of FOUNDATION_CAPABILITIES) {
     if (!capability.endpoint || capability.requiredScopes.length === 0) continue

@@ -16,6 +16,8 @@ export interface EditorialCutPayloadV3 {
   rules:readonly Readonly<{id:string;label:string;alternatives:readonly string[]}>[]
   exclusions:readonly Readonly<{sourceStartSeconds:number;sourceEndSeconds:number;ruleIds:readonly string[]}>[]
   exclusionOverrides?:readonly Readonly<{sourceStartSeconds:number;sourceEndSeconds:number;ruleIds:readonly string[];reason:string}>[]
+  /** Present only when the Command confirms a cut the Apollo proposed for a subject of the request (capability `apollo.projects.speech-removals.confirm`). */
+  confirmation?:Readonly<{subject:string;medium:'ui-session'|'api-key-scope'}>
   sourceBinding:Readonly<EditorialSourceBindingV1>
   editPlanHash:string
   audioProjection:Readonly<EditorialAudioProjectionV1>|null

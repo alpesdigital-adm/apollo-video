@@ -6,9 +6,22 @@
 // configuration is the deployment's own variables (model, key and base URL), pointed at this server.
 import { createServer } from 'node:http'
 
+// Dynamic import: a suite run under tsx loses the names of a static named import of a .ts module from an .mjs file.
+const { briefingSentences } = await import('../../../src/v2/domain/editorial-request.ts')
+
 export const NOTHING_MAPPED = Object.freeze({ directives: [], unsupported: [], questions: [], coverage: [] })
 
-export async function startBriefInterpreterStandIn({ fallback = NOTHING_MAPPED } = {}) {
+/**
+ * What a model that finds nothing to ask of the video says about a briefing: every sentence is a statement of context. A reading that left a sentence out would
+ * ask the owner about it and block the Director (ADR-160), so a stand-in that must not block says what each sentence is instead of returning nothing.
+ */
+export const EVERY_SENTENCE_IS_CONTEXT = (briefing) => ({
+  directives: [], unsupported: [], questions: [],
+  // (A sentence with fewer than two letters or digits cannot be cited at all; it stays unsaid, and the reading asks about it.)
+  coverage: briefingSentences(briefing).filter((sentence) => (sentence.text.match(/[\p{L}\p{N}]/gu) ?? []).length >= 2).map((sentence) => ({ topic: 'context', quote: sentence.text })),
+})
+
+export async function startBriefInterpreterStandIn({ fallback = EVERY_SENTENCE_IS_CONTEXT } = {}) {
   const calls = []
   const script = new Map()
   const server = createServer((request, response) => {
@@ -18,7 +31,7 @@ export async function startBriefInterpreterStandIn({ fallback = NOTHING_MAPPED }
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
       const briefing = JSON.parse(body.messages[1].content).briefing
       calls.push({ path: request.url, authorized: request.headers.authorization?.startsWith('Bearer ') === true, body, briefing })
-      const answer = script.has(briefing) ? script.get(briefing) : fallback
+      const answer = script.has(briefing) ? script.get(briefing) : typeof fallback === 'function' ? fallback(briefing) : fallback
       response.setHeader('content-type', 'application/json')
       if (answer === undefined) { response.statusCode = 500; response.end('{}'); return }
       response.end(JSON.stringify({

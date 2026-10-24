@@ -198,10 +198,62 @@ function presentDirectorInheritanceRefusal(details: Readonly<Record<string, unkn
   return presented
 }
 
+/** A sentence the Apollo wrote for the owner: plain text of bounded length, with nothing a control character could carry. */
+function plainSentence(value: unknown, max = 600): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= max && !/[\u0000-\u0008\u000e-\u001f\u007f]/u.test(value) ? value : undefined
+}
+
+const BLOCKER_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
+
+/**
+ * Why the Director refused a request, in the words the Apollo wrote for the owner: what it does not do, and what it still needs to ask (the cut to
+ * confirm comes with the exact rule and the stretches it would take out). Only these fields cross; anything else a domain throw carried stays internal.
+ */
+function presentEditorialRequestBlockers(details: Readonly<Record<string, unknown>>) {
+  const blockers: Record<string, unknown>[] = []
+  if (Array.isArray(details.unsupported)) {
+    for (const item of details.unsupported.slice(0, 64)) {
+      const record = item as Record<string, unknown> | null
+      const text = plainSentence(record?.summary)
+      if (record && typeof record.directiveId === 'string' && BLOCKER_ID.test(record.directiveId) && text) blockers.push({ kind: 'unsupported', id: record.directiveId, text })
+    }
+  }
+  if (Array.isArray(details.openQuestions)) {
+    for (const item of details.openQuestions.slice(0, 64)) {
+      const record = item as Record<string, unknown> | null
+      const text = plainSentence(record?.question, 2_000)
+      if (!record || typeof record.id !== 'string' || !BLOCKER_ID.test(record.id) || !text) continue
+      const removal = record.removal as Record<string, unknown> | undefined
+      const matches = Array.isArray(removal?.matches) ? (removal!.matches as unknown[]).slice(0, 64).flatMap((match) => {
+        const entry = match as Record<string, unknown> | null
+        return entry && Number.isFinite(entry.startSeconds) && Number.isFinite(entry.endSeconds) && plainSentence(entry.text, 300)
+          ? [{ startSeconds: entry.startSeconds, endSeconds: entry.endSeconds, text: entry.text }] : []
+      }) : undefined
+      const alternatives = Array.isArray(removal?.alternatives) ? (removal!.alternatives as unknown[]).slice(0, 8).flatMap((word) => plainSentence(word, 200) ? [word] : []) : undefined
+      blockers.push({
+        kind: 'question', id: record.id, text,
+        ...(removal && typeof removal.ruleId === 'string' && /^[a-z0-9][a-z0-9-]{1,63}$/u.test(removal.ruleId) && plainSentence(removal.label, 200) && matches && alternatives
+          ? { removal: {
+            ruleId: removal.ruleId, label: removal.label, alternatives, matches,
+            ...(plainSentence(removal.subject, 200) ? { subject: removal.subject } : {}),
+            ...(typeof removal.sourceTranscriptId === 'string' && BLOCKER_ID.test(removal.sourceTranscriptId) ? { sourceTranscriptId: removal.sourceTranscriptId } : {}),
+          } } : {}),
+      })
+    }
+  }
+  return blockers.length > 0 ? blockers : undefined
+}
+
 function presentPreconditionReason(details: Readonly<Record<string, unknown>>) {
-  return typeof details.reason === 'string' && PUBLISHED_PRECONDITION_REASONS.has(details.reason)
-    ? { reason: details.reason }
-    : undefined
+  if (typeof details.reason !== 'string' || !PUBLISHED_PRECONDITION_REASONS.has(details.reason)) return undefined
+  if (details.reason === 'editorial-request-blocked') {
+    const blockers = presentEditorialRequestBlockers(details)
+    return blockers ? { reason: details.reason, blockers } : { reason: details.reason }
+  }
+  if ((details.reason === 'reframe-plan-required' || details.reason === 'output-not-produced') && typeof details.variantId === 'string' && BLOCKER_ID.test(details.variantId)) {
+    return { reason: details.reason, variantId: details.variantId }
+  }
+  return { reason: details.reason }
 }
 
 export function presentPublicDomainError(error: DomainError, requestId: string) {

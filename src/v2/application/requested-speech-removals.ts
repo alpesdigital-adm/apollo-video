@@ -40,7 +40,12 @@ function removalRulesOf(command: Readonly<SpeechRemovalLineageCommand>): readonl
   }
   try {
     // The same definition the cut itself applied: ids, labels and alternatives are validated and tokenised identically.
-    return defineEditorialPhraseRules(stored as readonly Readonly<{ id: string; label: string; alternatives: readonly string[] }>[])
+    const rules = defineEditorialPhraseRules(stored as readonly Readonly<{ id: string; label: string; alternatives: readonly string[] }>[])
+    // Only the confirmation capability writes this, with a verified actor; a client's explicit Command never carries it.
+    const confirmation = command.payload.confirmation as { subject?: unknown; medium?: unknown } | undefined
+    return confirmation !== undefined && typeof confirmation.subject === 'string' && (confirmation.medium === 'ui-session' || confirmation.medium === 'api-key-scope')
+      ? rules.map((rule) => Object.freeze({ ...rule, confirmation: Object.freeze({ subject: confirmation.subject as string, medium: confirmation.medium as 'ui-session' | 'api-key-scope' }) }))
+      : rules
   } catch (error) {
     if (error instanceof DomainError) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Stored remove-spoken-content rules are invalid', { commandId: command.id })

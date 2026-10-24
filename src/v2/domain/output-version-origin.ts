@@ -419,7 +419,8 @@ export function validateOperationalOutputOriginV3(input: OperationalOutputOrigin
       exact(input,['kind','command','audit','requestFingerprint'])
       const c=input.command,p=c.payload,b=createEditorialSourceBindingV1(p.sourceBinding.document)
       exact(p,['schemaVersion','sourceTranscriptId','sourceArtifactId','variantId','rules','exclusions','sourceBinding','editPlanHash','audioProjection','impact',
-        ...(p.exclusionOverrides===undefined?[]:['exclusionOverrides'])])
+        ...(p.exclusionOverrides===undefined?[]:['exclusionOverrides']),...(p.confirmation===undefined?[]:['confirmation'])])
+      assertDomain(p.confirmation===undefined||(typeof p.confirmation.subject==='string'&&p.confirmation.subject.length>0&&(p.confirmation.medium==='ui-session'||p.confirmation.medium==='api-key-scope')&&Object.keys(p.confirmation).length===2),'INVALID_COMMAND','Editorial confirmation is malformed')
       const d=b.document
       requireOutputHash(p.editPlanHash,'editorial plan seal')
       assertDomain(c.type==='remove-spoken-content'&&p.schemaVersion===3&&c.author.type==='api-client'&&
@@ -431,7 +432,7 @@ export function validateOperationalOutputOriginV3(input: OperationalOutputOrigin
         base.state.document.entries.some(e=>e.variantId===p.variantId)&&stableSerialize(c.scope)===stableSerialize({project:true})&&
         input.requestFingerprint===calculateCanonicalHash({type:'remove-spoken-content',workspaceId:c.workspaceId,projectId:c.projectId,
           baseVersionId:c.baseVersionId,baseHash:c.baseHash,sourceTranscriptId:p.sourceTranscriptId,variantId:p.variantId,rules:p.rules,
-          exclusionOverrides:p.exclusionOverrides??null,reason:c.reason?.trim()||null,actorContextHash:input.audit.contextHash}),
+          exclusionOverrides:p.exclusionOverrides??null,...(p.confirmation?{confirmation:p.confirmation}:{}),reason:c.reason?.trim()||null,actorContextHash:input.audit.contextHash}),
         'INVALID_COMMAND','Editorial source binding, actor, intent or exact parent differs')
       assertDomain(p.rules.length>0&&p.exclusions.length>0&&p.exclusions.every((x,i)=>Number.isFinite(x.sourceStartSeconds)&&
         Number.isFinite(x.sourceEndSeconds)&&x.sourceStartSeconds>=0&&x.sourceEndSeconds>x.sourceStartSeconds&&
