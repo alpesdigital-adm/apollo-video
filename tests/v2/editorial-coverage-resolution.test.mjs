@@ -59,10 +59,14 @@ test('ADR-160 coverage W70: the briefing resolves to a policy per output, the wr
   assert.equal(resolution.policies.movement.status, 'unsupported')
   // The two subjects of the speech are asked to be confirmed, with the stretches they would take out, and nothing is cut.
   assert.deepEqual(ids(resolution.openQuestions), ['speech-removal-1', 'speech-removal-2'])
-  assert.match(resolution.openQuestions[0].question, /Achei trechos sobre “sorteio” na fala/)
-  assert.match(resolution.openQuestions[0].question, /58,0 s a 64,5 s/)
+  assert.match(resolution.openQuestions[0].question, /Achei um trecho sobre “sorteio” na fala/)
+  // The subject is spoken in a passage (three sentences of the speech), not in three loose sentences.
+  assert.match(resolution.openQuestions[0].question, /58,0 s a 79,5 s/)
   assert.match(resolution.openQuestions[0].question, /nada é cortado sem a sua confirmação/)
-  assert.equal(resolution.openQuestions[0].removal.matches.length, 3)
+  assert.match(resolution.openQuestions[0].question, /ajustar onde ele começa e onde termina/)
+  assert.match(resolution.openQuestions[0].question, /não diz o idioma da fala/, 'a transcript with no language is searched literally, and the question says so')
+  assert.equal(resolution.openQuestions[0].removal.matches.length, 1)
+  assert.equal(resolution.openQuestions[0].removal.passages.length, 1)
   assert.equal(resolution.openQuestions[1].removal.matches.length, 1)
   assert.deepEqual(resolution.policies.speechRemovals.value.ruleIds, [])
   assert.equal(resolution.blocked, true)
@@ -119,23 +123,25 @@ test('ADR-160 coverage: the rule that answers a cut is the subject\'s own, and t
   const transcript = w70Transcript()
   const phrase = proposeSpeechRemoval('formulário de inscrição', transcript)
   assert.equal(phrase.basis, 'phrase')
-  assert.deepEqual(phrase.alternatives, ['formulário de inscrição'])
+  assert.deepEqual(phrase.alternatives.toSorted(), ['formulário', 'formulário de inscrição', 'inscrição'], 'the rule looks for the forms the speech says')
   assert.equal(phrase.matches[0].startSeconds, 58)
   // The whole phrase is not spoken: the words longer than three letters are searched one by one, and the proposal says so.
   const words = proposeSpeechRemoval('sorteio e do formulário de inscrição', transcript)
   assert.equal(words.basis, 'words')
-  assert.deepEqual(words.alternatives, ['sorteio', 'formulário', 'inscrição'])
-  assert.deepEqual(words.matches.map((match) => [match.startSeconds, match.endSeconds]), [[58, 64.5], [66, 69.5], [74, 79.5]])
-  // A stretch is the segment the cut would take, whole, with its times; a subject nobody says has no candidate.
-  assert.equal(words.matches[1].text, 'O resultado do sorteio sai na sexta.')
+  assert.deepEqual(words.alternatives.toSorted(), ['formulário', 'inscrição', 'sorteio'])
+  // The three sentences are one passage of the speech: a block from the first to the last, with its whole text.
+  assert.deepEqual(words.matches.map((match) => [match.startSeconds, match.endSeconds]), [[58, 79.5]])
+  assert.equal(words.passages[0].text, 'Quem quiser participar do sorteio da sessão individual preenche o formulário de inscrição. O resultado do sorteio sai na sexta. Depois do sorteio, entra na área de membros e no grupo.')
+  // A subject nobody says has no candidate.
   const none = proposeSpeechRemoval('garantia', transcript)
   assert.deepEqual(none.matches, [])
   assert.equal(none.searchable, true)
   assert.equal(proposeSpeechRemoval('um dois três quatro cinco seis sete oito nove dez onze doze treze catorze quinze dezesseis dezessete', transcript).searchable, false)
-  // Without segments the cut does not expand a match, and the proposal says what the words alone say.
+  // Without segments the sentences are found from the marks of the words, and the passage is still whole sentences.
   const bare = proposeSpeechRemoval('sorteio', { words: transcript.words })
-  assert.equal(bare.matches.length, 3)
-  assert.ok(bare.matches.every((match) => match.endSeconds - match.startSeconds < 1))
+  assert.equal(bare.matches.length, 1)
+  assert.equal(bare.passages[0].boundary, 'sentence')
+  assert.equal(bare.matches[0].startSeconds, 58)
 })
 
 test('ADR-160 coverage: a cut that finds nothing, cannot be searched, or has no transcript is a question that says so, never a silent skip', async () => {
@@ -230,7 +236,11 @@ test('ADR-160 coverage: the owner is told why the Director stopped in the Apollo
   const cut = details.blockers[2].removal
   assert.equal(cut.ruleId, speechRemovalRuleId('sorteio'))
   assert.deepEqual(cut.alternatives, ['sorteio'])
-  assert.equal(cut.matches.length, 3)
+  assert.equal(cut.matches.length, 1)
+  assert.equal(cut.passages.length, 1)
+  assert.equal(cut.passages[0].mentions.length, 3, 'the mentions that anchor the passage cross whole')
+  assert.equal(cut.search.matching, 'literal')
+  assert.equal(cut.search.policy.origin, 'technical-search-parameter')
   assert.doesNotMatch(JSON.stringify(published), /token\.txt|someone/)
   // A field that is not text of the Apollo's, or an id that is not an id, does not cross.
   const hostile = presentPublicDomainError(new DomainError(refusal.code, refusal.message, {

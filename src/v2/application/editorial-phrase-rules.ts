@@ -1,11 +1,12 @@
+import type { SpeechRemovalConfirmationRecord } from '../domain/editorial-cut-impact.ts'
 import { assertDomain } from '../domain/errors.ts'
 import type { MediaTranscript, TranscriptWord } from '../domain/media-transcript.ts'
 
-/** How a removal Command was confirmed when it confirms a cut the Apollo proposed (see `confirm-speech-removal.ts`): the subject it answers and the means of the verified human. */
-export interface SpeechRemovalConfirmation {
-  subject: string
-  medium: 'ui-session' | 'api-key-scope'
-}
+/**
+ * How a removal Command was confirmed when it confirms a cut the Apollo proposed (see `confirm-speech-removal.ts`): the subject it answers, the means of the
+ * verified human and, for a cut confirmed as passages, the bounds that were cut and whether the person moved them.
+ */
+export type SpeechRemovalConfirmation = SpeechRemovalConfirmationRecord
 
 export interface EditorialPhraseRule {
   id: string

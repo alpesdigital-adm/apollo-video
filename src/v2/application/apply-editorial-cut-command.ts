@@ -8,7 +8,7 @@ import { createMediaTranscript, type MediaTranscript, type TranscriptWord } from
 import type { DirectedSubtitleCue } from '../domain/director-run.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createEditorialSourceBindingV1 } from '../domain/output-materialization.ts'
-import { materializeEditorialCutPlanV3, createEditorialAudioProjectionV1, createEditorialCutImpactV2, type EditorialCutPayloadV3 } from '../domain/editorial-cut-impact.ts'
+import { materializeEditorialCutPlanV3, createEditorialAudioProjectionV1, createEditorialCutImpactV2, isSpeechRemovalConfirmationRecord, type EditorialCutPayloadV3, type SpeechRemovalConfirmationRecord } from '../domain/editorial-cut-impact.ts'
 import { buildOperationalOutputVersionBundleV3, operationalBundlePlanV3 } from '../domain/output-version-bundle.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import type {
@@ -186,7 +186,7 @@ export interface ApplyEditorialCutCommandRequest {
   rules: readonly Readonly<RemoveSpokenContentRuleInput>[]
   exclusionOverrides?: readonly Readonly<EditorialExclusionOverrideInput>[]
   /** Set only by the confirmation of a proposed cut; the general Command never sets it. */
-  confirmation?: Readonly<{ subject: string; medium: 'ui-session' | 'api-key-scope' }>
+  confirmation?: Readonly<SpeechRemovalConfirmationRecord>
   reason?: string
   actor: Readonly<AuthenticatedExternalActor>
   idempotency: Readonly<{ clientId: string; key: string }>
@@ -552,6 +552,7 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
     assertDomain(sourceTranscriptId.length >= 3, 'INVALID_COMMAND', 'Editorial command transcript is required')
     assertDomain(idempotencyKey.length > 0 && idempotencyKey.length <= 128, 'INVALID_COMMAND', 'Editorial command idempotency key is invalid')
     requireScope(request.actor, 'projects:write')
+    assertDomain(request.confirmation === undefined || isSpeechRemovalConfirmationRecord(request.confirmation), 'INVALID_COMMAND', 'Editorial confirmation is malformed')
     const authenticationAudit = materializeActorAuditContext(request.actor)
     assertDomain(
       authenticationAudit.workspaceId === workspaceId &&
@@ -607,6 +608,15 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
           sourceDurationSeconds: context.sourceDurationSeconds,
         })
       : deriveEditorialExclusions(context.transcript, rules)
+    // A cut confirmed as passages cuts exactly the passages the person confirmed: nothing more, nothing less, nothing moved.
+    const confirmedPassages = request.confirmation?.passages
+    if (confirmedPassages !== undefined) {
+      assertDomain(
+        exclusions.length === confirmedPassages.length && exclusions.every((range, index) =>
+          range.sourceStartSeconds === confirmedPassages[index]!.startSeconds && range.sourceEndSeconds === confirmedPassages[index]!.endSeconds),
+        'INVALID_COMMAND', 'The cut differs from the passages that were confirmed',
+      )
+    }
     const matchedRuleIds = new Set(exclusions.flatMap((range) => range.ruleIds))
     const missingRuleIds = rules.map((rule) => rule.id).filter((ruleId) => !matchedRuleIds.has(ruleId))
     if (missingRuleIds.length > 0) {

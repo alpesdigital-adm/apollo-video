@@ -8970,14 +8970,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.speech-removals.confirm": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
       "requiredScopes": [
         "projects:write"
       ],
-      "inputSchemaRef": "apollo://schemas/confirm-speech-removal-request/v1",
+      "inputSchemaRef": "apollo://schemas/confirm-speech-removal-request/v2",
       "outputSchemaRef": "apollo://schemas/project-edit-command-applied/v9",
       "endpoint": {
         "method": "POST",
@@ -45635,6 +45635,81 @@
           "minLength": 1,
           "maxLength": 200,
           "description": "The subject exactly as a remove-speech directive of the current request states it."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    },
+    "apollo://schemas/confirm-speech-removal-request/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "baseHash",
+        "sourceTranscriptId",
+        "variantId",
+        "subject"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sourceTranscriptId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "variantId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "The subject exactly as a remove-speech directive of the current request states it."
+        },
+        "adjustments": {
+          "type": "array",
+          "maxItems": 64,
+          "description": "Optional. The passages of the proposal whose start or end the person moved. A passage that is not named is cut as proposed. A start must be the start of a word or of a segment of the transcript and an end the end of one, inside the limits of the passage (not into the neighbouring passage, not beyond the speech), and the passage must still hold every mention that anchors it. Anything else refuses the whole confirmation: nothing is cut.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "passageId",
+              "startSeconds",
+              "endSeconds"
+            ],
+            "properties": {
+              "passageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "description": "The id of a passage of the proposal."
+              },
+              "startSeconds": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Where the passage starts instead, in seconds of the source."
+              },
+              "endSeconds": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Where the passage ends instead, in seconds of the source."
+              }
+            }
+          }
         },
         "reason": {
           "type": "string",

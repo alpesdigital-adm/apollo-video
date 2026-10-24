@@ -275,6 +275,80 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     const afterDirector = await bareRevise({ objective: 'warming' }, 'bare-after-director')
     assert.equal(afterDirector.status, 422, JSON.stringify(afterDirector.payload))
     assert.equal((await db.v2Project.findUniqueOrThrow({ where: { id: bare.projectId } })).objective, 'awareness')
+
+    // 9. A subject spoken in a PASSAGE (ADR-160): the Director asks to confirm the whole stretch of speech, not the loose sentences that carry the word; the person moves
+    // where it starts; an adjustment outside the limits writes nothing; the confirmation is a remove-spoken-content Command that records the passage as cut, and the Director
+    // reads it back from PostgreSQL as the answer to the question.
+    const CUT_BRIEFING = 'tire o trecho sobre venda'
+    const sentences = [
+      [0, 2, 'Bem-vindos ao curso.'], [2, 4, 'Hoje falamos da venda do produto.'], [4, 6, 'Vender bem exige confiança,'], [6, 8, 'e ouvir o cliente com calma.'],
+      [8, 10, 'O produto foi vendido ontem.'], [10, 12, 'Agora vamos ao conteúdo.'], [12, 14, 'Depois vem a prática.'],
+    ]
+    const cutWords = sentences.flatMap(([start, end, text]) => {
+      const spoken = text.replace(/[.,]/gu, '').split(' ')
+      const step = (end - start) / spoken.length
+      return spoken.map((word, index) => ({ word, start: Math.round((start + index * step) * 1000) / 1000, end: Math.round((start + (index + 1) * step - 0.02) * 1000) / 1000 }))
+    })
+    const cutSegments = sentences.map(([start, end, text], id) => ({ id, start, end, text }))
+    const cutWorld = await seedSealedProject(db, { workspaceId, actor: seedActor, prefix: 'f6cut', name: 'A passage to cut', briefing: CUT_BRIEFING })
+    await seedDirectedProject(db, { workspaceId, clientId, credentialId: `${clientId}-cred`, environment: 'production', projectId: cutWorld.projectId, suffix: `f6cut${run}`, directed: false, words: cutWords, segments: cutSegments })
+    const cutProjectId = cutWorld.projectId
+    const cutHead = async () => {
+      const row = await db.v2ProjectVersion.findUniqueOrThrow({ where: { id: (await db.v2Project.findUniqueOrThrow({ where: { id: cutProjectId } })).currentVersionId } })
+      return { baseVersionId: row.id, baseHash: row.baseHash }
+    }
+    const cutVersions = () => db.v2ProjectVersion.count({ where: { projectId: cutProjectId } })
+    const cutDirector = async (key) => runProjectDirectorService({
+      repository: new PrismaDirectorRunRepository(db), clock: () => new Date(), createEventId: randomUUID, compileBrief: createEvidenceBoundBriefCompiler(),
+      createId: (kind) => `f6req-${run}-${key}-${kind}-${randomUUID().slice(0, 8)}`,
+    })({ workspaceId, projectId: cutProjectId, ...(await cutHead()), actor: seedActor, idempotency: { key: `f6req-${run}-${key}` }, reason: 'Director over a subject spoken in a passage.' })
+    interpreter.script.set(CUT_BRIEFING, { directives: [{ kind: 'remove-speech', value: 'about', param: 'venda', quote: 'tire o trecho sobre venda' }], unsupported: [], questions: [], coverage: [] })
+    const read = await callRoute(NextRequest, route, { method: 'POST', path: `/v1/projects/${cutProjectId}/editorial-request`, params: { projectId: cutProjectId }, authorization,
+      idempotencyKey: `f6req-${run}-cut-read`, body: { ...(await cutHead()), briefing: CUT_BRIEFING, reason: 'Read the briefing.' } })
+    assert.equal(read.status, 201, JSON.stringify(read.payload))
+    const blocked = await cutDirector('cut-blocked').then(() => null, (error) => error)
+    assert.equal(blocked?.code, 'PRECONDITION_REQUIRED', String(blocked?.message))
+    assert.equal(blocked.details.reason, 'editorial-request-blocked')
+    const removal = blocked.details.openQuestions.find((question) => question.removal)?.removal
+    assert.equal(removal.passages.length, 1, 'three sentences that say the subject and the ones between are ONE passage')
+    const [passage] = removal.passages
+    assert.deepEqual([passage.startSeconds, passage.endSeconds], [2, 10])
+    assert.equal(passage.text, 'Hoje falamos da venda do produto. Vender bem exige confiança, e ouvir o cliente com calma. O produto foi vendido ontem.')
+    assert.deepEqual(passage.mentions.map((mention) => mention.text), ['venda', 'Vender', 'vendido'])
+    assert.equal(removal.search.matching, 'stem')
+    assert.equal(removal.confirmed, undefined, 'nothing is confirmed until a person confirms')
+    assert.equal(await db.v2EditCommand.count({ where: { projectId: cutProjectId, type: 'remove-spoken-content' } }), 0, 'nothing is cut')
+
+    const { confirmSpeechRemovalService } = await import('../../src/v2/application/confirm-speech-removal.ts')
+    const factory = await import('../../src/v2/infrastructure/repository-factory.ts')
+    const granted = testActor({ workspaceId, clientId, credentialId: `${clientId}-cred`, environment: 'production', scopes: ['projects:write', 'speech-removals:confirm'] })
+    const confirm = confirmSpeechRemovalService({
+      requests: factory.createEditorialRequestRepository(), cuts: factory.createEditorialCommandRepository(), clock: () => new Date(),
+      createId: (kind) => `f6cut-${run}-${kind}-${randomUUID().slice(0, 8)}`, createEventId: randomUUID,
+    })
+    const cutRequest = async (key, extra = {}) => ({
+      workspaceId, projectId: cutProjectId, ...(await cutHead()), sourceTranscriptId: removal.sourceTranscriptId, variantId: cutWorld.variantId, subject: 'venda',
+      actor: granted, idempotency: { clientId, key: `f6req-${run}-${key}` }, ...extra,
+    })
+    // An adjustment that leaves the speech or a mention out is refused whole: no Command, no Version.
+    const versionsBeforeCut = await cutVersions()
+    for (const adjustment of [{ startSeconds: 2.1, endSeconds: 10 }, { startSeconds: 4, endSeconds: 10 }, { startSeconds: 2, endSeconds: 6 }]) {
+      await assert.rejects(confirm(await cutRequest(`cut-refused-${adjustment.startSeconds}-${adjustment.endSeconds}`, { adjustments: [{ passageId: passage.id, ...adjustment }] })),
+        (error) => error.code === 'INVALID_ARGUMENT', JSON.stringify(adjustment))
+    }
+    assert.equal(await cutVersions(), versionsBeforeCut)
+    assert.equal(await db.v2EditCommand.count({ where: { projectId: cutProjectId, type: 'remove-spoken-content' } }), 0)
+    // The person starts the passage a sentence earlier (the start of a segment, inside the limits); the cut is exactly that.
+    const cut = await confirm(await cutRequest('cut-confirmed', { adjustments: [{ passageId: passage.id, startSeconds: 0, endSeconds: 10 }] }))
+    assert.deepEqual(cut.exclusions.map((range) => [range.sourceStartSeconds, range.sourceEndSeconds]), [[0, 10]])
+    const stored = JSON.parse((await db.v2EditCommand.findFirstOrThrow({ where: { projectId: cutProjectId, type: 'remove-spoken-content' } })).payloadJson)
+    assert.equal(stored.confirmation.medium, 'api-key-scope')
+    assert.deepEqual(stored.confirmation.passages.map(({ id, ...rest }) => rest), [{ startSeconds: 0, endSeconds: 10, proposedStartSeconds: 2, proposedEndSeconds: 10, adjusted: true }])
+    assert.equal(stored.confirmation.search.matching, 'stem')
+    assert.deepEqual(stored.exclusionOverrides.map((override) => [override.sourceStartSeconds, override.sourceEndSeconds]), [[0, 10]])
+    // The Director reads the confirmation back from the stored Command: the question is answered.
+    const answered = await cutDirector('cut-answered')
+    assert.ok(answered.run.policyResolution.satisfied.some((item) => item.kind === 'remove-speech' && item.how === 'confirmed-removal'))
   } finally {
     await interpreter.close()
     for (const name of CONFIGURATION) {

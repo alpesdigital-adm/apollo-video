@@ -205,6 +205,52 @@ function plainSentence(value: unknown, max = 600): string | undefined {
 
 const BLOCKER_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 
+const second = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
+
+/**
+ * The passages of a cut to confirm, as the owner is shown them: the whole text, the mentions that anchor each, the limits within which its start and end may be
+ * moved and the segments around it to move them by. Anything out of shape is left out (a passage that cannot be shown whole is not offered).
+ */
+function presentRemovalPassages(value: unknown) {
+  if (!Array.isArray(value)) return undefined
+  const passages = value.slice(0, 64).flatMap((item) => {
+    const passage = item as Record<string, unknown> | null
+    const limits = passage?.limits as Record<string, unknown> | undefined
+    if (!passage || typeof passage.id !== 'string' || !BLOCKER_ID.test(passage.id) || !second(passage.startSeconds) || !second(passage.endSeconds) ||
+      !plainSentence(passage.text, 20_000) || !limits || !second(limits.earliestStartSeconds) || !second(limits.latestEndSeconds) ||
+      !Array.isArray(passage.mentions) || !Array.isArray(passage.segments) || !['sentence', 'segment', 'word'].includes(passage.boundary as string)) return []
+    const mentions = passage.mentions.slice(0, 256).flatMap((mention) => {
+      const entry = mention as Record<string, unknown> | null
+      return entry && second(entry.startSeconds) && second(entry.endSeconds) && plainSentence(entry.text, 300)
+        ? [{ startSeconds: entry.startSeconds, endSeconds: entry.endSeconds, text: entry.text }] : []
+    })
+    const segments = passage.segments.slice(0, 512).flatMap((segment) => {
+      const entry = segment as Record<string, unknown> | null
+      return entry && Number.isSafeInteger(entry.id) && second(entry.startSeconds) && second(entry.endSeconds) && plainSentence(entry.text, 2_000) && typeof entry.inPassage === 'boolean'
+        ? [{ id: entry.id, startSeconds: entry.startSeconds, endSeconds: entry.endSeconds, text: entry.text, inPassage: entry.inPassage }] : []
+    })
+    return [{
+      id: passage.id, startSeconds: passage.startSeconds, endSeconds: passage.endSeconds, text: passage.text, mentions, boundary: passage.boundary,
+      limits: { earliestStartSeconds: limits.earliestStartSeconds, latestEndSeconds: limits.latestEndSeconds }, segments,
+    }]
+  })
+  return passages.length === value.length ? passages : undefined
+}
+
+function presentRemovalSearch(value: unknown) {
+  const search = value as Record<string, unknown> | null | undefined
+  const policy = search?.policy as Record<string, unknown> | undefined
+  if (!search || (search.matching !== 'stem' && search.matching !== 'literal') || !policy || !plainSentence(policy.name, 100) || !second(policy.maxGapSeconds) ||
+    !second(policy.maxGapSentences) || !second(policy.maxSentenceSeconds)) return undefined
+  return {
+    matching: search.matching,
+    language: plainSentence(search.language, 35) ?? null,
+    lexicon: plainSentence(search.lexicon, 60) ?? null,
+    ...(plainSentence(search.notice, 600) ? { notice: search.notice } : {}),
+    policy: { name: policy.name, maxGapSeconds: policy.maxGapSeconds, maxGapSentences: policy.maxGapSentences, maxSentenceSeconds: policy.maxSentenceSeconds, origin: 'technical-search-parameter' },
+  }
+}
+
 /**
  * Why the Director refused a request, in the words the Apollo wrote for the owner: what it does not do, and what it still needs to ask (the cut to
  * confirm comes with the exact rule and the stretches it would take out). Only these fields cross; anything else a domain throw carried stays internal.
@@ -235,6 +281,8 @@ function presentEditorialRequestBlockers(details: Readonly<Record<string, unknow
         ...(removal && typeof removal.ruleId === 'string' && /^[a-z0-9][a-z0-9-]{1,63}$/u.test(removal.ruleId) && plainSentence(removal.label, 200) && matches && alternatives
           ? { removal: {
             ruleId: removal.ruleId, label: removal.label, alternatives, matches,
+            ...(presentRemovalPassages(removal.passages) ? { passages: presentRemovalPassages(removal.passages) } : {}),
+            ...(presentRemovalSearch(removal.search) ? { search: presentRemovalSearch(removal.search) } : {}),
             ...(plainSentence(removal.subject, 200) ? { subject: removal.subject } : {}),
             ...(typeof removal.sourceTranscriptId === 'string' && BLOCKER_ID.test(removal.sourceTranscriptId) ? { sourceTranscriptId: removal.sourceTranscriptId } : {}),
           } } : {}),

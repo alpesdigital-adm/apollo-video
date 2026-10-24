@@ -67,7 +67,12 @@ test('the cut that is applied is the Apollo\'s proposal for the subject: its id,
   assert.equal(applied[0].reason, 'conferido')
   assert.equal(applied[0].sourceTranscriptId, 'transcript-1')
   assert.equal(applied[0].variantId, 'variant-1')
-  assert.deepEqual(applied[0].confirmation, { subject: 'sorteio', medium: 'ui-session' })
+  // Without an adjustment the passage is the proposed one, and the Command records the bounds that were cut and that they were not moved.
+  assert.equal(applied[0].confirmation.subject, 'sorteio')
+  assert.equal(applied[0].confirmation.medium, 'ui-session')
+  assert.equal(applied[0].confirmation.passages.length, 1)
+  assert.deepEqual({ ...applied[0].confirmation.passages[0], id: undefined }, { id: undefined, startSeconds: 0, endSeconds: 1.5, proposedStartSeconds: 0, proposedEndSeconds: 1.5, adjusted: false })
+  assert.deepEqual(applied[0].exclusionOverrides.map(({ sourceStartSeconds, sourceEndSeconds, ruleIds }) => ({ sourceStartSeconds, sourceEndSeconds, ruleIds })), [{ sourceStartSeconds: 0, sourceEndSeconds: 1.5, ruleIds: [speechRemovalRuleId('sorteio')] }])
   assert.equal(applied[0].actor, UI_ACTOR, 'the actor of the audit is the one who confirmed')
 })
 
@@ -75,7 +80,7 @@ test('the media that confirm: the screen session and the granted client key (RES
   for (const [label, actor, medium] of [['screen', UI_ACTOR, 'ui-session'], ['key with the scope', GRANTED_ACTOR, 'api-key-scope']]) {
     const { service, applied } = world()
     await service(request({ actor }))
-    assert.deepEqual(applied.map((item) => item.confirmation), [{ subject: 'sorteio', medium }], label)
+    assert.deepEqual(applied.map((item) => [item.confirmation.subject, item.confirmation.medium]), [['sorteio', medium]], label)
   }
   const { service, applied } = world()
   await assert.rejects(service(request({ actor: UNGRANTED_ACTOR })), (error) => error.code === 'AUTH_SCOPE_REQUIRED' && error.details.requiredScope === 'speech-removals:confirm')
@@ -149,7 +154,7 @@ test('the capability needs human approval for an agent: the general Command does
   assert.deepEqual(capability.requiredScopes, ['projects:write'])
   assert.deepEqual(capability.endpoint, { method: 'POST', path: '/v1/projects/{projectId}/speech-removals' })
   assert.equal(capability.toolName, 'apollo.projects.speech-removals.confirm')
-  assert.equal(capability.inputSchemaRef, 'apollo://schemas/confirm-speech-removal-request/v1')
+  assert.equal(capability.inputSchemaRef, 'apollo://schemas/confirm-speech-removal-request/v2')
   const rule = agentToolSafetyFor(capability, FOUNDATION_AGENT_TOOL_SAFETY)
   assert.equal(rule.confirmation, 'human-approval')
   const fingerprint = 'c'.repeat(64)
@@ -159,8 +164,10 @@ test('the capability needs human approval for an agent: the general Command does
     kind: 'human-approval', capabilityId: capability.id, inputFingerprint: fingerprint, issuedAt: '2026-10-23T11:59:00.000Z', expiresAt: '2026-10-23T12:05:00.000Z',
   }, now))
   // The body carries the subject and the transcript, never rules.
-  const schema = getPublicSchema('apollo://schemas/confirm-speech-removal-request/v1').schema
+  const schema = getPublicSchema('apollo://schemas/confirm-speech-removal-request/v2').schema
   assert.equal(schema.additionalProperties, false)
   assert.equal('rules' in schema.properties, false)
-  assert.ok(publicSchemaExamples(getPublicSchema('apollo://schemas/confirm-speech-removal-request/v1')).length >= 1)
+  assert.ok(publicSchemaExamples(getPublicSchema('apollo://schemas/confirm-speech-removal-request/v2')).length >= 2)
+  // The v1 contract stays published, unchanged: the new capability reads a new ref.
+  assert.equal('adjustments' in getPublicSchema('apollo://schemas/confirm-speech-removal-request/v1').schema.properties, false)
 })

@@ -331,7 +331,7 @@ test('ADR-160 coverage: the screen offers the confirmation only for a proposal t
   const found = { kind: 'question', id: 'speech-removal-1', text: 'Achei trechos.', removal: { subject: 'assunto', sourceTranscriptId: 'transcript-1', ruleId: 'speech-aaaaaaaaaaaa', matches: [{ startSeconds: 1, endSeconds: 2, text: 'fala' }] } }
   assert.deepEqual(cutProposalsOf([found, { ...found, id: 'x', removal: { ...found.removal, matches: [] } }, { kind: 'unsupported', id: 'd1', text: 'x' },
     { ...found, removal: { ...found.removal, sourceTranscriptId: undefined } }, null]),
-  [{ question: 'Achei trechos.', subject: 'assunto', sourceTranscriptId: 'transcript-1', matches: found.removal.matches }])
+  [{ question: 'Achei trechos.', subject: 'assunto', sourceTranscriptId: 'transcript-1', matches: found.removal.matches, passages: [] }])
   assert.equal(CUT_CONFIRMATION_TEXTS.button, 'Confirmar corte')
   assert.match(CUT_CONFIRMATION_TEXTS.note, /Nada é cortado sem a sua confirmação/)
   assert.deepEqual(new RefusedWithBlockers('x', [found]).blockers, [found])
@@ -341,6 +341,7 @@ test('ADR-160 coverage: the screen offers the confirmation only for a proposal t
   const component = readFileSync('src/components/SpeechCutConfirmation.tsx', 'utf8')
   assert.match(component, /speech-removals/)
   assert.doesNotMatch(component, /alternatives|rules/)
+  assert.match(component, /adjustments/, 'the component sends the passages the person moved, by id, and never the words')
   assert.match(readFileSync('src/app/projects/[id]/page.tsx', 'utf8'), /<SpeechCutConfirmation/)
 })
 

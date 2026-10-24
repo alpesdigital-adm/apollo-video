@@ -19,7 +19,22 @@ import { presentSuccess } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
 
-const FIELDS = ['baseVersionId', 'baseHash', 'sourceTranscriptId', 'variantId', 'subject', 'reason']
+const FIELDS = ['baseVersionId', 'baseHash', 'sourceTranscriptId', 'variantId', 'subject', 'adjustments', 'reason']
+const ADJUSTMENT_FIELDS = ['passageId', 'startSeconds', 'endSeconds']
+
+/** The adjustments a person made to the passages of the proposal: each names a passage and where it starts and ends instead. The service checks them against the proposal. */
+function readAdjustments(value: unknown) {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length > 64) throw new DomainError('INVALID_ARGUMENT', 'adjustments must be a list of at most 64 passages')
+  return value.map((entry): { passageId: string; startSeconds: number; endSeconds: number } => {
+    const adjustment = entry as Record<string, unknown> | null
+    if (typeof adjustment !== 'object' || adjustment === null || Array.isArray(adjustment) || Object.keys(adjustment).some((key) => !ADJUSTMENT_FIELDS.includes(key)) ||
+      typeof adjustment.passageId !== 'string' || typeof adjustment.startSeconds !== 'number' || typeof adjustment.endSeconds !== 'number') {
+      throw new DomainError('INVALID_ARGUMENT', 'Each adjustment must be exactly { passageId, startSeconds, endSeconds }')
+    }
+    return { passageId: adjustment.passageId, startSeconds: adjustment.startSeconds, endSeconds: adjustment.endSeconds }
+  })
+}
 
 /** Confirms the cut the Apollo proposed for a subject the request asks to take out of the speech (ADR-160). Human approval for agents; the words are the Apollo's. */
 export async function POST(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
@@ -41,6 +56,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       if (typeof body[field] !== 'string') throw new DomainError('INVALID_ARGUMENT', `${field} must be a string`)
     }
     if (body.reason !== undefined && typeof body.reason !== 'string') throw new DomainError('INVALID_ARGUMENT', 'reason must be a string')
+    const adjustments = readAdjustments(body.adjustments)
     const { projectId } = await context.params
     const result = await confirmSpeechRemovalService({
       requests: createEditorialRequestRepository(),
@@ -56,6 +72,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       sourceTranscriptId: body.sourceTranscriptId as string,
       variantId: body.variantId as string,
       subject: body.subject as string,
+      ...(adjustments !== undefined ? { adjustments } : {}),
       ...(typeof body.reason === 'string' && body.reason.trim() ? { reason: body.reason.trim() } : {}),
       actor,
       idempotency: { clientId: actor.clientId, key: idempotencyKey },
