@@ -90,10 +90,21 @@ O condutor espera cada decisão consultando `<decisions>/<nome>.json` a cada `--
 { "skip": true, "reason": "<por que não há corte>" }
 ```
 
-`speech-removal-confirm.json` — quando o briefing pede para tirar da fala **um assunto** (diretiva `remove-speech`), o Diretor recusa com a pergunta e os trechos da transcrição que sairiam; o condutor grava os candidatos em `speech-removal/candidates-N.json` e no log (`speech-removal-proposed`) e espera este arquivo. Quem confirma é o dono, pela capability `apollo.projects.speech-removals.confirm` (por REST, o cliente da API precisa do scope `speech-removals:confirm`; `scripts/bootstrap-v2-workspace.mjs` concede todos os scopes das capacidades, então um cliente criado por ele já o tem). O arquivo nomeia o **assunto** exatamente como o pedido o diz e a saída pela qual o corte é pedido, nunca as palavras: a regra do corte é a que o Apollo propôs. O condutor não confirma nada que o arquivo não diga.
+`speech-removal-confirm.json` — quando o briefing pede para tirar da fala **um assunto** (diretiva `remove-speech`), o Diretor recusa com a **proposta por passagem** (`apollo.projects.speech-removals.confirm` 3.0.0, `confirm-speech-removal-request/v2`): blocos com `id`, início e fim, texto, menções, `limits` (o quanto o bloco pode crescer), `boundary`, os segmentos de contexto com tempo e texto (`segments`, `inPassage`), e o `proposalHash`. Antes de pausar, o condutor grava **a proposta inteira** em `speech-removal/candidates-N.json` na evidência e escreve `speech-removal-proposed` no log, com o caminho. Quem confirma é o dono, que lê esse arquivo. Por REST o cliente da API precisa do scope da capability; `scripts/bootstrap-v2-workspace.mjs` concede todos os scopes, então um cliente criado por ele já o tem. O condutor só aplica o que o arquivo diz:
+
+- `subject`: exatamente como a diretiva do pedido o diz (nunca as palavras do corte: o corte é o que o Apollo propôs).
+- `proposalHash`: **obrigatório**, o da proposta lida; se a proposta mudou, o Apollo recusa com `VERSION_CONFLICT` e o condutor para.
+- `adjustments` (opcional): `{ passageId, startSeconds, endSeconds }` por bloco, só em fronteira de palavra ou segmento e sem deixar menção de fora; o Apollo confere.
+- `discardedPassageIds` (opcional): blocos que o dono descarta; um bloco não pode ser ajustado e descartado.
+- `variant`: a saída **pela qual** o corte é pedido. O corte é um Command sobre o EditPlan único do projeto (vale para todas as saídas); a API exige um `variantId` de saída existente, então o condutor aceita as proporções de `--outputs` e envia o id da saída correspondente.
+- Um segundo assunto é uma segunda confirmação do mesmo arquivo (cada uma com o seu `proposalHash`); se o produto recusar o segundo corte sobre o plano já cortado, a jornada para com a recusa.
 
 ```json
-{ "confirmations": [{ "subject": "<assunto exatamente como a diretiva do pedido o diz>", "variant": "<proporção>", "reason": "<motivo>" }] }
+{ "confirmations": [{
+  "subject": "<assunto exatamente como a diretiva do pedido o diz>", "variant": "<proporção>", "proposalHash": "<proposalHash lido, 64 hex>",
+  "adjustments": [{ "passageId": "<id do bloco>", "startSeconds": 0.0, "endSeconds": 0.0 }],
+  "discardedPassageIds": ["<id do bloco descartado>"], "reason": "<motivo>"
+}] }
 ```
 
 `proxy-review.json` — uma entrada por saída. Aprovar (com `acknowledgeWarnings: true` quando o laudo pede reconhecimento) ou corrigir com pedidos:
