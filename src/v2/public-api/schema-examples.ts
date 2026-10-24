@@ -15695,6 +15695,17 @@ type ExampleNode = { [key: string]: unknown }
 const clonedExamples = (ref: string): ExampleNode[] => structuredClone([...(BASE_PUBLIC_SCHEMA_EXAMPLES[ref] ?? [])]) as ExampleNode[]
 const exampleNode = (parent: ExampleNode, ...path: readonly string[]): ExampleNode =>
   path.reduce<ExampleNode>((current, key) => current[key] as ExampleNode, parent)
+// ADR-160 F4: a cut of the source applies no movement, so its opening has no window to protect.
+const editCommandAppliedExamplesV9: ExampleNode[] = clonedExamples('apollo://schemas/project-edit-command-applied/v8').map((example) => {
+  const cloned = structuredClone(example) as Record<string, unknown>
+  exampleNode(cloned, 'data', 'editorial').protectedOpeningFrames = 0
+  return cloned
+})
+// What a Command on a project with several outputs says instead of `operation`: no proxy was enqueued, these outputs' proxies are to be requested.
+const perOutputProxyRendersExample = {
+  status: 'per-output-request-required', reason: 'output-variant-required',
+  outputs: [{ variantId: EXAMPLE_VERTICAL_VARIANT_ID, aspectRatio: '9:16' }, { variantId: 'variant-example-wide', aspectRatio: '16:9' }],
+}
 const withStableFormatIds = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(withStableFormatIds)
   if (value === null || typeof value !== 'object') return value
@@ -15797,11 +15808,25 @@ const MULTI_OUTPUT_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>>
     'apollo://schemas/director-quality-report-read/v3': directorQualityReadExamplesV3,
     'apollo://schemas/director-quality-report-read/v4': directorQualityReadExamplesV4,
     // ADR-160 F4: a cut of the source applies no movement, so its opening has no window to protect.
-    'apollo://schemas/project-edit-command-applied/v9': clonedExamples('apollo://schemas/project-edit-command-applied/v8').map((example) => {
-      const cloned = structuredClone(example) as Record<string, unknown>
-      exampleNode(cloned, 'data', 'editorial').protectedOpeningFrames = 0
-      return cloned
-    }),
+    'apollo://schemas/project-edit-command-applied/v9': editCommandAppliedExamplesV9,
+    // A project with two outputs: the Command committed, no proxy was enqueued, and the answer says which outputs' proxies to request.
+    'apollo://schemas/project-edit-command-applied/v10': [
+      ...structuredClone(editCommandAppliedExamplesV9),
+      ...structuredClone(editCommandAppliedExamplesV9).filter((example) => 'operation' in ((example as { data: object }).data)).map((example) => {
+        const cloned = structuredClone(example) as { data: Record<string, unknown> }
+        delete cloned.data.operation
+        cloned.data.proxyRenders = perOutputProxyRendersExample
+        return cloned
+      }),
+    ],
+    'apollo://schemas/project-lut-selection-applied/v4': [
+      ...structuredClone(BASE_PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/project-lut-selection-applied/v3'] ?? []),
+      { data: { ...projectLutSelectionExampleV3, proxyRenders: perOutputProxyRendersExample }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/project-color-plan-applied/v2': [
+      ...structuredClone(BASE_PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/project-color-plan-applied/v1'] ?? []),
+      { data: { ...projectColorPlanResultExample, proxyRenders: perOutputProxyRendersExample }, meta: { apiVersion: 'v1' } },
+    ],
   })
 })()
 

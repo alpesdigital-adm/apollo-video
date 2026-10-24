@@ -213,6 +213,7 @@ export async function POST(
     })({
       workspaceId: actor.workspaceId,
       projectId,
+      variantId: body.variantId,
       actor,
       idempotencyKey: `${idempotencyKey}:proxy`,
       traceId: requestId,

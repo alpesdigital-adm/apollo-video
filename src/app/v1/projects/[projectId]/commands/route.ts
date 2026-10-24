@@ -5,7 +5,7 @@ import { applyEditorialCutCommandService, type EditorialCutEditPlan } from '@/v2
 import {
   requireScope,
 } from '@/v2/application/authenticate-api-client'
-import { enqueueProjectProxyRenderService } from '@/v2/application/enqueue-project-proxy-render'
+import { enqueueProjectProxyRenderAfterCommandService } from '@/v2/application/enqueue-project-proxy-render'
 import { replaceSourceTranscriptService } from '@/v2/application/replace-source-transcript'
 import { runProjectDirectorService } from '@/v2/application/run-project-director'
 import { DomainError } from '@/v2/domain/errors'
@@ -29,9 +29,9 @@ import { parseDesiredActionInput } from '@/v2/domain/desired-action'
 import { createEvidenceBoundBriefCompiler } from '@/v2/infrastructure/brief/evidence-bound-brief-compiler-model'
 import {
   presentProjectVersionV2,
-  presentPublicOperation,
   presentSuccess,
 } from '@/v2/public-api/presenters'
+import { commandProxyRenderReplayed, presentCommandProxyRender } from '@/v2/public-api/command-proxy-render-contract'
 
 export const dynamic = 'force-dynamic'
 
@@ -134,7 +134,7 @@ export async function POST(
           : {}),
         ...(body.reason?.trim() ? { reason: body.reason.trim() } : {}),
       })
-      const proxy = await enqueueProjectProxyRenderService({
+      const proxy = await enqueueProjectProxyRenderAfterCommandService({
         projects: createProjectProxyRenderRepository(),
         operations: createPublicOperationRepository(),
         colorPipelines: createColorPipelineCompilationRepository(),
@@ -197,8 +197,8 @@ export async function POST(
           invalidations: result.invalidations,
           createdAt: result.run.createdAt,
         },
-        operation: presentPublicOperation(proxy.operation),
-        replayed: result.replayed && proxy.replayed,
+        ...presentCommandProxyRender(proxy),
+        replayed: result.replayed && commandProxyRenderReplayed(proxy),
       }), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
     }
     if (body.type === 'replace-source-transcript') {
@@ -280,7 +280,7 @@ export async function POST(
     })
     // The sealed Command3 plan only promises validated fields; the response reads the compiled editorial plan fields.
     const editPlan = result.editPlan as unknown as Readonly<EditorialCutEditPlan>
-    const proxy = await enqueueProjectProxyRenderService({
+    const proxy = await enqueueProjectProxyRenderAfterCommandService({
       projects: createProjectProxyRenderRepository(),
       operations: createPublicOperationRepository(),
       colorPipelines: createColorPipelineCompilationRepository(),
@@ -327,8 +327,8 @@ export async function POST(
           impact: result.impact,
           invalidations: result.invalidations,
         },
-        operation: presentPublicOperation(proxy.operation),
-        replayed: result.replayed && proxy.replayed,
+        ...presentCommandProxyRender(proxy),
+        replayed: result.replayed && commandProxyRenderReplayed(proxy),
       }),
       { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) },
     )

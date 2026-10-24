@@ -12,6 +12,7 @@ import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { PrismaAssetRightsRepository } from './asset-rights-repository.ts'
 import { expectedOcrTimeline } from '../../domain/projected-ocr-timeline.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { outputEntryAspectRatio } from '../../domain/output-consumption.ts'
 import {
   parseCommandArtifactInvalidation,
   parseCommandImpact,
@@ -108,6 +109,15 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
 
   queryProject(input: Parameters<typeof queryProxySourceProject>[1], client: PrismaClient | Prisma.TransactionClient = this.client) {
     return queryProxySourceProject(client, input)
+  }
+
+  /** The outputs of the State a Version sealed, by stable variant id. Reads the entry rows only; it consumes nothing and writes nothing. */
+  async listVersionOutputs(input: { workspaceId: string; projectId: string; projectVersionId: string }) {
+    const rows = await this.client.v2ProjectOutputStateEntry.findMany({
+      where: { workspaceId: input.workspaceId, projectId: input.projectId, state: { resultVersionId: input.projectVersionId } },
+      select: { variantId: true, entryJson: true }, orderBy: { variantId: 'asc' },
+    })
+    return Object.freeze(rows.map((row) => Object.freeze({ variantId: row.variantId, aspectRatio: outputEntryAspectRatio(JSON.parse(row.entryJson) as { spec: unknown }) })))
   }
 
   /** The head Version, consumed for `purpose` (default: the proxy render). The persisted verdict refuses what may not be consumed. */

@@ -212,3 +212,43 @@ export function enqueueProjectProxyRenderService(dependencies: {
     })
   }
 }
+
+/**
+ * Why the proxy of a Command's result is not enqueued by the Command itself: the Version has several outputs, a proxy is rendered for
+ * ONE output, and no Command chooses which (`output-variant-required`). Not an error - the Command committed and its answer says
+ * which proxies remain to be requested, one `apollo.projects.proxy-renders.enqueue` per listed output.
+ */
+export const PROXY_RENDERS_PER_OUTPUT_REASON = 'output-variant-required' as const
+export type CommandProxyRender =
+  | Readonly<{ status: 'enqueued'; operation: Awaited<ReturnType<ReturnType<typeof enqueueProjectProxyRenderService>>>['operation']; replayed: boolean }>
+  | Readonly<{
+      status: 'per-output-request-required'
+      reason: typeof PROXY_RENDERS_PER_OUTPUT_REASON
+      outputs: readonly Readonly<{ variantId: string; aspectRatio: string | null }>[]
+    }>
+
+/**
+ * The proxy render a Command that has ALREADY COMMITTED asks for. A project-wide Command (Director, spoken-content removal, LUT, ColorPlan,
+ * review patch...) changes every output at once, so a Version with exactly one output (or none yet) gets that output's proxy, as always.
+ * A Version with several outputs gets no render and no refusal: the committed Command must not answer `428 output-variant-required`
+ * after its Version exists. The outputs are read from the State the Command sealed, before anything is written here, so a deferral
+ * writes nothing and asking again answers the same. A caller that names the output (`variantId`, e.g. the view of a manual edit)
+ * is enqueued for that output.
+ */
+export function enqueueProjectProxyRenderAfterCommandService(dependencies: Parameters<typeof enqueueProjectProxyRenderService>[0]) {
+  const enqueue = enqueueProjectProxyRenderService(dependencies)
+  return async function enqueueAfterCommand(request: Parameters<typeof enqueue>[0] & { expectedProjectVersionId: string }): Promise<CommandProxyRender> {
+    if (request.variantId === undefined && dependencies.projects.listVersionOutputs !== undefined) {
+      const outputs = await dependencies.projects.listVersionOutputs({
+        workspaceId: validateId(request.workspaceId, 'workspaceId'), projectId: validateId(request.projectId, 'projectId'),
+        projectVersionId: validateId(request.expectedProjectVersionId, 'expectedProjectVersionId'),
+      })
+      if (outputs.length > 1) {
+        return Object.freeze({ status: 'per-output-request-required', reason: PROXY_RENDERS_PER_OUTPUT_REASON,
+          outputs: Object.freeze(outputs.map((output) => Object.freeze({ variantId: output.variantId, aspectRatio: output.aspectRatio }))) })
+      }
+    }
+    const queued = await enqueue(request)
+    return Object.freeze({ status: 'enqueued', operation: queued.operation, replayed: queued.replayed })
+  }
+}

@@ -132,9 +132,9 @@ function impactActor() {
 
 test('T-FR-236 exposes the resulting Command version as the current project head', () => {
   const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.commands.apply')
-  assert.equal(capability.version, '11.0.0')
+  assert.equal(capability.version, '12.0.0')
   assert.equal(capability.inputSchemaRef, 'apollo://schemas/apply-project-edit-command-request/v7')
-  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-edit-command-applied/v9')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-edit-command-applied/v10')
   for (const previousRef of [
     'apollo://schemas/project-edit-command-applied/v3',
     'apollo://schemas/project-edit-command-applied/v4',
@@ -147,8 +147,8 @@ test('T-FR-236 exposes the resulting Command version as the current project head
   }
 
   const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
-    .compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v9').schema)
-  for (const example of publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v9'))) {
+    .compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v10').schema)
+  for (const example of publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v10'))) {
     const body = structuredClone(example)
     body.data.version = presentProjectVersionV2(
       body.data.version,
@@ -172,8 +172,8 @@ test('apollo.projects.commands.apply 10.0.0 names the output variant a spoken-co
   assert.equal(request({ ...replacement, variantId: removal.variantId }), false, 'only the removal edits a variant')
   assert.equal(request({ ...direction, variantId: removal.variantId }), false, 'only the removal edits a variant')
 
-  const response = ajv().compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v9').schema)
-  const [editorial] = publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v9'))
+  const response = ajv().compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v10').schema)
+  const [editorial] = publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v10'))
   assert.equal(editorial.data.command.type, 'remove-spoken-content')
   const present = (body) => {
     const copy = structuredClone(body)
