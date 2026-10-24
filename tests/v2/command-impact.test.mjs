@@ -221,11 +221,11 @@ test('T-FR-236 exposes individual and batch patch result versions as current', (
     ['apollo.projects.review-patch-batches.apply', 'review-patch-batch-applied'],
   ]
   for (const [capabilityId, schemaName] of cases) {
-    assert.equal(capabilities.get(capabilityId).version, '3.0.0')
-    assert.equal(capabilities.get(capabilityId).outputSchemaRef, `apollo://schemas/${schemaName}/v3`)
+    assert.equal(capabilities.get(capabilityId).version, '4.0.0')
+    assert.equal(capabilities.get(capabilityId).outputSchemaRef, `apollo://schemas/${schemaName}/v4`)
     assert.equal(getPublicSchema(`apollo://schemas/${schemaName}/v2`).ref, `apollo://schemas/${schemaName}/v2`)
     const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
-      .compile(getPublicSchema(`apollo://schemas/${schemaName}/v3`).schema)
+      .compile(getPublicSchema(`apollo://schemas/${schemaName}/v4`).schema)
     const body = structuredClone(publicSchemaExamples(getPublicSchema(`apollo://schemas/${schemaName}/v2`))[0])
     body.data.version = presentProjectVersionV2(
       body.data.version,
