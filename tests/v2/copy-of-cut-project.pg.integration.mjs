@@ -10,6 +10,8 @@ import { editorialDerivedBindingV3, forkAuthorityPendingV3, operationalBundlePla
 import { serializeOutputCanonicalJson } from '../../src/v2/domain/output-canonical-policy.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { PrismaDirectorRunRepository } from '../../src/v2/infrastructure/prisma/director-run-repository.ts'
+import { setProjectLutSelectionService } from '../../src/v2/application/project-lut-selections.ts'
+import { PrismaProjectLutSelectionRepository } from '../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts'
 import { PrismaEditorialCommandRepository } from '../../src/v2/infrastructure/prisma/editorial-command-repository.ts'
 import { requirePersistedOutputConsumptionV3 } from '../../src/v2/infrastructure/prisma/output-state-consumption.ts'
 import { PrismaOperationalOutputBundleRepositoryV3 } from '../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
@@ -68,15 +70,19 @@ test('W70 PostgreSQL a copy of a cut project adopts the cut, takes additional cu
     const directOwn = await runProjectDirectorService({ repository: new PrismaDirectorRunRepository(db), clock: () => new Date(), createEventId: randomUUID,
       compileBrief: createEvidenceBoundBriefCompiler(), createId: (kind) => `w70cc-${run}-own-dir-${kind}-${++allocations}` })({
       workspaceId, projectId: world.projectId, baseVersionId: cutOwn.version.id, baseHash: cutOwn.version.baseHash, actor, idempotency: { key: `w70cc-${run}-own-director` }, reason: 'Director over the cut project.' })
+    // The project is delivered with an explicit LUT selection (a render requires one): the copy carries it.
+    const lutOwn = await setProjectLutSelectionService({ repository: new PrismaProjectLutSelectionRepository(db), clock: () => new Date(), createEventId: randomUUID,
+      createId: (kind) => `w70cc-${run}-own-lut-${kind}-${++allocations}` })({ workspaceId, projectId: world.projectId, baseVersionId: directOwn.version.id, baseHash: directOwn.version.baseHash,
+      selection: { mode: 'none' }, actor, idempotencyKey: `w70cc-${run}-own-lut`, reason: 'Delivered without a grade.' })
     // The project was delivered: a render of its plan is a media link of the project, and the copy carries every link (the owner states its rights).
-    const directedRow = await db.v2ProjectVersion.findUniqueOrThrow({ where: { id: directOwn.version.id } })
+    const directedRow = await db.v2ProjectVersion.findUniqueOrThrow({ where: { id: lutOwn.version.id } })
     const observed = head.state.document.entries[0].consumption.materialization.document.normalizations[0].document.source
     const render = await insertControlledProxyRender(db, { workspaceId, clientId, projectId: world.projectId, version: directedRow,
       source: { artifactId: observed.artifactId, manifestId: observed.manifestId }, outputVariantId: head.state.document.entries[0].variantId, label: 'delivered', run })
     await persistCurrentRights(db, createAssetRightsSnapshot({ id: `rights-${render.artifactId}-1`, workspaceId, artifactId: render.artifactId, sequence: 1,
       draft: { status: 'approved', allowedUses: [...RECORDING_ALLOWED_USES], prohibitedUses: [], sourceNote: 'the owner states the rights of the delivered render', consent: { status: 'not-required', allowedUses: [] } },
       createdBy: { type: 'api-client', id: clientId }, createdAt: new Date().toISOString() }))
-    const own = { version: directOwn.version, editPlan: JSON.parse(operationalBundlePlanV3(await operational.read({ workspaceId, projectId: world.projectId, versionId: directOwn.version.id })).contentJson) }
+    const own = { version: lutOwn.version, editPlan: JSON.parse(operationalBundlePlanV3(await operational.read({ workspaceId, projectId: world.projectId, versionId: lutOwn.version.id })).contentJson) }
     const planOf = (bundle) => JSON.parse(operationalBundlePlanV3(bundle).contentJson)
     const clipsOf = (plan) => plan.videoTracks.flatMap((track) => track.clips.map((clip) => [clip.sourceInFrame, clip.sourceOutFrame, clip.timelineInFrame, clip.timelineOutFrame]))
     let copyAllocations = 0
@@ -89,6 +95,10 @@ test('W70 PostgreSQL a copy of a cut project adopts the cut, takes additional cu
     assert.equal(forkAuthorityPendingV3(root), true)
     assert.equal(planOf(root).durationFrames, own.editPlan.durationFrames, 'the copy carries the original\'s cut plan')
 
+    const luts = new PrismaProjectLutSelectionRepository(db)
+    const inherited = await luts.readEffectiveForVersion({ ...copyScope, projectVersionId: copy.version.id })
+    assert.notEqual(inherited, null, 'the copy carries the LUT selection its original was delivered with')
+    assert.deepEqual(inherited, await luts.readEffectiveForVersion({ workspaceId, projectId: world.projectId, projectVersionId: lutOwn.version.id }), 'the very selection of the original, by reference')
     // 1. The Director refuses on the copy, with the reason it can be acted on.
     let directions = 0
     const direct = (base, key) => runProjectDirectorService({ repository: new PrismaDirectorRunRepository(db), clock: () => new Date(), createEventId: randomUUID,
