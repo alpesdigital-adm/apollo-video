@@ -12,9 +12,9 @@ A única hospedagem remota permitida é a DigitalOcean. **É proibido usar a VPS
 |---|---|---|
 | `p1-create-project` | `POST /v1/projects` com o texto exato do briefing; registra a leitura do interpretador (diretivas com trecho citado, não suportado, perguntas) | nenhuma |
 | `p2-outputs-ingest` | uma saída por proporção; upload real do master (tamanho e SHA-256 conferidos); espera da transcrição (idioma detectado e origem); direitos da fonte; pipeline de cor técnico (identidade); pedidos de `--setup` | `source-rights.json` só se os direitos não vierem aprovados |
-| `p3-director-first` | roda o Diretor; se recusar (`editorial-request-blocked`, `director-objective-required`, briefing não lido), registra o motivo e **para** | `revise-editorial-request.json` (e `-2`, `-3`…) |
-| `p4-spoken-cuts` | um `remove-spoken-content`, com as frases do arquivo | `remove-spoken-content.json` |
-| `p5-director-review` | Diretor de novo, proxy de cada saída, laudo (issues técnicas e do crítico), download do proxy | `proxy-review.json` (e `-2`…) |
+| `p3-director-first` | roda o Diretor; se recusar (`editorial-request-blocked`, `director-objective-required`, briefing não lido), registra o motivo e **para**; se a recusa for só a pergunta de um assunto a cortar da fala, lista os trechos candidatos e espera a confirmação | `revise-editorial-request.json` (e `-2`, `-3`…) ou `speech-removal-confirm.json` |
+| `p4-spoken-cuts` | um `remove-spoken-content`, com as frases do arquivo; é dispensado quando o corte já foi confirmado pelo dono (veja `speech-removal-confirm.json`) | `remove-spoken-content.json` |
+| `p5-director-review` | Diretor de novo; **plano de reframe** (`reframe-plans`) para cada saída cujo pedido preenche o quadro seguindo o rosto; proxy de cada saída, laudo (issues técnicas e do crítico), download do proxy | `proxy-review.json` (e `-2`…) |
 | `p6-final-inspection` | final de cada saída, download por download-grant, SHA-256, `ffprobe`, decode completo, `w70-manifest.json` | nenhuma (o dono revisa os arquivos fora do script) |
 | `p7-owner-correction` | aplica a correção do dono, novo final das saídas afetadas, `w70-manifest.v2.json` | `owner-correction.json` |
 | `p8-owner-acceptance` | grava o aceite no manifesto v2 | `owner-acceptance.json` |
@@ -90,6 +90,12 @@ O condutor espera cada decisão consultando `<decisions>/<nome>.json` a cada `--
 { "skip": true, "reason": "<por que não há corte>" }
 ```
 
+`speech-removal-confirm.json` — quando o briefing pede para tirar da fala **um assunto** (diretiva `remove-speech`), o Diretor recusa com a pergunta e os trechos da transcrição que sairiam; o condutor grava os candidatos em `speech-removal/candidates-N.json` e no log (`speech-removal-proposed`) e espera este arquivo. Quem confirma é o dono, pela capability `apollo.projects.speech-removals.confirm` (por REST, o cliente da API precisa do scope `speech-removals:confirm`; `scripts/bootstrap-v2-workspace.mjs` concede todos os scopes das capacidades, então um cliente criado por ele já o tem). O arquivo nomeia o **assunto** exatamente como o pedido o diz e a saída pela qual o corte é pedido, nunca as palavras: a regra do corte é a que o Apollo propôs. O condutor não confirma nada que o arquivo não diga.
+
+```json
+{ "confirmations": [{ "subject": "<assunto exatamente como a diretiva do pedido o diz>", "variant": "<proporção>", "reason": "<motivo>" }] }
+```
+
 `proxy-review.json` — uma entrada por saída. Aprovar (com `acknowledgeWarnings: true` quando o laudo pede reconhecimento) ou corrigir com pedidos:
 
 ```json
@@ -132,11 +138,17 @@ Em `--evidence` (tudo sem credenciais; trechos de download perdem o `token`):
 
 O teste unitário do condutor (`tests/v2/w70-owner-journey.test.mjs`, parte de `npm test`) cobre argumentos, formato de cada decisão, substituição de pedidos, remoção de credenciais da evidência e as recusas de falha fechada.
 
+## Contratos novos (PR #104 e PR #103)
+
+- **Várias saídas sem 428.** `run-director`, `remove-spoken-content`, `lut-selection`, `color-plan` e a confirmação de corte respondem **sucesso** com `proxyRenders` (`status`, `reason` e, por saída, `variantId` e proporção) quando não pedem o proxy por conta própria; o proxy de cada saída é pedido pelo condutor com `proxy-renders` (que nomeia a variante). Com uma saída só, a resposta continua trazendo `operation`. O tratamento do 428 `output-variant-required` depois do commit (conferido pela Version de cabeça) fica só como compatibilidade.
+- **Preencher o quadro seguindo o rosto exige plano de reframe.** O pedido por saída (`output-layout` `fill-following-face`, com `vertical`, `horizontal`, `square`, uma proporção ou `all`) faz o render da saída recusar com `reframe-plan-required` até existir o plano da Version e da saída. O condutor lê o pedido vigente, acha as saídas que preenchem e pede `POST /v1/projects/{id}/reframe-plans` (`baseVersionId`, `variantId`) para cada uma, na Version de cabeça, antes de pedir o proxy (também depois de uma correção, que muda a Version). O plano usa a evidência de rosto selada: o worker de rosto V9 precisa ter rodado na fonte.
+- **O briefing agora gera mais diretivas** (`output`, `output-layout`, `cta-text`, `invariant`, `absent`, `remove-speech`); cada frase fica contada, e uma frase que ninguém classifica vira pergunta fechada que bloqueia o Diretor (resolva em `revise-editorial-request.json` com `answers`).
+
 ## O que o ensaio mostrou do produto (leia antes da rodada real)
 
 Fatos observados no ensaio local (um servidor, PostgreSQL descartável, master sintético de 12 s, duas saídas); cada um tem tratamento no condutor ou é pendência do produto, não do condutor:
 
-- **Comandos de projeto com mais de uma saída.** `run-director`, `remove-spoken-content` e `lut-selection` confirmam o Command e depois pedem o proxy "da" saída; com duas saídas a rota responde `428 PRECONDITION_REQUIRED` (`output-variant-required`) **depois do commit**. O condutor reconhece só essa resposta, prova o commit pela Version de cabeça que mudou, registra `warning` e pede o proxy de cada saída por `proxy-renders` (que nomeia a variante). Qualquer outra resposta, ou cabeça sem mudança, para a jornada.
+- **(contrato antigo, mantido por compatibilidade)** Comandos de projeto com mais de uma saída. `run-director`, `remove-spoken-content` e `lut-selection` confirmam o Command e depois pedem o proxy "da" saída; com duas saídas a rota responde `428 PRECONDITION_REQUIRED` (`output-variant-required`) **depois do commit**. O condutor reconhece só essa resposta, prova o commit pela Version de cabeça que mudou, registra `warning` e pede o proxy de cada saída por `proxy-renders` (que nomeia a variante). Qualquer outra resposta, ou cabeça sem mudança, para a jornada.
 - **Corte de fala é um Command só.** O EditPlan é único para todas as saídas; um segundo `remove-spoken-content` sobre o plano já cortado é recusado (`INVALID_COMMAND`). Por isso `remove-spoken-content.json` tem um `variant` (a saída pela qual o corte é pedido), não uma lista.
 - **Geometria do final.** O final sai com a geometria do preset de formato do produto; largura e altura diferentes no `--output-spec` não mudam o MP4 entregue, e a inspeção do condutor falha por isso (`dimensions-match-output-spec`). Use o preset, ou confira o que o produto entrega antes de pedir outra geometria.
 - **LUT.** O render exige uma seleção de LUT explícita na Version. Sem pedido de visual, o condutor grava `mode: none` (origem: "nenhum visual foi pedido"); um pedido de `--setup` para `/lut-selection` o substitui.
