@@ -502,9 +502,11 @@ async function runLocked(config, { secrets, logPath }) {
     for (const key of keys) {
       const variantId = state.variants[key].id
       const existing = await call({ path: `${projectPath()}/reframe-plans?variantId=${encodeURIComponent(variantId)}&projectVersionId=${encodeURIComponent(current.versionId)}`, allowError: true, label: `reframe-plan-read:${key}` })
-      const planned = existing.ok ? existing : await call({ method: 'POST', path: `${projectPath()}/reframe-plans`, key: keyFor('reframe', key, current.versionId), body: { baseVersionId: current.versionId, variantId }, expect: [200, 201], label: `reframe-plan:${key}` })
-      state.reframePlans[key] = { versionId: current.versionId, variantId, reused: existing.ok }
-      await log('reframe-plan', { key, versionId: current.versionId, reused: existing.ok, status: planned.status })
+      // The read answers 200 with `plan: null` when nothing was planned for this Version and output.
+      const has = existing.ok && existing.data?.plan !== null && existing.data?.plan !== undefined
+      const planned = has ? existing : await call({ method: 'POST', path: `${projectPath()}/reframe-plans`, key: keyFor('reframe', key, current.versionId), body: { baseVersionId: current.versionId, variantId }, expect: [200, 201], label: `reframe-plan:${key}` })
+      state.reframePlans[key] = { versionId: current.versionId, variantId, reused: has }
+      await log('reframe-plan', { key, versionId: current.versionId, reused: has, status: planned.status })
     }
     return keys
   }
