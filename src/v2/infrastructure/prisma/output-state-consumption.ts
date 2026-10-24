@@ -126,6 +126,19 @@ export async function readPersistedForkCreationOutputBundleV3(client: Reader,
 import { buildOperationalOutputVersionBundleV3, editorialDerivedBindingV3, type OperationalOutputVersionBundleV3, type OperationalOutputParentV3 } from '../../domain/output-version-bundle.ts'
 import { readOutputNormalizationsV3, readEditorialSourceBindingV1 } from './output-version-materializer.ts'
 type OperationalAnchorCacheV3={rows:Map<string,Readonly<OperationalOutputParentV3>|null>;visiting:Set<string>}
+/**
+ * What one transaction has already proved about sealed Versions. A Version's bundle is immutable and the rows its assertions look at are
+ * locked by the owner transaction (the project, its artifacts, the Versions it builds on), so a second full verification of the SAME
+ * Version inside the same transaction cannot answer differently: it would repeat the database assertion, the row's two canonical
+ * serializations and the whole reconstruction (seconds, on a State that embeds the master's receipt) to learn what the first one proved.
+ * The cache lives for ONE owner transaction and is never shared across transactions, requests or the committed readback; it holds only
+ * Versions that were read and verified in full (never a null, never a failure).
+ */
+export type OperationalReadCacheV3=Readonly<{anchors:OperationalAnchorCacheV3;bundles:Map<string,Readonly<OperationalOutputParentV3>>}>
+export function createOperationalReadCacheV3():OperationalReadCacheV3 {
+  return Object.freeze({anchors:{rows:new Map(),visiting:new Set<string>()},bundles:new Map()})
+}
+const verifiedCanonical=new WeakMap<object,string>()
 async function readOperationalAnchorV3(client:Reader,input:Readonly<{workspaceId:string;projectId:string;versionId:string}>,cache:OperationalAnchorCacheV3) {
   const key=JSON.stringify([input.workspaceId,input.projectId,input.versionId])
   if(cache.visiting.has(key))throw new DomainError('PERSISTENCE_CONFLICT','Operational output dependency cycle')
@@ -168,6 +181,8 @@ async function readOperationalAnchorV3(client:Reader,input:Readonly<{workspaceId
       anchor=JSON.parse(r.bundleJson)
       if(serializeOutputCanonicalJson(anchor)!==r.bundleJson||serializeOutputCanonicalJson((anchor as Extract<typeof anchor,{origin:unknown}>).origin)!==r.originJson)
         throw new Error('Operational row raw authority differs')
+      // The stored text IS the canonical text of this anchor (just proved): the reconstruction compares against it without serializing again.
+      verifiedCanonical.set(anchor,r.bundleJson)
     }
     if(anchor.version.id!==input.versionId||anchor.version.workspaceId!==input.workspaceId||anchor.version.projectId!==input.projectId||
       anchor.version.outputContractVersion!==v.outputContractVersion||anchor.version.outputStateId!==v.outputStateId||
@@ -183,8 +198,21 @@ async function readOperationalAnchorV3(client:Reader,input:Readonly<{workspaceId
 }
 export async function readPersistedOperationalOutputBundleV3(client:Reader,input:Readonly<{
   workspaceId:string;projectId:string;versionId:string
-}>):Promise<Readonly<OperationalOutputParentV3>|null> {
-  const cache:OperationalAnchorCacheV3={rows:new Map(),visiting:new Set()}
+}>,reuse?:OperationalReadCacheV3):Promise<Readonly<OperationalOutputParentV3>|null> {
+  const bundleKey=JSON.stringify([input.workspaceId,input.projectId,input.versionId])
+  const proved=reuse?.bundles.get(bundleKey)
+  if(proved!==undefined)return proved
+  const result=await readPersistedOperationalOutputBundleUncachedV3(client,input,reuse?.anchors??{rows:new Map(),visiting:new Set()})
+  if(reuse) {
+    // Only Versions that exist are remembered: a Version this transaction is about to write must read as absent until it does.
+    for(const [key,anchor] of reuse.anchors.rows)if(anchor===null)reuse.anchors.rows.delete(key)
+    if(result!==null)reuse.bundles.set(bundleKey,result)
+  }
+  return result
+}
+async function readPersistedOperationalOutputBundleUncachedV3(client:Reader,input:Readonly<{
+  workspaceId:string;projectId:string;versionId:string
+}>,cache:OperationalAnchorCacheV3):Promise<Readonly<OperationalOutputParentV3>|null> {
   const stored=await readOperationalAnchorV3(client,input,cache)
   if(!stored||stored.schemaVersion==='project-creation-output-bundle/v2')return stored
   try {
@@ -219,8 +247,9 @@ export async function readPersistedOperationalOutputBundleV3(client:Reader,input
       editPlanSnapshot:stored.editPlanSnapshot,normalizations:actual,materializationIds,
       // A child Command's replaced non-output snapshots are born with its Version; the origin declares which.
       ...(origin.kind==='child-command'?{replacementSnapshots:stored.snapshots.filter(s=>(origin.replaces as readonly string[]).includes(s.kind))}:{})})
-    if(serializeOutputCanonicalJson(JSON.parse(stableSerializeOperational(fresh)))!==serializeOutputCanonicalJson(stored))
-      throw new Error(`Reconstructed operational bundle differs at ${bundleDifferences(JSON.parse(serializeOutputCanonicalJson(JSON.parse(stableSerializeOperational(fresh)))),JSON.parse(serializeOutputCanonicalJson(stored))).join('; ')||'$'}`)
+    const storedCanonical=verifiedCanonical.get(stored)??serializeOutputCanonicalJson(stored)
+    if(serializeOutputCanonicalJson(JSON.parse(stableSerializeOperational(fresh)))!==storedCanonical)
+      throw new Error(`Reconstructed operational bundle differs at ${bundleDifferences(JSON.parse(serializeOutputCanonicalJson(JSON.parse(stableSerializeOperational(fresh)))),JSON.parse(storedCanonical)).join('; ')||'$'}`)
     return fresh
   } catch(error) {
     if(error instanceof DomainError&&['PRECONDITION_REQUIRED','ASSET_RIGHTS_BLOCKED'].includes(error.code))throw error
