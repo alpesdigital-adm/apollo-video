@@ -856,6 +856,7 @@ const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/multi-output-plan-commands.pg.integration.mjs', reason: W66_SUPERVISED_PG },
   { file: 'tests/v2/multi-output-variant-commands.pg.integration.mjs', reason: W66_SUPERVISED_PG },
   { file: 'tests/v2/multi-output-command-proxy.pg.integration.mjs', reason: W66_SUPERVISED_PG, citedBy: ['docs/quality/w66-version-overlay-integration-v1.md'] },
+  { file: 'tests/v2/copy-of-cut-project.pg.integration.mjs', reason: W66_SUPERVISED_PG, citedBy: ['docs/quality/w66-version-overlay-integration-v1.md'] },
   { file: 'tests/v2/project-duplication-realistic-size.pg.integration.mjs', reason: W66_SUPERVISED_PG },
   { file: 'tests/v2/output-consumption-proxy-final.pg.integration.mjs', reason: W66_SUPERVISED_PG },
   { file: 'tests/v2/output-consumption-readers.pg.integration.mjs', reason: W66_SUPERVISED_PG },
