@@ -92,7 +92,8 @@ standIn.script.set(briefingSecond, answerFor(briefingSecond))
 
 const workspaceId = `w70-rehearsal-${suffix}`
 await factory.createWorkspaceRepository().create(createWorkspace({ id: workspaceId, slug: workspaceId, name: 'W70 journey rehearsal', status: 'active', createdAt: new Date().toISOString() }))
-const scopes = [...new Set(FOUNDATION_CAPABILITIES.flatMap((capability) => [...capability.requiredScopes]))].sort()
+// `speech-removals:confirm` is granted by the owner explicitly (it is in no capability's requiredScopes): the person who confirms a cut is the owner.
+const scopes = [...new Set([...FOUNDATION_CAPABILITIES.flatMap((capability) => [...capability.requiredScopes]), 'speech-removals:confirm'])].sort()
 const issued = await createApiClientService({ repository: factory.createApiClientRepository(), credentialCrypto: nodeApiCredentialCrypto, clock: () => new Date() })({ id: `w70-rehearsal-client-${suffix}`, workspaceId, name: 'W70 rehearsal actor', environment: 'production', scopes })
 
 const port = await freePort()
