@@ -401,10 +401,99 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     assert.doesNotMatch(await page.locator('dl').first().textContent(), /awareness/, 'the objective is shown in words, never as its id')
     await shot('19-projeto-objetivo-definido.png')
 
+    // ---- 4. The cut as a PASSAGE (ADR-160): the Director asks to confirm the whole stretch of speech that talks about the subject, the owner reads it whole with the
+    // mentions marked, moves where it starts and ends among the places the Apollo offers, and what is shown is EXACTLY what will be cut (extended or shortened);
+    // what the screen sends is the subject, the seal of what was shown and that adjustment, never the words. ----
+    const CUT_BRIEFING = 'tire o trecho sobre vender'
+    fake.script.set(CUT_BRIEFING, { directives: [{ kind: 'remove-speech', value: 'about', param: 'vender', quote: 'tire o trecho sobre vender' }], unsupported: [], questions: [], coverage: [] })
+    const cutSentences = [
+      [0, 2, 'Bem-vindos ao curso.'], [2, 3, 'Hoje falamos de tudo,'], [3, 4, 'e de como vender melhor.'], [4, 6, 'Vender bem exige confiança.'],
+      [6, 8, 'O produto foi vendido'], [8, 9, 'ontem.'], [9, 11, 'Agora vamos ao conteúdo.'],
+    ]
+    const cutWords = cutSentences.flatMap(([start, end, text]) => {
+      const spoken = text.replace(/[.,]/gu, '').split(' ')
+      const step = (end - start) / spoken.length
+      return spoken.map((word, index) => ({ word, start: Math.round((start + index * step) * 1000) / 1000, end: Math.round((start + (index + 1) * step - 0.02) * 1000) / 1000 }))
+    })
+    const cutWorld = await seedSealedProject(prisma, { workspaceId, actor: worldActor, prefix: 'cut', name: 'Projeto com um trecho a cortar', briefing: CUT_BRIEFING })
+    await seedDirectedProject(prisma, {
+      workspaceId, clientId, credentialId, environment: 'production', projectId: cutWorld.projectId, suffix: `cut${suffix.slice(0, 8)}`, directed: false,
+      words: cutWords, segments: cutSentences.map(([start, end, text], id) => ({ id, start, end, text })),
+    })
+    const cutHeadRow = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: (await prisma.v2Project.findUniqueOrThrow({ where: { id: cutWorld.projectId } })).currentVersionId } })
+    const cutRead = await fetch(`${baseUrl}/v1/projects/${cutWorld.projectId}/editorial-request`, {
+      method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': `cut-read-${fixture.suffix}` },
+      body: JSON.stringify({ baseVersionId: cutHeadRow.id, baseHash: cutHeadRow.baseHash, briefing: CUT_BRIEFING, reason: 'Ler o briefing.' }),
+    })
+    assert.equal(cutRead.status, 201, JSON.stringify(await cutRead.json()))
+    let sentToConfirm = null
+    await page.route('**/v1/projects/*/speech-removals', async (route) => {
+      sentToConfirm = route.request().postDataJSON()
+      // The real confirmation is proved against PostgreSQL elsewhere; here the screen is what is under test, so nothing is cut.
+      await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 'VERSION_CONFLICT', message: 'A confirmação não foi enviada de verdade neste teste.' } }) })
+    })
+    await page.goto(`${baseUrl}/projects/${cutWorld.projectId}`)
+    await page.getByRole('button', { name: /Executar Diretor V2/ }).click()
+    const confirmation = page.getByTestId('speech-cut-confirmation')
+    await confirmation.waitFor({ timeout: 60_000 })
+    const passageBox = confirmation.getByTestId('speech-cut-passage')
+    assert.equal(await passageBox.count(), 1, 'the sentences that say the subject, and the ones between them, are ONE passage')
+    const shownText = async () => (await passageBox.getByTestId('speech-cut-passage-text').textContent())
+    const shownMarks = async () => passageBox.locator('mark').allTextContents()
+    const PROPOSED = 'Hoje falamos de tudo, e de como vender melhor. Vender bem exige confiança. O produto foi vendido ontem.'
+    assert.equal(await shownText(), PROPOSED)
+    assert.deepEqual(await shownMarks(), ['vender', 'Vender', 'vendido'], 'the words of the subject are marked')
+    assert.match(await passageBox.textContent(), /Trecho 1 de 1: 2,0 s a 9,0 s/)
+    assert.match(await passageBox.getByTestId('speech-cut-passage-state').textContent(), /como o Apollo propôs/)
+    assert.equal(await confirmation.getByTestId('speech-cut-notice').count(), 0, 'the language is known: nothing to warn about')
+    // One passage: nothing to keep on purpose (the choice appears when there are several).
+    assert.equal(await passageBox.getByTestId('speech-cut-keep').count(), 0)
+    const startSelect = passageBox.getByTestId('speech-cut-start')
+    const endSelect = passageBox.getByTestId('speech-cut-end')
+    const startOptions = await startSelect.locator('option').allTextContents()
+    assert.equal(startOptions.length, 3, startOptions.join(' | '))
+    assert.match(startOptions[0], /Bem-vindos ao curso/)
+    const endOptions = await endSelect.locator('option').allTextContents()
+    assert.equal(endOptions.length, 3, endOptions.join(' | '))
+    assert.match(endOptions[0], /O produto foi vendido/)
+    assert.ok(await startSelect.evaluate((element) => element.offsetHeight >= 44), 'a touch-sized control')
+    await shot('20-trecho-da-fala-proposto.png')
+    // Confirming without moving anything sends the subject and the seal only.
+    sentToConfirm = null
+    await Promise.all([page.waitForResponse((response) => response.url().includes('/speech-removals')), confirmation.getByRole('button', { name: 'Confirmar corte' }).click()])
+    assert.equal(sentToConfirm.subject, 'vender')
+    assert.match(sentToConfirm.proposalHash, /^[a-f0-9]{64}$/, 'the seal of what was shown goes back with the confirmation')
+    assert.equal('adjustments' in sentToConfirm, false, 'nothing was moved: the passage is the proposed one')
+    assert.equal('rules' in sentToConfirm || 'alternatives' in sentToConfirm, false, 'the screen never sends the words of the cut')
+    // EXTENDING: the text shown is the text of the bounds chosen - the sentence before is read now, and it is what is cut.
+    await startSelect.selectOption({ index: 0 })
+    assert.match(await passageBox.getByTestId('speech-cut-passage-state').textContent(), /Você mudou este trecho/)
+    assert.match(await passageBox.textContent(), /Trecho 1 de 1: 0,0 s a 9,0 s/)
+    assert.equal(await shownText(), `Bem-vindos ao curso. ${PROPOSED}`)
+    assert.deepEqual(await shownMarks(), ['vender', 'Vender', 'vendido'])
+    await shot('21-trecho-da-fala-ajustado.png')
+    // SHORTENING at the start and at the end: what drops out of the bounds drops out of the text.
+    await startSelect.selectOption('3')
+    assert.equal(await shownText(), 'e de como vender melhor. Vender bem exige confiança. O produto foi vendido ontem.')
+    await endSelect.selectOption('8')
+    assert.equal(await shownText(), 'e de como vender melhor. Vender bem exige confiança. O produto foi vendido')
+    assert.match(await passageBox.textContent(), /Trecho 1 de 1: 3,0 s a 8,0 s/)
+    assert.deepEqual(await shownMarks(), ['vender', 'Vender', 'vendido'])
+    // EXTENDING at the end.
+    await endSelect.selectOption('11')
+    assert.equal(await shownText(), 'e de como vender melhor. Vender bem exige confiança. O produto foi vendido ontem. Agora vamos ao conteúdo.')
+    await endSelect.selectOption('8')
+    sentToConfirm = null
+    await Promise.all([page.waitForResponse((response) => response.url().includes('/speech-removals')), confirmation.getByRole('button', { name: 'Confirmar corte' }).click()])
+    assert.equal(sentToConfirm.adjustments.length, 1)
+    assert.deepEqual([sentToConfirm.adjustments[0].startSeconds, sentToConfirm.adjustments[0].endSeconds], [3, 8], 'what was sent is the bounds of the text that was shown')
+    assert.match(sentToConfirm.adjustments[0].passageId, /^passage-[a-f0-9]{10}$/)
+    await page.unroute('**/v1/projects/*/speech-removals')
+
     // ---- gateway of the cut confirmation (real HTTP, real authentication) ----
     // The UI client here has the scopes of a workspace that existed before the scope speech-removals:confirm: a person on the screen is admitted anyway.
     const cutPath = `/v1/projects/${world.projectId}/speech-removals`
-    const cutBody = { baseVersionId: 'version-none', baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-none', variantId: 'variant-none', subject: 'assunto que o pedido nao tem' }
+    const cutBody = { baseVersionId: 'version-none', baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-none', variantId: 'variant-none', subject: 'assunto que o pedido nao tem', proposalHash: 'a'.repeat(64) }
     const cutFromScreen = await page.evaluate(async ({ path, body }) => {
       const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'gateway-screen-1' }, body: JSON.stringify(body) })
       return { status: response.status, payload: await response.json() }

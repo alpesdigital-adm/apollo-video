@@ -8,6 +8,63 @@ import { createEditorialAudioTimelineHash } from './production-modes.ts'
 import { createDirectedAudioTimelineHash, type DirectedMusicTrack } from './director-run.ts'
 import type { MaterializationPlanV3, EditorialSourceBindingV1 } from './output-materialization.ts'
 
+/**
+ * What a confirmed cut records of the passages a person confirmed (ADR-160): for each one the bounds that were CUT, the bounds that were proposed and
+ * whether the person moved them, and how the speech was searched. The rule that was applied is exactly this one.
+ */
+export interface SpeechRemovalConfirmedPassage {
+  id:string
+  startSeconds:number
+  endSeconds:number
+  proposedStartSeconds:number
+  proposedEndSeconds:number
+  adjusted:boolean
+}
+export interface SpeechRemovalConfirmationSearch {
+  matching:'stem'|'literal'
+  language:string|null
+  lexicon:string|null
+  policy:Readonly<{name:string;maxGapSeconds:number;maxGapSentences:number;maxSentenceSeconds:number;maxPassageSeconds:number;maxMentions:number}>
+}
+/** A passage the person chose NOT to cut: kept, and recorded with the bounds that were proposed. */
+export interface SpeechRemovalDiscardedPassage {
+  id:string
+  startSeconds:number
+  endSeconds:number
+}
+export interface SpeechRemovalConfirmationRecord {
+  subject:string
+  medium:'ui-session'|'api-key-scope'
+  /** Present when the cut was confirmed as passages; absent on a confirmation made before passages existed. Both or neither of `passages` and `search`. */
+  passages?:readonly Readonly<SpeechRemovalConfirmedPassage>[]
+  /** The passages of the proposal the person chose not to cut (only with `passages`). */
+  discarded?:readonly Readonly<SpeechRemovalDiscardedPassage>[]
+  search?:Readonly<SpeechRemovalConfirmationSearch>
+}
+
+const isPlain=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value)
+const finite=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value)&&value>=0
+/** The shape of a stored confirmation: the one a Command carries, and nothing else (no key beyond the ones it names). */
+export function isSpeechRemovalConfirmationRecord(value:unknown):value is SpeechRemovalConfirmationRecord {
+  if(!isPlain(value)||typeof value.subject!=='string'||value.subject.length===0||(value.medium!=='ui-session'&&value.medium!=='api-key-scope'))return false
+  const keys=Object.keys(value).sort().join('|')
+  if(keys==='medium|subject')return true
+  if((keys!=='medium|passages|search|subject'&&keys!=='discarded|medium|passages|search|subject')||!Array.isArray(value.passages)||value.passages.length===0||!isPlain(value.search))return false
+  const search=value.search
+  const policy=search.policy
+  if(Object.keys(search).sort().join('|')!=='language|lexicon|matching|policy'||(search.matching!=='stem'&&search.matching!=='literal')||
+    (search.language!==null&&typeof search.language!=='string')||(search.lexicon!==null&&typeof search.lexicon!=='string')||!isPlain(policy)||
+    Object.keys(policy).sort().join('|')!=='maxGapSeconds|maxGapSentences|maxMentions|maxPassageSeconds|maxSentenceSeconds|name'||typeof policy.name!=='string'||
+    !finite(policy.maxGapSeconds)||!finite(policy.maxGapSentences)||!finite(policy.maxSentenceSeconds)||!finite(policy.maxPassageSeconds)||!finite(policy.maxMentions))return false
+  if(value.discarded!==undefined&&(!Array.isArray(value.discarded)||value.discarded.length===0||!value.discarded.every(item=>isPlain(item)&&
+    Object.keys(item).sort().join('|')==='endSeconds|id|startSeconds'&&typeof item.id==='string'&&item.id.length>0&&finite(item.startSeconds)&&finite(item.endSeconds)&&
+    item.endSeconds>item.startSeconds)))return false
+  return value.passages.every(passage=>isPlain(passage)&&Object.keys(passage).sort().join('|')==='adjusted|endSeconds|id|proposedEndSeconds|proposedStartSeconds|startSeconds'&&
+    typeof passage.id==='string'&&passage.id.length>0&&typeof passage.adjusted==='boolean'&&finite(passage.startSeconds)&&finite(passage.endSeconds)&&
+    passage.endSeconds>passage.startSeconds&&finite(passage.proposedStartSeconds)&&finite(passage.proposedEndSeconds)&&passage.proposedEndSeconds>passage.proposedStartSeconds&&
+    passage.adjusted===(passage.startSeconds!==passage.proposedStartSeconds||passage.endSeconds!==passage.proposedEndSeconds))
+}
+
 export interface EditorialCutPayloadV3 {
   schemaVersion:3
   sourceTranscriptId:string
@@ -17,7 +74,7 @@ export interface EditorialCutPayloadV3 {
   exclusions:readonly Readonly<{sourceStartSeconds:number;sourceEndSeconds:number;ruleIds:readonly string[]}>[]
   exclusionOverrides?:readonly Readonly<{sourceStartSeconds:number;sourceEndSeconds:number;ruleIds:readonly string[];reason:string}>[]
   /** Present only when the Command confirms a cut the Apollo proposed for a subject of the request (capability `apollo.projects.speech-removals.confirm`). */
-  confirmation?:Readonly<{subject:string;medium:'ui-session'|'api-key-scope'}>
+  confirmation?:Readonly<SpeechRemovalConfirmationRecord>
   sourceBinding:Readonly<EditorialSourceBindingV1>
   editPlanHash:string
   audioProjection:Readonly<EditorialAudioProjectionV1>|null

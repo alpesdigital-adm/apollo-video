@@ -27404,6 +27404,31 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
       reason: { type: 'string', minLength: 1, maxLength: 1000 },
     },
   }),
+  defineSchema('confirm-speech-removal-request', 2, 'Confirm the cut the Apollo proposed for a subject the editorial request asks to take out of the speech, as PASSAGES (a block of speech from the first sentence that mentions the subject to the last); the person may move where each passage starts and ends, within the limits the proposal gave, or choose not to cut a passage. The request carries the seal of what the person was shown. The words and the passages of the cut are made by the Apollo, never by the caller', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash', 'sourceTranscriptId', 'variantId', 'subject', 'proposalHash'],
+    properties: {
+      baseVersionId: idSchema, baseHash: sha256Schema, sourceTranscriptId: idSchema, variantId: idSchema,
+      subject: { type: 'string', minLength: 1, maxLength: 200, description: 'The subject exactly as a remove-speech directive of the current request states it.' },
+      proposalHash: { ...sha256Schema, description: 'The proposalHash of the proposal the person was shown (in the question of the Director). The Apollo searches the transcript again and refuses the confirmation when what it finds is not what the person saw: nothing is cut that was not seen.' },
+      discardedPassageIds: {
+        type: 'array', maxItems: 64, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 64 },
+        description: 'Optional. The passages of the proposal the person chose NOT to cut. They stay in the video and the Command records that they were offered and kept. At least one passage must be cut, and a discarded passage cannot be adjusted.',
+      },
+      adjustments: {
+        type: 'array', maxItems: 64,
+        description: 'Optional. The passages of the proposal whose start or end the person moved. A passage that is not named is cut as proposed. A start must be the start of a word or of a segment of the transcript and an end the end of one, inside the limits of the passage (not into the neighbouring passage, not beyond the speech), and the passage must still hold every mention that anchors it. Anything else refuses the whole confirmation: nothing is cut.',
+        items: {
+          type: 'object', additionalProperties: false, required: ['passageId', 'startSeconds', 'endSeconds'],
+          properties: {
+            passageId: { type: 'string', minLength: 1, maxLength: 64, description: 'The id of a passage of the proposal.' },
+            startSeconds: { type: 'number', minimum: 0, description: 'Where the passage starts instead, in seconds of the source.' },
+            endSeconds: { type: 'number', minimum: 0, description: 'Where the passage ends instead, in seconds of the source.' },
+          },
+        },
+      },
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+  }),
   defineSchema('batch-editorial-request-response', 2, 'The editorial request of one production batch as it stands now, read with the coverage vocabulary: the versions asked for, the frame of one version, the words of the written call to action, a spoken subject to take out, the guarantees of the product and what the Apollo never adds, and, for each sentence it could not place, a question', successSchema(batchEditorialRequestResponseSchemaCover)),
   defineSchema('batch-editorial-request-revised', 2, 'The request of a production batch after a revision, read with the coverage vocabulary', successSchema(batchEditorialRequestRevisedSchemaCover)),
   defineSchema('editorial-request-revise-request', 4, 'Replace the parts of the editorial request of a video that the body names, with the coverage vocabulary: the versions asked for, the frame of one version, the words of the written call to action, a spoken subject to take out, the guarantees of the product and what the Apollo never adds', editorialRequestReviseRequestSchemaCover),

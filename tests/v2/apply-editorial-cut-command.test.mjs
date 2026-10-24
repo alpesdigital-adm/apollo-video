@@ -608,3 +608,126 @@ test('a removal that confirms a proposal records who confirmed and by which medi
   const { service: other, request: otherRequest } = await fixture()
   assert.equal((await other(otherRequest())).command.payload.confirmation, undefined)
 })
+
+/** The confirmation of a cut as passages, through the real Command: the passage the person confirmed is the cut, and the Command records it. */
+async function confirmationWorld() {
+  const { confirmSpeechRemovalService } = await import('../../src/v2/application/confirm-speech-removal.ts')
+  const { proposeSpeechRemoval } = await import('../../src/v2/application/speech-removal-proposal.ts')
+  const { repository, service } = await fixture()
+  const world = await sharedEditorialWorld()
+  const identity = { clientId: 'client-1', credentialId: 'credential-editorial-1', workspaceId: 'workspace-1', environment: 'production',
+    delegatedUserId: 'member-1', delegatedIdentityId: 'identity-1', workspaceRole: 'administrator' }
+  const person = Object.freeze({
+    ...identity, scopes: new Set(['projects:write']), authenticationKind: 'ui-session', clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext: createExternalAuditContext(identity),
+  })
+  const directive = { id: 'cut', kind: 'remove-speech', value: 'about', param: 'janeiro' }
+  const current = { version: { id: world.fork.version.id }, objective: 'discovery', briefSnapshot: { id: 'snapshot-1', contentHash: 'a'.repeat(64), content: {
+    schemaVersion: 1, objective: 'discovery', editorialRequest: { directives: [directive] },
+  } } }
+  let counter = 0
+  const confirm = confirmSpeechRemovalService({
+    requests: { async readCurrent() { return current } },
+    cuts: repository,
+    clock: () => new Date('2026-07-18T21:00:00.000Z'),
+    createId: (kind) => `${kind}-passage-${++counter}`,
+    createEventId: () => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`,
+    apply: (dependencies) => (input) => service(input),
+  })
+  const ask = (overrides = {}) => confirm({
+    workspaceId: 'workspace-1', projectId: 'project-1', baseVersionId: world.fork.version.id, baseHash: world.fork.version.baseHash,
+    sourceTranscriptId: world.context.transcriptId, variantId: world.context.variantId, subject: 'janeiro', actor: person,
+    proposalHash: proposeSpeechRemoval('janeiro', repository.transcript).proposalHash,
+    idempotency: { clientId: 'client-1', key: `confirm-passage-${++counter}` }, ...overrides,
+  })
+  return { repository, ask, world }
+}
+
+test('a cut confirmed as passages cuts the whole passage the speech mentions the subject in, and the Command records the bounds that were cut', async () => {
+  const { ask, repository } = await confirmationWorld()
+  const result = await ask()
+  // "janeiro" is said at 39.55 and 55.35; the segment between them (43.0, "conteúdo") is part of the same stretch of speech.
+  assert.deepEqual(result.exclusions.map(({ sourceStartSeconds, sourceEndSeconds }) => [sourceStartSeconds, sourceEndSeconds]), [[39.02, 57.72]])
+  assert.deepEqual(result.retainedSourceRanges, [{ sourceStartSeconds: 0, sourceEndSeconds: 39.02 }, { sourceStartSeconds: 57.72, sourceEndSeconds: 102.166 }])
+  const { confirmation } = result.command.payload
+  assert.equal(confirmation.subject, 'janeiro')
+  assert.equal(confirmation.medium, 'ui-session')
+  assert.equal(confirmation.search.matching, 'stem')
+  assert.equal(confirmation.search.lexicon, 'pt-endings/v2')
+  assert.equal(confirmation.search.policy.name, 'speech-passage-adjacency/v2')
+  assert.deepEqual(confirmation.passages.map(({ id, ...passage }) => passage), [{ startSeconds: 39.02, endSeconds: 57.72, proposedStartSeconds: 39.02, proposedEndSeconds: 57.72, adjusted: false }])
+  assert.equal(repository.currentVersion.id, result.version.id)
+})
+
+test('a person may move where a passage starts and ends within its limits; the cut is exactly what was confirmed, and the Command says it was adjusted', async () => {
+  const { ask, repository } = await confirmationWorld()
+  const { proposeSpeechRemoval } = await import('../../src/v2/application/speech-removal-proposal.ts')
+  const proposal = proposeSpeechRemoval('janeiro', repository.transcript)
+  const passage = proposal.passages[0]
+  // From the first word of the first segment's date to the end of the word "fevereiro" of the last: the start of a word and the end of a word.
+  const result = await ask({ adjustments: [{ passageId: passage.id, startSeconds: 39.2, endSeconds: 56.7 }] })
+  assert.deepEqual(result.exclusions.map(({ sourceStartSeconds, sourceEndSeconds }) => [sourceStartSeconds, sourceEndSeconds]), [[39.2, 56.7]])
+  assert.deepEqual(result.command.payload.confirmation.passages.map(({ id, ...rest }) => rest), [{ startSeconds: 39.2, endSeconds: 56.7, proposedStartSeconds: 39.02, proposedEndSeconds: 57.72, adjusted: true }])
+})
+
+test('an adjustment outside the limits is refused whole and nothing is cut: not a boundary of the speech, not past the speech, not leaving a mention out', async () => {
+  const { ask, repository } = await confirmationWorld()
+  const { proposeSpeechRemoval } = await import('../../src/v2/application/speech-removal-proposal.ts')
+  const passage = proposeSpeechRemoval('janeiro', repository.transcript).passages[0]
+  const before = repository.currentVersion.id
+  for (const [label, adjustment] of [
+    ['inside a word', { startSeconds: 39.3, endSeconds: 57.72 }],
+    ['not a boundary of the end', { startSeconds: 39.02, endSeconds: 60 }],
+    ['leaving a mention out (starts after the first)', { startSeconds: 40, endSeconds: 57.72 }],
+    ['leaving a mention out (ends before the last)', { startSeconds: 39.02, endSeconds: 42.68 }],
+    ['ends before it starts', { startSeconds: 57.72, endSeconds: 39.02 }],
+  ]) {
+    await assert.rejects(ask({ adjustments: [{ passageId: passage.id, ...adjustment }] }), (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT', label)
+  }
+  await assert.rejects(ask({ adjustments: [{ passageId: 'passage-of-another-proposal', startSeconds: 39.02, endSeconds: 57.72 }] }), (error) => error.code === 'INVALID_ARGUMENT')
+  assert.equal(repository.currentVersion.id, before, 'no Version was made')
+})
+
+test('a confirmation that records passages is the cut it records: a Command whose exclusions differ from the passages, or whose confirmation is malformed, is refused', async () => {
+  const search = { matching: 'stem', language: 'pt-BR', lexicon: 'pt-endings/v2', policy: { name: 'speech-passage-adjacency/v2', maxGapSeconds: 15, maxGapSentences: 3, maxSentenceSeconds: 30, maxPassageSeconds: 120, maxMentions: 40 } }
+  const passage = { id: 'passage-1', startSeconds: 38.5, endSeconds: 58, proposedStartSeconds: 38.5, proposedEndSeconds: 58, adjusted: false }
+  const overrides = (end) => [{ sourceStartSeconds: 38.5, sourceEndSeconds: end, ruleIds: ['date-january-31', 'date-february-1'], reason: 'Reviewed boundary.' }]
+  const rules = recoveryRules().slice(0, 2)
+  const { service, request } = await fixture()
+  const honest = await service(request({ rules, exclusionOverrides: overrides(58), confirmation: { subject: 'datas', medium: 'ui-session', passages: [passage], search } }))
+  assert.deepEqual(honest.exclusions.map(({ sourceStartSeconds, sourceEndSeconds }) => [sourceStartSeconds, sourceEndSeconds]), [[38.5, 58]])
+  const other = await fixture()
+  await assert.rejects(other.service(other.request({ idempotency: { clientId: 'client-1', key: 'differs' }, rules, exclusionOverrides: overrides(60), confirmation: { subject: 'datas', medium: 'ui-session', passages: [passage], search } })),
+    (error) => error instanceof DomainError && /differs from the passages that were confirmed/.test(error.message))
+  for (const [label, confirmation] of [
+    ['an unknown key', { subject: 'datas', medium: 'ui-session', extra: true }],
+    ['passages without the search', { subject: 'datas', medium: 'ui-session', passages: [passage] }],
+    ['a passage that claims it was not moved but was', { subject: 'datas', medium: 'ui-session', search, passages: [{ ...passage, proposedEndSeconds: 59 }] }],
+    ['a medium that is nobody', { subject: 'datas', medium: 'anonymous' }],
+  ]) {
+    const again = await fixture()
+    await assert.rejects(again.service(again.request({ rules, exclusionOverrides: overrides(58), confirmation })), (error) => error instanceof DomainError && error.code === 'INVALID_COMMAND', label)
+  }
+})
+
+test('a confirmation that kept a passage on purpose lets its mentions stay uncovered, only inside the passage it recorded', async () => {
+  const search = { matching: 'stem', language: 'pt-BR', lexicon: 'pt-endings/v2', policy: { name: 'speech-passage-adjacency/v2', maxGapSeconds: 15, maxGapSentences: 3, maxSentenceSeconds: 30, maxPassageSeconds: 120, maxMentions: 40 } }
+  const cutPassage = { id: 'passage-1', startSeconds: 38.5, endSeconds: 42.7, proposedStartSeconds: 38.5, proposedEndSeconds: 42.7, adjusted: false }
+  const kept = { id: 'passage-2', startSeconds: 54.82, endSeconds: 57.72 }
+  const rules = recoveryRules().slice(0, 1)
+  const overrides = [{ sourceStartSeconds: 38.5, sourceEndSeconds: 42.7, ruleIds: ['date-january-31'], reason: 'Reviewed boundary.' }]
+  // Without the record, the second date left behind is refused (the gate is the same).
+  const bare = await fixture()
+  await assert.rejects(bare.service(bare.request({ rules, exclusionOverrides: overrides, idempotency: { clientId: 'client-1', key: 'bare-1' } })), (error) => error instanceof DomainError && /cover every detected phrase/.test(error.message))
+  const { service, request } = await fixture()
+  const result = await service(request({ rules, exclusionOverrides: overrides, confirmation: { subject: 'datas', medium: 'ui-session', passages: [cutPassage], discarded: [kept], search } }))
+  assert.deepEqual(result.exclusions.map(({ sourceStartSeconds, sourceEndSeconds }) => [sourceStartSeconds, sourceEndSeconds]), [[38.5, 42.7]])
+  assert.deepEqual(result.command.payload.confirmation.discarded, [kept])
+  // A stretch recorded as kept that overlaps the cut is no stretch kept; and one that does not hold the left-behind mention covers nothing.
+  const overlap = await fixture()
+  await assert.rejects(overlap.service(overlap.request({ rules, exclusionOverrides: overrides, idempotency: { clientId: 'client-1', key: 'overlap-1' },
+    confirmation: { subject: 'datas', medium: 'ui-session', passages: [cutPassage], discarded: [{ id: 'passage-2', startSeconds: 40, endSeconds: 57.72 }], search } })), (error) => error instanceof DomainError)
+  const elsewhere = await fixture()
+  await assert.rejects(elsewhere.service(elsewhere.request({ rules, exclusionOverrides: overrides, idempotency: { clientId: 'client-1', key: 'elsewhere-1' },
+    confirmation: { subject: 'datas', medium: 'ui-session', passages: [cutPassage], discarded: [{ id: 'passage-2', startSeconds: 60, endSeconds: 70 }], search } })), (error) => error instanceof DomainError && /cover every detected phrase/.test(error.message))
+})

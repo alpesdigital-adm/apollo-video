@@ -232,11 +232,18 @@ export function speechCandidateLine(startSeconds: number, endSeconds: number, te
 }
 
 /** The Apollo found the subject to take out of the speech and asks the owner to confirm exactly what would go. */
-export function speechRemovalConfirmQuestion(subject: string, lines: readonly string[], more: number, basis: 'phrase' | 'words'): string {
+export function speechRemovalConfirmQuestion(subject: string, lines: readonly string[], more: number, basis: 'phrase' | 'words', literalNotice?: string): string {
   const found = basis === 'phrase'
-    ? `Achei trechos sobre “${subject}” na fala`
-    : `Não achei a frase “${subject}” inteira; achei trechos com as palavras dela`
-  return `${found}. Estes trechos sairiam do vídeo: ${lines.join(' | ')}${more > 0 ? ` | e mais ${more}` : ''}. Confirme para o Apollo cortar; nada é cortado sem a sua confirmação.`
+    ? `Achei ${lines.length + more === 1 ? 'um trecho' : 'trechos'} sobre “${subject}” na fala`
+    : `Não achei a frase “${subject}” inteira; achei ${lines.length + more === 1 ? 'um trecho' : 'trechos'} com as palavras dela`
+  return `${found}. ${lines.length + more === 1 ? 'Este trecho sairia' : 'Estes trechos sairiam'} do vídeo, do começo ao fim da conversa sobre o assunto: ${lines.join(' | ')}${more > 0 ? ` | e mais ${more}` : ''}. Confira o texto inteiro de cada trecho; você pode ajustar onde ele começa e onde termina. Confirme para o Apollo cortar; nada é cortado sem a sua confirmação.${literalNotice ? ` ${literalNotice}` : ''}`
+}
+
+/** The transcript is in a language the Apollo has no word variations for (or records none): only the words as spoken were searched. */
+export function speechSearchLiteralNotice(language: string | null): string {
+  return language === null
+    ? 'A transcrição não diz o idioma da fala, então o Apollo procurou só as palavras exatamente como foram ditas, sem variações (como venda e vender).'
+    : `O Apollo ainda não tem variações de palavras para o idioma “${language}”, então procurou só as palavras exatamente como foram ditas, sem variações (como venda e vender). Confira se o trecho cobre toda a conversa.`
 }
 
 /** The subject to take out of the speech is not in the transcript. */

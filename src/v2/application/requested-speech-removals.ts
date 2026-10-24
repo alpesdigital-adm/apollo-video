@@ -1,3 +1,4 @@
+import { isSpeechRemovalConfirmationRecord } from '../domain/editorial-cut-impact.ts'
 import { DomainError } from '../domain/errors.ts'
 import {
   resolveSubtitleOverridesForRender, type SubtitleOverrideRenderCue, type SubtitleSegmentOverride,
@@ -41,10 +42,11 @@ function removalRulesOf(command: Readonly<SpeechRemovalLineageCommand>): readonl
   try {
     // The same definition the cut itself applied: ids, labels and alternatives are validated and tokenised identically.
     const rules = defineEditorialPhraseRules(stored as readonly Readonly<{ id: string; label: string; alternatives: readonly string[] }>[])
-    // Only the confirmation capability writes this, with a verified actor; a client's explicit Command never carries it.
-    const confirmation = command.payload.confirmation as { subject?: unknown; medium?: unknown } | undefined
-    return confirmation !== undefined && typeof confirmation.subject === 'string' && (confirmation.medium === 'ui-session' || confirmation.medium === 'api-key-scope')
-      ? rules.map((rule) => Object.freeze({ ...rule, confirmation: Object.freeze({ subject: confirmation.subject as string, medium: confirmation.medium as 'ui-session' | 'api-key-scope' }) }))
+    // Only the confirmation capability writes this, with a verified actor; a client's explicit Command never carries it. One that is not exactly what the capability
+    // writes (a key too many, a passage out of shape) is no confirmation at all: the cut stands as a valid explicit cut and the question is asked again.
+    const confirmation = command.payload.confirmation
+    return isSpeechRemovalConfirmationRecord(confirmation)
+      ? rules.map((rule) => Object.freeze({ ...rule, confirmation }))
       : rules
   } catch (error) {
     if (error instanceof DomainError) {

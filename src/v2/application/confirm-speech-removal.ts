@@ -4,12 +4,19 @@ import { requireScope, type AuthenticatedExternalActor } from './authenticate-ap
 import type { EditorialCommandRepository } from './ports/editorial-command-repository.ts'
 import type { EditorialRequestRepository } from './ports/editorial-request-repository.ts'
 import { describeEditorialRequest } from './revise-editorial-request.ts'
+import { confirmSpeechPassages, type SpeechPassageAdjustment } from './speech-passage.ts'
 import { proposeSpeechRemoval } from './speech-removal-proposal.ts'
 
 /**
- * The owner CONFIRMS a cut the Apollo proposed (ADR-160): "tire o trecho que fala de X" became a question with the stretches that would go, and this is the
- * answer. The caller names the SUBJECT, never the words: the rule of the removal Command is the one the Apollo proposes for that subject from the transcript, so what is
- * cut is exactly what the owner was shown, and a caller cannot dress another cut up as a confirmation.
+ * The owner CONFIRMS a cut the Apollo proposed (ADR-160): "tire o trecho que fala de X" became a question with the PASSAGES that would go (each a block of speech
+ * from the first sentence that mentions the subject to the last), and this is the answer. The caller names the SUBJECT, never the words: the rule of the removal
+ * Command is the one the Apollo proposes for that subject from the transcript, so what is cut is exactly what the owner was shown, and a caller cannot dress another
+ * cut up as a confirmation.
+ *
+ * The person may ADJUST where a passage starts and ends (`adjustments`), only to the start of a word or segment and the end of one, within the limits the proposal
+ * gave (not into the neighbouring passage, not beyond the speech), and never leaving out a mention that anchors the passage. Without an adjustment the passage is the
+ * proposed one. The cut is exactly the passages as confirmed, and the Command records them (`confirmation.passages`: the bounds cut, the bounds proposed, whether
+ * the person moved them).
  *
  * Who may confirm (the id and the words of a proposal are computable and are shown in the refusal of the Director, so they prove nothing):
  *  - a person on a screen: the user session (`ui-session`) is the person;
@@ -26,6 +33,15 @@ export interface ConfirmSpeechRemovalRequest {
   variantId: string
   /** The subject exactly as a `remove-speech` directive of the current request states it. */
   subject: string
+  /**
+   * The seal of what the person was shown (`proposalHash` of the proposal): the Apollo searches the transcript again and refuses the confirmation when what it finds now is
+   * not what the person saw (the transcript or the search changed between showing and confirming). Nothing is cut that the person has not seen.
+   */
+  proposalHash: string
+  /** The passages the person moved, by id: where each one starts and ends instead. A passage not named here is cut as proposed. */
+  adjustments?: readonly Readonly<SpeechPassageAdjustment>[]
+  /** The passages the person chose NOT to cut, by id: they stay in the video and the Command records that they were offered and kept. At least one passage is cut. */
+  discardedPassageIds?: readonly string[]
   reason?: string
   actor: Readonly<AuthenticatedExternalActor>
   idempotency: ApplyEditorialCutCommandRequest['idempotency']
@@ -74,14 +90,39 @@ export function confirmSpeechRemovalService(dependencies: Readonly<{
         'The request asks for this cut for one output of several; a cut takes the stretches out of the video every output plays, so it is not confirmed for one output alone')
     }
     const proposal = proposeSpeechRemoval(subject, context.transcript, { sourceTranscriptId: request.sourceTranscriptId })
-    assertDomain(proposal.searchable && proposal.matches.length > 0, 'INVALID_COMMAND', 'The speech does not say this subject, so there is nothing to confirm')
+    assertDomain(proposal.searchable && proposal.matches.length > 0 && proposal.passages !== undefined && proposal.passages.length > 0 && proposal.search !== undefined,
+      'INVALID_COMMAND', 'The speech does not say this subject, so there is nothing to confirm')
+    // What the person saw is what the Apollo finds now, or nothing is cut.
+    if (typeof request.proposalHash !== 'string' || request.proposalHash !== proposal.proposalHash) {
+      throw new DomainError('VERSION_CONFLICT', 'The passages the person was shown are not the ones the Apollo finds now (the transcript or the search changed); read the proposal again and confirm what it shows', {
+        reason: 'speech-removal-proposal-changed',
+      })
+    }
+    // Refused whole when any adjustment leaves its limits: the cut is what the person confirmed or it is not made.
+    const { confirmed: passages, discarded } = confirmSpeechPassages({
+      passages: proposal.passages!, words: context.transcript.words, segments: context.transcript.segments,
+      ...(request.adjustments !== undefined ? { adjustments: request.adjustments } : {}),
+      ...(request.discardedPassageIds !== undefined ? { discarded: request.discardedPassageIds } : {}),
+    })
+    const { maxGapSeconds, maxGapSentences, maxSentenceSeconds, maxPassageSeconds, maxMentions, name } = proposal.search!.policy
     return (dependencies.apply ?? applyEditorialCutCommandService)({
       repository: dependencies.cuts, clock: dependencies.clock, createId: dependencies.createId, createEventId: dependencies.createEventId,
     })({
       workspaceId: request.workspaceId, projectId: request.projectId, baseVersionId: request.baseVersionId, baseHash: request.baseHash,
       sourceTranscriptId: request.sourceTranscriptId, variantId: request.variantId,
       rules: [{ id: proposal.ruleId, label: proposal.label, alternatives: [...proposal.alternatives] }],
-      confirmation: { subject, medium },
+      exclusionOverrides: passages.map((passage) => ({
+        sourceStartSeconds: passage.startSeconds, sourceEndSeconds: passage.endSeconds, ruleIds: [proposal.ruleId],
+        reason: `Passage ${passage.id} confirmed by a person ${passage.adjusted ? 'with adjusted bounds' : 'as proposed'}`,
+      })),
+      confirmation: {
+        subject, medium, passages: [...passages],
+        ...(discarded.length > 0 ? { discarded: [...discarded] } : {}),
+        search: {
+          matching: proposal.search!.matching, language: proposal.search!.language, lexicon: proposal.search!.lexicon,
+          policy: { name, maxGapSeconds, maxGapSentences, maxSentenceSeconds, maxPassageSeconds, maxMentions },
+        },
+      },
       ...(request.reason?.trim() ? { reason: request.reason.trim() } : {}),
       actor: request.actor, idempotency: request.idempotency,
     })

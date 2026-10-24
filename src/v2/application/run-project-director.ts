@@ -1136,7 +1136,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const removalSubjects = [...new Set([...editorialRequest.directives, ...Object.values(editorialRequest.variantOverrides).flat(), ...(editorialRequest.interpretation?.directives ?? [])]
       .filter((directive) => directive.kind === 'remove-speech').map((directive) => String(directive.param)))]
     const speechRemovalProposals = context.transcript.words !== undefined
-      ? removalSubjects.map((subject) => proposeSpeechRemoval(subject, { words: context.transcript.words!, ...(context.transcript.segments ? { segments: context.transcript.segments } : {}) },
+      ? removalSubjects.map((subject) => proposeSpeechRemoval(subject, { words: context.transcript.words!, ...(context.transcript.segments ? { segments: context.transcript.segments } : {}), ...(reportedLanguage ? { language: reportedLanguage } : {}) },
         { sourceTranscriptId: context.transcript.id, requested: context.requestedSpeechRemovals })) : []
     const resolution = resolveEditorialPolicies(editorialRequest, {
       transcriptId: context.transcript.id, ...(transcriptLanguage ? { transcriptLanguage, transcriptLanguageBasis: context.transcript.languageBasis ?? 'declared-not-verified' as const } : {}),

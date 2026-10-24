@@ -190,7 +190,68 @@ export interface SpeechRemovalProposal {
   basis: 'phrase' | 'words'
   /** False when the subject is too long to be searched as a phrase. */
   searchable: boolean
+  /** The stretches that would go, one per passage (the passage's time and its text, shortened to a line): the question the owner reads. */
   matches: readonly Readonly<{ startSeconds: number; endSeconds: number; text: string }>[]
+  /**
+   * The subject as it is spoken in PASSAGES (a block of contiguous speech from the first sentence that mentions it to the last, with the sentences between),
+   * so confirming does not leave a talk cut in pieces. Each passage carries the whole text, the mentions that anchor it and the limits within which a person
+   * may move its start and end before confirming.
+   */
+  passages?: readonly Readonly<SpeechRemovalPassage>[]
+  /**
+   * The seal of what a person is shown: a hash of the passages (ids, bounds, whole text, mentions) and of how they were searched. The confirmation carries it back and the
+   * Apollo, which searches the transcript again, refuses to cut when it differs: a person confirms exactly what was shown, or nothing is cut.
+   */
+  proposalHash?: string
+  /** How the transcript was searched: by variation of the word (stem) or literally, and the technical policy that grouped the mentions into passages. */
+  search?: Readonly<SpeechRemovalSearch>
+}
+
+/** A word of the speech that mentions the subject, as spoken. */
+export interface SpeechRemovalMention {
+  startSeconds: number
+  endSeconds: number
+  text: string
+}
+
+/** One segment of the transcript around a passage: what a person sees to move the start or the end of the passage. */
+export interface SpeechRemovalSegmentLine {
+  id: number
+  startSeconds: number
+  endSeconds: number
+  text: string
+  inPassage: boolean
+}
+
+/** A block of speech the subject is spoken in, from the start of a sentence to the end of a sentence, with every sentence between its mentions. */
+export interface SpeechRemovalPassage {
+  /** Stable for these bounds and this rule: an adjustment names the passage by it, so an adjustment of another proposal is refused. */
+  id: string
+  startSeconds: number
+  endSeconds: number
+  /** The whole text of the passage. */
+  text: string
+  /** The mentions of the subject that anchor the passage: a passage never ends up without them. */
+  mentions: readonly Readonly<SpeechRemovalMention>[]
+  /** Where the passage may be moved to by a person: not into the neighbouring passage, not beyond the speech. */
+  limits: Readonly<{ earliestStartSeconds: number; latestEndSeconds: number }>
+  /** The segments of the passage and a few around it. */
+  segments: readonly Readonly<SpeechRemovalSegmentLine>[]
+  /** What the passage was extended to: whole sentences, whole segments (the transcript has no sentence marks) or only the word (it has neither). */
+  boundary: 'sentence' | 'segment' | 'word'
+}
+
+export interface SpeechRemovalSearch {
+  /** The language of the transcript as recorded (null: it records none). */
+  language: string | null
+  /** `stem`: variations of a word were searched too (venda, vender, vendido). `literal`: only the word as spoken, because the Apollo has no variations for this language. */
+  matching: 'stem' | 'literal'
+  /** The lexicon the variations come from (null when the search is literal). */
+  lexicon: string | null
+  /** Said to the owner when the search is literal. */
+  notice?: string
+  /** The technical parameters that grouped the mentions into passages: a search parameter with its origin, not an editorial value. */
+  policy: Readonly<{ name: string; maxGapSeconds: number; maxGapSentences: number; maxSentenceSeconds: number; maxPassageSeconds: number; maxMentions: number; origin: 'technical-search-parameter' }>
 }
 
 /** A directive that needs no work to be satisfied, and what satisfies it. Present in a resolution only when there is one. */
@@ -895,7 +956,7 @@ export function resolveEditorialPolicies(
       const shown = proposal.matches.slice(0, SPEECH_CANDIDATES_SHOWN)
       openQuestions.push(Object.freeze({
         id, source: 'resolution' as const, removal: proposal,
-        question: speechRemovalConfirmQuestion(subject, shown.map((match) => speechCandidateLine(match.startSeconds, match.endSeconds, match.text)), proposal.matches.length - shown.length, proposal.basis),
+        question: speechRemovalConfirmQuestion(subject, shown.map((match) => speechCandidateLine(match.startSeconds, match.endSeconds, match.text)), proposal.matches.length - shown.length, proposal.basis, proposal.search?.notice),
       }))
     }
   })

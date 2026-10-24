@@ -321,7 +321,7 @@ import type { ProjectOutputStateV2, ProjectOutputStateV3 } from './project-outpu
 import { createEditorialSourceBindingV1 } from './output-materialization.ts'
 import { CHILD_COMMAND_TRANSITIONS, type ChildCommandOriginV3 } from './output-child-command.ts'
 import { validateRenderableCompileOriginV3, type RenderableCompileOriginV3 } from './renderable-compile-command.ts'
-import type { EditorialCutPayloadV3 } from './editorial-cut-impact.ts'
+import { isSpeechRemovalConfirmationRecord, type EditorialCutPayloadV3 } from './editorial-cut-impact.ts'
 export type OperationalOutputOriginV3 = Readonly<
   { kind:'create-output-variant'|'revise-output-spec'; result:ReturnType<typeof createOutputVariantCommand> } |
   { kind:'ingest-operation'; operation:PublicOperation; requestFingerprint:string; leaseOwner:string;
@@ -420,7 +420,7 @@ export function validateOperationalOutputOriginV3(input: OperationalOutputOrigin
       const c=input.command,p=c.payload,b=createEditorialSourceBindingV1(p.sourceBinding.document)
       exact(p,['schemaVersion','sourceTranscriptId','sourceArtifactId','variantId','rules','exclusions','sourceBinding','editPlanHash','audioProjection','impact',
         ...(p.exclusionOverrides===undefined?[]:['exclusionOverrides']),...(p.confirmation===undefined?[]:['confirmation'])])
-      assertDomain(p.confirmation===undefined||(typeof p.confirmation.subject==='string'&&p.confirmation.subject.length>0&&(p.confirmation.medium==='ui-session'||p.confirmation.medium==='api-key-scope')&&Object.keys(p.confirmation).length===2),'INVALID_COMMAND','Editorial confirmation is malformed')
+      assertDomain(p.confirmation===undefined||isSpeechRemovalConfirmationRecord(p.confirmation),'INVALID_COMMAND','Editorial confirmation is malformed')
       const d=b.document
       requireOutputHash(p.editPlanHash,'editorial plan seal')
       assertDomain(c.type==='remove-spoken-content'&&p.schemaVersion===3&&c.author.type==='api-client'&&

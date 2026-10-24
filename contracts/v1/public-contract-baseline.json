@@ -8970,14 +8970,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.speech-removals.confirm": {
-      "version": "2.0.0",
+      "version": "3.0.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
       "requiredScopes": [
         "projects:write"
       ],
-      "inputSchemaRef": "apollo://schemas/confirm-speech-removal-request/v1",
+      "inputSchemaRef": "apollo://schemas/confirm-speech-removal-request/v2",
       "outputSchemaRef": "apollo://schemas/project-edit-command-applied/v10",
       "endpoint": {
         "method": "POST",
@@ -45635,6 +45635,98 @@
           "minLength": 1,
           "maxLength": 200,
           "description": "The subject exactly as a remove-speech directive of the current request states it."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    },
+    "apollo://schemas/confirm-speech-removal-request/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "baseHash",
+        "sourceTranscriptId",
+        "variantId",
+        "subject",
+        "proposalHash"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sourceTranscriptId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "variantId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "The subject exactly as a remove-speech directive of the current request states it."
+        },
+        "proposalHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "The proposalHash of the proposal the person was shown (in the question of the Director). The Apollo searches the transcript again and refuses the confirmation when what it finds is not what the person saw: nothing is cut that was not seen."
+        },
+        "discardedPassageIds": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": "Optional. The passages of the proposal the person chose NOT to cut. They stay in the video and the Command records that they were offered and kept. At least one passage must be cut, and a discarded passage cannot be adjusted."
+        },
+        "adjustments": {
+          "type": "array",
+          "maxItems": 64,
+          "description": "Optional. The passages of the proposal whose start or end the person moved. A passage that is not named is cut as proposed. A start must be the start of a word or of a segment of the transcript and an end the end of one, inside the limits of the passage (not into the neighbouring passage, not beyond the speech), and the passage must still hold every mention that anchors it. Anything else refuses the whole confirmation: nothing is cut.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "passageId",
+              "startSeconds",
+              "endSeconds"
+            ],
+            "properties": {
+              "passageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "description": "The id of a passage of the proposal."
+              },
+              "startSeconds": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Where the passage starts instead, in seconds of the source."
+              },
+              "endSeconds": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Where the passage ends instead, in seconds of the source."
+              }
+            }
+          }
         },
         "reason": {
           "type": "string",

@@ -2151,7 +2151,7 @@ test('ADR-160 coverage: a subject the request takes out of the speech is searche
   const [question] = refusal.details.openQuestions
   assert.equal(question.id, 'speech-removal-1')
   assert.deepEqual(question.removal.matches, [{ startSeconds: 20, endSeconds: 24, text: sentence }])
-  assert.match(question.question, /Achei trechos sobre “relâmpago” na fala/)
+  assert.match(question.question, /Achei um trecho sobre “relâmpago” na fala/)
   assert.equal(asked.repository.lastBundle, undefined, 'nothing is persisted, nothing is cut')
   // The owner confirms with the removal Command carrying the proposed rule: the lineage now holds it, and the Director plans.
   const [proposedRule] = defineEditorialPhraseRules([{ id: question.removal.ruleId, label: question.removal.label, alternatives: question.removal.alternatives }])

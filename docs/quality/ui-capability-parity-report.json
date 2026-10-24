@@ -2958,9 +2958,9 @@
       ]
     },
     {
-      "uiAction": "src/components/SpeechCutConfirmation.tsx:37",
+      "uiAction": "src/components/SpeechCutConfirmation.tsx:75",
       "capabilityId": "apollo.projects.speech-removals.confirm",
-      "capabilityVersion": "2.0.0",
+      "capabilityVersion": "3.0.0",
       "endpoint": "POST /v1/projects/{projectId}/speech-removals",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -6471,7 +6471,7 @@
       "capabilityId": "apollo.projects.speech-removals.confirm",
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/speech-removals",
-      "inputSchemaRef": "apollo://schemas/confirm-speech-removal-request/v1",
+      "inputSchemaRef": "apollo://schemas/confirm-speech-removal-request/v2",
       "outputSchemaRef": "apollo://schemas/project-edit-command-applied/v10",
       "internalOnlySurfaceId": null,
       "tests": [
