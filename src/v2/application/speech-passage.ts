@@ -91,9 +91,12 @@ function passageId(ruleId: string, start: number, end: number): string {
 
 /** The first and the last instant of speech of a transcript: a passage never goes beyond them. */
 function speechSpan(words: readonly TranscriptWord[], segments: readonly TranscriptSegment[]): { start: number; end: number } {
-  const starts = [...words.map((word) => word.start), ...segments.map((segment) => segment.start)]
-  const ends = [...words.map((word) => word.end), ...segments.map((segment) => segment.end)]
-  return { start: starts.length > 0 ? Math.min(...starts) : 0, end: ends.length > 0 ? Math.max(...ends) : 0 }
+  // (A loop, not Math.min(...all): a transcript may hold hundreds of thousands of words.)
+  let start = Number.POSITIVE_INFINITY
+  let end = Number.NEGATIVE_INFINITY
+  for (const word of words) { start = Math.min(start, word.start); end = Math.max(end, word.end) }
+  for (const segment of segments) { start = Math.min(start, segment.start); end = Math.max(end, segment.end) }
+  return { start: Number.isFinite(start) ? start : 0, end: Number.isFinite(end) ? end : 0 }
 }
 
 /**
