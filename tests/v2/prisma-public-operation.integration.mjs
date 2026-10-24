@@ -299,7 +299,9 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     let holding
     const held = new Promise((resolve) => { release = resolve })
     const taken = new Promise((resolve) => { holding = resolve })
-    const holder = client.$transaction(async (transaction) => {
+    // The holder has a connection of its own: the harness pools a single connection per client, and the heartbeat needs one to be refused or answered.
+    const holderClient = new PrismaClient()
+    const holder = holderClient.$transaction(async (transaction) => {
       await transaction.$queryRawUnsafe('SELECT id FROM public_operations WHERE id = $1 FOR UPDATE', operationId)
       holding()
       await held
@@ -314,6 +316,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     } finally {
       release()
       await holder
+      await holderClient.$disconnect()
     }
 
     const waiting = await repository.wait({
