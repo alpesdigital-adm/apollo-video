@@ -205,6 +205,8 @@ export interface CutProposal {
   subject: string
   sourceTranscriptId: string
   matches: readonly { startSeconds: number; endSeconds: number; text: string }[]
+  /** The seal of what is shown: the confirmation carries it back, and the Apollo refuses to cut anything else. */
+  proposalHash: string
   /** The passages that would go (empty when the answer predates passages: the stretches in `matches` are then all there is to show). */
   passages: readonly CutPassage[]
   /** Said when only the words as spoken were searched, because the Apollo has no variations for the language. */
@@ -227,12 +229,13 @@ function cutPassagesOf(value: unknown): readonly CutPassage[] {
 /** The cuts a refusal asks the owner to confirm: only a proposal that found something in the speech, with the subject and the transcript it was searched in. */
 export function cutProposalsOf(blockers: readonly unknown[]): readonly CutProposal[] {
   return blockers.flatMap((blocker) => {
-    const entry = blocker as { kind?: unknown; text?: unknown; removal?: { subject?: unknown; sourceTranscriptId?: unknown; matches?: unknown; passages?: unknown; search?: { notice?: unknown } } } | null
+    const entry = blocker as { kind?: unknown; text?: unknown; removal?: { subject?: unknown; sourceTranscriptId?: unknown; matches?: unknown; proposalHash?: unknown; passages?: unknown; search?: { notice?: unknown } } } | null
     const removal = entry?.removal
     if (entry?.kind !== 'question' || typeof entry.text !== 'string' || !removal || typeof removal.subject !== 'string' || typeof removal.sourceTranscriptId !== 'string' ||
       !Array.isArray(removal.matches) || removal.matches.length === 0) return []
     return [{
       question: entry.text, subject: removal.subject, sourceTranscriptId: removal.sourceTranscriptId, matches: removal.matches as CutProposal['matches'],
+      proposalHash: typeof removal.proposalHash === 'string' ? removal.proposalHash : '',
       passages: cutPassagesOf(removal.passages),
       ...(typeof removal.search?.notice === 'string' ? { notice: removal.search.notice } : {}),
     }]
@@ -273,6 +276,20 @@ export function cutEndOptions(passage: Readonly<CutPassage>): readonly CutBounda
   return options.sort((left, right) => left.seconds - right.seconds)
 }
 
+/**
+ * The text of the passage as it stands for the bounds CHOSEN: the segments of the speech between them, whole. What a person reads is exactly what is cut, so it is
+ * made from the segments inside the chosen bounds, never from the text of the proposed passage. (A passage the speech holds no segments for has only its own text.)
+ */
+export function cutTextOfRange(passage: Readonly<CutPassage>, startSeconds: number, endSeconds: number): string {
+  const inside = passage.segments.filter((segment) => segment.startSeconds >= startSeconds - EPS && segment.endSeconds <= endSeconds + EPS)
+  return inside.length > 0 ? inside.map((segment) => segment.text.trim()).join(' ') : passage.text
+}
+
+/** The mentions of the passage that lie inside the chosen bounds. */
+export function cutMentionsInRange(passage: Readonly<CutPassage>, startSeconds: number, endSeconds: number): readonly CutMention[] {
+  return passage.mentions.filter((mention) => mention.startSeconds >= startSeconds - EPS && mention.endSeconds <= endSeconds + EPS)
+}
+
 /** The adjustments to send: only the passages whose start or end the person moved from what the Apollo proposed. */
 export function cutAdjustmentsOf(passages: readonly CutPassage[], chosen: Readonly<Record<string, { startSeconds: number; endSeconds: number }>>): readonly { passageId: string; startSeconds: number; endSeconds: number }[] {
   return passages.flatMap((passage) => {
@@ -306,6 +323,8 @@ export const CUT_CONFIRMATION_TEXTS = Object.freeze({
   endLabel: 'Termina em',
   moved: 'Você mudou este trecho. O corte será exatamente o que está escolhido aqui.',
   proposed: 'Este é o trecho como o Apollo propôs.',
+  keep: 'Não cortar este trecho (ele fica no vídeo)',
+  keptState: 'Este trecho não será cortado.',
   button: 'Confirmar corte',
   working: 'Cortando…',
   done: 'Corte feito. O vídeo foi refeito sem esses trechos; peça ao Diretor de novo.',

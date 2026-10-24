@@ -19,7 +19,7 @@ import { presentSuccess } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
 
-const FIELDS = ['baseVersionId', 'baseHash', 'sourceTranscriptId', 'variantId', 'subject', 'adjustments', 'reason']
+const FIELDS = ['baseVersionId', 'baseHash', 'sourceTranscriptId', 'variantId', 'subject', 'proposalHash', 'adjustments', 'discardedPassageIds', 'reason']
 const ADJUSTMENT_FIELDS = ['passageId', 'startSeconds', 'endSeconds']
 
 /** The adjustments a person made to the passages of the proposal: each names a passage and where it starts and ends instead. The service checks them against the proposal. */
@@ -52,11 +52,14 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     }
     if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new DomainError('INVALID_ARGUMENT', 'Request body must be an object')
     if (Object.keys(body).some((key) => !FIELDS.includes(key))) throw new DomainError('INVALID_ARGUMENT', 'Request body contains an unsupported field')
-    for (const field of ['baseVersionId', 'baseHash', 'sourceTranscriptId', 'variantId', 'subject']) {
+    for (const field of ['baseVersionId', 'baseHash', 'sourceTranscriptId', 'variantId', 'subject', 'proposalHash']) {
       if (typeof body[field] !== 'string') throw new DomainError('INVALID_ARGUMENT', `${field} must be a string`)
     }
     if (body.reason !== undefined && typeof body.reason !== 'string') throw new DomainError('INVALID_ARGUMENT', 'reason must be a string')
     const adjustments = readAdjustments(body.adjustments)
+    if (body.discardedPassageIds !== undefined && (!Array.isArray(body.discardedPassageIds) || body.discardedPassageIds.length > 64 || body.discardedPassageIds.some((id) => typeof id !== 'string'))) {
+      throw new DomainError('INVALID_ARGUMENT', 'discardedPassageIds must be a list of at most 64 passage ids')
+    }
     const { projectId } = await context.params
     const result = await confirmSpeechRemovalService({
       requests: createEditorialRequestRepository(),
@@ -72,6 +75,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       sourceTranscriptId: body.sourceTranscriptId as string,
       variantId: body.variantId as string,
       subject: body.subject as string,
+      proposalHash: body.proposalHash as string,
+      ...(body.discardedPassageIds !== undefined ? { discardedPassageIds: body.discardedPassageIds as string[] } : {}),
       ...(adjustments !== undefined ? { adjustments } : {}),
       ...(typeof body.reason === 'string' && body.reason.trim() ? { reason: body.reason.trim() } : {}),
       actor,

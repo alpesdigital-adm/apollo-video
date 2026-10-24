@@ -241,13 +241,16 @@ function presentRemovalSearch(value: unknown) {
   const search = value as Record<string, unknown> | null | undefined
   const policy = search?.policy as Record<string, unknown> | undefined
   if (!search || (search.matching !== 'stem' && search.matching !== 'literal') || !policy || !plainSentence(policy.name, 100) || !second(policy.maxGapSeconds) ||
-    !second(policy.maxGapSentences) || !second(policy.maxSentenceSeconds)) return undefined
+    !second(policy.maxGapSentences) || !second(policy.maxSentenceSeconds) || !second(policy.maxPassageSeconds) || !second(policy.maxMentions)) return undefined
   return {
     matching: search.matching,
     language: plainSentence(search.language, 35) ?? null,
     lexicon: plainSentence(search.lexicon, 60) ?? null,
     ...(plainSentence(search.notice, 600) ? { notice: search.notice } : {}),
-    policy: { name: policy.name, maxGapSeconds: policy.maxGapSeconds, maxGapSentences: policy.maxGapSentences, maxSentenceSeconds: policy.maxSentenceSeconds, origin: 'technical-search-parameter' },
+    policy: {
+      name: policy.name, maxGapSeconds: policy.maxGapSeconds, maxGapSentences: policy.maxGapSentences, maxSentenceSeconds: policy.maxSentenceSeconds,
+      maxPassageSeconds: policy.maxPassageSeconds, maxMentions: policy.maxMentions, origin: 'technical-search-parameter',
+    },
   }
 }
 
@@ -281,6 +284,7 @@ function presentEditorialRequestBlockers(details: Readonly<Record<string, unknow
         ...(removal && typeof removal.ruleId === 'string' && /^[a-z0-9][a-z0-9-]{1,63}$/u.test(removal.ruleId) && plainSentence(removal.label, 200) && matches && alternatives
           ? { removal: {
             ruleId: removal.ruleId, label: removal.label, alternatives, matches,
+            ...(typeof removal.proposalHash === 'string' && /^[a-f0-9]{64}$/u.test(removal.proposalHash) ? { proposalHash: removal.proposalHash } : {}),
             ...(presentRemovalPassages(removal.passages) ? { passages: presentRemovalPassages(removal.passages) } : {}),
             ...(presentRemovalSearch(removal.search) ? { search: presentRemovalSearch(removal.search) } : {}),
             ...(plainSentence(removal.subject, 200) ? { subject: removal.subject } : {}),

@@ -126,6 +126,9 @@ export function editorialRulesMatchingSpeech(
   const tokens = editorialSpeechTokens(text)
   const found: string[] = []
   for (const rule of rules) {
+    // A rule whose confirmation recorded passages the person chose NOT to cut leaves the subject in the video on purpose, where the person kept it: the text of the
+    // captions cannot tell that stretch from a stretch that should be gone, so it is not judged by the words (the Command records which passages were kept).
+    if (rule.confirmation?.discarded !== undefined && rule.confirmation.discarded.length > 0) continue
     const present = rule.alternatives.some((phrase) => {
       for (let start = 0; start + phrase.length <= tokens.length; start += 1) {
         if (phrase.every((token, offset) => tokens[start + offset] === token)) return true

@@ -46,7 +46,7 @@ const GRANTED_ACTOR = actorOf('bearer', ['projects:write', 'speech-removals:conf
 const UNGRANTED_ACTOR = actorOf('bearer', ['projects:write'])
 const request = (overrides = {}) => ({
   workspaceId: 'workspace-1', projectId: 'project-1', baseVersionId: 'version-1', baseHash: 'b'.repeat(64), sourceTranscriptId: 'transcript-1', variantId: 'variant-1',
-  subject: 'sorteio', actor: UI_ACTOR, idempotency: { clientId: 'client-1', key: 'confirm-cut-1' }, ...overrides,
+  subject: 'sorteio', proposalHash: proposeSpeechRemoval('sorteio', transcript).proposalHash, actor: UI_ACTOR, idempotency: { clientId: 'client-1', key: 'confirm-cut-1' }, ...overrides,
 })
 function world(directives = [directive('sorteio')], version = 'version-1') {
   const applied = []
@@ -170,4 +170,26 @@ test('the capability needs human approval for an agent: the general Command does
   assert.ok(publicSchemaExamples(getPublicSchema('apollo://schemas/confirm-speech-removal-request/v2')).length >= 2)
   // The v1 contract stays published, unchanged: the new capability reads a new ref.
   assert.equal('adjustments' in getPublicSchema('apollo://schemas/confirm-speech-removal-request/v1').schema.properties, false)
+})
+
+test('nothing is cut that the person was not shown: the seal of the proposal must be the one the Apollo finds now', async () => {
+  const { service, applied } = world()
+  for (const [label, proposalHash] of [['absent', undefined], ['another proposal', 'f'.repeat(64)], ['not a hash', 'x']]) {
+    await assert.rejects(service(request({ proposalHash })), (error) => error.code === 'VERSION_CONFLICT' && error.details?.reason === 'speech-removal-proposal-changed', label)
+  }
+  // The transcript changed after the person looked: the text of the same sentence is not the one that was shown.
+  const shown = proposeSpeechRemoval('sorteio', transcript).proposalHash
+  const changed = createMediaTranscript({
+    language: 'pt', text: 'um sorteio hoje. depois o conteúdo.', provider: 'controlled', model: 'stub/v1',
+    words: transcript.words, segments: [{ id: 0, text: 'um sorteio de hoje.', start: 0, end: 1.5 }, { id: 1, text: 'depois o conteúdo.', start: 2, end: 3.4 }],
+  })
+  const moved = confirmSpeechRemovalService({
+    requests: { async readCurrent() { return current([directive('sorteio')]) } }, cuts: { async readContext() { return { transcript: changed } } },
+    clock: () => new Date(), createId: (kind) => kind, createEventId: () => 'event', apply: () => async (input) => { applied.push(input); return { applied: true } },
+  })
+  await assert.rejects(moved(request({ proposalHash: shown })), (error) => error.code === 'VERSION_CONFLICT')
+  assert.deepEqual(applied, [], 'nothing was applied')
+  await service(request())
+  assert.equal(applied.length, 1)
+  assert.equal(applied[0].confirmation.discarded, undefined, 'nothing was kept on purpose')
 })

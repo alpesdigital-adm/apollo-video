@@ -123,7 +123,7 @@ test('ADR-160 coverage: the rule that answers a cut is the subject\'s own, and t
   const transcript = w70Transcript()
   const phrase = proposeSpeechRemoval('formulário de inscrição', transcript)
   assert.equal(phrase.basis, 'phrase')
-  assert.deepEqual(phrase.alternatives.toSorted(), ['formulário', 'formulário de inscrição', 'inscrição'], 'the rule looks for the forms the speech says')
+  assert.deepEqual(phrase.alternatives, ['formulário de inscrição'], 'the phrase is the subject: the rule looks for the forms of it that the speech says')
   assert.equal(phrase.matches[0].startSeconds, 58)
   // The whole phrase is not spoken: the words longer than three letters are searched one by one, and the proposal says so.
   const words = proposeSpeechRemoval('sorteio e do formulário de inscrição', transcript)

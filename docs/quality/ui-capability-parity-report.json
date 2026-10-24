@@ -2958,7 +2958,7 @@
       ]
     },
     {
-      "uiAction": "src/components/SpeechCutConfirmation.tsx:61",
+      "uiAction": "src/components/SpeechCutConfirmation.tsx:75",
       "capabilityId": "apollo.projects.speech-removals.confirm",
       "capabilityVersion": "3.0.0",
       "endpoint": "POST /v1/projects/{projectId}/speech-removals",

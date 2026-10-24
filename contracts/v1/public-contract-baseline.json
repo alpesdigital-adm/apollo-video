@@ -45651,7 +45651,8 @@
         "baseHash",
         "sourceTranscriptId",
         "variantId",
-        "subject"
+        "subject",
+        "proposalHash"
       ],
       "properties": {
         "baseVersionId": {
@@ -45678,6 +45679,22 @@
           "minLength": 1,
           "maxLength": 200,
           "description": "The subject exactly as a remove-speech directive of the current request states it."
+        },
+        "proposalHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "The proposalHash of the proposal the person was shown (in the question of the Director). The Apollo searches the transcript again and refuses the confirmation when what it finds is not what the person saw: nothing is cut that was not seen."
+        },
+        "discardedPassageIds": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": "Optional. The passages of the proposal the person chose NOT to cut. They stay in the video and the Command records that they were offered and kept. At least one passage must be cut, and a discarded passage cannot be adjusted."
         },
         "adjustments": {
           "type": "array",

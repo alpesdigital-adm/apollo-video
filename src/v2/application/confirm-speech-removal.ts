@@ -33,8 +33,15 @@ export interface ConfirmSpeechRemovalRequest {
   variantId: string
   /** The subject exactly as a `remove-speech` directive of the current request states it. */
   subject: string
+  /**
+   * The seal of what the person was shown (`proposalHash` of the proposal): the Apollo searches the transcript again and refuses the confirmation when what it finds now is
+   * not what the person saw (the transcript or the search changed between showing and confirming). Nothing is cut that the person has not seen.
+   */
+  proposalHash: string
   /** The passages the person moved, by id: where each one starts and ends instead. A passage not named here is cut as proposed. */
   adjustments?: readonly Readonly<SpeechPassageAdjustment>[]
+  /** The passages the person chose NOT to cut, by id: they stay in the video and the Command records that they were offered and kept. At least one passage is cut. */
+  discardedPassageIds?: readonly string[]
   reason?: string
   actor: Readonly<AuthenticatedExternalActor>
   idempotency: ApplyEditorialCutCommandRequest['idempotency']
@@ -85,12 +92,19 @@ export function confirmSpeechRemovalService(dependencies: Readonly<{
     const proposal = proposeSpeechRemoval(subject, context.transcript, { sourceTranscriptId: request.sourceTranscriptId })
     assertDomain(proposal.searchable && proposal.matches.length > 0 && proposal.passages !== undefined && proposal.passages.length > 0 && proposal.search !== undefined,
       'INVALID_COMMAND', 'The speech does not say this subject, so there is nothing to confirm')
+    // What the person saw is what the Apollo finds now, or nothing is cut.
+    if (typeof request.proposalHash !== 'string' || request.proposalHash !== proposal.proposalHash) {
+      throw new DomainError('VERSION_CONFLICT', 'The passages the person was shown are not the ones the Apollo finds now (the transcript or the search changed); read the proposal again and confirm what it shows', {
+        reason: 'speech-removal-proposal-changed',
+      })
+    }
     // Refused whole when any adjustment leaves its limits: the cut is what the person confirmed or it is not made.
-    const passages = confirmSpeechPassages({
+    const { confirmed: passages, discarded } = confirmSpeechPassages({
       passages: proposal.passages!, words: context.transcript.words, segments: context.transcript.segments,
       ...(request.adjustments !== undefined ? { adjustments: request.adjustments } : {}),
+      ...(request.discardedPassageIds !== undefined ? { discarded: request.discardedPassageIds } : {}),
     })
-    const { maxGapSeconds, maxGapSentences, maxSentenceSeconds, name } = proposal.search!.policy
+    const { maxGapSeconds, maxGapSentences, maxSentenceSeconds, maxPassageSeconds, maxMentions, name } = proposal.search!.policy
     return (dependencies.apply ?? applyEditorialCutCommandService)({
       repository: dependencies.cuts, clock: dependencies.clock, createId: dependencies.createId, createEventId: dependencies.createEventId,
     })({
@@ -103,9 +117,10 @@ export function confirmSpeechRemovalService(dependencies: Readonly<{
       })),
       confirmation: {
         subject, medium, passages: [...passages],
+        ...(discarded.length > 0 ? { discarded: [...discarded] } : {}),
         search: {
           matching: proposal.search!.matching, language: proposal.search!.language, lexicon: proposal.search!.lexicon,
-          policy: { name, maxGapSeconds, maxGapSentences, maxSentenceSeconds },
+          policy: { name, maxGapSeconds, maxGapSentences, maxSentenceSeconds, maxPassageSeconds, maxMentions },
         },
       },
       ...(request.reason?.trim() ? { reason: request.reason.trim() } : {}),

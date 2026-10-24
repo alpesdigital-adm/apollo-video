@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
 
+import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
+
 import type { SpeechRemovalConfirmationRecord } from '../domain/editorial-cut-impact.ts'
 import type { SpeechRemovalPassage, SpeechRemovalProposal, SpeechRemovalSearch } from '../domain/editorial-policy-resolution.ts'
 import { speechSearchLiteralNotice } from '../domain/editorial-request-texts.ts'
@@ -15,9 +17,9 @@ import { sameSpeechWord, speechStemmerFor, type SpeechStemmer } from './speech-s
  * confirmation is the `remove-spoken-content` Command with the rule proposed here and the passages as confirmed (each one adjustable by the person, within
  * limits); nothing is cut without it and nothing is invented: a subject the speech does not say has no candidate.
  *
- * What counts as a mention: the whole subject as a phrase, and each of its words longer than three letters (a search aid for the owner to read and confirm,
- * not a decision). A word is the same word when it is equal as spoken or, in a language the Apollo has a lexicon for (`speech-stemming.ts`), when it varies from
- * it ("venda", "vender", "vendido"). For any other language the search is literal, and the proposal says so.
+ * What counts as a mention: the whole subject as a phrase; when the phrase is not spoken as such, each of its words longer than three letters, alone (a search aid
+ * for the owner to read and confirm, not a decision). A word is the same word when it is equal as spoken or, in a language the Apollo has a lexicon for
+ * (`speech-stemming.ts`), when it is another safe form of the same lemma ("sortear", "sorteado"). For any other language the search is literal, and the proposal says so.
  */
 const MAX_PHRASE_TOKENS = 16
 const MAX_ALTERNATIVES = 8
@@ -68,9 +70,11 @@ export function proposeSpeechRemoval(
 /** A confirmation made before passages existed holds the cut of the phrase; one that recorded passages holds every mention of the proposal inside them. */
 function confirmationHoldsEveryMention(confirmation: Readonly<SpeechRemovalConfirmationRecord>, passages: readonly Readonly<SpeechRemovalPassage>[]): boolean {
   if (confirmation.passages === undefined) return true
+  // Every mention of the proposal is in a passage that was cut, or in one the person chose not to cut (and that the Command recorded).
+  const answered = [...confirmation.passages, ...(confirmation.discarded ?? [])]
   return passages.every((passage) => passage.mentions.every((mention) => {
     const middle = (mention.startSeconds + mention.endSeconds) / 2
-    return confirmation.passages!.some((confirmed) => middle >= confirmed.startSeconds - EPSILON && middle <= confirmed.endSeconds + EPSILON)
+    return answered.some((range) => middle >= range.startSeconds - EPSILON && middle <= range.endSeconds + EPSILON)
   }))
 }
 
@@ -122,10 +126,11 @@ function proposeWithoutConfirmation(subject: string, transcript: Readonly<Search
       }
     }
   }
-  // Each word of the subject longer than three letters, alone (a lone word of three letters or fewer is searched only as the whole subject, as spoken).
+  // Each word of the subject longer than three letters, alone - only when the whole subject is not spoken as a phrase (a phrase that is found is the subject; its words
+  // alone would call every sentence that merely shares a word). A lone word of three letters or fewer is searched only as the whole subject, as spoken.
   const contentWords = [...new Set(tokens.filter((token) => token.length > MIN_WORD_LETTERS))].slice(0, MAX_ALTERNATIVES)
   const lone = tokens.length === 1 && contentWords.length === 0 ? [tokens[0]!] : contentWords
-  if (lone.length > 0) {
+  if (lone.length > 0 && !phraseFound) {
     for (let index = 0; index < spoken.length; index += 1) {
       if (lone.some((word) => sameSpeechWord(stemmer, spoken[index]!, word))) raw.push(at(index, index))
     }
@@ -174,6 +179,19 @@ function proposeWithoutConfirmation(subject: string, transcript: Readonly<Search
   return Object.freeze({
     subject, ruleId, label, alternatives: Object.freeze(alternatives), basis, searchable: true,
     matches: Object.freeze(passages.map((passage) => Object.freeze({ startSeconds: passage.startSeconds, endSeconds: passage.endSeconds, text: shorten(passage.text) }))),
-    passages, search,
+    passages, search, proposalHash: proposalHashOf(passages, search),
+  })
+}
+
+/** What a person is shown, sealed: the passages (ids, bounds, whole text, mentions) and how they were searched. */
+function proposalHashOf(passages: readonly Readonly<SpeechRemovalPassage>[], search: Readonly<SpeechRemovalSearch>): string {
+  return calculateCanonicalHash({
+    schemaVersion: 'speech-removal-proposal/v1',
+    passages: passages.map((passage) => ({
+      id: passage.id, startSeconds: passage.startSeconds, endSeconds: passage.endSeconds, text: passage.text,
+      mentions: passage.mentions.map((mention) => ({ startSeconds: mention.startSeconds, endSeconds: mention.endSeconds, text: mention.text })),
+      limits: passage.limits,
+    })),
+    search: { matching: search.matching, language: search.language, lexicon: search.lexicon, policy: search.policy },
   })
 }

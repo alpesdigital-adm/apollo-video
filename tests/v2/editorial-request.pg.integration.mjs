@@ -276,14 +276,14 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     assert.equal(afterDirector.status, 422, JSON.stringify(afterDirector.payload))
     assert.equal((await db.v2Project.findUniqueOrThrow({ where: { id: bare.projectId } })).objective, 'awareness')
 
-    // 9. A subject spoken in a PASSAGE (ADR-160): the Director asks to confirm the whole stretch of speech, not the loose sentences that carry the word; the person moves
-    // where it starts; an adjustment outside the limits writes nothing; the confirmation is a remove-spoken-content Command that records the passage as cut, and the Director
-    // reads it back from PostgreSQL as the answer to the question.
+    // 9. A subject spoken in PASSAGES (ADR-160): the Director asks to confirm the stretches of speech that talk about the subject; the person is shown a sealed proposal, may
+    // keep one passage on purpose and move where another starts; a confirmation of something else than what was shown, or outside the limits, writes nothing; the
+    // confirmation is a remove-spoken-content Command that records what was cut, what was kept and the seal in the database, and the Director reads it back.
     {
-    const CUT_BRIEFING = 'tire o trecho sobre venda'
+    const CUT_BRIEFING = 'tire o trecho sobre vender'
     const sentences = [
-      [0, 2, 'Bem-vindos ao curso.'], [2, 4, 'Hoje falamos da venda do produto.'], [4, 6, 'Vender bem exige confiança,'], [6, 8, 'e ouvir o cliente com calma.'],
-      [8, 10, 'O produto foi vendido ontem.'], [10, 12, 'Agora vamos ao conteúdo.'], [12, 14, 'Depois vem a prática.'],
+      [0, 1, 'Bem-vindos ao curso.'], [1, 2, 'Vamos vender bem.'], [2, 3, 'Tudo começa pela escuta.'], [3, 4, 'Depois vem a confiança.'], [4, 5, 'Em seguida o preço.'],
+      [5, 6, 'Também o prazo.'], [6, 7, 'E o suporte.'], [7, 8, 'O produto foi vendido ontem.'], [8, 9, 'Foi um sucesso.'], [9, 10, 'Agora vamos ao conteúdo.'],
     ]
     const cutWords = sentences.flatMap(([start, end, text]) => {
       const spoken = text.replace(/[.,]/gu, '').split(' ')
@@ -291,7 +291,7 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
       return spoken.map((word, index) => ({ word, start: Math.round((start + index * step) * 1000) / 1000, end: Math.round((start + (index + 1) * step - 0.02) * 1000) / 1000 }))
     })
     const cutSegments = sentences.map(([start, end, text], id) => ({ id, start, end, text }))
-    const cutWorld = await seedSealedProject(db, { workspaceId, actor: seedActor, prefix: 'f6cut', name: 'A passage to cut', briefing: CUT_BRIEFING })
+    const cutWorld = await seedSealedProject(db, { workspaceId, actor: seedActor, prefix: 'f6cut', name: 'Passages to cut', briefing: CUT_BRIEFING })
     await seedDirectedProject(db, { workspaceId, clientId, credentialId: `${clientId}-cred`, environment: 'production', projectId: cutWorld.projectId, suffix: `f6cut${run}`, directed: false, words: cutWords, segments: cutSegments })
     const cutProjectId = cutWorld.projectId
     const cutHead = async () => {
@@ -299,11 +299,12 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
       return { baseVersionId: row.id, baseHash: row.baseHash }
     }
     const cutVersions = () => db.v2ProjectVersion.count({ where: { projectId: cutProjectId } })
+    const cutCommands = () => db.v2EditCommand.count({ where: { projectId: cutProjectId, type: 'remove-spoken-content' } })
     const cutDirector = async (key) => runProjectDirectorService({
       repository: new PrismaDirectorRunRepository(db), clock: () => new Date(), createEventId: randomUUID, compileBrief: createEvidenceBoundBriefCompiler(),
       createId: (kind) => `f6req-${run}-${key}-${kind}-${randomUUID().slice(0, 8)}`,
-    })({ workspaceId, projectId: cutProjectId, ...(await cutHead()), actor: seedActor, idempotency: { key: `f6req-${run}-${key}` }, reason: 'Director over a subject spoken in a passage.' })
-    interpreter.script.set(CUT_BRIEFING, { directives: [{ kind: 'remove-speech', value: 'about', param: 'venda', quote: 'tire o trecho sobre venda' }], unsupported: [], questions: [], coverage: [] })
+    })({ workspaceId, projectId: cutProjectId, ...(await cutHead()), actor: seedActor, idempotency: { key: `f6req-${run}-${key}` }, reason: 'Director over a subject spoken in passages.' })
+    interpreter.script.set(CUT_BRIEFING, { directives: [{ kind: 'remove-speech', value: 'about', param: 'vender', quote: 'tire o trecho sobre vender' }], unsupported: [], questions: [], coverage: [] })
     const read = await callRoute(NextRequest, route, { method: 'POST', path: `/v1/projects/${cutProjectId}/editorial-request`, params: { projectId: cutProjectId }, authorization,
       idempotencyKey: `f6req-${run}-cut-read`, body: { ...(await cutHead()), briefing: CUT_BRIEFING, reason: 'Read the briefing.' } })
     assert.equal(read.status, 201, JSON.stringify(read.payload))
@@ -311,14 +312,16 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
     assert.equal(blocked?.code, 'PRECONDITION_REQUIRED', String(blocked?.message))
     assert.equal(blocked.details.reason, 'editorial-request-blocked')
     const removal = blocked.details.openQuestions.find((question) => question.removal)?.removal
-    assert.equal(removal.passages.length, 1, 'three sentences that say the subject and the ones between are ONE passage')
-    const [passage] = removal.passages
-    assert.deepEqual([passage.startSeconds, passage.endSeconds], [2, 10])
-    assert.equal(passage.text, 'Hoje falamos da venda do produto. Vender bem exige confiança, e ouvir o cliente com calma. O produto foi vendido ontem.')
-    assert.deepEqual(passage.mentions.map((mention) => mention.text), ['venda', 'Vender', 'vendido'])
+    // The two mentions are five sentences apart: two passages, each with its own limits.
+    assert.equal(removal.passages.length, 2)
+    const [first, second] = removal.passages
+    assert.deepEqual([first.startSeconds, first.endSeconds, second.startSeconds, second.endSeconds], [1, 2, 7, 8])
+    assert.equal(first.text, 'Vamos vender bem.')
+    assert.deepEqual(second.mentions.map((mention) => mention.text), ['vendido'])
     assert.equal(removal.search.matching, 'stem')
+    assert.match(removal.proposalHash, /^[a-f0-9]{64}$/)
     assert.equal(removal.confirmed, undefined, 'nothing is confirmed until a person confirms')
-    assert.equal(await db.v2EditCommand.count({ where: { projectId: cutProjectId, type: 'remove-spoken-content' } }), 0, 'nothing is cut')
+    assert.equal(await cutCommands(), 0, 'nothing is cut')
 
     const { confirmSpeechRemovalService } = await import('../../src/v2/application/confirm-speech-removal.ts')
     const factory = await import('../../src/v2/infrastructure/repository-factory.ts')
@@ -328,28 +331,57 @@ test('ADR-160 F6 a briefing is read by the interpreter through /v1 and the Direc
       createId: (kind) => `f6cut-${run}-${kind}-${randomUUID().slice(0, 8)}`, createEventId: randomUUID,
     })
     const cutRequest = async (key, extra = {}) => ({
-      workspaceId, projectId: cutProjectId, ...(await cutHead()), sourceTranscriptId: removal.sourceTranscriptId, variantId: cutWorld.variantId, subject: 'venda',
-      actor: granted, idempotency: { clientId, key: `f6req-${run}-${key}` }, ...extra,
+      workspaceId, projectId: cutProjectId, ...(await cutHead()), sourceTranscriptId: removal.sourceTranscriptId, variantId: cutWorld.variantId, subject: 'vender',
+      proposalHash: removal.proposalHash, actor: granted, idempotency: { clientId, key: `f6req-${run}-${key}` }, ...extra,
     })
-    // An adjustment that leaves the speech or a mention out is refused whole: no Command, no Version.
+    // Refused whole, writing nothing: a seal that is not the one of what was shown; an adjustment off the boundaries or the limits or leaving the mention out; nothing to cut;
+    // a kept passage that is also adjusted.
     const versionsBeforeCut = await cutVersions()
-    for (const adjustment of [{ startSeconds: 2.1, endSeconds: 10 }, { startSeconds: 4, endSeconds: 10 }, { startSeconds: 2, endSeconds: 6 }]) {
-      await assert.rejects(confirm(await cutRequest(`cut-refused-${adjustment.startSeconds}-${adjustment.endSeconds}`, { adjustments: [{ passageId: passage.id, ...adjustment }] })),
-        (error) => error.code === 'INVALID_ARGUMENT', JSON.stringify(adjustment))
+    await assert.rejects(confirm(await cutRequest('cut-seal', { proposalHash: 'a'.repeat(64) })), (error) => error.code === 'VERSION_CONFLICT' && error.details?.reason === 'speech-removal-proposal-changed')
+    for (const [label, extra] of [
+      ['off a boundary', { adjustments: [{ passageId: first.id, startSeconds: 0.5, endSeconds: 2 }] }],
+      ['beyond the limit of the neighbour', { adjustments: [{ passageId: first.id, startSeconds: 1, endSeconds: 8 }] }],
+      ['leaving the mention out', { adjustments: [{ passageId: second.id, startSeconds: 8, endSeconds: 9 }] }],
+      ['nothing left to cut', { discardedPassageIds: [first.id, second.id] }],
+      ['a kept passage adjusted', { discardedPassageIds: [first.id], adjustments: [{ passageId: first.id, startSeconds: 0, endSeconds: 2 }] }],
+      ['a passage of nowhere', { discardedPassageIds: ['passage-0000000000'] }],
+    ]) {
+      await assert.rejects(confirm(await cutRequest(`cut-refused-${label.replaceAll(' ', '-')}`, extra)), (error) => error.code === 'INVALID_ARGUMENT', label)
     }
     assert.equal(await cutVersions(), versionsBeforeCut)
-    assert.equal(await db.v2EditCommand.count({ where: { projectId: cutProjectId, type: 'remove-spoken-content' } }), 0)
-    // The person starts the passage a sentence earlier (the start of a segment, inside the limits); the cut is exactly that.
-    const cut = await confirm(await cutRequest('cut-confirmed', { adjustments: [{ passageId: passage.id, startSeconds: 0, endSeconds: 10 }] }))
-    assert.deepEqual(cut.exclusions.map((range) => [range.sourceStartSeconds, range.sourceEndSeconds]), [[0, 10]])
+    assert.equal(await cutCommands(), 0)
+    // The person keeps the first passage on purpose and starts the second one sentence earlier (the start of a segment, inside its limits).
+    const cut = await confirm(await cutRequest('cut-confirmed', { discardedPassageIds: [first.id], adjustments: [{ passageId: second.id, startSeconds: 6, endSeconds: 8 }] }))
+    assert.deepEqual(cut.exclusions.map((range) => [range.sourceStartSeconds, range.sourceEndSeconds]), [[6, 8]])
     const storedCut = JSON.parse((await db.v2EditCommand.findFirstOrThrow({ where: { projectId: cutProjectId, type: 'remove-spoken-content' } })).payloadJson)
     assert.equal(storedCut.confirmation.medium, 'api-key-scope')
-    assert.deepEqual(storedCut.confirmation.passages.map(({ id, ...rest }) => rest), [{ startSeconds: 0, endSeconds: 10, proposedStartSeconds: 2, proposedEndSeconds: 10, adjusted: true }])
-    assert.equal(storedCut.confirmation.search.matching, 'stem')
-    assert.deepEqual(storedCut.exclusionOverrides.map((override) => [override.sourceStartSeconds, override.sourceEndSeconds]), [[0, 10]])
-    // The Director reads the confirmation back from the stored Command: the question is answered.
+    assert.deepEqual(storedCut.confirmation.passages.map(({ id, ...rest }) => rest), [{ startSeconds: 6, endSeconds: 8, proposedStartSeconds: 7, proposedEndSeconds: 8, adjusted: true }])
+    assert.deepEqual(storedCut.confirmation.discarded, [{ id: first.id, startSeconds: 1, endSeconds: 2 }], 'what was kept on purpose is recorded')
+    assert.equal(storedCut.confirmation.search.policy.name, 'speech-passage-adjacency/v2')
+    assert.deepEqual(storedCut.exclusionOverrides.map((override) => [override.sourceStartSeconds, override.sourceEndSeconds]), [[6, 8]])
+    // The Director reads the confirmation back from the stored Command: the question is answered, although the subject is still said in the passage that was kept.
     const answered = await cutDirector('cut-answered')
     assert.ok(answered.run.policyResolution.satisfied.some((item) => item.kind === 'remove-speech' && item.how === 'confirmed-removal'))
+
+    // The shape of the confirmation the database accepts: a missing or null value is a refusal, never a pass.
+    const accepts = async (confirmation) => (await db.$queryRawUnsafe('SELECT w66_editorial_confirmation_v1($1::jsonb) AS ok', JSON.stringify(confirmation)))[0].ok
+    const policy = { name: 'p', maxGapSeconds: 1, maxGapSentences: 1, maxSentenceSeconds: 1, maxPassageSeconds: 1, maxMentions: 1 }
+    const search = { matching: 'stem', language: 'pt', lexicon: null, policy }
+    const passage = { id: 'passage-1', startSeconds: 1, endSeconds: 2, proposedStartSeconds: 1, proposedEndSeconds: 2, adjusted: false }
+    const valid = { subject: 'x', medium: 'ui-session', passages: [passage], search }
+    assert.equal(await accepts(valid), true)
+    assert.equal(await accepts({ subject: 'x', medium: 'api-key-scope' }), true)
+    assert.equal(await accepts({ ...valid, discarded: [{ id: 'passage-2', startSeconds: 3, endSeconds: 4 }] }), true)
+    for (const [label, bad] of [
+      ['medium null', { ...valid, medium: null }], ['medium unknown', { ...valid, medium: 'anonymous' }], ['matching null', { ...valid, search: { ...search, matching: null } }],
+      ['matching unknown', { ...valid, search: { ...search, matching: 'magic' } }], ['id empty', { ...valid, passages: [{ ...passage, id: '' }] }], ['id null', { ...valid, passages: [{ ...passage, id: null }] }],
+      ['subject empty', { ...valid, subject: '' }], ['adjusted lies', { ...valid, passages: [{ ...passage, adjusted: true }] }], ['end before start', { ...valid, passages: [{ ...passage, endSeconds: 0.5, proposedEndSeconds: 0.5 }] }],
+      ['passages empty', { ...valid, passages: [] }], ['search missing', { subject: 'x', medium: 'ui-session', passages: [passage] }], ['key too many', { ...valid, extra: 1 }],
+      ['policy short', { ...valid, search: { ...search, policy: { name: 'p' } } }], ['discarded id empty', { ...valid, discarded: [{ id: '', startSeconds: 3, endSeconds: 4 }] }],
+      ['discarded without passages', { subject: 'x', medium: 'ui-session', discarded: [{ id: 'a', startSeconds: 3, endSeconds: 4 }] }], ['lexicon number', { ...valid, search: { ...search, lexicon: 3 } }],
+    ]) {
+      assert.equal(await accepts(bad), false, label)
+    }
     }
   } finally {
     await interpreter.close()

@@ -5,32 +5,48 @@
 -- rest; the Version origin verifier refuses a confirmation that is not exactly what the capability writes). The shape of the confirmation, passage by passage, is
 -- w66_editorial_confirmation_v1 (a CHECK cannot hold a subquery). A payload without the key is judged as before.
 CREATE FUNCTION w66_editorial_confirmation_v1(p_confirmation jsonb) RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$
-DECLARE passage jsonb; search jsonb; policy jsonb;
+DECLARE passage jsonb; kept jsonb; search jsonb; policy jsonb;
 BEGIN
+ -- Every test is written so that a missing or JSON-null value is a refusal (a NULL in IN / <> / comparisons never passes).
  IF jsonb_typeof(p_confirmation) IS DISTINCT FROM 'object' THEN RETURN false; END IF;
- IF NOT w66_v2_exact_json(p_confirmation, ARRAY['subject','medium'] || CASE WHEN p_confirmation ? 'passages' THEN ARRAY['passages','search'] ELSE ARRAY[]::text[] END) THEN RETURN false; END IF;
- IF jsonb_typeof(p_confirmation -> 'subject') IS DISTINCT FROM 'string' OR (p_confirmation ->> 'subject') = ''
- OR (p_confirmation ->> 'medium') NOT IN ('ui-session','api-key-scope') THEN RETURN false; END IF;
+ IF NOT w66_v2_exact_json(p_confirmation, ARRAY['subject','medium'] ||
+   CASE WHEN p_confirmation ? 'passages' THEN ARRAY['passages','search'] ELSE ARRAY[]::text[] END ||
+   CASE WHEN p_confirmation ? 'discarded' THEN ARRAY['discarded'] ELSE ARRAY[]::text[] END) THEN RETURN false; END IF;
+ IF jsonb_typeof(p_confirmation -> 'subject') IS DISTINCT FROM 'string' OR coalesce(p_confirmation ->> 'subject', '') = '' THEN RETURN false; END IF;
+ IF jsonb_typeof(p_confirmation -> 'medium') IS DISTINCT FROM 'string' OR (p_confirmation ->> 'medium') IS NULL
+ OR NOT coalesce((p_confirmation ->> 'medium') IN ('ui-session','api-key-scope'), false) THEN RETURN false; END IF;
+ IF p_confirmation ? 'discarded' AND NOT (p_confirmation ? 'passages') THEN RETURN false; END IF;
  IF NOT (p_confirmation ? 'passages') THEN RETURN true; END IF;
  IF jsonb_typeof(p_confirmation -> 'passages') IS DISTINCT FROM 'array' OR jsonb_array_length(p_confirmation -> 'passages') = 0 THEN RETURN false; END IF;
  FOR passage IN SELECT e.element FROM jsonb_array_elements(p_confirmation -> 'passages') AS e(element) LOOP
   IF NOT w66_v2_exact_json(passage, ARRAY['id','startSeconds','endSeconds','proposedStartSeconds','proposedEndSeconds','adjusted']) THEN RETURN false; END IF;
-  IF jsonb_typeof(passage -> 'id') IS DISTINCT FROM 'string' OR jsonb_typeof(passage -> 'adjusted') IS DISTINCT FROM 'boolean'
+  IF jsonb_typeof(passage -> 'id') IS DISTINCT FROM 'string' OR coalesce(passage ->> 'id', '') = '' OR jsonb_typeof(passage -> 'adjusted') IS DISTINCT FROM 'boolean'
   OR jsonb_typeof(passage -> 'startSeconds') IS DISTINCT FROM 'number' OR jsonb_typeof(passage -> 'endSeconds') IS DISTINCT FROM 'number'
   OR jsonb_typeof(passage -> 'proposedStartSeconds') IS DISTINCT FROM 'number' OR jsonb_typeof(passage -> 'proposedEndSeconds') IS DISTINCT FROM 'number' THEN RETURN false; END IF;
-  IF (passage ->> 'startSeconds')::numeric < 0 OR (passage ->> 'endSeconds')::numeric <= (passage ->> 'startSeconds')::numeric
-  OR (passage ->> 'proposedStartSeconds')::numeric < 0 OR (passage ->> 'proposedEndSeconds')::numeric <= (passage ->> 'proposedStartSeconds')::numeric THEN RETURN false; END IF;
+  IF NOT ((passage ->> 'startSeconds')::numeric >= 0 AND (passage ->> 'endSeconds')::numeric > (passage ->> 'startSeconds')::numeric
+    AND (passage ->> 'proposedStartSeconds')::numeric >= 0 AND (passage ->> 'proposedEndSeconds')::numeric > (passage ->> 'proposedStartSeconds')::numeric) THEN RETURN false; END IF;
   -- "adjusted" says whether the bounds that were cut are the bounds that were proposed.
   IF (passage ->> 'adjusted')::boolean IS DISTINCT FROM ((passage ->> 'startSeconds')::numeric <> (passage ->> 'proposedStartSeconds')::numeric
     OR (passage ->> 'endSeconds')::numeric <> (passage ->> 'proposedEndSeconds')::numeric) THEN RETURN false; END IF;
  END LOOP;
+ IF p_confirmation ? 'discarded' THEN
+  IF jsonb_typeof(p_confirmation -> 'discarded') IS DISTINCT FROM 'array' OR jsonb_array_length(p_confirmation -> 'discarded') = 0 THEN RETURN false; END IF;
+  FOR kept IN SELECT e.element FROM jsonb_array_elements(p_confirmation -> 'discarded') AS e(element) LOOP
+   IF NOT w66_v2_exact_json(kept, ARRAY['id','startSeconds','endSeconds']) THEN RETURN false; END IF;
+   IF jsonb_typeof(kept -> 'id') IS DISTINCT FROM 'string' OR coalesce(kept ->> 'id', '') = ''
+   OR jsonb_typeof(kept -> 'startSeconds') IS DISTINCT FROM 'number' OR jsonb_typeof(kept -> 'endSeconds') IS DISTINCT FROM 'number' THEN RETURN false; END IF;
+   IF NOT ((kept ->> 'startSeconds')::numeric >= 0 AND (kept ->> 'endSeconds')::numeric > (kept ->> 'startSeconds')::numeric) THEN RETURN false; END IF;
+  END LOOP;
+ END IF;
  search := p_confirmation -> 'search';
  IF NOT w66_v2_exact_json(search, ARRAY['matching','language','lexicon','policy']) THEN RETURN false; END IF;
- IF (search ->> 'matching') NOT IN ('stem','literal') OR jsonb_typeof(search -> 'language') NOT IN ('string','null') OR jsonb_typeof(search -> 'lexicon') NOT IN ('string','null') THEN RETURN false; END IF;
+ IF jsonb_typeof(search -> 'matching') IS DISTINCT FROM 'string' OR NOT coalesce((search ->> 'matching') IN ('stem','literal'), false)
+ OR jsonb_typeof(search -> 'language') NOT IN ('string','null') OR jsonb_typeof(search -> 'lexicon') NOT IN ('string','null') THEN RETURN false; END IF;
  policy := search -> 'policy';
- RETURN w66_v2_exact_json(policy, ARRAY['name','maxGapSeconds','maxGapSentences','maxSentenceSeconds'])
+ RETURN coalesce(w66_v2_exact_json(policy, ARRAY['name','maxGapSeconds','maxGapSentences','maxSentenceSeconds','maxPassageSeconds','maxMentions'])
   AND jsonb_typeof(policy -> 'name') IS NOT DISTINCT FROM 'string' AND jsonb_typeof(policy -> 'maxGapSeconds') IS NOT DISTINCT FROM 'number'
-  AND jsonb_typeof(policy -> 'maxGapSentences') IS NOT DISTINCT FROM 'number' AND jsonb_typeof(policy -> 'maxSentenceSeconds') IS NOT DISTINCT FROM 'number';
+  AND jsonb_typeof(policy -> 'maxGapSentences') IS NOT DISTINCT FROM 'number' AND jsonb_typeof(policy -> 'maxSentenceSeconds') IS NOT DISTINCT FROM 'number'
+  AND jsonb_typeof(policy -> 'maxPassageSeconds') IS NOT DISTINCT FROM 'number' AND jsonb_typeof(policy -> 'maxMentions') IS NOT DISTINCT FROM 'number', false);
 END $$;
 ALTER TABLE "edit_commands" DROP CONSTRAINT "edit_commands_output_payload_seal_check";
 ALTER TABLE "edit_commands" ADD CONSTRAINT "edit_commands_output_payload_seal_check" CHECK (

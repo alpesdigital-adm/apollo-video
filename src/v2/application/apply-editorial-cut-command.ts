@@ -193,6 +193,8 @@ export interface ApplyEditorialCutCommandRequest {
 }
 
 function normalizeExclusionOverrides(input: {
+  /** Stretches a person chose not to cut (a confirmation that recorded them): a detected phrase inside one of them may stay uncovered. */
+  keptRanges?: readonly Readonly<SourceTimeRange>[]
   overrides: readonly Readonly<EditorialExclusionOverrideInput>[]
   rules: readonly ReturnType<typeof defineEditorialPhraseRules>[number][]
   transcript: Readonly<MediaTranscript>
@@ -234,6 +236,8 @@ function normalizeExclusionOverrides(input: {
     match.ruleIds.some((id) => override.ruleIds.includes(id)) &&
     match.sourceStartSeconds >= override.sourceStartSeconds - 0.001 &&
     match.sourceEndSeconds <= override.sourceEndSeconds + 0.001,
+  ) && !(input.keptRanges ?? []).some((kept) =>
+    match.sourceStartSeconds >= kept.sourceStartSeconds - 0.001 && match.sourceEndSeconds <= kept.sourceEndSeconds + 0.001,
   ))
   assertDomain(uncovered.length === 0, 'INVALID_ARGUMENT', 'Editorial exclusion overrides must cover every detected phrase')
   return Object.freeze(normalized)
@@ -602,6 +606,7 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
     }
     const exclusions = request.exclusionOverrides
       ? normalizeExclusionOverrides({
+          keptRanges: (request.confirmation?.discarded ?? []).map((kept) => ({ sourceStartSeconds: kept.startSeconds, sourceEndSeconds: kept.endSeconds })),
           overrides: request.exclusionOverrides,
           rules,
           transcript: context.transcript,
@@ -615,6 +620,10 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
         exclusions.length === confirmedPassages.length && exclusions.every((range, index) =>
           range.sourceStartSeconds === confirmedPassages[index]!.startSeconds && range.sourceEndSeconds === confirmedPassages[index]!.endSeconds),
         'INVALID_COMMAND', 'The cut differs from the passages that were confirmed',
+      )
+      assertDomain(
+        (request.confirmation?.discarded ?? []).every((kept) => exclusions.every((range) => kept.endSeconds <= range.sourceStartSeconds || kept.startSeconds >= range.sourceEndSeconds)),
+        'INVALID_COMMAND', 'A passage the person chose not to cut overlaps the cut',
       )
     }
     const matchedRuleIds = new Set(exclusions.flatMap((range) => range.ruleIds))

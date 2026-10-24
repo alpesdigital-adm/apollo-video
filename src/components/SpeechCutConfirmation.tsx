@@ -6,6 +6,8 @@ import {
   CUT_CONFIRMATION_TEXTS,
   cutAdjustmentsOf,
   cutEndOptions,
+  cutMentionsInRange,
+  cutTextOfRange,
   cutStartOptions,
   highlightMentions,
   type CutPassage,
@@ -39,6 +41,7 @@ export default function SpeechCutConfirmation({
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [chosenBySubject, setChosenBySubject] = useState<Readonly<Record<string, Chosen>>>({})
+  const [keptBySubject, setKeptBySubject] = useState<Readonly<Record<string, readonly string[]>>>({})
   const keys = useRef(new Map<string, string>())
 
   const chosenOf = (proposal: CutProposal, passage: CutPassage) =>
@@ -51,19 +54,31 @@ export default function SpeechCutConfirmation({
     }))
   }
 
+  const discardedOf = (proposal: CutProposal) => keptBySubject[proposal.subject] ?? []
+
+  function toggleDiscard(proposal: CutProposal, passage: CutPassage) {
+    setKeptBySubject((current) => {
+      const now = current[proposal.subject] ?? []
+      return { ...current, [proposal.subject]: now.includes(passage.id) ? now.filter((id) => id !== passage.id) : [...now, passage.id] }
+    })
+  }
+
   async function confirm(proposal: CutProposal) {
     setBusy(proposal.subject)
     setError(null)
     try {
-      const adjustments = cutAdjustmentsOf(proposal.passages, chosenBySubject[proposal.subject] ?? {})
-      const fingerprint = JSON.stringify([baseVersionId, baseHash, variantId, proposal.sourceTranscriptId, proposal.subject, adjustments])
+      const discarded = discardedOf(proposal)
+      // A passage that will not be cut is not adjusted: only the ones that are cut and were moved are sent.
+      const adjustments = cutAdjustmentsOf(proposal.passages.filter((passage) => !discarded.includes(passage.id)), chosenBySubject[proposal.subject] ?? {})
+      const fingerprint = JSON.stringify([baseVersionId, baseHash, variantId, proposal.sourceTranscriptId, proposal.subject, proposal.proposalHash, adjustments, discarded])
       if (!keys.current.has(fingerprint)) keys.current.set(fingerprint, globalThis.crypto.randomUUID())
       const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/speech-removals`, {
         method: 'POST',
         headers: { accept: 'application/json', 'content-type': 'application/json', 'idempotency-key': keys.current.get(fingerprint)! },
         body: JSON.stringify({
-          baseVersionId, baseHash, sourceTranscriptId: proposal.sourceTranscriptId, variantId, subject: proposal.subject,
+          baseVersionId, baseHash, sourceTranscriptId: proposal.sourceTranscriptId, variantId, subject: proposal.subject, proposalHash: proposal.proposalHash,
           ...(adjustments.length > 0 ? { adjustments } : {}),
+          ...(discarded.length > 0 ? { discardedPassageIds: discarded } : {}),
         }),
       })
       const payload = await response.json().catch(() => null) as { data?: unknown; error?: { message?: string } } | null
@@ -93,6 +108,7 @@ export default function SpeechCutConfirmation({
             </ul>
           ) : proposal.passages.map((passage, index) => {
             const chosen = chosenOf(proposal, passage)
+            const kept = discardedOf(proposal).includes(passage.id)
             const moved = chosen.startSeconds !== passage.startSeconds || chosen.endSeconds !== passage.endSeconds
             const startId = `cut-start-${passage.id}`
             const endId = `cut-end-${passage.id}`
@@ -102,7 +118,7 @@ export default function SpeechCutConfirmation({
                   {CUT_CONFIRMATION_TEXTS.passageTitle(index + 1, proposal.passages.length)}: {secondsInWords(chosen.startSeconds)} a {secondsInWords(chosen.endSeconds)}
                 </p>
                 <p className="mt-2 text-xs leading-6 text-[#b5afa5]" data-testid="speech-cut-passage-text">
-                  {highlightMentions(passage.text, passage.mentions).map((piece, position) => (
+                  {highlightMentions(cutTextOfRange(passage, chosen.startSeconds, chosen.endSeconds), cutMentionsInRange(passage, chosen.startSeconds, chosen.endSeconds)).map((piece, position) => (
                     piece.mention
                       ? <mark className="rounded bg-[#e0af37]/25 px-0.5 text-[#f1ede5]" key={position}>{piece.text}</mark>
                       : <span key={position}>{piece.text}</span>
@@ -114,7 +130,7 @@ export default function SpeechCutConfirmation({
                     <select
                       className="mt-1 h-11 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-2 text-xs text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55"
                       data-testid="speech-cut-start"
-                      disabled={busy !== null}
+                      disabled={busy !== null || kept}
                       id={startId}
                       onChange={(event) => choose(proposal, passage, { startSeconds: Number(event.target.value) })}
                       value={chosen.startSeconds}
@@ -127,7 +143,7 @@ export default function SpeechCutConfirmation({
                     <select
                       className="mt-1 h-11 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-2 text-xs text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55"
                       data-testid="speech-cut-end"
-                      disabled={busy !== null}
+                      disabled={busy !== null || kept}
                       id={endId}
                       onChange={(event) => choose(proposal, passage, { endSeconds: Number(event.target.value) })}
                       value={chosen.endSeconds}
@@ -136,13 +152,19 @@ export default function SpeechCutConfirmation({
                     </select>
                   </label>
                 </div>
-                <p className="mt-2 text-[10px] leading-4 text-[#8f897f]" data-testid="speech-cut-passage-state">{moved ? CUT_CONFIRMATION_TEXTS.moved : CUT_CONFIRMATION_TEXTS.proposed}</p>
+                <p className="mt-2 text-[10px] leading-4 text-[#8f897f]" data-testid="speech-cut-passage-state">{kept ? CUT_CONFIRMATION_TEXTS.keptState : moved ? CUT_CONFIRMATION_TEXTS.moved : CUT_CONFIRMATION_TEXTS.proposed}</p>
+                {proposal.passages.length > 1 ? (
+                  <label className="mt-2 flex min-h-11 items-center gap-2 text-xs text-[#d1cbc1]">
+                    <input checked={kept} className="h-5 w-5" data-testid="speech-cut-keep" disabled={busy !== null} onChange={() => toggleDiscard(proposal, passage)} type="checkbox" />
+                    {CUT_CONFIRMATION_TEXTS.keep}
+                  </label>
+                ) : null}
               </div>
             )
           })}
           <button
             className="mt-3 h-11 rounded-xl bg-[#e0af37] px-4 text-xs font-bold text-[#171207] hover:bg-[#edc34f] disabled:cursor-not-allowed disabled:opacity-45"
-            disabled={busy !== null}
+            disabled={busy !== null || discardedOf(proposal).length >= proposal.passages.length}
             onClick={() => { void confirm(proposal) }}
             type="button"
           >

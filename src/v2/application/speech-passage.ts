@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { DomainError } from '../domain/errors.ts'
 import type { SpeechRemovalPassage, SpeechRemovalSearch, SpeechRemovalSegmentLine } from '../domain/editorial-policy-resolution.ts'
-import type { SpeechRemovalConfirmedPassage } from '../domain/editorial-cut-impact.ts'
+import type { SpeechRemovalConfirmedPassage, SpeechRemovalDiscardedPassage } from '../domain/editorial-cut-impact.ts'
 import type { TranscriptSegment, TranscriptWord } from '../domain/media-transcript.ts'
 
 /**
@@ -14,18 +14,22 @@ import type { TranscriptSegment, TranscriptWord } from '../domain/media-transcri
  * confirmation with their origin, and the person confirming can move the start and the end of every passage.
  */
 export const SPEECH_PASSAGE_POLICY: SpeechRemovalSearch['policy'] = Object.freeze({
-  name: 'speech-passage-adjacency/v1',
+  name: 'speech-passage-adjacency/v2',
   /** Two mentions belong to the same passage when no more than this many seconds of speech separate their sentences... */
   maxGapSeconds: 15,
   /** ...AND no more than this many whole sentences stand between them. */
   maxGapSentences: 3,
   /** A run of segments without a sentence mark is closed after this long: a transcript that forgot its punctuation does not make one endless sentence. */
   maxSentenceSeconds: 30,
+  /** A chain of mentions is closed when the passage would last more than this: mentions that keep coming do not make one endless passage. */
+  maxPassageSeconds: 120,
+  /** ...or hold more mentions than this. */
+  maxMentions: 40,
   origin: 'technical-search-parameter',
 })
 
 /** Segments of context shown before and after a passage, to move its start or end by. */
-const CONTEXT_SEGMENTS = 3
+const CONTEXT_SEGMENTS = 8
 /** Times of a transcript are compared to this tolerance (one millisecond): the one the editorial cut uses to place a word inside a range. */
 const EPSILON = 0.001
 const TERMINAL = /[.!?…。！？]["'”’)\]»]*$/u
@@ -138,7 +142,10 @@ export function groupSpeechPassages(input: Readonly<{
     if (current !== undefined) {
       const sentencesBetween = Math.max(0, unit - current.last - 1)
       const secondsBetween = Math.max(0, units[unit]!.start - units[current.last]!.end)
-      if (unit <= current.last || (sentencesBetween <= policy.maxGapSentences && secondsBetween <= policy.maxGapSeconds)) {
+      const lasts = Math.max(current.last, unit)
+      const withinReach = sentencesBetween <= policy.maxGapSentences && secondsBetween <= policy.maxGapSeconds
+      const withinCaps = units[lasts]!.end - units[current.first]!.start <= policy.maxPassageSeconds && current.mentions.length + 1 <= policy.maxMentions
+      if (unit <= current.last || (withinReach && withinCaps)) {
         current.last = Math.max(current.last, unit)
         current.mentions.push(mention)
         continue
@@ -204,8 +211,20 @@ export function confirmSpeechPassages(input: Readonly<{
   words: readonly TranscriptWord[]
   segments: readonly TranscriptSegment[]
   adjustments?: readonly Readonly<SpeechPassageAdjustment>[]
-}>): readonly Readonly<SpeechRemovalConfirmedPassage>[] {
+  /** The ids of the passages the person chose NOT to cut. */
+  discarded?: readonly string[]
+}>): Readonly<{ confirmed: readonly Readonly<SpeechRemovalConfirmedPassage>[]; discarded: readonly Readonly<SpeechRemovalDiscardedPassage>[] }> {
+  const discardedIds = input.discarded ?? []
+  if (!Array.isArray(discardedIds) || new Set(discardedIds).size !== discardedIds.length || discardedIds.some((id) => typeof id !== 'string' || !input.passages.some((passage) => passage.id === id))) {
+    throw new DomainError('INVALID_ARGUMENT', 'discardedPassageIds must name passages of this proposal, each once')
+  }
+  if (discardedIds.length >= input.passages.length) {
+    throw new DomainError('INVALID_ARGUMENT', 'At least one passage must be cut: to cut nothing, do not confirm')
+  }
   const adjustments = input.adjustments ?? []
+  if (Array.isArray(adjustments) && adjustments.some((adjustment) => adjustment && discardedIds.includes((adjustment as { passageId?: string }).passageId as string))) {
+    throw new DomainError('INVALID_ARGUMENT', 'A passage that is not cut cannot be adjusted')
+  }
   if (!Array.isArray(adjustments) || adjustments.length > input.passages.length) {
     throw new DomainError('INVALID_ARGUMENT', 'adjustments must name each passage of the proposal at most once')
   }
@@ -221,7 +240,7 @@ export function confirmSpeechPassages(input: Readonly<{
   }
   const starts = [...input.words.map((word) => word.start), ...input.segments.map((segment) => segment.start)]
   const ends = [...input.words.map((word) => word.end), ...input.segments.map((segment) => segment.end)]
-  return Object.freeze(input.passages.map((passage) => {
+  const confirmed = input.passages.filter((passage) => !discardedIds.includes(passage.id)).map((passage) => {
     const adjustment = adjusted.get(passage.id)
     let start = passage.startSeconds
     let end = passage.endSeconds
@@ -249,5 +268,8 @@ export function confirmSpeechPassages(input: Readonly<{
       proposedStartSeconds: passage.startSeconds, proposedEndSeconds: passage.endSeconds,
       adjusted: start !== passage.startSeconds || end !== passage.endSeconds,
     })
-  }))
+  })
+  const discarded = input.passages.filter((passage) => discardedIds.includes(passage.id))
+    .map((passage) => Object.freeze({ id: passage.id, startSeconds: passage.startSeconds, endSeconds: passage.endSeconds }))
+  return Object.freeze({ confirmed: Object.freeze(confirmed), discarded: Object.freeze(discarded) })
 }

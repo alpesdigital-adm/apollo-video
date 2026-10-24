@@ -402,12 +402,13 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     await shot('19-projeto-objetivo-definido.png')
 
     // ---- 4. The cut as a PASSAGE (ADR-160): the Director asks to confirm the whole stretch of speech that talks about the subject, the owner reads it whole with the
-    // mentions marked, moves where it starts among the places the Apollo offers, and what the screen sends is the subject and that adjustment, never the words. ----
-    const CUT_BRIEFING = 'tire o trecho sobre venda'
-    fake.script.set(CUT_BRIEFING, { directives: [{ kind: 'remove-speech', value: 'about', param: 'venda', quote: 'tire o trecho sobre venda' }], unsupported: [], questions: [], coverage: [] })
+    // mentions marked, moves where it starts and ends among the places the Apollo offers, and what is shown is EXACTLY what will be cut (extended or shortened);
+    // what the screen sends is the subject, the seal of what was shown and that adjustment, never the words. ----
+    const CUT_BRIEFING = 'tire o trecho sobre vender'
+    fake.script.set(CUT_BRIEFING, { directives: [{ kind: 'remove-speech', value: 'about', param: 'vender', quote: 'tire o trecho sobre vender' }], unsupported: [], questions: [], coverage: [] })
     const cutSentences = [
-      [0, 2, 'Bem-vindos ao curso.'], [2, 4, 'Hoje falamos da venda do produto.'], [4, 6, 'Vender bem exige confiança,'], [6, 8, 'e ouvir o cliente com calma.'],
-      [8, 10, 'O produto foi vendido ontem.'], [10, 12, 'Agora vamos ao conteúdo.'],
+      [0, 2, 'Bem-vindos ao curso.'], [2, 3, 'Hoje falamos de tudo,'], [3, 4, 'e de como vender melhor.'], [4, 6, 'Vender bem exige confiança.'],
+      [6, 8, 'O produto foi vendido'], [8, 9, 'ontem.'], [9, 11, 'Agora vamos ao conteúdo.'],
     ]
     const cutWords = cutSentences.flatMap(([start, end, text]) => {
       const spoken = text.replace(/[.,]/gu, '').split(' ')
@@ -436,35 +437,56 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     const confirmation = page.getByTestId('speech-cut-confirmation')
     await confirmation.waitFor({ timeout: 60_000 })
     const passageBox = confirmation.getByTestId('speech-cut-passage')
-    assert.equal(await passageBox.count(), 1, 'the three sentences that say the subject, and the ones between them, are ONE passage')
-    const passageText = await passageBox.getByTestId('speech-cut-passage-text').textContent()
-    assert.equal(passageText, 'Hoje falamos da venda do produto. Vender bem exige confiança, e ouvir o cliente com calma. O produto foi vendido ontem.')
-    assert.deepEqual(await passageBox.locator('mark').allTextContents(), ['venda', 'Vender', 'vendido'], 'the words of the subject are marked')
-    assert.match(await passageBox.textContent(), /Trecho 1 de 1: 2,0 s a 10,0 s/)
+    assert.equal(await passageBox.count(), 1, 'the sentences that say the subject, and the ones between them, are ONE passage')
+    const shownText = async () => (await passageBox.getByTestId('speech-cut-passage-text').textContent())
+    const shownMarks = async () => passageBox.locator('mark').allTextContents()
+    const PROPOSED = 'Hoje falamos de tudo, e de como vender melhor. Vender bem exige confiança. O produto foi vendido ontem.'
+    assert.equal(await shownText(), PROPOSED)
+    assert.deepEqual(await shownMarks(), ['vender', 'Vender', 'vendido'], 'the words of the subject are marked')
+    assert.match(await passageBox.textContent(), /Trecho 1 de 1: 2,0 s a 9,0 s/)
     assert.match(await passageBox.getByTestId('speech-cut-passage-state').textContent(), /como o Apollo propôs/)
     assert.equal(await confirmation.getByTestId('speech-cut-notice').count(), 0, 'the language is known: nothing to warn about')
-    // The places to start are the starts of the segments from the beginning of the speech to the first mention; to end, from the last mention to the end of the speech.
-    const startOptions = await passageBox.getByTestId('speech-cut-start').locator('option').allTextContents()
-    assert.ok(startOptions.length >= 2 && /Bem-vindos ao curso/.test(startOptions[0]), startOptions.join(' | '))
-    const endOptions = await passageBox.getByTestId('speech-cut-end').locator('option').allTextContents()
-    assert.ok(endOptions.length >= 2 && /O produto foi vendido ontem/.test(endOptions[0]), endOptions.join(' | '))
-    assert.ok(await passageBox.getByTestId('speech-cut-start').evaluate((element) => element.offsetHeight >= 44), 'a touch-sized control')
+    // One passage: nothing to keep on purpose (the choice appears when there are several).
+    assert.equal(await passageBox.getByTestId('speech-cut-keep').count(), 0)
+    const startSelect = passageBox.getByTestId('speech-cut-start')
+    const endSelect = passageBox.getByTestId('speech-cut-end')
+    const startOptions = await startSelect.locator('option').allTextContents()
+    assert.equal(startOptions.length, 3, startOptions.join(' | '))
+    assert.match(startOptions[0], /Bem-vindos ao curso/)
+    const endOptions = await endSelect.locator('option').allTextContents()
+    assert.equal(endOptions.length, 3, endOptions.join(' | '))
+    assert.match(endOptions[0], /O produto foi vendido/)
+    assert.ok(await startSelect.evaluate((element) => element.offsetHeight >= 44), 'a touch-sized control')
     await shot('20-trecho-da-fala-proposto.png')
-    // Confirming without moving anything sends the subject only.
+    // Confirming without moving anything sends the subject and the seal only.
     sentToConfirm = null
     await Promise.all([page.waitForResponse((response) => response.url().includes('/speech-removals')), confirmation.getByRole('button', { name: 'Confirmar corte' }).click()])
-    assert.equal(sentToConfirm.subject, 'venda')
+    assert.equal(sentToConfirm.subject, 'vender')
+    assert.match(sentToConfirm.proposalHash, /^[a-f0-9]{64}$/, 'the seal of what was shown goes back with the confirmation')
     assert.equal('adjustments' in sentToConfirm, false, 'nothing was moved: the passage is the proposed one')
     assert.equal('rules' in sentToConfirm || 'alternatives' in sentToConfirm, false, 'the screen never sends the words of the cut')
-    // Moving the start to the first segment: the screen says it was changed and sends that passage, by id, with the bounds chosen.
-    await passageBox.getByTestId('speech-cut-start').selectOption({ index: 0 })
+    // EXTENDING: the text shown is the text of the bounds chosen - the sentence before is read now, and it is what is cut.
+    await startSelect.selectOption({ index: 0 })
     assert.match(await passageBox.getByTestId('speech-cut-passage-state').textContent(), /Você mudou este trecho/)
-    assert.match(await passageBox.textContent(), /Trecho 1 de 1: 0,0 s a 10,0 s/)
+    assert.match(await passageBox.textContent(), /Trecho 1 de 1: 0,0 s a 9,0 s/)
+    assert.equal(await shownText(), `Bem-vindos ao curso. ${PROPOSED}`)
+    assert.deepEqual(await shownMarks(), ['vender', 'Vender', 'vendido'])
     await shot('21-trecho-da-fala-ajustado.png')
+    // SHORTENING at the start and at the end: what drops out of the bounds drops out of the text.
+    await startSelect.selectOption('3')
+    assert.equal(await shownText(), 'e de como vender melhor. Vender bem exige confiança. O produto foi vendido ontem.')
+    await endSelect.selectOption('8')
+    assert.equal(await shownText(), 'e de como vender melhor. Vender bem exige confiança. O produto foi vendido')
+    assert.match(await passageBox.textContent(), /Trecho 1 de 1: 3,0 s a 8,0 s/)
+    assert.deepEqual(await shownMarks(), ['vender', 'Vender', 'vendido'])
+    // EXTENDING at the end.
+    await endSelect.selectOption('11')
+    assert.equal(await shownText(), 'e de como vender melhor. Vender bem exige confiança. O produto foi vendido ontem. Agora vamos ao conteúdo.')
+    await endSelect.selectOption('8')
     sentToConfirm = null
     await Promise.all([page.waitForResponse((response) => response.url().includes('/speech-removals')), confirmation.getByRole('button', { name: 'Confirmar corte' }).click()])
     assert.equal(sentToConfirm.adjustments.length, 1)
-    assert.deepEqual([sentToConfirm.adjustments[0].startSeconds, sentToConfirm.adjustments[0].endSeconds], [0, 10])
+    assert.deepEqual([sentToConfirm.adjustments[0].startSeconds, sentToConfirm.adjustments[0].endSeconds], [3, 8], 'what was sent is the bounds of the text that was shown')
     assert.match(sentToConfirm.adjustments[0].passageId, /^passage-[a-f0-9]{10}$/)
     await page.unroute('**/v1/projects/*/speech-removals')
 

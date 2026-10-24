@@ -198,6 +198,11 @@ export interface SpeechRemovalProposal {
    * may move its start and end before confirming.
    */
   passages?: readonly Readonly<SpeechRemovalPassage>[]
+  /**
+   * The seal of what a person is shown: a hash of the passages (ids, bounds, whole text, mentions) and of how they were searched. The confirmation carries it back and the
+   * Apollo, which searches the transcript again, refuses to cut when it differs: a person confirms exactly what was shown, or nothing is cut.
+   */
+  proposalHash?: string
   /** How the transcript was searched: by variation of the word (stem) or literally, and the technical policy that grouped the mentions into passages. */
   search?: Readonly<SpeechRemovalSearch>
 }
@@ -246,7 +251,7 @@ export interface SpeechRemovalSearch {
   /** Said to the owner when the search is literal. */
   notice?: string
   /** The technical parameters that grouped the mentions into passages: a search parameter with its origin, not an editorial value. */
-  policy: Readonly<{ name: string; maxGapSeconds: number; maxGapSentences: number; maxSentenceSeconds: number; origin: 'technical-search-parameter' }>
+  policy: Readonly<{ name: string; maxGapSeconds: number; maxGapSentences: number; maxSentenceSeconds: number; maxPassageSeconds: number; maxMentions: number; origin: 'technical-search-parameter' }>
 }
 
 /** A directive that needs no work to be satisfied, and what satisfies it. Present in a resolution only when there is one. */

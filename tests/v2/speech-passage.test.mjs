@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { defineEditorialPhraseRules } from '../../src/v2/application/editorial-phrase-rules.ts'
+import { defineEditorialPhraseRules, editorialRulesMatchingSpeech } from '../../src/v2/application/editorial-phrase-rules.ts'
 import { confirmSpeechPassages, groupSpeechPassages, SPEECH_PASSAGE_POLICY } from '../../src/v2/application/speech-passage.ts'
 import { proposeSpeechRemoval } from '../../src/v2/application/speech-removal-proposal.ts'
 import { sameSpeechWord, speechStemmerFor } from '../../src/v2/application/speech-stemming.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { presentPublicDomainError } from '../../src/v2/public-api/error-presenter.ts'
-import { cutAdjustmentsOf, cutEndOptions, cutProposalsOf, cutStartOptions, highlightMentions } from '../../src/v2/ui/editorial-request-view.ts'
+import { cutAdjustmentsOf, cutEndOptions, cutMentionsInRange, cutProposalsOf, cutStartOptions, cutTextOfRange, highlightMentions } from '../../src/v2/ui/editorial-request-view.ts'
 
 /**
  * ADR-160. A subject is spoken in a PASSAGE: the sentences that mention it and the ones between them. The fixture below has the shape of a real case (the
@@ -63,7 +63,7 @@ test('the subject is proposed as ONE passage from the first sentence to the last
   assert.deepEqual(proposal.search.policy, SPEECH_PASSAGE_POLICY)
   assert.equal(proposal.search.policy.origin, 'technical-search-parameter')
   assert.equal(proposal.search.matching, 'stem')
-  assert.equal(proposal.search.lexicon, 'pt-endings/v1')
+  assert.equal(proposal.search.lexicon, 'pt-endings/v2')
   assert.equal(proposal.search.notice, undefined)
 })
 
@@ -71,14 +71,17 @@ test('the request as two subjects finds each its own passage; together they are 
   const draw = proposeSpeechRemoval('sorteio', transcriptOf())
   const form = proposeSpeechRemoval('formulário de inscrição', transcriptOf())
   assert.deepEqual(draw.matches.map((match) => [match.startSeconds, match.endSeconds]), [[58.12, 72.46]])
-  assert.deepEqual(form.matches.map((match) => [match.startSeconds, match.endSeconds]), [[63.5, 83.24]])
+  // The phrase "formulário de inscrição" is spoken once, in the sentence of 63.5-72.46: that is the subject. Its words alone do not call the sentences that only share one
+  // (the person can extend the end to the rest of the talk, within the limits).
+  assert.deepEqual(form.matches.map((match) => [match.startSeconds, match.endSeconds]), [[63.5, 72.46]])
+  assert.deepEqual(form.passages[0].mentions.map((mention) => mention.text), ['formulário de inscrição'])
   assert.equal(draw.basis, 'phrase', 'a subject of one word is the phrase')
   assert.equal(form.basis, 'phrase', 'the whole subject is spoken')
 })
 
 test('a word is the same subject in its variations: sorteio, sortear, sorteado, sorteios; formulário and formulários', () => {
   const stemmer = speechStemmerFor('pt-BR')
-  assert.equal(stemmer.id, 'pt-endings/v1')
+  assert.equal(stemmer.id, 'pt-endings/v2')
   for (const variation of ['sorteio', 'sorteios', 'sortear', 'sorteado', 'sorteados', 'sorteia', 'sorteamos']) {
     assert.ok(sameSpeechWord(stemmer, variation, 'sorteio'), variation)
   }
@@ -141,7 +144,7 @@ test('mentions far apart are separate passages, each with limits that stop at it
   // The same words with a longer reach (the owner adjusts the passage: the parameters are named and recorded) are one passage.
   const wide = groupSpeechPassages({
     ruleId: proposal.ruleId, words: transcriptOf(far).words, segments: transcriptOf(far).segments, mentions: proposal.passages.flatMap((passage) => passage.mentions),
-    policy: { ...SPEECH_PASSAGE_POLICY, name: 'speech-passage-adjacency/test', maxGapSeconds: 60, maxGapSentences: 20 },
+    policy: { ...SPEECH_PASSAGE_POLICY, name: 'speech-passage-adjacency/test', maxGapSeconds: 60, maxGapSentences: 20, maxPassageSeconds: 600, maxMentions: 100 },
   })
   assert.equal(wide.length, 1)
   assert.deepEqual([wide[0].startSeconds, wide[0].endSeconds], [0, 42])
@@ -165,7 +168,7 @@ test('a passage is confirmed as proposed unless the person moved it, and only to
   const transcript = transcriptOf()
   const proposal = proposeSpeechRemoval('sorteio e do formulário de inscrição', transcript)
   const [passage] = proposal.passages
-  const confirmed = (adjustments) => confirmSpeechPassages({ passages: proposal.passages, words: transcript.words, segments: transcript.segments, adjustments })
+  const confirmed = (adjustments) => confirmSpeechPassages({ passages: proposal.passages, words: transcript.words, segments: transcript.segments, adjustments }).confirmed
   // No adjustment: the proposed bounds, not adjusted.
   assert.deepEqual(confirmed(undefined).map(({ id, ...rest }) => rest), [{ startSeconds: 58.12, endSeconds: 83.24, proposedStartSeconds: 58.12, proposedEndSeconds: 83.24, adjusted: false }])
   assert.deepEqual(confirmed([]).map((item) => item.adjusted), [false])
@@ -201,7 +204,7 @@ test('two passages cannot be moved into one another', () => {
   const transcript = transcriptOf(far)
   const proposal = proposeSpeechRemoval('sorteio', transcript)
   const [first, second] = proposal.passages
-  const move = (adjustment) => confirmSpeechPassages({ passages: proposal.passages, words: transcript.words, segments: transcript.segments, adjustments: [adjustment] })
+  const move = (adjustment) => confirmSpeechPassages({ passages: proposal.passages, words: transcript.words, segments: transcript.segments, adjustments: [adjustment] }).confirmed
   assert.equal(move({ passageId: first.id, startSeconds: 0, endSeconds: 29 })[0].endSeconds, 29)
   assert.throws(() => move({ passageId: first.id, startSeconds: 0, endSeconds: 38 }), (error) => /beyond its limits/.test(error.message))
   assert.equal(move({ passageId: second.id, startSeconds: 24, endSeconds: 38 })[1].startSeconds, 24)
@@ -218,7 +221,7 @@ test('the confirmation of a proposal is read back only from a confirmation that 
   const record = (startSeconds, endSeconds) => ({
     subject: 'formulário', medium: 'ui-session',
     passages: [{ id: 'passage-x', startSeconds, endSeconds, proposedStartSeconds: startSeconds, proposedEndSeconds: endSeconds, adjusted: false }],
-    search: { matching: 'stem', language: 'pt', lexicon: 'pt-endings/v1', policy: { name: 'x', maxGapSeconds: 1, maxGapSentences: 1, maxSentenceSeconds: 1 } },
+    search: { matching: 'stem', language: 'pt', lexicon: 'pt-endings/v2', policy: { name: 'x', maxGapSeconds: 1, maxGapSentences: 1, maxSentenceSeconds: 1 } },
   })
   const ask = (requested) => proposeSpeechRemoval('formulário', transcript, { requested }).confirmed
   assert.equal(ask([rule(undefined)]), undefined)
@@ -275,4 +278,124 @@ test('the screen offers, per passage, the places to start and end it, marks the 
   const marked = highlightMentions(passage.text, passage.mentions)
   assert.equal(marked.map((piece) => piece.text).join(''), passage.text)
   assert.deepEqual(marked.filter((piece) => piece.mention).map((piece) => piece.text.trim().replace(/[.,]$/u, '')).filter((text) => text.length > 0).slice(0, 4), ['sorteio.', 'sortear', 'formulário', 'inscrição'].map((text) => text.replace(/\.$/u, '')))
+})
+
+test('safe variations only: the pairs that merely look alike are not the same word', () => {
+  const pt = speechStemmerFor('pt-BR')
+  // Other words that share letters: not joined.
+  for (const [left, right] of [['venda', 'vendo'], ['conta', 'contar'], ['conta', 'conto'], ['parte', 'partido'], ['banco', 'bancada'], ['sorte', 'sorteio'], ['venda', 'vender'], ['casa', 'casamento']]) {
+    assert.equal(sameSpeechWord(pt, left, right), false, `${left} / ${right}`)
+  }
+  // The same lemma: the plural, and the forms of one verb.
+  for (const [left, right] of [['vender', 'vendido'], ['contar', 'contado'], ['partir', 'partido'], ['venda', 'vendas'], ['formulario', 'formularios'], ['sortear', 'sorteio'], ['sorteio', 'sorteados']]) {
+    assert.equal(sameSpeechWord(pt, left, right), true, `${left} / ${right}`)
+  }
+  const en = speechStemmerFor('en-US')
+  assert.equal(sameSpeechWord(en, 'plan', 'plane'), false)
+  assert.equal(sameSpeechWord(en, 'plan', 'plans'), true)
+  assert.equal(sameSpeechWord(en, 'sell', 'selling'), true)
+})
+
+test('when the whole phrase of the subject is spoken, its words alone do not become mentions', () => {
+  const spoken = [
+    { start: 0, end: 4, text: 'Vamos ver a conta de luz da casa.' },
+    { start: 4, end: 8, text: 'Fale com o suporte do plano de saúde.' },
+    { start: 8, end: 12, text: 'Aqui o plano de saúde cobre tudo.' },
+    { start: 12, end: 16, text: 'O plano do ano que vem é outro.' },
+  ]
+  const proposal = proposeSpeechRemoval('plano de saúde', transcriptOf(spoken))
+  assert.equal(proposal.basis, 'phrase')
+  assert.deepEqual(proposal.passages.flatMap((passage) => passage.mentions.map((mention) => mention.text)), ['plano de saúde', 'plano de saúde'], '"plano" alone, in the last sentence, is not the subject')
+  assert.ok(proposal.passages.every((passage) => passage.endSeconds <= 12))
+  // Not spoken as a phrase: its words are the search, as before.
+  const apart = proposeSpeechRemoval('saúde do plano', transcriptOf(spoken))
+  assert.equal(apart.basis, 'words')
+  assert.ok(apart.passages[0].mentions.length >= 3)
+})
+
+test('a chain of mentions is closed by the total reach of the passage and by the number of mentions, both named in the policy', () => {
+  // A mention every 10 seconds for five minutes, each with a sentence of its own: every gap is within reach, so only the caps stop the chain.
+  const chain = Array.from({ length: 30 }, (_, index) => ({ start: index * 10, end: index * 10 + 9, text: `Fala número ${index + 1} sobre o sorteio.` }))
+  const proposal = proposeSpeechRemoval('sorteio', transcriptOf(chain))
+  assert.ok(proposal.passages.length >= 3, `one endless passage was proposed: ${proposal.passages.map((passage) => passage.endSeconds - passage.startSeconds).join(', ')}`)
+  assert.ok(proposal.passages.every((passage) => passage.endSeconds - passage.startSeconds <= SPEECH_PASSAGE_POLICY.maxPassageSeconds + 10))
+  assert.ok(proposal.passages.every((passage) => passage.mentions.length <= SPEECH_PASSAGE_POLICY.maxMentions))
+  assert.equal(SPEECH_PASSAGE_POLICY.name, 'speech-passage-adjacency/v2')
+  const transcript = transcriptOf(chain)
+  const few = groupSpeechPassages({
+    ruleId: 'speech-x', words: transcript.words, segments: transcript.segments, mentions: proposal.passages.flatMap((passage) => passage.mentions),
+    policy: { ...SPEECH_PASSAGE_POLICY, maxMentions: 2, maxPassageSeconds: 1000 },
+  })
+  assert.ok(few.every((passage) => passage.mentions.length <= 2) && few.length === 15)
+  // A sentence without a mark is closed by the policy too: a transcript whose punctuation is missing for minutes is not one sentence.
+  const unmarked = Array.from({ length: 8 }, (_, index) => ({ start: index * 10, end: index * 10 + 10, text: index === 3 ? 'falamos do sorteio.' : `parte ${index} sem marca` }))
+  unmarked.push({ start: 80, end: 90, text: 'Fim.' })
+  const run = proposeSpeechRemoval('sorteio', transcriptOf(unmarked))
+  assert.ok(run.passages[0].endSeconds - run.passages[0].startSeconds <= SPEECH_PASSAGE_POLICY.maxSentenceSeconds + 10, `${run.passages[0].startSeconds}-${run.passages[0].endSeconds}`)
+})
+
+test('what a person is shown is sealed: the proposal has a hash that changes with the text, the bounds and the search', () => {
+  const base = proposeSpeechRemoval('sorteio', transcriptOf())
+  assert.match(base.proposalHash, /^[a-f0-9]{64}$/)
+  assert.equal(proposeSpeechRemoval('sorteio', transcriptOf()).proposalHash, base.proposalHash, 'deterministic')
+  const edited = SEGMENTS.map((segment) => ({ ...segment, text: segment.text.replace('Nós vamos sortear', 'Nós vamos sortear hoje') }))
+  assert.notEqual(proposeSpeechRemoval('sorteio', transcriptOf(edited)).proposalHash, base.proposalHash, 'the text changed')
+  assert.notEqual(proposeSpeechRemoval('sorteio', transcriptOf(SEGMENTS, { language: 'de' })).proposalHash, base.proposalHash, 'the search changed')
+})
+
+test('a person may choose not to cut a passage: it is kept and recorded; at least one is cut; a kept passage is not adjusted', () => {
+  const far = [
+    { start: 0, end: 4, text: 'Falamos do sorteio.' },
+    ...Array.from({ length: 6 }, (_, index) => ({ start: 4 + index * 5, end: 9 + index * 5, text: `Assunto número ${index + 1} sem relação.` })),
+    { start: 34, end: 38, text: 'No fim, o sorteio de novo.' },
+  ]
+  const transcript = transcriptOf(far)
+  const proposal = proposeSpeechRemoval('sorteio', transcript)
+  const [first, second] = proposal.passages
+  const run = (extra) => confirmSpeechPassages({ passages: proposal.passages, words: transcript.words, segments: transcript.segments, ...extra })
+  const kept = run({ discarded: [first.id] })
+  assert.deepEqual(kept.confirmed.map((passage) => passage.id), [second.id])
+  assert.deepEqual(kept.discarded, [{ id: first.id, startSeconds: first.startSeconds, endSeconds: first.endSeconds }])
+  assert.deepEqual(run({}).discarded, [])
+  const refused = (extra, pattern) => assert.throws(() => run(extra), (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT' && pattern.test(error.message), JSON.stringify(extra))
+  refused({ discarded: [first.id, second.id] }, /At least one passage must be cut/)
+  refused({ discarded: ['passage-0000000000'] }, /must name passages of this proposal/)
+  refused({ discarded: [first.id, first.id] }, /each once/)
+  refused({ discarded: [first.id], adjustments: [{ passageId: first.id, startSeconds: 0, endSeconds: 4 }] }, /cannot be adjusted/)
+  // The read-back: the proposal is answered when every mention is in a passage that was cut or one that was kept on purpose.
+  const rule = defineEditorialPhraseRules([{ id: proposal.ruleId, label: proposal.label, alternatives: [...proposal.alternatives] }])[0]
+  const record = (passages, discarded) => ({
+    subject: 'sorteio', medium: 'ui-session',
+    passages: passages.map(({ id, startSeconds, endSeconds }) => ({ id, startSeconds, endSeconds, proposedStartSeconds: startSeconds, proposedEndSeconds: endSeconds, adjusted: false })),
+    ...(discarded.length > 0 ? { discarded: discarded.map(({ id, startSeconds, endSeconds }) => ({ id, startSeconds, endSeconds })) } : {}),
+    search: { matching: 'stem', language: 'pt', lexicon: 'pt-endings/v2', policy: { name: 'x', maxGapSeconds: 1, maxGapSentences: 1, maxSentenceSeconds: 1, maxPassageSeconds: 1, maxMentions: 1 } },
+  })
+  const ask = (confirmation) => proposeSpeechRemoval('sorteio', transcript, { requested: [{ ...rule, confirmation }] }).confirmed
+  assert.equal(ask(record([second], [first])), true)
+  assert.equal(ask(record([second], [])), undefined, 'a passage that is neither cut nor recorded as kept is still asked')
+  // A rule that kept a passage on purpose is not judged by the words of the captions (the subject is in the video where the person kept it).
+  assert.deepEqual(editorialRulesMatchingSpeech('o sorteio de novo', [{ ...rule, confirmation: record([second], [first]) }]), [])
+  assert.deepEqual(editorialRulesMatchingSpeech('o sorteio de novo', [{ ...rule, confirmation: record([second, first], []) }]), [proposal.ruleId])
+})
+
+test('the text a person reads for the bounds chosen is exactly the text that is cut: it follows the segments between them, extended or shortened', () => {
+  const sentences = [
+    { start: 0, end: 2, text: 'Bem-vindos ao curso.' },
+    { start: 2, end: 3, text: 'Hoje falamos de tudo,' },
+    { start: 3, end: 4, text: 'e de como vender melhor.' },
+    { start: 4, end: 6, text: 'Vender bem exige confiança.' },
+    { start: 6, end: 8, text: 'O produto foi vendido' },
+    { start: 8, end: 9, text: 'ontem.' },
+    { start: 9, end: 11, text: 'Agora vamos ao conteúdo.' },
+  ]
+  const [passage] = proposeSpeechRemoval('vender', transcriptOf(sentences)).passages
+  assert.deepEqual([passage.startSeconds, passage.endSeconds], [2, 9])
+  assert.equal(cutTextOfRange(passage, passage.startSeconds, passage.endSeconds), passage.text, 'the proposed bounds read the proposed text')
+  assert.deepEqual(cutStartOptions(passage).map((option) => option.seconds), [0, 2, 3], 'from the beginning of the speech to the segment of the first mention')
+  assert.deepEqual(cutEndOptions(passage).map((option) => option.seconds), [8, 9, 11], 'from the end of the last mention to the end of the speech')
+  assert.equal(cutTextOfRange(passage, 0, 9), 'Bem-vindos ao curso. Hoje falamos de tudo, e de como vender melhor. Vender bem exige confiança. O produto foi vendido ontem.', 'extended')
+  assert.equal(cutTextOfRange(passage, 3, 9), 'e de como vender melhor. Vender bem exige confiança. O produto foi vendido ontem.', 'shortened at the start')
+  assert.equal(cutTextOfRange(passage, 2, 8), 'Hoje falamos de tudo, e de como vender melhor. Vender bem exige confiança. O produto foi vendido', 'shortened at the end')
+  assert.equal(cutTextOfRange(passage, 2, 11), `${passage.text} Agora vamos ao conteúdo.`, 'extended at the end')
+  assert.deepEqual(cutMentionsInRange(passage, 3, 8).map((mention) => mention.text), ['vender', 'Vender', 'vendido'])
 })

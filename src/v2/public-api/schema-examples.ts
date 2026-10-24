@@ -14794,10 +14794,11 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       subject: '<assunto>', reason: '<motivo da confirmação>',
     }],
     'apollo://schemas/confirm-speech-removal-request/v2': [
-      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-example-1', variantId: 'variant-example-1', subject: '<assunto>' },
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-example-1', variantId: 'variant-example-1', subject: '<assunto>', proposalHash: 'b'.repeat(64) },
       {
         baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-example-1', variantId: 'variant-example-1',
-        subject: '<assunto>', adjustments: [{ passageId: 'passage-0123456789', startSeconds: 10.5, endSeconds: 42 }], reason: '<motivo da confirmação>',
+        subject: '<assunto>', proposalHash: 'b'.repeat(64), adjustments: [{ passageId: 'passage-0123456789', startSeconds: 10.5, endSeconds: 42 }],
+        discardedPassageIds: ['passage-9876543210'], reason: '<motivo da confirmação>',
       },
     ],
     'apollo://schemas/editorial-request-response/v3': [{ data: currentEditorialRequestExampleCover, meta: { apiVersion: 'v1' } }],
