@@ -35,6 +35,7 @@ import {
   advancePublicOperationPhase,
   assertPublicOperation,
   cancelPublicOperation,
+  cancellationInstant,
   isTerminalPublicOperation,
   rehydratePublicOperation,
   retryPublicOperation,
@@ -1248,7 +1249,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       throw new DomainError('INVALID_PUBLIC_OPERATION', 'Cancellation target is invalid')
     }
     const audit = assertAuthenticationAudit(input.authenticationAudit, input.workspaceId)
-    const canceledAt = parseCommandDate(input.canceledAt, 'canceledAt')
+    const requestedAt = parseCommandDate(input.canceledAt, 'canceledAt')
     return this.client.$transaction(async (transaction) => {
       const stored = await transaction.v2PublicOperation.findFirst({
         where: { id: input.operationId, workspaceId: input.workspaceId },
@@ -1256,6 +1257,8 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       })
       if (!stored) return null
       const current = hydratePublicOperationRecord(stored)
+      // A heartbeat committed after the request was stamped must not turn the cancel into a "time moved backwards" refusal.
+      const canceledAt = new Date(cancellationInstant(current.operation, requestedAt.toISOString()))
       const canceled = cancelPublicOperation(current.operation, canceledAt.toISOString())
       if (canceled.status !== 'canceled' || stored.status === 'canceled') return current
 
