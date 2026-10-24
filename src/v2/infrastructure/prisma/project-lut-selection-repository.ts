@@ -300,7 +300,7 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
     return hydrate(row, false)
   }
 
-  async readEffectiveForVersion(input: { workspaceId: string; projectId: string; projectVersionId: string }) {
+  async readEffectiveForVersion(input: { workspaceId: string; projectId: string; projectVersionId: string }): ReturnType<ProjectLutSelectionRepository['readEffectiveForVersion']> {
     const lineage = await this.client.$queryRaw<Array<{ selectionId: string }>>(Prisma.sql`
       WITH RECURSIVE lineage AS (
         SELECT "id", "parentVersionId", 0 AS depth
@@ -322,7 +322,16 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
       LIMIT 1
     `)
     const selectionId = lineage[0]?.selectionId
-    if (!selectionId) return null
+    if (!selectionId) {
+      // A copy has no selection of its own until one is made on it: it carries the one its source had at the Version it was copied from, by reference
+      // (the source's rows are immutable), so the copy renders with the grade the original was delivered with.
+      const root = await this.client.v2ProjectVersion.findFirst({ where: { workspaceId: input.workspaceId, projectId: input.projectId, parentVersionId: null },
+        select: { forkedFromProjectId: true, forkedFromVersionId: true } })
+      if (root?.forkedFromProjectId && root.forkedFromVersionId) {
+        return this.readEffectiveForVersion({ workspaceId: input.workspaceId, projectId: root.forkedFromProjectId, projectVersionId: root.forkedFromVersionId })
+      }
+      return null
+    }
     const row = await this.client.v2ProjectLutSelection.findUnique({ where: { id: selectionId }, include: selectionInclude })
     if (!row || row.workspaceId !== input.workspaceId || row.projectId !== input.projectId) throw new DomainError('PERSISTENCE_CONFLICT', 'Effective project LUT selection disappeared')
     const result = hydrate(row, false)

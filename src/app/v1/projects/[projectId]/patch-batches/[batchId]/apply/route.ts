@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
-import { enqueueProjectProxyRenderService } from '@/v2/application/enqueue-project-proxy-render'
+import { enqueueProjectProxyRenderAfterCommandService } from '@/v2/application/enqueue-project-proxy-render'
 import { applyReviewPatchBatchService } from '@/v2/application/review-patch-batch'
 import { calculateVersionHash } from '@/v2/application/version-hash'
 import { DomainError } from '@/v2/domain/errors'
@@ -15,7 +15,8 @@ import {
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { presentReviewPatchBatch } from '@/v2/public-api/collaborative-review-presenters'
-import { presentProjectVersionV2, presentPublicOperation, presentSuccess } from '@/v2/public-api/presenters'
+import { presentProjectVersionV2, presentSuccess } from '@/v2/public-api/presenters'
+import { commandProxyRenderReplayed, presentCommandProxyRender } from '@/v2/public-api/command-proxy-render-contract'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       actor,
       idempotencyKey,
     })
-    const render = await enqueueProjectProxyRenderService({
+    const render = await enqueueProjectProxyRenderAfterCommandService({
       projects: createProjectProxyRenderRepository(),
       operations: createPublicOperationRepository(),
       colorPipelines: createColorPipelineCompilationRepository(),
@@ -54,16 +55,16 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     })({
       workspaceId: actor.workspaceId,
       projectId,
+      expectedProjectVersionId: result.version.id,
       actor,
       idempotencyKey: `patch-batch-proxy:${calculateVersionHash(idempotencyKey).slice(0, 58)}`,
       traceId: requestId,
     })
-    const batch = await repository.attachRenderOperation({
-      workspaceId: actor.workspaceId,
-      projectId,
-      batchId,
-      renderOperationId: render.operation.id,
-    })
+    // A project with several outputs has no single proxy to attach: the batch is answered as committed and the proxies are requested per output.
+    const batch = render.status === 'enqueued'
+      ? await repository.attachRenderOperation({ workspaceId: actor.workspaceId, projectId, batchId, renderOperationId: render.operation.id })
+      : await repository.readBatch({ workspaceId: actor.workspaceId, projectId, batchId })
+    if (!batch) throw new DomainError('PROJECT_NOT_FOUND', 'Review patch batch was not found')
     return NextResponse.json(presentSuccess({
       batch: presentReviewPatchBatch(batch),
       command: { id: result.command.id, type: result.command.type, baseVersionId: result.command.baseVersionId, resultVersionId: result.version.id, createdAt: result.command.createdAt },
@@ -74,8 +75,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       comparison: result.comparison,
       impact: result.impact,
       invalidations: result.invalidations,
-      operation: presentPublicOperation(render.operation),
-      replayed: result.replayed && render.replayed,
+      ...presentCommandProxyRender(render),
+      replayed: result.replayed && commandProxyRenderReplayed(render),
     }), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
   } catch (error) {
     return respondPublicError(error, requestId)

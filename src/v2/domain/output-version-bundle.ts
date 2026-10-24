@@ -442,7 +442,7 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
       before.retimedTranscript?.sourceTranscriptHash===d.transcript.document.transcriptHash,
       'INVALID_COMMAND','Editorial source must be the actual aligned parent transcript')
     const expected=materializeEditorialCutPlanV3({before,versionId:a.resultVersionId,planId:p.id,commandId:c.id,
-      createdAt:a.createdAt,sourceBinding:b,exclusions:payload.exclusions})
+      createdAt:a.createdAt,sourceBinding:b,exclusions:payload.exclusions,adoptsAppliedCut:pending})
     assertDomain(edit.contentJson===stableSerialize(expected)&&edit.contentHash===payload.editPlanHash&&stableSerialize(createEditorialAudioProjectionV1(expected))===stableSerialize(payload.audioProjection),
       'INVALID_COMMAND','Editorial plan differs from exact parent timing/content rematerialization')
     const impact=createEditorialCutImpactV2({commandId:c.id,baseVersionId:parent.version.id,resultVersionId:a.resultVersionId,

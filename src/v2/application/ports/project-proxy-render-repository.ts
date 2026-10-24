@@ -193,7 +193,20 @@ export interface ProjectProxyCompletionLease {
   readonly now: string
 }
 
+/** One output of a Version's State, as a caller that must request a proxy per output needs to name it. */
+export interface ProjectVersionOutput {
+  readonly variantId: string
+  /** The aspect ratio the output's sealed spec carries, or null when it carries none. */
+  readonly aspectRatio: string | null
+}
+
 export interface ProjectProxyRenderRepository {
+  /**
+   * The outputs of the State a Version sealed (ordered by stable variant id). A cheap read of the entry rows: it does not consume
+   * the Version (no verdict, no render source), it only says how many outputs there are and which. Optional: a repository without
+   * it makes `enqueueProjectProxyRenderAfterCommandService` enqueue exactly as `enqueueProjectProxyRenderService` does.
+   */
+  listVersionOutputs?(input: { workspaceId: string; projectId: string; projectVersionId: string }): Promise<readonly ProjectVersionOutput[]>
   /**
    * The operation already admitted for exactly this Version and pre-render input hash (a render, or a render carried from an earlier Version),
    * or null. Optional: a repository without it simply never short-circuits an enqueue.

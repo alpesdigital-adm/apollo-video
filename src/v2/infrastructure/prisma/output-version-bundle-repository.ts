@@ -9,7 +9,7 @@ import { serializeOutputCanonicalJson, calculateOutputCanonicalHash } from '../.
 import { evaluateAssetUse, UNDETERMINED_LOCALE } from '../../domain/asset-rights.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
 import { PrismaAssetRightsRepository } from './asset-rights-repository.ts'
-import { readPersistedCreationOutputBundleV2, readPersistedForkCreationOutputBundleV3 } from './output-state-consumption.ts'
+import { readPersistedCreationOutputBundleV2, readPersistedForkCreationOutputBundleV3, createOperationalReadCacheV3, type OperationalReadCacheV3 } from './output-state-consumption.ts'
 import { readCompletedIdempotencyResponse,
   pauseBeforeLostRaceRetry,
 } from './idempotency-record-persistence.ts'
@@ -69,7 +69,20 @@ async function insert(tx: Tx, table: string, data: Record<string, unknown>) {
   return tx.$executeRawUnsafe('INSERT INTO "'+table+'" ('+names.map((n) => '"'+n+'"').join(',')+') VALUES ('+
     names.map((name,i) => '$'+(i+1)+(table==='project_media_assets' && (name==='id'||name==='uploadId')?'::uuid':'')).join(',')+')',...Object.values(data))
 }
-async function sourceFacts(tx: Tx, command: CreationOutputBundleWriteV2['proposal']): Promise<Readonly<CreationSourceFactsV2 | CreationSourceFactsV3> | null> {
+/**
+ * The bundle of the source Version the duplication is made from. `expected` is the bundle the caller read and verified IN FULL (the database
+ * assertion and the reconstruction) before the transaction began; it is the same sealed, immutable Version. When the stored bundle row
+ * carries the very hash of that bundle there is nothing left to learn from verifying it again under the transaction's locks, and the
+ * seconds that costs (twice the assertion, the reconstruction and the serialization of a State that embeds the master's receipt) are
+ * not spent inside the 30 s the transaction has. A source that does not match its row, or has no operational row (a Creation root),
+ * is read and verified in full here, as before.
+ */
+async function storedSourceBundle(tx: Tx, scope: Readonly<{workspaceId:string;projectId:string;versionId:string}>, expected: Readonly<OperationalOutputParentV3>, reads?: OperationalReadCacheV3) {
+  const rows = await tx.$queryRawUnsafe<{ bundleHash: string }[]>('SELECT "bundleHash" FROM output_operational_bundles WHERE "versionId"=$1 AND "projectId"=$2 AND "workspaceId"=$3',scope.versionId,scope.projectId,scope.workspaceId)
+  if (rows.length === 1 && rows[0].bundleHash === sha(encode(JSON.parse(stableSerialize(expected))))) return expected
+  return readPersistedOperationalOutputBundleV3(tx,scope,reads)
+}
+async function sourceFacts(tx: Tx, command: CreationOutputBundleWriteV2['proposal'], reads?: OperationalReadCacheV3): Promise<Readonly<CreationSourceFactsV2 | CreationSourceFactsV3> | null> {
   const fork = command.payload.forkDerivation
   if (!fork) return null
   const d = fork.document, expected = d.kernel.document.source, projectId = expected.version.projectId
@@ -113,10 +126,13 @@ async function sourceFacts(tx: Tx, command: CreationOutputBundleWriteV2['proposa
     version.editPlanSnapshotId !== expected.version.snapshotRefs.editPlan || version.treatmentSnapshotId !== (expected.version.snapshotRefs.treatment ?? null) ||
     version.storySnapshotId !== (expected.version.snapshotRefs.story ?? null) || states.length !== 1 || states[0].stateJson !== encode(expected.state.document) || states[0].stateHash !== expected.state.stateHash)
     return conflict('Creation exact operational source Version/State differs')
-  const actualBundle = currentSource === null ? null : await readPersistedOperationalOutputBundleV3(tx,{workspaceId:command.workspaceId,projectId,versionId:expected.version.id})
+  const actualBundle = currentSource === null ? null : await storedSourceBundle(tx,{workspaceId:command.workspaceId,projectId,versionId:expected.version.id},currentSource.bundle,reads)
   if (currentSource !== null && (!actualBundle || !identical(actualBundle,currentSource.bundle)))
     return conflict('Creation exact source2/3 receipt differs')
-  if (currentSource !== null) await tx.$queryRawUnsafe('SELECT 1 AS verified FROM w66_assert_fork_source_v3($1::jsonb,true)',encode(currentSource))
+  // The source document is asserted against the database by the deferred creation guard (w66_assert_creation_fork_bundle_v3 calls
+  // w66_assert_fork_source_v3 on the very document the derivation stores) when this transaction settles, and again by the committed readback.
+  // It used to be asserted here as well, before any write and once more per call of this function: each assertion re-verifies the whole
+  // source State, seconds apiece when it embeds the master's receipt, inside the 30 s the transaction has. It is no longer asked for here.
   const snapshots = await tx.v2ProjectSnapshot.findMany({where:{id:{in:snapshotIds},projectId,workspaceId:command.workspaceId}})
   const actualSnapshots = snapshots.map((r)=>({schemaVersion:1 as const,id:r.id,workspaceId:r.workspaceId,projectId:r.projectId,
     kind:r.kind as typeof d.sourceEditPlanSnapshot.kind,contentSchemaVersion:r.schemaVersion,contentJson:r.contentJson,contentHash:r.contentHash,createdAt:r.createdAt.toISOString()}))
@@ -214,6 +230,8 @@ export class PrismaCreationOutputBundleRepositoryV2 implements CreationOutputBun
         committed=await this.client.$transaction(async(tx)=>{
           await tx.$executeRawUnsafe("SET LOCAL statement_timeout = '10000ms'")
           await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '8000ms'")
+          // The three verifications of the source (below) are of the same sealed Version under the same locks: it is proved in full once.
+          const reads=createOperationalReadCacheV3()
           await tx.$queryRawUnsafe('SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended($1,0))',encode([proposal.workspaceId,proposal.author.id,input.idempotencyKey]))
           const existing=await tx.v2IdempotencyRecord.findUnique({where:{workspaceId_clientId_key:{workspaceId:proposal.workspaceId,clientId:proposal.author.id,key:input.idempotencyKey}}})
           if (existing) {
@@ -224,12 +242,12 @@ export class PrismaCreationOutputBundleRepositoryV2 implements CreationOutputBun
               !/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(ids.versionId))return conflict('Creation replay identity invalid')
             return {projectId:ids.projectId,versionId:ids.versionId,replayed:true}
           }
-          const facts=await sourceFacts(tx,proposal)
+          const facts=await sourceFacts(tx,proposal,reads)
           const command=validateProjectCreationOutputCommandV2(input.recompose(facts))
           assertCreationRecompositionV2(proposal,command)
           // Validate the reconstituted facts again; no obsolete prepared bundle
           // survives retry and no provider/compiler executes inside this callback.
-          await sourceFacts(tx,command)
+          await sourceFacts(tx,command,reads)
           const bundle=buildCreationOutputVersionBundleV2(command), s=bundle.state.document, v=bundle.version, p=command.payload,
             fork=p.forkDerivation, kernel=fork?.document.kernel.document, date=new Date(command.createdAt), policy='output-canonical-json/v1'
           const metadata=creationProjectMetadataV2(command)
@@ -302,7 +320,7 @@ export class PrismaCreationOutputBundleRepositoryV2 implements CreationOutputBun
           // A potentially expensive deferred flush is also a query: read the
           // last PG authority clock afterwards. These are read/lock operations
           // only; no write or re-defer can occur after ALL.
-          await sourceFacts(tx,command)
+          await sourceFacts(tx,command,reads)
           return {projectId:command.projectId,versionId:v.id,replayed:false}
         },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,maxWait:10000,timeout:30000})
         break
@@ -325,8 +343,9 @@ export class PrismaCreationOutputBundleRepositoryV2 implements CreationOutputBun
 
 
 import type { OperationalOutputBundleRepositoryV3, OperationalOutputBundleWriteV3 } from '../../application/ports/output-version-bundle-repository.ts'
+import type { OperationalOutputParentV3 } from '../../domain/output-version-bundle.ts'
 import { buildOperationalOutputVersionBundleV3, type OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
-import { persistCreationVersionV2, persistOutputVersionBundleInTransactionV3, persistOperationalIngestFactsInTransactionV3 } from './output-version-bundle-persistence.ts'
+import { persistCreationVersionV2, persistOutputVersionBundleInTransactionV3, persistOperationalIngestFactsInTransactionV3, validatePreparedOperationalIngestV3 } from './output-version-bundle-persistence.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { readOutputNormalizationsV3, assertCurrentOutputSourceUseV3, readEditorialSourceBindingV1 } from './output-version-materializer.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
@@ -414,6 +433,14 @@ export class PrismaOperationalOutputBundleRepositoryV3 implements OperationalOut
     if((initial.origin.kind==='ingest-operation')!==(input.operationEventId!==null)||
       (initial.origin.kind==='ingest-operation')!==(input.ingestFacts!==null))
       conflict('Operational event allocation differs from typed origin')
+    // The Versions this child is built on are sealed and immutable. Their full verification (the database assertion of each State and the
+    // reconstruction of each bundle: seconds apiece when the State embeds the master's receipt) is done HERE, before the transaction and
+    // its locks, instead of inside the 30 s the transaction has. Inside it, only the head and the identity of each of these Versions are
+    // checked again (cheap rows that cannot hold a different Version under the same id); a Version that does not check, or that could not
+    // be verified here, is read and verified in full inside the transaction, exactly as before.
+    const sealed=await this.verifySealedParentsOutsideTransaction(initial)
+    // Prepared ingest facts are validated once, here: the validation reads nothing from the database (see its comment).
+    const validatedIngest=input.ingestFacts?validatePreparedOperationalIngestV3(input.ingestFacts):undefined
     for(let attempt=0;attempt<3;attempt++) {
       try {
         const result=await this.client.$transaction(async(tx)=>{
@@ -473,6 +500,7 @@ export class PrismaOperationalOutputBundleRepositoryV3 implements OperationalOut
             if(locked.length!==1)throw new DomainError('VERSION_CONFLICT','Operational ingest operation missing')
             await tx.$queryRawUnsafe('SELECT "operationId" FROM media_ingest_operations WHERE "operationId"=$1 AND "workspaceId"=$2 FOR UPDATE',op.id,a.workspaceId)
           }
+          const reads=createOperationalReadCacheV3()
           const held=await tx.$queryRawUnsafe<Array<{id:string;currentVersionId:string|null}>>(
             'SELECT id,"currentVersionId" FROM projects WHERE id=$1 AND "workspaceId"=$2 FOR UPDATE',a.projectId,a.workspaceId)
           if(held.length!==1)throw new DomainError('VERSION_CONFLICT','Operational project missing')
@@ -484,16 +512,16 @@ export class PrismaOperationalOutputBundleRepositoryV3 implements OperationalOut
             return {bundle:existing,replayed:true}
           }
           if(held[0].currentVersionId!==a.parentVersionId)throw new DomainError('VERSION_CONFLICT','Operational head changed')
-          const parent=await this.readWithTransaction(tx,{workspaceId:a.workspaceId,projectId:a.projectId,versionId:a.parentVersionId!})
+          const parent=await this.sealedVersion(tx,sealed,{workspaceId:a.workspaceId,projectId:a.projectId,versionId:a.parentVersionId!},reads)
           if(!parent)throw new DomainError('VERSION_CONFLICT','Operational parent missing')
-          const target=initial.restoreTarget?await this.readWithTransaction(tx,{workspaceId:a.workspaceId,projectId:a.projectId,
-            versionId:initial.restoreTarget.version.id}):null
+          const target=initial.restoreTarget?await this.sealedVersion(tx,sealed,{workspaceId:a.workspaceId,projectId:a.projectId,
+            versionId:initial.restoreTarget.version.id},reads):null
           await assertIngestFenceV3(tx,initial)
-          if(input.ingestFacts)await persistOperationalIngestFactsInTransactionV3(tx,input.ingestFacts)
+          if(input.ingestFacts)await persistOperationalIngestFactsInTransactionV3(tx,input.ingestFacts,validatedIngest)
           if(initial.origin.kind==='editorial-cut-command') {
             await readEditorialSourceBindingV1(tx,initial.origin.command.payload.sourceBinding,{lock:true,currentRights:true})
             const binding=initial.origin.command.payload.sourceBinding.document
-            const original=await this.readWithTransaction(tx,{workspaceId:a.workspaceId,projectId:binding.authority.sourceProjectId,versionId:binding.authority.sourceVersionId})
+            const original=await this.sealedVersion(tx,sealed,{workspaceId:a.workspaceId,projectId:binding.authority.sourceProjectId,versionId:binding.authority.sourceVersionId},reads)
             if(!original||original.version.baseHash!==binding.authority.sourceBaseHash||original.state.stateHash!==binding.authority.sourceStateHash||
               original.state.document.id!==binding.authority.sourceStateId)conflict('Editorial immutable source receipt differs')
           }
@@ -571,7 +599,37 @@ export class PrismaOperationalOutputBundleRepositoryV3 implements OperationalOut
     }
     return conflict('Operational serialization retry exhausted')
   }
-  private readWithTransaction(tx:Tx,input:Parameters<OperationalOutputBundleRepositoryV3['read']>[0]) {
-    return readPersistedOperationalOutputBundleV3(tx,input)
+  /** Verifies, outside any transaction, the sealed Versions `initial` builds on. A Version that fails here is left to the transaction, which reads it again and refuses it with the error it has always raised. */
+  private async verifySealedParentsOutsideTransaction(initial:OperationalOutputBundleWriteV3['proposal']):Promise<ReadonlyMap<string,Readonly<OperationalOutputParentV3>>> {
+    const a=initial.allocation,wanted=new Map<string,{projectId:string;versionId:string}>()
+    const want=(projectId:string,versionId:string|null|undefined)=>{if(versionId)wanted.set(JSON.stringify([projectId,versionId]),{projectId,versionId})}
+    want(a.projectId,a.parentVersionId)
+    want(a.projectId,initial.restoreTarget?.version.id)
+    if(initial.origin.kind==='editorial-cut-command') {
+      const authority=initial.origin.command.payload.sourceBinding.document.authority
+      want(authority.sourceProjectId,authority.sourceVersionId)
+    }
+    const reads=createOperationalReadCacheV3(),proved=new Map<string,Readonly<OperationalOutputParentV3>>()
+    for(const [key,scope] of wanted) {
+      try {
+        const bundle=await readPersistedOperationalOutputBundleV3(this.client,{workspaceId:a.workspaceId,...scope},reads)
+        if(bundle!==null)proved.set(key,bundle)
+      } catch { /* the transaction reads it again and raises the refusal in its own order */ }
+    }
+    return proved
+  }
+  /** A sealed Version for the transaction: the one verified outside when its identity rows still say so, else read and verified in full here. */
+  private async sealedVersion(tx:Tx,sealed:ReadonlyMap<string,Readonly<OperationalOutputParentV3>>,input:Parameters<OperationalOutputBundleRepositoryV3['read']>[0],reads:OperationalReadCacheV3) {
+    const proved=sealed.get(JSON.stringify([input.projectId,input.versionId]))
+    if(proved!==undefined) {
+      const rows=await tx.$queryRawUnsafe<Array<{baseHash:string;outputStateId:string|null;outputStateHash:string|null}>>(
+        'SELECT "baseHash","outputStateId","outputStateHash" FROM project_versions WHERE id=$1 AND "projectId"=$2 AND "workspaceId"=$3 FOR SHARE',
+        input.versionId,input.projectId,input.workspaceId)
+      if(rows.length===1&&rows[0].baseHash===proved.version.baseHash&&rows[0].outputStateId===proved.state.document.id&&rows[0].outputStateHash===proved.state.stateHash)return proved
+    }
+    return this.readWithTransaction(tx,input,reads)
+  }
+  private readWithTransaction(tx:Tx,input:Parameters<OperationalOutputBundleRepositoryV3['read']>[0],reads?:OperationalReadCacheV3) {
+    return readPersistedOperationalOutputBundleV3(tx,input,reads)
   }
 }

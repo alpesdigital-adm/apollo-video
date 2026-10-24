@@ -1,6 +1,8 @@
 import type { EditorialCutEditPlan } from '../application/apply-editorial-cut-command.ts'
 import type { EditorialCommandResult } from '../application/ports/editorial-command-repository.ts'
-import { presentProjectVersionV2, presentPublicOperation } from './presenters.ts'
+import type { CommandProxyRender } from '../application/enqueue-project-proxy-render.ts'
+import { commandProxyRenderReplayed, presentCommandProxyRender } from './command-proxy-render-contract.ts'
+import { presentProjectVersionV2 } from './presenters.ts'
 
 /**
  * What a spoken-content removal answers, with the proxy render it queued: the same value for the Command (`apollo.projects.commands.apply`,
@@ -8,7 +10,7 @@ import { presentProjectVersionV2, presentPublicOperation } from './presenters.ts
  */
 export function presentEditorialCutApplied(
   result: Readonly<EditorialCommandResult>,
-  proxy: Readonly<{ operation: Parameters<typeof presentPublicOperation>[0]; replayed: boolean }>,
+  proxy: CommandProxyRender,
 ) {
   // The sealed Command3 plan only promises validated fields; the response reads the compiled editorial plan fields.
   const editPlan = result.editPlan as unknown as Readonly<EditorialCutEditPlan>
@@ -44,7 +46,7 @@ export function presentEditorialCutApplied(
       impact: result.impact,
       invalidations: result.invalidations,
     },
-    operation: presentPublicOperation(proxy.operation),
-    replayed: result.replayed && proxy.replayed,
+    ...presentCommandProxyRender(proxy),
+    replayed: result.replayed && commandProxyRenderReplayed(proxy),
   }
 }
