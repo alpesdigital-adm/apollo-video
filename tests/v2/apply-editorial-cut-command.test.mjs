@@ -595,3 +595,16 @@ test('a cut copy takes the normal children under the editorial authority of its 
       clips: track.clips.map((clip) => ({ ...clip, sourceArtifactId: 'artifact-not-observed-by-the-cut' })) })) }) }),
   (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.sourceArtifactIds.includes('artifact-not-observed-by-the-cut'))
 })
+
+test('a removal that confirms a proposal records who confirmed and by which medium in its Command, and the fingerprint binds it', async () => {
+  const { service, request } = await fixture()
+  const confirmation = { subject: 'datas', medium: 'ui-session' }
+  const first = await service(request({ confirmation }))
+  assert.deepEqual(first.command.payload.confirmation, confirmation)
+  assert.equal(first.command.author.type, 'api-client')
+  // The same key without the confirmation is another request: the origin of a cut cannot be rewritten by a replay.
+  await assert.rejects(() => service(request()), (error) => error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH')
+  // The general Command (no confirmation) leaves the payload without one.
+  const { service: other, request: otherRequest } = await fixture()
+  assert.equal((await other(otherRequest())).command.payload.confirmation, undefined)
+})

@@ -15,6 +15,8 @@ export const API_SCOPE_MATRIX = Object.freeze({
   localization: Object.freeze(['read', 'run'] as const),
   operations: Object.freeze(['cancel', 'read', 'retry'] as const),
   projects: Object.freeze(['approve', 'read', 'write'] as const),
+  // The owner grants it, explicitly, to a client that may confirm the cut of a spoken subject the Apollo proposed (a person on a screen needs no grant: the session is the person).
+  'speech-removals': Object.freeze(['confirm'] as const),
   webhooks: Object.freeze(['admin'] as const),
 } as const)
 

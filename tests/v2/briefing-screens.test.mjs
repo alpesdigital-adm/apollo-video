@@ -293,7 +293,8 @@ test('ADR-160: no question, choice or unsupported item the Apollo writes carries
   const kinds = Object.keys(DIRECTIVE_KIND_LABELS)
   for (const kind of Object.keys(EDITORIAL_DIRECTIVE_VOCABULARY)) assert.ok(kinds.includes(kind), `the catalog has no words for the kind ${kind}`)
   for (const [kind, entry] of Object.entries(EDITORIAL_DIRECTIVE_VOCABULARY)) {
-    if (kind === 'keep' || kind === 'avoid' || kind === 'caption-language') continue
+    // The words of these come from the request itself (a subject, a language, the words of the call): the catalog gives them a frame, not a table.
+    if (['keep', 'avoid', 'caption-language', 'cta-text', 'remove-speech'].includes(kind)) continue
     for (const value of entry.values) {
       const text = kind === 'caption-style' ? CAPTION_STYLE_LABELS[value] : DIRECTIVE_VALUE_LABELS[kind]?.[value]
       assert.ok(text, `the catalog has no words for ${kind} ${value}`)

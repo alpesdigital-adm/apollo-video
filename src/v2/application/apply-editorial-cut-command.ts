@@ -185,6 +185,8 @@ export interface ApplyEditorialCutCommandRequest {
   sourceTranscriptId: string
   rules: readonly Readonly<RemoveSpokenContentRuleInput>[]
   exclusionOverrides?: readonly Readonly<EditorialExclusionOverrideInput>[]
+  /** Set only by the confirmation of a proposed cut; the general Command never sets it. */
+  confirmation?: Readonly<{ subject: string; medium: 'ui-session' | 'api-key-scope' }>
   reason?: string
   actor: Readonly<AuthenticatedExternalActor>
   idempotency: Readonly<{ clientId: string; key: string }>
@@ -573,6 +575,7 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
       variantId,
       rules: normalizedRules,
       exclusionOverrides: request.exclusionOverrides ?? null,
+      ...(request.confirmation ? { confirmation: request.confirmation } : {}),
       reason: request.reason?.trim() || null,
       actorContextHash: authenticationAudit.contextHash,
     })
@@ -654,6 +657,7 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
         schemaVersion: 3,
         sourceTranscriptId: context.transcriptId,
         variantId,sourceBinding,editPlanHash,audioProjection:createEditorialAudioProjectionV1(editPlan),
+        ...(request.confirmation ? { confirmation: Object.freeze({ ...request.confirmation }) } : {}),
         sourceArtifactId: context.sourceArtifactId,
         rules: Object.freeze(normalizedRules.map((rule) => Object.freeze(rule))),
         exclusions,

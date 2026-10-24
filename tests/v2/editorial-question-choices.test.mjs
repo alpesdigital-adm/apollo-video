@@ -26,7 +26,9 @@ test('two answers the Apollo can do about one subject are asked as a question wi
 })
 
 test('a conflict between things the Apollo cannot all do yet stays a question in words, with no choices', async () => {
-  const { interpretation } = await read({ directives: [layout('source-native', 'alpha'), layout('fill-crop', 'beta')] })
+  // One of the two (no movement) is something the Apollo does and the other (a pan) is not: the answers are not all doable, so they are not closed.
+  const movement = (value, quote) => ({ kind: 'movement', value, param: null, quote })
+  const { interpretation } = await read({ directives: [movement('none', 'alpha'), movement('pan', 'beta')] })
   assert.equal(interpretation.questions.length, 1)
   assert.equal(interpretation.questions[0].choices, undefined)
 })

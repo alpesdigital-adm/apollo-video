@@ -400,6 +400,34 @@ test('project creation and Lotes ask for a briefing and pre-fill nothing; the re
     assert.match(await page.locator('dl').first().textContent(), new RegExp(STRATEGIC_OBJECTIVES.find((item) => item.id === 'awareness').label))
     assert.doesNotMatch(await page.locator('dl').first().textContent(), /awareness/, 'the objective is shown in words, never as its id')
     await shot('19-projeto-objetivo-definido.png')
+
+    // ---- gateway of the cut confirmation (real HTTP, real authentication) ----
+    // The UI client here has the scopes of a workspace that existed before the scope speech-removals:confirm: a person on the screen is admitted anyway.
+    const cutPath = `/v1/projects/${world.projectId}/speech-removals`
+    const cutBody = { baseVersionId: 'version-none', baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-none', variantId: 'variant-none', subject: 'assunto que o pedido nao tem' }
+    const cutFromScreen = await page.evaluate(async ({ path, body }) => {
+      const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'gateway-screen-1' }, body: JSON.stringify(body) })
+      return { status: response.status, payload: await response.json() }
+    }, { path: cutPath, body: cutBody })
+    assert.equal(cutFromScreen.status, 409, 'the screen session reaches the service (refused for the base version it does not have, not for the scope)')
+    assert.equal(cutFromScreen.payload.error.code, 'VERSION_CONFLICT')
+    const cutWithKey = async (token, key) => {
+      const response = await fetch(`${baseUrl}${cutPath}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'idempotency-key': key }, body: JSON.stringify(cutBody) })
+      return { status: response.status, payload: await response.json() }
+    }
+    // A key that may write but was never granted the confirmation is refused with the scope it lacks, before anything is read.
+    const withoutScope = await cutWithKey(fixture.issued.token, 'gateway-key-without-scope')
+    assert.equal(withoutScope.status, 403)
+    assert.equal(withoutScope.payload.error.code, 'AUTH_SCOPE_REQUIRED')
+    assert.equal(withoutScope.payload.error.details.requiredScope, 'speech-removals:confirm')
+    // The same key with the scope the owner granted reaches the service.
+    const granted = await issueApiClient({
+      prisma, workspaceId: fixture.workspaceId, clientId: `${fixture.clientId}-granted`, name: 'Teste de tela com escopo', createdAt: new Date(),
+      scopes: ['projects:read', 'projects:write', 'speech-removals:confirm'],
+    })
+    const withScope = await cutWithKey(granted.token, 'gateway-key-with-scope')
+    assert.equal(withScope.status, 409)
+    assert.equal(withScope.payload.error.code, 'VERSION_CONFLICT')
   } catch (error) {
     if (shots) {
       const visible = await page?.locator('body').innerText().catch(() => '(page text unavailable)')

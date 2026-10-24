@@ -1,10 +1,21 @@
 import { assertDomain } from '../domain/errors.ts'
 import type { MediaTranscript, TranscriptWord } from '../domain/media-transcript.ts'
 
+/** How a removal Command was confirmed when it confirms a cut the Apollo proposed (see `confirm-speech-removal.ts`): the subject it answers and the means of the verified human. */
+export interface SpeechRemovalConfirmation {
+  subject: string
+  medium: 'ui-session' | 'api-key-scope'
+}
+
 export interface EditorialPhraseRule {
   id: string
   label: string
   alternatives: readonly (readonly string[])[]
+  /**
+   * Present only on a rule read back from a removal Command that CONFIRMED a proposal. A rule without it came from an explicit Command of the client: a valid cut,
+   * asked for explicitly, that is not the confirmation of any proposal (the id and the words of a proposal can be computed by anyone).
+   */
+  confirmation?: Readonly<SpeechRemovalConfirmation>
 }
 
 export interface SourceTimeRange {

@@ -3,11 +3,36 @@ import { assertDomain, DomainError } from './errors.ts'
 import {
   createEditorialRequest,
   EDITORIAL_EXECUTABLE_VALUES,
+  OUTPUT_NOT_PRODUCED_REASON,
+  REFRAME_PLAN_CONTRADICTS_LAYOUT_REASON,
+  REFRAME_PLAN_REQUIRED_REASON,
+  orientationOfAspect,
+  outputReferenceMatches,
+  outputReferenceSpecificity,
   type EditorialDirective,
   type EditorialDirectiveKind,
   type EditorialRequestV1,
   type BriefExcerpt,
 } from './editorial-request.ts'
+import {
+  ctaTextConflictQuestion,
+  ctaTextWithoutOverlayQuestion,
+  musicAlreadyInVideoSummary,
+  notExecutableSummary,
+  outputNotAskedQuestion,
+  outputOmitWithoutOutputQuestion,
+  variantOverrideAloneSummary,
+  variantOverrideWithoutOutputSummary,
+  outputLayoutNativeMismatchQuestion,
+  outputLayoutWithoutOutputQuestion,
+  outputMissingQuestion,
+  RESOLUTION_QUESTION_TEXTS,
+  speechCandidateLine,
+  speechRemovalConfirmQuestion,
+  speechRemovalNeedsTranscriptQuestion,
+  speechRemovalNotFoundQuestion,
+  speechRemovalTooLongQuestion,
+} from './editorial-request-texts.ts'
 import { captionFitGeometryFor, type CaptionDeliveryMode, type CaptionFitGeometry } from './caption-fit.ts'
 import { ctaLexiconFor } from './cta-lexicon.ts'
 import type { OutputSpec } from './output-spec.ts'
@@ -33,7 +58,7 @@ export const EDITORIAL_POLICY_RESOLVER_VERSION = 'editorial-policy-resolver/v2' 
 export const POLICY_RESOLUTION_SNAPSHOT_SCHEMA_VERSION = 2 as const
 
 export const POLICY_ORIGINS = Object.freeze([
-  'request-field', 'request-briefing', 'media-context', 'output-spec', 'workspace-policy', 'silence-rule',
+  'request-field', 'request-briefing', 'media-context', 'output-spec', 'workspace-policy', 'silence-rule', 'product-invariant',
 ] as const)
 export type PolicyOrigin = (typeof POLICY_ORIGINS)[number]
 
@@ -50,6 +75,7 @@ export const EDITORIAL_POLICY_RULES = Object.freeze({
   'minimal-intervention': Object.freeze({ origins: Object.freeze(['silence-rule'] as const), summary: 'The request is silent: nothing is added that was not asked for and not observed in the source.' }),
   'project-override': Object.freeze({ origins: Object.freeze(['request-field', 'workspace-policy'] as const), summary: 'A project override (or, failing it, the workspace Guardrail it inherits) fixed it.' }),
   'renderer-baseline': Object.freeze({ origins: Object.freeze(['silence-rule'] as const), summary: 'Nothing named it and the output cannot be drawn without one: the baseline of the renderer registry is used, which is not an editorial preference.' }),
+  'product-invariant': Object.freeze({ origins: Object.freeze(['product-invariant'] as const), summary: 'The product guarantees it in every video, whether or not the request says it.' }),
 } as const)
 export type PolicyRuleId = keyof typeof EDITORIAL_POLICY_RULES
 
@@ -76,13 +102,24 @@ export interface EditorialPolicies {
   transitions: ResolvedPolicy<{ type: 'straight-cut'; audioFadeMs: number }>
   inserts: ResolvedPolicy<{ mode: 'use-selected-insert' | 'no-insert' }>
   cta: ResolvedPolicy<{ required: boolean; evaluation: CtaEvaluation }>
-  ctaOverlay: ResolvedPolicy<{ mode: 'none' } | { mode: 'window'; startSeconds: number; endSeconds: number; anchoredTo: 'spoken-cta' | 'spoken-cta-to-end' | 'closing-sentence' | 'requested-seconds' | 'whole-video' }>
-  layout: ResolvedPolicy<{ mode: 'fit-with-backdrop' | 'source-native' }>
+  ctaOverlay: ResolvedPolicy<{ mode: 'none' } | { mode: 'window'; startSeconds: number; endSeconds: number; anchoredTo: 'spoken-cta' | 'spoken-cta-to-end' | 'closing-sentence' | 'requested-seconds' | 'whole-video'; text?: string }>
+  layout: ResolvedPolicy<LayoutPolicyValue>
   language: ResolvedPolicy<{ captionLanguage: string | null }>
   captions: ResolvedPolicy<CaptionPolicyValue>
   speechRemovals: ResolvedPolicy<{ ruleIds: readonly string[] }>
   budget: ResolvedPolicy<EditorialBudgetValue>
   rubric: ResolvedPolicy<{ notRequested: readonly RubricCriterionId[] }>
+}
+
+/**
+ * How the frame of each output is laid out. `mode` is what the ONE timeline of the plan is composed with (the source as it is, or the whole frame over
+ * a backdrop). `perOutput` is present only when the request speaks about the frame of an output: it says what each output gets, and `fill-following-face`
+ * is the reframe trajectory (W66r) - which exists as a plan of that output on the Version this run makes, and without which a render is refused.
+ */
+export type OutputLayoutMode = 'fill-following-face' | 'source-native' | 'fit-with-backdrop' | 'not-produced'
+export interface LayoutPolicyValue {
+  mode: 'fit-with-backdrop' | 'source-native'
+  perOutput?: readonly Readonly<{ variantId: string; aspectRatio: string | null; mode: OutputLayoutMode }>[]
 }
 
 /** What the plan is allowed to add, derived from the policies: nothing the request did not ask for, and what the timeline already holds. */
@@ -127,6 +164,47 @@ export interface OpenQuestion {
   id: string
   question: string
   source: 'interpretation' | 'resolution'
+  /** The cut the question asks the owner to confirm: the exact rule of the `remove-spoken-content` Command and what it would take out. */
+  removal?: Readonly<SpeechRemovalProposal>
+}
+
+/**
+ * What the Apollo found when it searched the speech for a subject the request asks to take out (computed from the transcript by the application,
+ * never by this module): the rule that would cut it, and every stretch that rule would remove, so the owner confirms WHAT goes before anything is cut.
+ */
+export interface SpeechRemovalProposal {
+  /** The subject exactly as the directive states it: the proposal answers every directive with this subject. */
+  subject: string
+  /** The transcript the subject was searched in (the removal Command names it). */
+  sourceTranscriptId?: string
+  /**
+   * True when the lineage already holds a removal rule with this id AND these words: the id alone confirms nothing (the same id with other words is another cut).
+   * Computed by the application, from the rules of the removal Commands the project holds.
+   */
+  confirmed?: boolean
+  /** The id a `remove-spoken-content` rule must carry to answer the directive: the same subject is always the same id. */
+  ruleId: string
+  label: string
+  alternatives: readonly string[]
+  /** `phrase`: the whole subject was found as spoken. `words`: only its words (longer than three letters) were. */
+  basis: 'phrase' | 'words'
+  /** False when the subject is too long to be searched as a phrase. */
+  searchable: boolean
+  matches: readonly Readonly<{ startSeconds: number; endSeconds: number; text: string }>[]
+}
+
+/** A directive that needs no work to be satisfied, and what satisfies it. Present in a resolution only when there is one. */
+export interface SatisfiedRequestItem {
+  directiveId: string
+  kind: EditorialDirectiveKind
+  value: string
+  source: 'variant-override' | 'request-field' | 'request-briefing'
+  /** `invariant`: the product guarantees it. `default`: the Apollo adds nothing it was not asked for. `project-outputs`: the outputs of the project already are what was asked. `confirmed-removal`: the owner confirmed the cut. */
+  how: 'invariant' | 'default' | 'project-outputs' | 'confirmed-removal' | 'omitted-output'
+  origin: PolicyOrigin
+  rule: PolicyRuleId
+  reason: string
+  evidenceRefs: readonly string[]
 }
 
 export interface EditorialPolicyResolutionV1 {
@@ -137,6 +215,8 @@ export interface EditorialPolicyResolutionV1 {
   policies: Readonly<EditorialPolicies>
   unsupported: readonly Readonly<UnsupportedRequestItem>[]
   openQuestions: readonly Readonly<OpenQuestion>[]
+  /** What the request asked that is satisfied without work, and by what. Present only when there is one: a resolution without any hashes as it always did. */
+  satisfied?: readonly Readonly<SatisfiedRequestItem>[]
   /** True when the request asks for something the Apollo cannot execute or leaves a question open: no plan may be made from it. */
   blocked: boolean
   /** SHA-256 of the canonical resolution without this field. */
@@ -175,6 +255,10 @@ export interface EditorialMediaContext {
    * and an inherited nothing are absent here: they name no style.
    */
   subtitleStyleOverride?: Readonly<{ presetId: string; origin: 'workspace' | 'project-custom' }>
+  /** What the transcript says about each subject the request asks to take out of the speech (absent: the video has no transcript to search). */
+  speechRemovalProposals?: readonly Readonly<SpeechRemovalProposal>[]
+  /** Background music tracks the EditPlan of the video already holds (absent: not stated). */
+  backgroundMusicTrackCount?: number
 }
 
 /** What the output imposes. */
@@ -232,6 +316,30 @@ function select(request: Readonly<EditorialRequestV1>, outputSpec: Readonly<Edit
   return undefined
 }
 
+/** Every directive of one kind that states several things at once (the versions, the layouts of each, the subjects of the speech), structured fields first. */
+function selectAll(request: Readonly<EditorialRequestV1>, outputSpec: Readonly<EditorialOutputSpec>, kind: EditorialDirectiveKind): readonly Selection[] {
+  // A request for the one output the plan serves is a request for the plan, exactly as a structured field is. (With several outputs a request for one of
+  // them cannot be executed by a plan that is one for all, and it is listed as unsupported below: it is never dropped.)
+  const overridden = outputSpec.variantId !== undefined ? request.variantOverrides[outputSpec.variantId] ?? [] : []
+  return Object.freeze([
+    ...overridden.filter((directive) => directive.kind === kind)
+      .map((directive) => Object.freeze({ directive, source: 'variant-override' as const, variantId: outputSpec.variantId! })),
+    ...request.directives.filter((directive) => directive.kind === kind).map((directive) => Object.freeze({ directive, source: 'request-field' as const })),
+    ...(request.interpretation?.directives ?? []).filter((directive) => directive.kind === kind)
+      .map((directive) => Object.freeze({ directive, source: 'request-briefing' as const, excerpt: directive.excerpt })),
+  ])
+}
+
+/** The same thing asked twice is asked once: the structured field is kept over the briefing's. */
+function distinctSelections(selections: readonly Selection[]): readonly Selection[] {
+  const seen = new Map<string, Selection>()
+  for (const selection of selections) {
+    const key = `${selection.directive.kind}\u0000${selection.directive.value}\u0000${String(selection.directive.param ?? '')}`
+    if (!seen.has(key)) seen.set(key, selection)
+  }
+  return Object.freeze([...seen.values()])
+}
+
 /** The sentence that attributes a policy to the request: it quotes only what the request contains. */
 function attribution(selection: Selection): string {
   const { directive } = selection
@@ -257,6 +365,7 @@ function silent<V>(request: Readonly<EditorialRequestV1>, key: PolicyKey, value:
 
 interface Builder {
   unsupported: UnsupportedRequestItem[]
+  satisfied: SatisfiedRequestItem[]
 }
 
 /** A policy the request names. When its value is not executable the policy is `unsupported`, the item is recorded, and the plan is blocked. */
@@ -270,7 +379,7 @@ function requested<V>(request: Readonly<EditorialRequestV1>, builder: Builder, k
   }
   builder.unsupported.push(Object.freeze({
     policyKey: key, directiveId: selection.directive.id, kind: selection.directive.kind, value: describe(selection.directive), source: selection.source,
-    reason: 'not-executable' as const, summary: `This Apollo version cannot execute ${describe(selection.directive)}.`,
+    reason: 'not-executable' as const, summary: notExecutableSummary(selection.directive.kind, selection.directive.value, selection.directive.param),
   }))
   return Object.freeze({
     key, status: 'unsupported' as const, value: Object.freeze(fallback) as Readonly<V>, origin: originOf(selection), rule: 'explicit-request' as const,
@@ -317,7 +426,7 @@ export function resolveEditorialPolicies(
   mediaContext: Readonly<EditorialMediaContext>,
   outputsInput: Readonly<EditorialOutputSpec> | readonly Readonly<EditorialOutputSpec>[] = [],
 ): Readonly<EditorialPolicyResolutionV1> {
-  const builder: Builder = { unsupported: [] }
+  const builder: Builder = { unsupported: [], satisfied: [] }
   const openQuestions: OpenQuestion[] = []
   // The Director plans one timeline for every output of the project; a single output is that project's only one. A request that is about one
   // output (a variant override) is read for that output only when it is the only one the plan serves.
@@ -354,7 +463,7 @@ export function resolveEditorialPolicies(
       } else {
         openQuestions.push(Object.freeze({
           id: 'opening-first-sentence-unknown',
-          question: 'The request protects the first sentence of the speech, and the speech shows no end of a first sentence. Until what second should the opening be protected?',
+          question: RESOLUTION_QUESTION_TEXTS.openingFirstSentenceUnknown(),
           source: 'resolution' as const,
         }))
         effect = 'The first sentence cannot be located in the speech, so no window is applied until the question is answered'
@@ -399,14 +508,14 @@ export function resolveEditorialPolicies(
   if (evaluation === 'not-evaluable' && mediaContext.transcriptLanguage !== undefined) {
     openQuestions.push(Object.freeze({
       id: 'cta-not-evaluable',
-      question: `The objective asks for the action ${action!.kind}, and the Apollo has no list of the words that ask for it in ${mediaContext.transcriptLanguage}. What is the exact spoken call to action (the verbal CTA text), so that it can be checked?`,
+      question: RESOLUTION_QUESTION_TEXTS.ctaNotEvaluable(action!.kind, mediaContext.transcriptLanguage),
       source: 'resolution' as const,
     }))
   }
   if (ctaRequired && ctaSelection?.directive.value === 'none') {
     openQuestions.push(Object.freeze({
       id: 'cta-conflicts-with-action',
-      question: `The objective asks for the action ${action!.kind}, and the request asks for no call to action. Which of the two holds?`,
+      question: RESOLUTION_QUESTION_TEXTS.ctaConflictsWithAction(action!.kind),
       source: 'resolution' as const,
     }))
   }
@@ -427,7 +536,16 @@ export function resolveEditorialPolicies(
   // drawn where the speech says the call: at the spoken call, or - when the request says closing - from the spoken call to the end (from the last
   // sentence of the speech, when the speech has no call). Without a spoken call and without a closing request there is nowhere to draw it from,
   // which is a question.
-  const visualText = action?.visualCta?.trim()
+  // The words of the written call may come from the request (a `cta-text` directive, structured first) or from the desired action's own visual text.
+  const ctaTextSelection = distinctSelections(selectAll(request, outputSpec, 'cta-text'))[0]
+  const ctaTextFromRequest = ctaTextSelection ? String(ctaTextSelection.directive.param).trim() : undefined
+  const actionVisualText = action?.visualCta?.trim()
+  if (ctaTextFromRequest && actionVisualText && ctaTextFromRequest.normalize('NFC').toLocaleLowerCase() !== actionVisualText.normalize('NFC').toLocaleLowerCase()) {
+    openQuestions.push(Object.freeze({
+      id: 'cta-text-conflict', question: ctaTextConflictQuestion(ctaTextFromRequest, actionVisualText), source: 'resolution' as const,
+    }))
+  }
+  const visualText = ctaTextFromRequest ?? actionVisualText
   const spoken = mediaContext.spokenCta
   const overlayWanted = ctaSelection !== undefined
     ? ['overlay-closing', 'overlay-at-spoken-cta', 'overlay-whole-video', 'overlay-from-seconds'].includes(ctaSelection.directive.value)
@@ -446,24 +564,24 @@ export function resolveEditorialPolicies(
     let value: EditorialPolicies['ctaOverlay']['value'] = noOverlay
     let effect = 'No visual call to action is drawn until the question is answered'
     if (!visualText) {
-      openQuestions.push(Object.freeze({ id: 'cta-overlay-text-missing', question: 'The request asks for a visual call to action and the desired action has no visual text. What should it say?', source: 'resolution' as const }))
+      openQuestions.push(Object.freeze({ id: 'cta-overlay-text-missing', question: RESOLUTION_QUESTION_TEXTS.ctaOverlayTextMissing(), source: 'resolution' as const }))
     } else if (structuredPlacement) {
       const fromSeconds = ctaSelection!.directive.value === 'overlay-from-seconds'
       const startSeconds = fromSeconds ? Number(ctaSelection!.directive.param) : 0
       if (mediaContext.timelineDurationSeconds === undefined) {
         openQuestions.push(Object.freeze({
           id: 'cta-overlay-timeline-unknown',
-          question: 'The request places the visual call to action on the video, and the length of the compiled video is not known yet. Direct the video again once its timeline exists.',
+          question: RESOLUTION_QUESTION_TEXTS.ctaOverlayTimelineUnknown(),
           source: 'resolution' as const,
         }))
       } else if (startSeconds >= mediaContext.timelineDurationSeconds) {
         openQuestions.push(Object.freeze({
           id: 'cta-overlay-after-end',
-          question: `The request draws the visual call to action from ${startSeconds} s, and the video lasts ${mediaContext.timelineDurationSeconds} s. From which second should it be drawn?`,
+          question: RESOLUTION_QUESTION_TEXTS.ctaOverlayAfterEnd(startSeconds, mediaContext.timelineDurationSeconds),
           source: 'resolution' as const,
         }))
       } else {
-        value = { mode: 'window' as const, startSeconds, endSeconds: mediaContext.timelineDurationSeconds, anchoredTo: fromSeconds ? 'requested-seconds' as const : 'whole-video' as const }
+        value = { mode: 'window' as const, startSeconds, endSeconds: mediaContext.timelineDurationSeconds, anchoredTo: fromSeconds ? 'requested-seconds' as const : 'whole-video' as const, ...(ctaTextFromRequest ? { text: ctaTextFromRequest } : {}) }
         effect = fromSeconds
           ? `The visual call to action is drawn from the second the request names (${startSeconds} s) to the end of the video (${mediaContext.timelineDurationSeconds} s)`
           : `The visual call to action is drawn throughout the video (0 s to ${mediaContext.timelineDurationSeconds} s)`
@@ -471,13 +589,13 @@ export function resolveEditorialPolicies(
     } else if (spoken === undefined && !(toEnd && mediaContext.closingSentenceStartSeconds !== undefined)) {
       openQuestions.push(Object.freeze({
         id: 'cta-overlay-placement-unknown',
-        question: 'The visual call to action is drawn where the speech says the call, and the speech shows none that can be recognised. Where should it be drawn?',
+        question: RESOLUTION_QUESTION_TEXTS.ctaOverlayPlacementUnknown(),
         source: 'resolution' as const,
       }))
     } else {
       const startSeconds = spoken?.startSeconds ?? mediaContext.closingSentenceStartSeconds!
       const endSeconds = toEnd ? Math.max(spoken?.endSeconds ?? startSeconds, mediaContext.timelineDurationSeconds ?? spoken?.endSeconds ?? startSeconds) : spoken!.endSeconds
-      value = { mode: 'window' as const, startSeconds, endSeconds, anchoredTo: !toEnd ? 'spoken-cta' as const : spoken ? 'spoken-cta-to-end' as const : 'closing-sentence' as const }
+      value = { mode: 'window' as const, startSeconds, endSeconds, anchoredTo: !toEnd ? 'spoken-cta' as const : spoken ? 'spoken-cta-to-end' as const : 'closing-sentence' as const, ...(ctaTextFromRequest ? { text: ctaTextFromRequest } : {}) }
       effect = !toEnd
         ? `The visual call to action is drawn while the call is spoken (${startSeconds} s to ${endSeconds} s)`
         : spoken
@@ -485,14 +603,22 @@ export function resolveEditorialPolicies(
           : `The speech has no call to action, so the closing of the video is its last sentence: the visual call to action is drawn from there (${startSeconds} s) to the end of the video (${endSeconds} s)`
     }
     if (ctaSelection !== undefined) {
-      ctaOverlay = requested(request, builder, 'ctaOverlay', ctaSelection, value, effect, noOverlay)
+      ctaOverlay = requested(request, builder, 'ctaOverlay', ctaSelection, value, effect, noOverlay, ...(ctaTextSelection ? [`directive:${ctaTextSelection.directive.id}`] : []))
     } else {
       ctaOverlay = Object.freeze({
-        key: 'ctaOverlay' as const, status: 'applied' as const, value: Object.freeze(value), origin: 'request-field' as const, rule: 'explicit-request' as const,
-        reason: `The desired action carries a visual call to action text, so it is drawn. ${sentence(effect)}`,
-        evidenceRefs: Object.freeze([requestRef(request), `desired-action:${action!.kind}`]),
+        key: 'ctaOverlay' as const, status: 'applied' as const, value: Object.freeze(value),
+        origin: ctaTextSelection ? originOf(ctaTextSelection) : 'request-field' as const, rule: 'explicit-request' as const,
+        reason: ctaTextSelection
+          ? `${attribution(ctaTextSelection)} The written call to action is drawn with those words. ${sentence(effect)}`
+          : `The desired action carries a visual call to action text, so it is drawn. ${sentence(effect)}`,
+        evidenceRefs: Object.freeze(ctaTextSelection ? evidenceOf(request, ctaTextSelection) : [requestRef(request), `desired-action:${action!.kind}`]),
       })
     }
+  }
+
+  // The words of a written call the request also says it does not want are a contradiction, not a text to drop.
+  if (ctaTextFromRequest && ctaSelection !== undefined && (ctaSelection.directive.value === 'none' || ctaSelection.directive.value === 'verbal-only')) {
+    openQuestions.push(Object.freeze({ id: 'cta-text-without-overlay', question: ctaTextWithoutOverlayQuestion(ctaTextFromRequest, ctaSelection.directive.value), source: 'resolution' as const }))
   }
 
   // Layout. The geometry of the source and of every output decides it unless the request does: where they have one frame shape the source is used
@@ -505,12 +631,79 @@ export function resolveEditorialPolicies(
   const outputsText = outputs.map((output) => output.aspectRatio ?? output.spec?.aspectRatio ?? 'unknown').join(', ')
   const fitWithBackdrop = { mode: 'fit-with-backdrop' as const }
   let layout: EditorialPolicies['layout']
-  if (layoutSelection !== undefined) {
+  // The request speaks about the frame of an output (or asks every output to be filled): each output gets its own layout, and a fill is the reframe path.
+  const outputLayoutSelections = distinctSelections(selectAll(request, outputSpec, 'output-layout'))
+  const fillEveryOutput = layoutSelection?.directive.value === 'fill-crop'
+  // A version the request says must not be produced stays in the project and is left out of this edition: it has an entry of its own and its render is refused.
+  const omitSelections = distinctSelections(selectAll(request, outputSpec, 'output')).filter((selection) => selection.directive.value === 'omit')
+  if (outputLayoutSelections.length > 0 || fillEveryOutput || omitSelections.length > 0) {
+    const modeOfGlobal: Readonly<Record<string, OutputLayoutMode>> = { 'fill-crop': 'fill-following-face', 'source-native': 'source-native', 'fit-with-backdrop': 'fit-with-backdrop' }
+    const entries: { variantId?: string; aspectRatio: string | null; mode: OutputLayoutMode; by?: Selection }[] = []
+    for (const output of outputs) {
+      const aspectRatio = output.aspectRatio ?? output.spec?.aspectRatio
+      const omittedBy = omitSelections.find((selection) => outputReferenceMatches(String(selection.directive.param), aspectRatio))
+      if (omittedBy !== undefined) {
+        entries.push({ ...(output.variantId !== undefined ? { variantId: output.variantId } : {}), aspectRatio: aspectRatio ?? null, mode: 'not-produced', by: omittedBy })
+        continue
+      }
+      const shape = aspectOf(aspectRatio)
+      const sameShapeAsSource = sourceAspect !== undefined && shape !== undefined && Math.abs(shape - sourceAspect) < 0.005
+      // Of the directives that point at this output the most specific one is about it (an aspect ratio beats a shape, a shape beats "all").
+      const best = outputLayoutSelections.filter((selection) => outputReferenceMatches(String(selection.directive.param), aspectRatio))
+        .toSorted((left, right) => outputReferenceSpecificity(String(right.directive.param)) - outputReferenceSpecificity(String(left.directive.param)))[0]
+      const by = best ?? (layoutSelection !== undefined ? layoutSelection : undefined)
+      const intent: OutputLayoutMode = best ? best.directive.value as OutputLayoutMode
+        : layoutSelection !== undefined ? modeOfGlobal[layoutSelection.directive.value]! : sameShapeAsSource ? 'source-native' : 'fit-with-backdrop'
+      let mode = intent
+      // A fill of an output that has the shape of the source is the source: there is nothing to fill.
+      if (intent === 'fill-following-face' && sameShapeAsSource) mode = 'source-native'
+      if (intent === 'source-native' && !sameShapeAsSource) {
+        openQuestions.push(Object.freeze({
+          id: best ? `output-layout-source-native-mismatch-${output.variantId ?? aspectRatio ?? 'unknown'}` : 'layout-source-native-mismatch',
+          question: outputLayoutNativeMismatchQuestion(String(best ? best.directive.param : 'all'), mediaContext.sourceAspectRatio ?? 'formato desconhecido', aspectRatio ?? 'formato desconhecido'),
+          source: 'resolution' as const,
+        }))
+        mode = 'fit-with-backdrop'
+      }
+      entries.push({ ...(output.variantId !== undefined ? { variantId: output.variantId } : {}), aspectRatio: aspectRatio ?? null, mode, ...(by ? { by } : {}) })
+    }
+    for (const selection of outputLayoutSelections) {
+      const reference = String(selection.directive.param)
+      if (!outputs.some((output) => outputReferenceMatches(reference, output.aspectRatio ?? output.spec?.aspectRatio))) {
+        openQuestions.push(Object.freeze({ id: `output-layout-without-output-${reference.replace(':', 'x')}`, question: outputLayoutWithoutOutputQuestion(reference), source: 'resolution' as const }))
+      }
+    }
+    for (const selection of omitSelections) {
+      const reference = String(selection.directive.param)
+      if (!outputs.some((output) => outputReferenceMatches(reference, output.aspectRatio ?? output.spec?.aspectRatio))) {
+        openQuestions.push(Object.freeze({ id: `output-omit-without-output-${reference.replace(':', 'x')}`, question: outputOmitWithoutOutputQuestion(reference), source: 'resolution' as const }))
+      }
+    }
+    const nonFill = entries.filter((entry) => entry.mode !== 'fill-following-face' && entry.mode !== 'not-produced')
+    const planMode: LayoutPolicyValue['mode'] = nonFill.length > 0 && nonFill.every((entry) => entry.mode === 'source-native') ? 'source-native' : 'fit-with-backdrop'
+    const perOutput = entries.flatMap((entry) => entry.variantId === undefined ? [] : [Object.freeze({ variantId: entry.variantId, aspectRatio: entry.aspectRatio, mode: entry.mode })])
+    // Everything the request said about the frame: even a directive that points at no output of the project is in the reason (and is asked about above).
+    const used = [...new Set([...outputLayoutSelections, ...omitSelections, ...(fillEveryOutput && layoutSelection !== undefined ? [layoutSelection] : [])])]
+    const effects: Readonly<Record<OutputLayoutMode, string>> = {
+      'fill-following-face': 'the picture fills the whole frame following the face (the reframe trajectory of that output, which has to exist on the Version this run makes: a render without it is refused)',
+      'source-native': 'the recorded frame is used as it is',
+      'fit-with-backdrop': 'the whole recorded frame stays visible over a backdrop',
+      'not-produced': 'the request says this version is not to be produced: it stays in the project, this edition leaves it out and its render is refused',
+    }
+    layout = Object.freeze({
+      key: 'layout' as const, status: 'applied' as const, value: Object.freeze({ mode: planMode, ...(perOutput.length > 0 ? { perOutput: Object.freeze(perOutput) } : {}) }),
+      origin: used.length > 0 && used.every((selection) => selection.source === 'request-briefing') ? 'request-briefing' as const : 'request-field' as const,
+      rule: 'explicit-request' as const,
+      reason: `${used.map((selection) => attribution(selection)).join(' ')} ${entries.map((entry) => `Output ${entry.variantId ?? entry.aspectRatio ?? 'unknown'}${entry.aspectRatio && entry.variantId ? ` (${entry.aspectRatio})` : ''}: ${effects[entry.mode]}.`).join(' ')}`.trim(),
+      evidenceRefs: Object.freeze([requestRef(request), ...used.flatMap((selection) => [`directive:${selection.directive.id}`, ...(selection.excerpt ? [`briefing:${selection.excerpt.start}-${selection.excerpt.end}`] : [])]),
+        ...outputs.flatMap((output) => output.id ? [`output-spec:${output.id}`] : [])]),
+    })
+  } else if (layoutSelection !== undefined) {
     const nativeAsked = layoutSelection.directive.value === 'source-native'
     if (nativeAsked && !sameShape) {
       openQuestions.push(Object.freeze({
         id: 'layout-source-native-mismatch',
-        question: `The request keeps the source frame as it is, and the source (${mediaContext.sourceAspectRatio ?? 'unknown shape'}) does not have the frame shape of the output(s) (${outputsText || 'unknown'}). Should the whole frame stay visible over a backdrop?`,
+        question: RESOLUTION_QUESTION_TEXTS.layoutSourceNativeMismatch(mediaContext.sourceAspectRatio ?? 'formato desconhecido', outputsText || 'formato desconhecido'),
         source: 'resolution' as const,
       }))
     }
@@ -539,7 +732,7 @@ export function resolveEditorialPolicies(
     if (mediaContext.transcriptLanguage !== undefined && primaryLanguage(requestedLanguage) !== primaryLanguage(mediaContext.transcriptLanguage)) {
       openQuestions.push(Object.freeze({
         id: 'caption-language-translation',
-        question: `Captions were requested in ${requestedLanguage}, but the speech is in ${mediaContext.transcriptLanguage} (${mediaContext.transcriptLanguageBasis === 'detected-from-media' ? 'detected from the media' : 'the language declared for the project, not verified against the speech'}) and the Apollo has no translation here. Should the captions stay in ${mediaContext.transcriptLanguage}?`,
+        question: RESOLUTION_QUESTION_TEXTS.captionLanguageTranslation(requestedLanguage, mediaContext.transcriptLanguage, mediaContext.transcriptLanguageBasis === 'detected-from-media'),
         source: 'resolution' as const,
       }))
     }
@@ -559,14 +752,14 @@ export function resolveEditorialPolicies(
     if (detected && mediaContext.declaredLocale !== undefined && primaryLanguage(mediaContext.declaredLocale) !== primaryLanguage(mediaContext.transcriptLanguage)) {
       openQuestions.push(Object.freeze({
         id: 'declared-language-differs-from-speech',
-        question: `The project declares ${mediaContext.declaredLocale}, and the speech recognition detected ${mediaContext.transcriptLanguage} in the media. Which language are the captions in?`,
+        question: RESOLUTION_QUESTION_TEXTS.declaredLanguageDiffers(mediaContext.declaredLocale, mediaContext.transcriptLanguage),
         source: 'resolution' as const,
       }))
     }
   } else {
     language = silent(request, 'language', { captionLanguage: null }, 'minimal-intervention',
       'The request does not name a caption language and the transcript does not state one. No language is assumed.')
-    openQuestions.push(Object.freeze({ id: 'caption-language-unknown', question: 'In which language should the captions be written? The request does not say and the transcript does not state it.', source: 'resolution' as const }))
+    openQuestions.push(Object.freeze({ id: 'caption-language-unknown', question: RESOLUTION_QUESTION_TEXTS.captionLanguageUnknown(), source: 'resolution' as const }))
   }
 
   // Captions. The style is the request's, else the project override's (or the Guardrail it inherits), else the baseline of the renderer registry;
@@ -605,19 +798,122 @@ export function resolveEditorialPolicies(
     })
     : silent(request, 'speechRemovals', { ruleIds: Object.freeze([] as string[]) }, 'minimal-intervention', 'The request asks to remove no speech; no spoken phrase is forbidden.')
 
+  // The versions the request asks for are the outputs of the project: satisfied when they exist, a question (create the output?) when they do not.
+  for (const selection of distinctSelections(selectAll(request, outputSpec, 'output'))) {
+    const directive = selection.directive
+    if (directive.value === 'omit') continue
+    const matching = outputs.filter((output) => {
+      const aspectRatio = output.aspectRatio ?? output.spec?.aspectRatio
+      return directive.value === 'aspect' ? aspectRatio === directive.param : orientationOfAspect(aspectRatio) === directive.value
+    })
+    const reference = directive.value === 'aspect' ? String(directive.param) : directive.value
+    if (matching.length > 0) {
+      builder.satisfied.push(Object.freeze({
+        directiveId: directive.id, kind: directive.kind, value: describe(directive), source: selection.source, how: 'project-outputs' as const, origin: 'output-spec' as const, rule: 'output-geometry' as const,
+        reason: `${attribution(selection)} The project already has ${matching.length} output(s) of that shape (${matching.map((output) => output.variantId ?? output.id ?? output.aspectRatio ?? 'output').join(', ')}).`,
+        evidenceRefs: evidenceOf(request, selection, ...matching.flatMap((output) => output.id ? [`output-spec:${output.id}`] : [])),
+      }))
+    } else {
+      openQuestions.push(Object.freeze({ id: `output-missing-${reference.replace(':', 'x')}`, question: outputMissingQuestion(reference), source: 'resolution' as const }))
+    }
+  }
+  // The project has an output the request, which speaks about the versions it wants, does not ask for: the Apollo neither drops it nor keeps it on its own.
+  const askedOutputs = distinctSelections(selectAll(request, outputSpec, 'output')).filter((selection) => selection.directive.value !== 'omit')
+  if (askedOutputs.length > 0) {
+    for (const output of outputs) {
+      const aspectRatio = output.aspectRatio ?? output.spec?.aspectRatio
+      const asked = askedOutputs.some(({ directive }) => directive.value === 'aspect' ? aspectRatio === directive.param : orientationOfAspect(aspectRatio) === directive.value)
+      const left = omitSelections.some((selection) => outputReferenceMatches(String(selection.directive.param), aspectRatio))
+      if (!asked && !left) {
+        openQuestions.push(Object.freeze({ id: `output-not-asked-${output.variantId ?? output.id ?? aspectRatio ?? 'unknown'}`, question: outputNotAskedQuestion(aspectRatio ?? 'formato desconhecido'), source: 'resolution' as const }))
+      }
+    }
+  }
+  // A request for an output the project has not got is listed, never dropped.
+  if (outputs.length > 0 && outputs.every((output) => output.variantId !== undefined)) {
+    for (const [variantId, directives] of Object.entries(request.variantOverrides)) {
+      if (outputs.some((output) => output.variantId === variantId)) continue
+      for (const directive of directives) {
+        builder.unsupported.push(Object.freeze({
+          policyKey: 'interpretation' as const, directiveId: directive.id, kind: directive.kind, value: describe(directive), source: 'variant-override' as const,
+          reason: 'not-executable' as const, summary: variantOverrideWithoutOutputSummary(notExecutableSummary(directive.kind, directive.value, directive.param)),
+        }))
+      }
+    }
+  }
+  // What the product guarantees whatever the request says, and what the Apollo never adds: satisfied, and recorded with what satisfies them.
+  for (const selection of distinctSelections(selectAll(request, outputSpec, 'invariant'))) {
+    builder.satisfied.push(Object.freeze({
+      directiveId: selection.directive.id, kind: selection.directive.kind, value: describe(selection.directive), source: selection.source, how: 'invariant' as const,
+      origin: 'product-invariant' as const, rule: 'product-invariant' as const,
+      reason: `${attribution(selection)} The product guarantees it in every video: a caption is placed only where the face evidence certifies the area free of a face, and a cue that cannot be certified is not drawn (the proxy review is blocked by it and the final leaves it out and lists it).`,
+      evidenceRefs: evidenceOf(request, selection, 'invariant:caption-face-clearance'),
+    }))
+  }
+  for (const selection of distinctSelections(selectAll(request, outputSpec, 'absent'))) {
+    const what = selection.directive.value
+    if (what === 'music' && (mediaContext.backgroundMusicTrackCount ?? 0) > 0) {
+      builder.unsupported.push(Object.freeze({
+        policyKey: 'interpretation' as const, directiveId: selection.directive.id, kind: selection.directive.kind, value: describe(selection.directive), source: selection.source,
+        reason: 'not-executable' as const, summary: musicAlreadyInVideoSummary(),
+      }))
+      continue
+    }
+    const why: Readonly<Record<string, string>> = {
+      music: `The Apollo adds no music: the vocabulary of the request has no way to ask for any, and the EditPlan of this video holds ${mediaContext.backgroundMusicTrackCount === undefined ? 'none that the Director adds' : 'none'}.`,
+      effects: 'The Apollo applies no effect: the renderer executes none and a plan that carries an effect track is never rendered.',
+      transitions: 'The Apollo makes only straight cuts (with a click-guard fade of the audio at each seam): no ornamental transition is added.',
+    }
+    builder.satisfied.push(Object.freeze({
+      directiveId: selection.directive.id, kind: selection.directive.kind, value: describe(selection.directive), source: selection.source, how: 'default' as const,
+      origin: 'silence-rule' as const, rule: 'minimal-intervention' as const, reason: `${attribution(selection)} ${why[what] ?? 'Nothing is added that was not asked for.'}`,
+      evidenceRefs: evidenceOf(request, selection),
+    }))
+  }
+  // A subject the request asks to take out of the speech: the transcript is searched, the owner confirms what would go, and the confirmation is a
+  // remove-spoken-content Command. Nothing is cut here, and nothing is cut without that confirmation.
+  distinctSelections(selectAll(request, outputSpec, 'remove-speech')).forEach((selection, index) => {
+    const subject = String(selection.directive.param)
+    const proposal = mediaContext.speechRemovalProposals?.find((candidate) => candidate.subject === subject)
+    if (proposal !== undefined && proposal.confirmed === true) {
+      builder.satisfied.push(Object.freeze({
+        directiveId: selection.directive.id, kind: selection.directive.kind, value: describe(selection.directive), source: selection.source, how: 'confirmed-removal' as const,
+        origin: 'request-field' as const, rule: 'explicit-request' as const,
+        reason: `${attribution(selection)} The requester confirmed the cut with a remove-spoken-content Command (rule ${proposal.ruleId}); the captions must not say it.`,
+        evidenceRefs: evidenceOf(request, selection, `removal:${proposal.ruleId}`),
+      }))
+      return
+    }
+    const id = `speech-removal-${index + 1}`
+    if (proposal === undefined) {
+      openQuestions.push(Object.freeze({ id, question: speechRemovalNeedsTranscriptQuestion(subject), source: 'resolution' as const }))
+    } else if (!proposal.searchable) {
+      openQuestions.push(Object.freeze({ id, question: speechRemovalTooLongQuestion(subject), source: 'resolution' as const }))
+    } else if (proposal.matches.length === 0) {
+      openQuestions.push(Object.freeze({ id, question: speechRemovalNotFoundQuestion(subject), source: 'resolution' as const, removal: proposal }))
+    } else {
+      const shown = proposal.matches.slice(0, SPEECH_CANDIDATES_SHOWN)
+      openQuestions.push(Object.freeze({
+        id, source: 'resolution' as const, removal: proposal,
+        question: speechRemovalConfirmQuestion(subject, shown.map((match) => speechCandidateLine(match.startSeconds, match.endSeconds, match.text)), proposal.matches.length - shown.length, proposal.basis),
+      }))
+    }
+  })
+
   // The plan is one timeline for every output of the project. A value asked for one output of several cannot be executed by that plan, and is
   // therefore listed (never applied to all, never dropped). With one output the override has been read for it above.
   if (outputs.length > 1) {
     const policyKeyOf: Readonly<Record<EditorialDirectiveKind, PolicyKey | 'interpretation'>> = {
       movement: 'movement', opening: 'opening', structure: 'structure', cta: 'ctaOverlay', layout: 'layout',
       'caption-language': 'language', 'caption-style': 'captions', keep: 'interpretation', avoid: 'interpretation',
+      'cta-text': 'ctaOverlay', output: 'interpretation', 'output-layout': 'layout', 'remove-speech': 'speechRemovals', invariant: 'interpretation', absent: 'interpretation',
     }
     for (const output of outputs) {
       for (const directive of output.variantId !== undefined ? request.variantOverrides[output.variantId] ?? [] : []) {
         builder.unsupported.push(Object.freeze({
           policyKey: policyKeyOf[directive.kind], directiveId: directive.id, kind: directive.kind, value: describe(directive),
           source: 'variant-override' as const, reason: 'not-executable' as const,
-          summary: `The plan is one for the ${outputs.length} outputs of the project: ${describe(directive)} for output variant ${output.variantId} alone cannot be executed.`,
+          summary: variantOverrideAloneSummary(outputs.length, notExecutableSummary(directive.kind, directive.value, directive.param)),
         }))
       }
     }
@@ -629,7 +925,7 @@ export function resolveEditorialPolicies(
       builder.unsupported.push(Object.freeze({
         policyKey: 'interpretation' as const, directiveId: directive.id, kind: directive.kind, value: describe(directive),
         source: request.interpretation?.directives.some((item) => item.id === directive.id) ? 'request-briefing' as const : 'request-field' as const,
-        reason: 'not-executable' as const, summary: `This Apollo version has no way to enforce ${describe(directive)} other than Commands.`,
+        reason: 'not-executable' as const, summary: notExecutableSummary(directive.kind, directive.value, directive.param),
       }))
     }
   }
@@ -666,6 +962,7 @@ export function resolveEditorialPolicies(
   const body = {
     schemaVersion: EDITORIAL_POLICY_RESOLUTION_SCHEMA, resolverVersion: EDITORIAL_POLICY_RESOLVER_VERSION, requestHash: request.requestHash,
     policies, unsupported: Object.freeze(builder.unsupported), openQuestions: Object.freeze(openQuestions),
+    ...(builder.satisfied.length > 0 ? { satisfied: Object.freeze(builder.satisfied) } : {}),
     blocked: builder.unsupported.length > 0 || openQuestions.length > 0,
   }
   return Object.freeze({ ...body, policyResolutionHash: calculateCanonicalHash(body) })
@@ -675,6 +972,9 @@ export function resolveEditorialPolicies(
 export function policyRef(resolution: Readonly<Pick<EditorialPolicyResolutionV1, 'policyResolutionHash'>>, key: PolicyKey): string {
   return `policy:${key}:${resolution.policyResolutionHash.slice(0, 16)}`
 }
+
+/** How many of the stretches a question lists in words; the rest are counted (the whole list travels with the question). */
+const SPEECH_CANDIDATES_SHOWN = 6
 
 const POLICY_REF = /^policy:([A-Za-z]+):([a-f0-9]{16})$/
 export function parsePolicyRef(ref: string): Readonly<{ key: PolicyKey; hashPrefix: string }> | null {
@@ -692,11 +992,52 @@ export function resolutionOwnsPolicyRef(resolution: Readonly<EditorialPolicyReso
 export function assertResolutionPlannable(resolution: Readonly<EditorialPolicyResolutionV1>): void {
   assertDomain(!resolution.blocked, 'PRECONDITION_REQUIRED',
     'The editorial request asks for something the Apollo cannot execute, or leaves a question open; it must be revised before a plan is made',
-    { reason: 'editorial-request-blocked', unsupported: resolution.unsupported.map((item) => ({ directiveId: item.directiveId, value: item.value, reason: item.reason })),
-      openQuestions: resolution.openQuestions.map((item) => ({ id: item.id, question: item.question })) })
+    { reason: 'editorial-request-blocked', unsupported: resolution.unsupported.map((item) => ({ directiveId: item.directiveId, value: item.value, reason: item.reason, summary: item.summary })),
+      openQuestions: resolution.openQuestions.map((item) => ({ id: item.id, question: item.question, ...(item.removal ? { removal: item.removal } : {}) })) })
 }
 
 // ---- Consumers of the policies: the facts a plan must show for a policy to hold. Pure, so the Director and the gates read them one way.
+
+/** A render of an output the request says is not to be produced is refused, and says so. A resolution that does not name the output asks nothing. */
+export function assertOutputIsProduced(resolution: Readonly<Pick<EditorialPolicyResolutionV1, 'policies'>> | null | undefined, variantId: string): void {
+  const omitted = resolution?.policies.layout.value.perOutput?.find((entry) => entry.variantId === variantId)?.mode === 'not-produced'
+  assertDomain(!omitted, 'PRECONDITION_REQUIRED', 'The request says this version is not to be produced in this edition, so it is not rendered', { reason: OUTPUT_NOT_PRODUCED_REASON, variantId })
+}
+
+/**
+ * A reframe plan that crops the frame by itself (the automatic trajectory) on an output whose resolved layout is the source frame or the whole frame over a backdrop
+ * contradicts what the request asked for: the render is refused. (An editor's own crop is an explicit Command and stays; a resolution that said nothing about the
+ * frame of this output allows any plan.)
+ */
+export function assertReframePlanCoherentWithLayout(
+  resolution: Readonly<Pick<EditorialPolicyResolutionV1, 'policies'>> | null | undefined,
+  variantId: string,
+  reframePlan: Readonly<{ ranges: readonly Readonly<{ source: string }>[] }> | null | undefined,
+): void {
+  const mode = resolution?.policies.layout.value.perOutput?.find((entry) => entry.variantId === variantId)?.mode
+  if (mode === 'not-produced') return
+  const crops = reframePlan?.ranges.some((range) => range.source === 'plan') === true
+  assertDomain(mode === undefined || mode === 'fill-following-face' || !crops, 'PRECONDITION_REQUIRED',
+    'The request keeps the frame of this output as it is, and the reframe plan of this Version crops it by itself; the plan has to agree with the resolved layout of the output',
+    { reason: REFRAME_PLAN_CONTRADICTS_LAYOUT_REASON, variantId })
+}
+
+/**
+ * A request that fills the frame of an output following the face asks for the reframe trajectory of THAT output (a persisted plan of the Version, W66r). A render
+ * of the output without that plan would draw the whole frame over a backdrop: something the request did not ask for, told to nobody. So it is refused, and the
+ * refusal says what is missing. A resolution that does not fill this output (or none at all, as a cut of the source has) asks nothing.
+ */
+export function assertReframePlanForFill(
+  resolution: Readonly<Pick<EditorialPolicyResolutionV1, 'policies'>> | null | undefined,
+  variantId: string,
+  hasReframePlan: boolean,
+): void {
+  const filled = resolution?.policies.layout.value.perOutput?.find((entry) => entry.variantId === variantId)?.mode === 'fill-following-face'
+  assertDomain(!filled || hasReframePlan, 'PRECONDITION_REQUIRED',
+    'The request fills the frame of this output following the face, and this Version has no reframe plan for it; plan it (apollo.projects.reframe-plans.create) before rendering',
+    { reason: REFRAME_PLAN_REQUIRED_REASON, variantId })
+}
+
 
 /** Seconds of protected opening window the plan contract carries under this policy (0: none). */
 export function protectedOpeningSeconds(policy: EditorialPolicies['opening']): number {
@@ -745,6 +1086,12 @@ export function compositionUnderPolicy(policy: EditorialPolicies['layout']): Rea
     faceSafeFallback: Object.freeze([0.14, 0.08, 0.72, 0.56] as const),
     subtitleSafeRegion: Object.freeze([0.08, 0.7, 0.84, 0.24] as const),
   })
+}
+
+/** The words of the written call to action the plan draws: the request's own (a `cta-text` directive) when it gave them, the desired action's visual text otherwise. */
+export function overlayTextOf(policies: Pick<EditorialPolicies, 'ctaOverlay'>, desiredActionVisualCta: string | undefined): string | undefined {
+  const value = policies.ctaOverlay.value
+  return value.mode === 'window' && value.text !== undefined ? value.text : desiredActionVisualCta
 }
 
 /** The id of the caption track: the language of its words, or `unspecified` when the language is not known. */
@@ -837,7 +1184,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function parseEditorialPolicyResolution(value: unknown): Readonly<EditorialPolicyResolutionV1> {
   const fail = (why: string): never => { throw new DomainError('PERSISTENCE_CONFLICT', `Stored editorial policy resolution is invalid: ${why}`) }
   if (!isRecord(value)) return fail('not an object')
-  if (Object.keys(value).sort().join('|') !== 'blocked|openQuestions|policies|policyResolutionHash|requestHash|resolverVersion|schemaVersion|unsupported') return fail('unexpected fields')
+  const expectedKeys = 'blocked|openQuestions|policies|policyResolutionHash|requestHash|resolverVersion|schemaVersion|unsupported'
+  if (Object.keys(value).sort().join('|') !== (value.satisfied === undefined ? expectedKeys : [...expectedKeys.split('|'), 'satisfied'].sort().join('|'))) return fail('unexpected fields')
+  if (value.satisfied !== undefined && (!Array.isArray(value.satisfied) || value.satisfied.length === 0 || value.satisfied.length > 256 ||
+    value.satisfied.some((item) => !isRecord(item) || typeof item.directiveId !== 'string' || typeof item.reason !== 'string' || item.reason.length === 0 ||
+      !(POLICY_ORIGINS as readonly string[]).includes(item.origin as string) || EDITORIAL_POLICY_RULES[item.rule as PolicyRuleId] === undefined ||
+      !(EDITORIAL_POLICY_RULES[item.rule as PolicyRuleId].origins as readonly string[]).includes(item.origin as string) ||
+      !Array.isArray(item.evidenceRefs) || item.evidenceRefs.length === 0))) return fail('satisfied items')
   if (value.schemaVersion !== EDITORIAL_POLICY_RESOLUTION_SCHEMA || value.resolverVersion !== EDITORIAL_POLICY_RESOLVER_VERSION) return fail('unknown version')
   if (typeof value.requestHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.requestHash)) return fail('request hash')
   if (!isRecord(value.policies) || Object.keys(value.policies).sort().join('|') !== [...POLICY_KEYS].sort().join('|')) return fail('policy set')

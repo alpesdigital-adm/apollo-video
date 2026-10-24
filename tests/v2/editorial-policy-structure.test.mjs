@@ -96,14 +96,16 @@ test('layout: the source as it is where it has the frame shape of every output; 
   const fit = resolveEditorialPolicies(createEditorialRequest({ directives: [{ id: 'l', kind: 'layout', value: 'fit-with-backdrop' }] }), { ...media, sourceAspectRatio: '16:9' }, [output('9:16')])
   assert.equal(fit.policies.layout.origin, 'request-field')
   assert.equal(fit.blocked, false)
+  // the fill that follows the face is the reframe trajectory the Apollo already has: it is applied, per output, and nothing blocks
   const fill = resolveEditorialPolicies(createEditorialRequest({ directives: [{ id: 'l', kind: 'layout', value: 'fill-crop' }] }), { ...media, sourceAspectRatio: '16:9' }, [output('9:16')])
-  assert.equal(fill.policies.layout.status, 'unsupported')
-  assert.equal(fill.blocked, true)
+  assert.equal(fill.policies.layout.status, 'applied')
+  assert.deepEqual(fill.policies.layout.value.perOutput.map((entry) => entry.mode), ['fill-following-face'])
+  assert.equal(fill.blocked, false)
   // source-native asked for a source that does not have the shape: a question
   const native = resolveEditorialPolicies(createEditorialRequest({ directives: [{ id: 'l', kind: 'layout', value: 'source-native' }] }), { ...media, sourceAspectRatio: '16:9' }, [output('9:16')])
   assert.deepEqual(native.openQuestions.map((item) => item.id), ['layout-source-native-mismatch'])
   // the layout of a plan whose policy is not executable is refused
-  assert.throws(() => compositionUnderPolicy(fill.policies.layout), (error) => error.code === 'PRECONDITION_REQUIRED')
+  assert.throws(() => compositionUnderPolicy({ ...fill.policies.layout, status: 'unsupported' }), (error) => error.code === 'PRECONDITION_REQUIRED')
 })
 
 test('budgets and the rubric come from the resolution: nothing is added that was not asked for', () => {

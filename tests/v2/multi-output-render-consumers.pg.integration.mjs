@@ -5,6 +5,7 @@ import test from 'node:test'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
+import { setProjectLutSelectionService } from '../../src/v2/application/project-lut-selections.ts'
 import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
 import { evaluateRenderedProxy } from '../../src/v2/application/render-workflow.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
@@ -17,6 +18,7 @@ import { renderElementMapHash } from '../../src/v2/domain/review-system.ts'
 import { PrismaColorPipelineCompilationRepository } from '../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts'
 import { PrismaMediaArtifactRepository } from '../../src/v2/infrastructure/prisma/media-artifact-repository.ts'
 import { PrismaProjectColorPlanRepository } from '../../src/v2/infrastructure/prisma/project-color-plan-repository.ts'
+import { PrismaProjectLutSelectionRepository } from '../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts'
 import { PrismaProjectFinalExportRepository } from '../../src/v2/infrastructure/prisma/project-final-export-repository.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
 import { PrismaProxyReviewRepository, readCurrentProxyReview } from '../../src/v2/infrastructure/prisma/proxy-review-repository.ts'
@@ -60,7 +62,16 @@ test('W66 PostgreSQL the render consumers resolve ONE output explicitly and pers
   const db = new PrismaClient()
   try {
     const world = await seedTwoOutputIngestedProject(db, { workspaceId, actor, prefix: 'w66mr', ids: { project: `w66mr-${run}-project` } })
-    const { projectId, head } = world
+    const { projectId } = world
+    // The worker refuses a render whose LUT is not the grade its source was read with (commit 8e63d11a), and a source with no LUT selection has no grade to match:
+    // the project starts from the neutral selection, as every real project does.
+    const lutSet = await setProjectLutSelectionService({
+      repository: new PrismaProjectLutSelectionRepository(db), createId: (kind) => `w66mr-${run}-lut-${kind}-${randomUUID()}`, createEventId: () => randomUUID(),
+    })({
+      workspaceId, projectId, baseVersionId: world.head.version.id, baseHash: world.head.version.baseHash, selection: { mode: 'none' },
+      actor: { type: 'system', id: 'w66mr-fixture' }, idempotencyKey: `w66mr-${run}-lut-none`, reason: 'Keep the fixture colorimetrically neutral.',
+    })
+    const head = { ...world.head, version: lutSet.version }
     const scope = { workspaceId, projectId }
     const wide = { variantId: world.wideVariantId, format: '16:9' }
     const tall = { variantId: world.verticalVariantId, format: '9:16' }
@@ -114,6 +125,7 @@ test('W66 PostgreSQL the render consumers resolve ONE output explicitly and pers
 
     // 3. The workers render independently; a failure of one output does not take the project from its sibling.
     const rendered = []
+    const diagnostics = []
     let renderBehaviour = () => new Error('W66_RENDER_REACHED')
     const worker = runNextProjectProxyRenderOperationService({
       operations, projects: proxy, colorPipelines, colorPlans: new PrismaProjectColorPlanRepository(db),
@@ -122,8 +134,10 @@ test('W66 PostgreSQL the render consumers resolve ONE output explicitly and pers
       renderer: { async render(input) { rendered.push({ operationId: input.operationId, format: input.format }); throw renderBehaviour(input) }, async cleanup() {} },
       renderElementMaps: { async persistOrReplay() { throw new Error('nothing may be mapped') } },
       perceptionTimelines: { async findLatest() { return null } },
-      luts: { async materialize() { return { selectionId: 'selection-w66mr', selectionHash: sha('selection'), lutPaths: {} } }, async cleanup() {} },
+      // The worker refuses a render whose LUT selection is not the grade its source was read with (commit 8e63d11a): the fake materializes exactly that selection.
+      luts: { async materialize() { const { id, selectionHash } = sources[wide.variantId].colorGrade.lutSelection; return { selectionId: id, selectionHash, lutPaths: {} } }, async cleanup() {} },
       sources: { async materialize(input) { return { path: `${process.cwd()}/.w66mr-not-read/${input.artifactKey}`, sha256: input.sha256, byteSize: input.byteSize } }, async cleanup() {} },
+      onFailureDiagnostic: (diagnostic) => diagnostics.push(String(diagnostic.error?.stack ?? diagnostic.error).split('\n').slice(0, 3).join(' | ')),
       clock: () => new Date(), leaseDurationMs: 60_000, heartbeatIntervalMs: 5_000, retryBaseDelayMs: 1, retryMaxDelayMs: 1,
     })
     const tallOutcome = await worker(`w66mr-${run}-worker-tall`, { workspaceId, operationId: queuedTall.operation.id })
@@ -131,7 +145,7 @@ test('W66 PostgreSQL the render consumers resolve ONE output explicitly and pers
     assert.equal(tallOutcome.status, 'retrying', 'the 9:16 worker passes its verdict and hash and reaches the renderer')
     assert.equal(wideOutcome.status, 'retrying', 'so does the 16:9 worker')
     assert.deepEqual(rendered, [{ operationId: queuedTall.operation.id, format: '9:16' }, { operationId: queuedWide.operation.id, format: '16:9' }],
-      'each worker rendered its own format')
+      `each worker rendered its own format; before the renderer it failed with: ${diagnostics.join(' // ')}`)
     assert.equal(await projectStatus(), 'rendering-proxy')
 
     // 4. A completed render of one output is never offered to the other.

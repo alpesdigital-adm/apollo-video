@@ -14,10 +14,10 @@ export interface ViewExcerpt { start: number; end: number; text: string }
 export interface ViewDirective { id: string; kind: string; value: string; param?: string | number; excerpt?: ViewExcerpt }
 export interface ViewUnsupported { id: string; source: 'interpretation' | 'directive'; reason: 'outside-vocabulary' | 'not-executable'; summary: string; excerpt: string | null }
 /** One closed answer of a question: choosing it is the owner's answer, and it becomes the directive of the same revision. */
-export interface ViewChoice { id: string; label: string; directive: Pick<ViewDirective, 'kind' | 'value' | 'param'> }
+export interface ViewChoice { id: string; label: string; directive?: Pick<ViewDirective, 'kind' | 'value' | 'param'>; effect?: 'statement-context' | 'unsupported-request' }
 export interface ViewQuestion { id: string; question: string; excerpt: string | null; choices?: readonly ViewChoice[] }
 export interface ViewInterpretationQuestion { id: string; question: string; status: 'open' | 'answered'; answer?: string; excerpt?: ViewExcerpt; choices?: readonly ViewChoice[] }
-export interface ViewCoverageItem { topic: 'audience' | 'offer' | 'tone'; excerpt: ViewExcerpt }
+export interface ViewCoverageItem { topic: 'audience' | 'offer' | 'tone' | 'context'; excerpt: ViewExcerpt }
 
 export interface EditorialRequestData {
   state: 'no-briefing' | 'awaiting-interpretation' | 'interpreted'
@@ -37,7 +37,11 @@ export function describeDirective(directive: Readonly<Pick<ViewDirective, 'kind'
   return describeDirectiveWords(directive.kind, directive.value, directive.param)
 }
 
-export const COVERAGE_LABELS: Readonly<Record<ViewCoverageItem['topic'], string>> = Object.freeze({ audience: 'Público', offer: 'Oferta', tone: 'Tom' })
+export const COVERAGE_LABELS: Readonly<Record<ViewCoverageItem['topic'], string>> = Object.freeze({ audience: 'Público', offer: 'Oferta', tone: 'Tom', context: 'Contexto' })
+
+/** What reading a statement does: it is recorded with its words, and it changes nothing in the video. */
+export const COVERAGE_NOTE = 'O Apollo leu e registrou estas frases. Elas descrevem o vídeo, mas não mudam nada no que ele faz.'
+
 
 export const UNSUPPORTED_REASON_LABELS: Readonly<Record<ViewUnsupported['reason'], string>> = Object.freeze({
   'outside-vocabulary': 'O Apollo não sabe fazer este pedido.',
@@ -93,14 +97,33 @@ export function buildAnswersBody(drafts: Readonly<Record<string, string>>, openQ
 
 /** The words of a closed answer, in plain Portuguese: what the choice makes the Apollo do. */
 export function describeChoice(choice: Readonly<ViewChoice>): string {
-  return describeDirective(choice.directive).text
+  // A choice that says what a sentence IS has no directive to put in words: its label is the words.
+  return choice.directive === undefined ? choice.label : describeDirective(choice.directive).text
 }
 
 export const ANSWER_MAX_LENGTH = 500
 
+/** The reasons the Director stopped, in the Apollo's own words (what it does not do, and what it still needs to ask), one after the other. */
+function blockerTexts(blockers: readonly { kind?: string; text?: string }[] | undefined): string {
+  const texts = (blockers ?? []).flatMap((blocker) => typeof blocker.text === 'string' && blocker.text.trim().length > 0 ? [blocker.text.trim()] : [])
+  return texts.length > 0 ? ` ${texts.join(' ')}` : ''
+}
+
 /** What a failed read or revision of the request tells the owner. */
-export function describeRequestFailure(status: number, payload: { error?: { code?: string; message?: string; requestId?: string; details?: { reason?: string } } } | null): CommandFailure {
+export function describeRequestFailure(status: number, payload: { error?: { code?: string; message?: string; requestId?: string; details?: { reason?: string; blockers?: readonly { kind?: string; text?: string }[] } } } | null): CommandFailure {
   const reason = payload?.error?.details?.reason ?? null
+  if (payload?.error?.code === 'PRECONDITION_REQUIRED' && reason === 'reframe-plan-required') {
+    return {
+      kind: 'refused', status, code: 'PRECONDITION_REQUIRED', requestId: payload?.error?.requestId ?? null,
+      message: 'O pedido preenche a tela desta saída acompanhando o rosto, e esta versão ainda não tem o plano de enquadramento dela. Peça o plano de enquadramento da saída antes de gerar o vídeo.',
+    }
+  }
+  if (payload?.error?.code === 'PRECONDITION_REQUIRED' && reason === 'output-not-produced') {
+    return {
+      kind: 'refused', status, code: 'PRECONDITION_REQUIRED', requestId: payload?.error?.requestId ?? null,
+      message: 'O pedido manda não produzir esta versão nesta edição, então o Apollo não gera o vídeo dela. Se quiser a versão, mude o pedido.',
+    }
+  }
   if (payload?.error?.code === 'PRECONDITION_REQUIRED' && reason === 'editorial-request-needs-output') {
     return {
       kind: 'refused', status, code: 'PRECONDITION_REQUIRED', requestId: payload?.error?.requestId ?? null,
@@ -122,7 +145,7 @@ export function describeRequestFailure(status: number, payload: { error?: { code
   if (payload?.error?.code === 'PRECONDITION_REQUIRED' && reason === 'editorial-request-blocked') {
     return {
       kind: 'refused', status, code: 'PRECONDITION_REQUIRED', requestId: payload?.error?.requestId ?? null,
-      message: 'O pedido ainda tem uma pergunta sem resposta ou algo que o Apollo não faz. Responda ou mude o briefing antes de gerar.',
+      message: `O pedido ainda tem uma pergunta sem resposta ou algo que o Apollo não faz. Responda ou mude o briefing antes de gerar.${blockerTexts(payload.error.details?.blockers)}`,
     }
   }
   // The Command that reads a briefing is made on a Version that already has an output and a montage; a project just created has neither.
@@ -149,3 +172,42 @@ export function describeBatchGenerationBlock(data: Readonly<{ state: 'no-request
   ].filter((part): part is string => part !== null)
   return { blocked: true, message: `O lote não será gerado enquanto isto não for resolvido: ${parts.join(' e ')}.` }
 }
+
+// ---- The cut of a spoken subject the Apollo proposes and the owner confirms (ADR-160).
+
+/** A refusal of the Director that carries the reasons it gives in the Apollo's words (`editorial-request-blocked`), so a screen can act on them. */
+export class RefusedWithBlockers extends Error {
+  readonly blockers: readonly unknown[]
+  constructor(message: string, blockers: unknown) {
+    super(message)
+    this.name = 'RefusedWithBlockers'
+    this.blockers = Array.isArray(blockers) ? blockers : []
+  }
+}
+
+export interface CutProposal {
+  /** The question the Apollo asked, in words. */
+  question: string
+  subject: string
+  sourceTranscriptId: string
+  matches: readonly { startSeconds: number; endSeconds: number; text: string }[]
+}
+
+/** The cuts a refusal asks the owner to confirm: only a proposal that found something in the speech, with the subject and the transcript it was searched in. */
+export function cutProposalsOf(blockers: readonly unknown[]): readonly CutProposal[] {
+  return blockers.flatMap((blocker) => {
+    const entry = blocker as { kind?: unknown; text?: unknown; removal?: { subject?: unknown; sourceTranscriptId?: unknown; matches?: unknown } } | null
+    const removal = entry?.removal
+    if (entry?.kind !== 'question' || typeof entry.text !== 'string' || !removal || typeof removal.subject !== 'string' || typeof removal.sourceTranscriptId !== 'string' ||
+      !Array.isArray(removal.matches) || removal.matches.length === 0) return []
+    return [{ question: entry.text, subject: removal.subject, sourceTranscriptId: removal.sourceTranscriptId, matches: removal.matches as CutProposal['matches'] }]
+  })
+}
+
+export const CUT_CONFIRMATION_TEXTS = Object.freeze({
+  title: 'Trechos que o Apollo cortaria',
+  note: 'Estes são os trechos da fala que saem do vídeo se você confirmar. Nada é cortado sem a sua confirmação.',
+  button: 'Confirmar corte',
+  working: 'Cortando…',
+  done: 'Corte feito. O vídeo foi refeito sem esses trechos; peça ao Diretor de novo.',
+})

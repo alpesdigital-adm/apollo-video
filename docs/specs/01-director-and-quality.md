@@ -219,7 +219,8 @@ Regra pétrea (`AGENTS.md`, ADR-160): **nada é fixo, tudo vem do pedido de cada
 estilo, abertura, estrutura, idioma ou layout próprios. Cada política editorial do plano é a consequência de
 uma de seis origens, e nunca de uma preferência do produto: o que o pedido disse, o que o briefing disse, o que
 a mídia mostrou, o que o OutputSpec impõe, o que o workspace fixou como Guardrail, ou a regra de silêncio
-descrita abaixo. A precedência de FR-023 não tem camada de "defaults".
+descrita abaixo. Uma sétima origem, `product-invariant`, só aparece em item **satisfeito sem trabalho** (`satisfied[]`): uma
+garantia que o produto dá em todo vídeo, como a legenda que nunca cobre o rosto; nunca decide uma política. A precedência de FR-023 não tem camada de "defaults".
 
 #### 7.4.1 `editorial-request/v1`
 
@@ -242,12 +243,20 @@ Um campo ausente é ausente. Não existe preenchimento por omissão que o faça 
 
 Um modelo (OpenAI, atrás da porta `BriefInterpreterModel`, auditado como a compilação de briefing) lê o briefing
 livre e devolve somente diretivas de um **vocabulário fechado**, ligado ao que o Apollo sabe executar de fato
-(movimento, abertura, estrutura, CTA, layout, idioma, estilo de legenda, manter, evitar). Regras:
+(movimento, abertura, estrutura, CTA, layout, idioma, estilo de legenda, manter, evitar e, desde `brief-interpreter/v2`, as capacidades que o
+Apollo já tinha: `output` (as versões pedidas, conferidas contra as saídas do projeto), `output-layout` (o enquadramento de UMA saída,
+com o preenchimento que acompanha o rosto), `cta-text` (as palavras da chamada escrita), `remove-speech` (um assunto a tirar da fala, que
+vira pergunta com os trechos candidatos e só é cortado depois da confirmação), `invariant` e `absent` (o que o produto garante e o que
+o Apollo nunca acrescenta)). Regras:
 
 - cada diretiva cita o trecho exato do briefing em que se apoia (offsets e texto), no mesmo esquema de
   `canonicalEvidence` da compilação de briefing; diretiva sem trecho é recusada;
 - o que o briefing pede e o Apollo não executa vai para `unsupported[]`, nunca é descartado em silêncio;
-- o que é ambíguo ou conflitante vai para `questions[]`; uma pergunta aberta bloqueia o Diretor;
+- o que é ambíguo ou conflitante, **sobre algo que o Apollo faz**, vai para `questions[]`; uma pergunta aberta bloqueia o Diretor. Pergunta sobre
+  os detalhes de algo que o Apollo não faz (para onde vai o zoom) não existe: é `unsupported`/não executável, dito em palavras simples;
+- toda frase do briefing termina em diretiva, `unsupported`, pergunta ou afirmação (`coverage`, incluindo `context`); a frase que nenhum item cita
+  vira uma **pergunta fechada que bloqueia o Diretor** ("Isso não pede nada ao vídeo" a registra como `context`; "Isso pede algo que o Apollo não sabe
+  fazer" a registra como `unsupported`). Nada é adivinhado e nada se perde em silêncio;
 - briefing com texto e interpretação indisponível falha fechado (`PRECONDITION_REQUIRED`); nunca é tratado como
   briefing vazio.
 

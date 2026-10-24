@@ -13,6 +13,7 @@ import {
 } from '@/v2/ui/briefing-guidance'
 import {
   COVERAGE_LABELS,
+  COVERAGE_NOTE,
   UNSUPPORTED_REASON_LABELS,
   buildAnswersBody,
   describeDirective,
@@ -256,6 +257,7 @@ export default function EditorialRequestPanel({
               <li className="text-xs leading-5 text-[#b5afa5]" key={item.topic}><strong className="font-semibold text-[#d1cbc1]">{COVERAGE_LABELS[item.topic]}:</strong> “{item.excerpt.text}”</li>
             ))}
           </ul>
+          <p className="mt-2 text-[11px] leading-5 text-[#8f897f]" data-testid="editorial-request-coverage-note">{COVERAGE_NOTE}</p>
         </div>
       ) : null}
 
