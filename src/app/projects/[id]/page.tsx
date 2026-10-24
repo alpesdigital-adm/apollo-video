@@ -5,6 +5,8 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 import EditorialRequestPanel from '@/components/EditorialRequestPanel'
+import SpeechCutConfirmation from '@/components/SpeechCutConfirmation'
+import { RefusedWithBlockers, cutProposalsOf, describeRequestFailure, type CutProposal } from '@/v2/ui/editorial-request-view'
 import IssueOverridePanel from '@/components/IssueOverridePanel'
 import LogoutButton from '@/components/LogoutButton'
 import SyntheticPhaseGatePanel from '@/components/SyntheticPhaseGatePanel'
@@ -60,7 +62,7 @@ const DIRECTOR_DESTINATION_TYPE: Readonly<Partial<Record<
   booking: 'calendar', download: 'file',
 }
 
-interface ApiEnvelope<T> { data?: T; error?: { message?: string; details?: { reason?: string } } }
+interface ApiEnvelope<T> { data?: T; error?: { message?: string; details?: { reason?: string; blockers?: readonly unknown[] } } }
 interface MediaRecord {
   id: string; role: 'source-master' | 'source-audio' | 'source-image' | 'editing-proxy' | 'editorial-proxy' | 'final-output'; originalFileName: string; artifactId: string;
   manifestId: string; mediaType: string; container: string; byteSize: string; sha256: string; status: string;
@@ -1228,6 +1230,8 @@ export default function ProjectWorkspacePage() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadLabel, setUploadLabel] = useState('')
   const [directorRunning, setDirectorRunning] = useState(false)
+  // The cuts of spoken subjects that the Director's last refusal asks the owner to confirm.
+  const [directorCuts, setDirectorCuts] = useState<readonly CutProposal[]>([])
   // null = the objective the project already states; a value is the objective the owner picked for the next direction.
   const [directorObjectiveChoice, setDirectorObjectiveChoice] =
     useState<StrategicObjectiveId | null>(null)
@@ -2179,7 +2183,14 @@ export default function ProjectWorkspacePage() {
     const response = await fetch(url, { ...init, headers: { accept: 'application/json', ...(init.headers ?? {}) } })
     if (response.status === 401) { router.replace(loginUrl()); throw new Error('Sessão expirada.') }
     const payload = await response.json() as ApiEnvelope<T>
-    if (!response.ok || !payload.data) throw new Error(apiError(payload, 'A API recusou a operação.'))
+    if (!response.ok || !payload.data) {
+      // The Director's refusals about the request come with the reasons in the Apollo's words (and the cuts it asks the owner to confirm).
+      const reason = payload.error?.details?.reason
+      if (reason === 'editorial-request-blocked' || reason === 'reframe-plan-required' || reason === 'reframe-plan-contradicts-layout') {
+        throw new RefusedWithBlockers(describeRequestFailure(response.status, payload as never).message, payload.error?.details?.blockers)
+      }
+      throw new Error(apiError(payload, 'A API recusou a operação.'))
+    }
     return payload.data
   }
 
@@ -3257,6 +3268,7 @@ export default function ProjectWorkspacePage() {
     }
     setDirectorRunning(true)
     setNotice(null)
+    setDirectorCuts([])
     try {
       await requestJson(`/v1/projects/${encodeURIComponent(projectId)}/commands`, {
         method: 'POST',
@@ -3285,6 +3297,7 @@ export default function ProjectWorkspacePage() {
       reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
       await loadWorkspace(true)
     } catch (error) {
+      if (error instanceof RefusedWithBlockers) setDirectorCuts(cutProposalsOf(error.blockers))
       setNotice(error instanceof Error ? error.message : 'O Diretor V2 não conseguiu concluir o plano.')
     } finally {
       setDirectorRunning(false)
@@ -3623,6 +3636,16 @@ export default function ProjectWorkspacePage() {
           <div className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4" data-testid="project-editorial-request">
             <EditorialRequestPanel onChanged={() => { void loadWorkspace(true) }} projectId={projectId} />
           </div>
+          {workspace?.version && outputVariantId ? (
+            <SpeechCutConfirmation
+              baseHash={workspace.version.baseHash}
+              baseVersionId={workspace.version.id}
+              onConfirmed={(message) => { setDirectorCuts([]); setNotice(message); reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews'); void loadWorkspace(true) }}
+              projectId={projectId}
+              proposals={directorCuts}
+              variantId={outputVariantId}
+            />
+          ) : null}
           <div className="mt-5 rounded-xl border border-[#d9a43a]/20 bg-[#d9a43a]/[0.035] p-4" data-testid="director-objective-governance">
             <label className="block text-[9px] font-semibold uppercase tracking-[0.16em] text-[#b58d31]" htmlFor="director-objective">
               Objetivo desta direção

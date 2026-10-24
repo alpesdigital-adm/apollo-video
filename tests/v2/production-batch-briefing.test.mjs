@@ -29,9 +29,10 @@ const actor = () => {
   return Object.freeze({ ...auditContext, auditContext, scopes: new Set(['projects:write']), authenticationKind: 'bearer',
     clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' })
 }
-function stubModel(answer = { directives: [], unsupported: [], questions: [], coverage: [] }) {
+const { EVERY_SENTENCE_IS_CONTEXT } = await import('./helpers/brief-interpreter-stand-in.mjs')
+function stubModel(answer) {
   const calls = []
-  return { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', calls, async interpret(request) { calls.push(request); return { text: JSON.stringify(answer) } } }
+  return { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', calls, async interpret(request) { calls.push(request); return { text: JSON.stringify(answer ?? EVERY_SENTENCE_IS_CONTEXT(JSON.parse(request.user).briefing)) } } }
 }
 function memoryRepository() {
   const stored = new Map()

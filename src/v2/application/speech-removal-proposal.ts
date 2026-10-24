@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 
 import type { SpeechRemovalProposal } from '../domain/editorial-policy-resolution.ts'
 import type { MediaTranscript, TranscriptSegment, TranscriptWord } from '../domain/media-transcript.ts'
-import { defineEditorialPhraseRules, deriveEditorialExclusions, editorialSpeechTokens } from './editorial-phrase-rules.ts'
+import { defineEditorialPhraseRules, deriveEditorialExclusions, editorialSpeechTokens, type EditorialPhraseRule } from './editorial-phrase-rules.ts'
 
 /**
  * A request to take a subject out of the speech ("tire o trecho que fala de X") becomes a QUESTION with candidates, never a cut. The transcript is
@@ -38,7 +38,23 @@ export interface SearchableTranscript {
   segments?: readonly Readonly<TranscriptSegment>[]
 }
 
-export function proposeSpeechRemoval(subject: string, transcript: Readonly<SearchableTranscript>): Readonly<SpeechRemovalProposal> {
+/**
+ * The proposal for one subject. `requested` are the rules of the removal Commands the project already holds: the proposal is `confirmed` only by a rule with its id
+ * AND its words (the same id with other alternatives is another cut, and confirms nothing).
+ */
+export function proposeSpeechRemoval(
+  subject: string,
+  transcript: Readonly<SearchableTranscript>,
+  options: Readonly<{ sourceTranscriptId?: string; requested?: readonly Readonly<EditorialPhraseRule>[] }> = {},
+): Readonly<SpeechRemovalProposal> {
+  const proposal = proposeWithoutConfirmation(subject, transcript)
+  const words = (alternatives: readonly (readonly string[])[]) => JSON.stringify(alternatives.map((tokens) => tokens.join(' ')).toSorted())
+  const confirmed = proposal.searchable && (options.requested ?? []).some((rule) => rule.id === proposal.ruleId &&
+    words(rule.alternatives) === words(defineEditorialPhraseRules([{ id: proposal.ruleId, label: proposal.label, alternatives: proposal.alternatives }])[0]!.alternatives))
+  return Object.freeze({ ...proposal, ...(options.sourceTranscriptId !== undefined ? { sourceTranscriptId: options.sourceTranscriptId } : {}), ...(confirmed ? { confirmed: true } : {}) })
+}
+
+function proposeWithoutConfirmation(subject: string, transcript: Readonly<SearchableTranscript>): Readonly<SpeechRemovalProposal> {
   const label = subject.replace(/\s+/gu, ' ').trim().slice(0, MAX_LABEL)
   const tokens = editorialSpeechTokens(subject)
   const ruleId = speechRemovalRuleId(subject)

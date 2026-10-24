@@ -5760,7 +5760,13 @@ const editorialRequestInterpretationExampleCover = createBriefInterpretation({
     { id: 'd6', kind: 'absent', value: 'music', excerpt: coverExcerpt('<terceira frase do pedido>') },
   ],
   coverage: [{ topic: 'context', excerpt: coverExcerpt('<primeira frase do pedido>') }],
-  unaccounted: [{ excerpt: coverExcerpt('<quarta frase do pedido>.') }],
+  questions: [{
+    id: 'q1', status: 'open', question: '<pergunta sobre a frase que o Apollo não soube classificar>', excerpt: coverExcerpt('<quarta frase do pedido>.'),
+    choices: [
+      { id: 'c1', label: '<primeira opção>', effect: 'statement-context' },
+      { id: 'c2', label: '<segunda opção>', effect: 'unsupported-request' },
+    ] as never,
+  }],
 })
 const editorialRequestViewExampleCover = describeEditorialRequest({
   objective: 'discovery',
@@ -14782,6 +14788,10 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     'apollo://schemas/editorial-request-revised/v2': [{
       data: { ...editorialRequestRevisedExample, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2, blocksDirector: true },
       meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/confirm-speech-removal-request/v1': [{
+      baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-example-1', variantId: 'variant-example-1',
+      subject: '<assunto>', reason: '<motivo da confirmação>',
     }],
     'apollo://schemas/editorial-request-response/v3': [{ data: currentEditorialRequestExampleCover, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/editorial-request-revise-request/v4': [

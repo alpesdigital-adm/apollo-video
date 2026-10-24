@@ -254,8 +254,9 @@ o Apollo nunca acrescenta)). Regras:
 - o que o briefing pede e o Apollo não executa vai para `unsupported[]`, nunca é descartado em silêncio;
 - o que é ambíguo ou conflitante, **sobre algo que o Apollo faz**, vai para `questions[]`; uma pergunta aberta bloqueia o Diretor. Pergunta sobre
   os detalhes de algo que o Apollo não faz (para onde vai o zoom) não existe: é `unsupported`/não executável, dito em palavras simples;
-- toda frase do briefing termina em diretiva, `unsupported`, pergunta ou afirmação (`coverage`, incluindo `context`); a que nenhum item cita fica
-  em `unaccounted[]` (não bloqueia, nunca se perde em silêncio);
+- toda frase do briefing termina em diretiva, `unsupported`, pergunta ou afirmação (`coverage`, incluindo `context`); a frase que nenhum item cita
+  vira uma **pergunta fechada que bloqueia o Diretor** ("Isso não pede nada ao vídeo" a registra como `context`; "Isso pede algo que o Apollo não sabe
+  fazer" a registra como `unsupported`). Nada é adivinhado e nada se perde em silêncio;
 - briefing com texto e interpretação indisponível falha fechado (`PRECONDITION_REQUIRED`); nunca é tratado como
   briefing vazio.
 

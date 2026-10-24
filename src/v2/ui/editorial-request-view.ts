@@ -14,12 +14,10 @@ export interface ViewExcerpt { start: number; end: number; text: string }
 export interface ViewDirective { id: string; kind: string; value: string; param?: string | number; excerpt?: ViewExcerpt }
 export interface ViewUnsupported { id: string; source: 'interpretation' | 'directive'; reason: 'outside-vocabulary' | 'not-executable'; summary: string; excerpt: string | null }
 /** One closed answer of a question: choosing it is the owner's answer, and it becomes the directive of the same revision. */
-export interface ViewChoice { id: string; label: string; directive: Pick<ViewDirective, 'kind' | 'value' | 'param'> }
+export interface ViewChoice { id: string; label: string; directive?: Pick<ViewDirective, 'kind' | 'value' | 'param'>; effect?: 'statement-context' | 'unsupported-request' }
 export interface ViewQuestion { id: string; question: string; excerpt: string | null; choices?: readonly ViewChoice[] }
 export interface ViewInterpretationQuestion { id: string; question: string; status: 'open' | 'answered'; answer?: string; excerpt?: ViewExcerpt; choices?: readonly ViewChoice[] }
 export interface ViewCoverageItem { topic: 'audience' | 'offer' | 'tone' | 'context'; excerpt: ViewExcerpt }
-/** A sentence of the briefing that no item of the reading stands on: it is shown, so that nothing the owner wrote is lost in silence. */
-export interface ViewUnaccounted { excerpt: ViewExcerpt }
 
 export interface EditorialRequestData {
   state: 'no-briefing' | 'awaiting-interpretation' | 'interpreted'
@@ -28,7 +26,6 @@ export interface EditorialRequestData {
     directives: readonly ViewDirective[]
     questions: readonly ViewInterpretationQuestion[]
     coverage?: readonly ViewCoverageItem[]
-    unaccounted?: readonly ViewUnaccounted[]
   }
   unsupported: readonly ViewUnsupported[]
   openQuestions: readonly ViewQuestion[]
@@ -45,8 +42,6 @@ export const COVERAGE_LABELS: Readonly<Record<ViewCoverageItem['topic'], string>
 /** What reading a statement does: it is recorded with its words, and it changes nothing in the video. */
 export const COVERAGE_NOTE = 'O Apollo leu e registrou estas frases. Elas descrevem o vídeo, mas não mudam nada no que ele faz.'
 
-/** Why the Apollo lists a sentence it could not stand an item on, and what the owner can do about it. */
-export const UNACCOUNTED_NOTE = 'O Apollo não classificou estas frases do briefing: nenhuma decisão foi tomada por causa delas. Se alguma pede algo ao vídeo, escreva de outro jeito ou diga o que é.'
 
 export const UNSUPPORTED_REASON_LABELS: Readonly<Record<ViewUnsupported['reason'], string>> = Object.freeze({
   'outside-vocabulary': 'O Apollo não sabe fazer este pedido.',
@@ -102,7 +97,8 @@ export function buildAnswersBody(drafts: Readonly<Record<string, string>>, openQ
 
 /** The words of a closed answer, in plain Portuguese: what the choice makes the Apollo do. */
 export function describeChoice(choice: Readonly<ViewChoice>): string {
-  return describeDirective(choice.directive).text
+  // A choice that says what a sentence IS has no directive to put in words: its label is the words.
+  return choice.directive === undefined ? choice.label : describeDirective(choice.directive).text
 }
 
 export const ANSWER_MAX_LENGTH = 500
@@ -170,3 +166,42 @@ export function describeBatchGenerationBlock(data: Readonly<{ state: 'no-request
   ].filter((part): part is string => part !== null)
   return { blocked: true, message: `O lote não será gerado enquanto isto não for resolvido: ${parts.join(' e ')}.` }
 }
+
+// ---- The cut of a spoken subject the Apollo proposes and the owner confirms (ADR-160).
+
+/** A refusal of the Director that carries the reasons it gives in the Apollo's words (`editorial-request-blocked`), so a screen can act on them. */
+export class RefusedWithBlockers extends Error {
+  readonly blockers: readonly unknown[]
+  constructor(message: string, blockers: unknown) {
+    super(message)
+    this.name = 'RefusedWithBlockers'
+    this.blockers = Array.isArray(blockers) ? blockers : []
+  }
+}
+
+export interface CutProposal {
+  /** The question the Apollo asked, in words. */
+  question: string
+  subject: string
+  sourceTranscriptId: string
+  matches: readonly { startSeconds: number; endSeconds: number; text: string }[]
+}
+
+/** The cuts a refusal asks the owner to confirm: only a proposal that found something in the speech, with the subject and the transcript it was searched in. */
+export function cutProposalsOf(blockers: readonly unknown[]): readonly CutProposal[] {
+  return blockers.flatMap((blocker) => {
+    const entry = blocker as { kind?: unknown; text?: unknown; removal?: { subject?: unknown; sourceTranscriptId?: unknown; matches?: unknown } } | null
+    const removal = entry?.removal
+    if (entry?.kind !== 'question' || typeof entry.text !== 'string' || !removal || typeof removal.subject !== 'string' || typeof removal.sourceTranscriptId !== 'string' ||
+      !Array.isArray(removal.matches) || removal.matches.length === 0) return []
+    return [{ question: entry.text, subject: removal.subject, sourceTranscriptId: removal.sourceTranscriptId, matches: removal.matches as CutProposal['matches'] }]
+  })
+}
+
+export const CUT_CONFIRMATION_TEXTS = Object.freeze({
+  title: 'Trechos que o Apollo cortaria',
+  note: 'Estes são os trechos da fala que saem do vídeo se você confirmar. Nada é cortado sem a sua confirmação.',
+  button: 'Confirmar corte',
+  working: 'Cortando…',
+  done: 'Corte feito. O vídeo foi refeito sem esses trechos; peça ao Diretor de novo.',
+})

@@ -158,6 +158,14 @@ export function notExecutableTogetherSummary(kind: string, options: readonly str
   return `${label}: ${options.join(' ou ')}`
 }
 
+/** A sentence of the briefing that the reading could not place: the owner says what it is. */
+export const UNPLACED_STATEMENT_LABEL = 'Isso não pede nada ao vídeo'
+export const UNPLACED_REQUEST_LABEL = 'Isso pede algo que o Apollo não sabe fazer'
+export function unplacedSentenceQuestion(sentence: string): string {
+  const shown = sentence.length > 300 ? `${sentence.slice(0, 299)}…` : sentence
+  return `O Apollo não entendeu o que esta frase do briefing pede ao vídeo: “${shown}”. O que ela é?`
+}
+
 // ---- The sentences the resolution writes when what the request asks for needs the owner (they reach the owner as the reasons the Director is blocked). ----
 
 /** Seconds as a person reads them: `58,1 s`. */
@@ -188,6 +196,22 @@ export function ctaTextConflictQuestion(inBriefing: string, inField: string): st
 /** A request for ONE output of several, in a project whose plan is one timeline for all of them. */
 export function variantOverrideAloneSummary(outputCount: number, line: string): string {
   return `O plano do vídeo é um só para as ${outputCount} saídas do projeto, então o pedido só para uma delas não pode ser feito (${line}).`
+}
+
+/** The words of a written call are given, and so is a request that no written call is drawn. */
+export function ctaTextWithoutOverlayQuestion(text: string, placement: string): string {
+  const no = placement === 'verbal-only' ? 'só falada, sem texto na tela' : 'sem chamada para ação'
+  return `O pedido quer escrever “${text}” na tela e também pede a chamada ${no}. Qual dos dois vale?`
+}
+
+/** The project has an output the request, which names the versions it wants, does not name. */
+export function outputNotAskedQuestion(aspectRatio: string): string {
+  return `Este projeto tem uma saída ${aspectRatio} que o briefing não pede. Se ela deve ficar, diga no briefing que quer essa versão; se não deve, tire a saída do projeto. O Apollo não tira nem mantém saída por conta própria.`
+}
+
+/** A request for an output the project does not have, in a field that names the output. */
+export function variantOverrideWithoutOutputSummary(line: string): string {
+  return `O pedido é para uma saída que este projeto não tem, então não pode ser feito (${line}).`
 }
 
 /** The video already has music and the request asks for none: the Apollo has no way to take music out. */

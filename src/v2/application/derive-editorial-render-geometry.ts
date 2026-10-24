@@ -1,6 +1,6 @@
 import { captionLayoutOverflows } from '../domain/caption-burn-layout.ts'
 import { DomainError } from '../domain/errors.ts'
-import { assertReframePlanForFill } from '../domain/editorial-policy-resolution.ts'
+import { assertReframePlanCoherentWithLayout, assertReframePlanForFill } from '../domain/editorial-policy-resolution.ts'
 import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import {
   validateRenderPlacementPlan,
@@ -124,7 +124,10 @@ export async function deriveEditorialRenderGeometry(input: Readonly<{
   }
   // ADR-160. A request that fills the frame of THIS output asks for the reframe trajectory of that output. Rendering it without that plan would draw the whole
   // frame over a backdrop - something the request did not ask for, told to nobody - so the render is refused and says what is missing.
-  if (source.policyResolution?.policies.layout.value.perOutput !== undefined) assertReframePlanForFill(source.policyResolution, sourceOutputVariantId(source), reframePlan !== undefined)
+  if (source.policyResolution?.policies.layout.value.perOutput !== undefined) {
+    assertReframePlanForFill(source.policyResolution, sourceOutputVariantId(source), reframePlan !== undefined)
+    assertReframePlanCoherentWithLayout(source.policyResolution, sourceOutputVariantId(source), reframePlan)
+  }
   const placementElements: RenderPlacementRequestV1[] = ctaOverlays.map((overlay, index) => ({
     id: `cta-${index}-${overlay.id ?? index}`.slice(0, 96),
     kind: 'cta' as const, anchor: 'auto' as const, priority: 80, readingOrder: index,

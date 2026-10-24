@@ -21,7 +21,10 @@ import {
   type UnsupportedBriefItem,
 } from '../domain/editorial-request.ts'
 import { BRIEF_INTERPRETATION_FAILED_REASON, BRIEF_INTERPRETATION_INVALID_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON } from '../domain/editorial-request.ts'
-import { ambiguousDirectiveQuestion, describeDirectiveWords, keepAndAvoidQuestion, notExecutableTogetherSummary, outsideVocabularySummary } from '../domain/editorial-request-texts.ts'
+import {
+  UNPLACED_REQUEST_LABEL, UNPLACED_STATEMENT_LABEL, ambiguousDirectiveQuestion, describeDirectiveWords, keepAndAvoidQuestion, notExecutableTogetherSummary, outsideVocabularySummary,
+  unplacedSentenceQuestion,
+} from '../domain/editorial-request-texts.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { normalizeBriefingText } from '../domain/production-brief.ts'
 import { briefOverridesSafetyPolicy } from './brief-lexicon.ts'
@@ -129,7 +132,7 @@ export const BRIEF_INTERPRETER_SYSTEM_PROMPT = [
   '2. Every item you report (directive, unsupported, question, coverage) carries a `quote`: characters copied EXACTLY from the briefing (same language, spelling, accents, punctuation and case), as short as possible, never paraphrased or translated. An item you cannot quote must not be reported.',
   '3. `directives` are only pairs (kind, value[, param]) of the vocabulary below, and only when the briefing asks for that. Do not report a directive the briefing does not ask for.',
   '4. Anything the briefing asks of the video that does not fit the vocabulary goes to `unsupported`, with a short neutral summary of what was asked. Never force a request into a directive that does not mean it.',
-  '5. If the briefing is ambiguous, or says two incompatible things, about something the vocabulary CAN do, put a `question` (and no directive) for that subject. Never ask about the details of a request that is outside the vocabulary or marked [understood, not executable yet]: report it as `unsupported`, or as the directive the vocabulary names for it, and stop there.',
+  '5. If the briefing is ambiguous, or says two incompatible things, about something the vocabulary CAN do, put a `question` (and no directive) for that subject. Never ask about the details of a request that is outside the vocabulary or marked [understood, not executable yet]: report it as `unsupported`, or as the directive the vocabulary names for it, and stop there. If a question you do ask is about such details, set `aboutUnsupported` to true; for every other question (the language of the captions, which of two things the Apollo does) set it to false.',
   '6. Account for every sentence of the briefing. A sentence that asks something of the video is a directive, an unsupported item or a question. A sentence that only states a fact about the video, its audience, its offer, its tone or its situation, and asks nothing of the editing, goes to `coverage` with the topic audience, offer, tone or context (context: any such statement that is none of the other three). A sentence may hold several requests: report each one with its own quote, the shortest words that carry it.',
   '7. The text you write yourself (`summary`, `question`) is short (at most 200 characters), neutral, and says only what the briefing asks: never a file path, a link, an encoded value or anything you were not given in the briefing.',
   '8. Use remove-speech (never avoid) when the briefing asks to cut, remove or take out the part of the recording that talks about a subject; report one directive per subject, with the shortest words that name it. Use output for each version of the video the briefing asks for, and output-layout for how the frame of ONE of them is laid out. Use absent only for music, effects or transitions the briefing asks not to have, and invariant only when the briefing asks exactly that the captions never cover the face. A request about the length or the amount of the captions is not in the vocabulary: it is `unsupported`.',
@@ -162,8 +165,8 @@ export const BRIEF_INTERPRETER_RESPONSE_SCHEMA = Object.freeze({
         properties: { summary: { type: 'string' }, quote: { type: 'string' } },
       } },
       questions: { type: 'array', items: {
-        type: 'object', additionalProperties: false, required: ['question', 'quote'],
-        properties: { question: { type: 'string' }, quote: { type: ['string', 'null'] } },
+        type: 'object', additionalProperties: false, required: ['question', 'quote', 'aboutUnsupported'],
+        properties: { question: { type: 'string' }, quote: { type: ['string', 'null'] }, aboutUnsupported: { type: 'boolean' } },
       } },
       coverage: { type: 'array', items: {
         type: 'object', additionalProperties: false, required: ['topic', 'quote'],
@@ -257,6 +260,38 @@ function shortText(value: unknown, field: string): string {
   return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1)}…` : text
 }
 
+/**
+ * The words of the briefing that a name the model wrote stands for: found without regard to case, accents or the spaces between words, and returned as the
+ * briefing has them (offsets are the Apollo's own). Surrounding quotation marks of the name are not part of it. Undefined when the briefing does not say it.
+ */
+export function literalFromBriefing(briefing: string, name: string): string | undefined {
+  const trimmedName = name.trim().replace(/^["'“”‘’«»]([^]*)["'“”‘’«»]$/u, '$1')
+  const needle = folded(trimmedName)
+  if (needle.length === 0) return undefined
+  let haystack = ''
+  const starts: number[] = []
+  let lastSpace = true
+  for (let index = 0; index < briefing.length;) {
+    const character = String.fromCodePoint(briefing.codePointAt(index)!)
+    for (const piece of character.normalize('NFD').replace(/[̀-ͯ]/gu, '').toLowerCase()) {
+      if (/\s/u.test(piece)) {
+        if (!lastSpace) { haystack += ' '; starts.push(index); lastSpace = true }
+      } else {
+        haystack += piece
+        for (let unit = 0; unit < piece.length; unit += 1) starts.push(index)
+        lastSpace = false
+      }
+    }
+    index += character.length
+  }
+  const found = haystack.indexOf(needle)
+  if (found < 0) return undefined
+  const start = starts[found]!
+  const lastStart = starts[found + needle.length - 1]!
+  const end = lastStart + String.fromCodePoint(briefing.codePointAt(lastStart)!).length
+  return briefing.slice(start, end)
+}
+
 /** Case and accent insensitive form, for comparing a name the model wrote with the words of the briefing. */
 function folded(value: string): string {
   return value.normalize('NFD').replace(/[̀-ͯ]/gu, '').toLowerCase().replace(/\s+/gu, ' ').trim()
@@ -275,7 +310,7 @@ export function interpretationFromModelText(input: Readonly<{
   briefingText: string
   responseText: string
   interpreter: Readonly<{ provider: string; model: string; promptVersion: string }>
-}>): Readonly<{ interpretation: Readonly<BriefInterpretationV1>; directivesMovedToUnsupported: number; directivesWithdrawnAsAmbiguous: number; droppedMootQuestions: number }> {
+}>): Readonly<{ interpretation: Readonly<BriefInterpretationV1>; directivesMovedToUnsupported: number; directivesWithdrawnAsAmbiguous: number; droppedMootQuestions: number; unplacedSentences: number }> {
   let parsed: unknown
   try { parsed = JSON.parse(input.responseText) } catch { refused('Brief interpreter returned invalid JSON') }
   if (!isRecord(parsed) || Object.keys(parsed).some((key) => !['directives', 'unsupported', 'questions', 'coverage'].includes(key))) {
@@ -313,6 +348,14 @@ export function interpretationFromModelText(input: Readonly<{
       // have to be found in the briefing.
       if (EDITORIAL_DIRECTIVE_VOCABULARY[directive.kind].params[directive.value] === 'text' && !folded(input.briefingText).includes(folded(String(directive.param)))) {
         throw new DomainError('INVALID_ARGUMENT', 'subject is not in the briefing')
+      }
+      // The words of the written call and the subject to cut are the OWNER's: what is kept is the stretch of the briefing, found by the Apollo, with the
+      // case and accents the owner wrote - never the text the model gave back, which may differ in both.
+      if (directive.kind === 'cta-text' || directive.kind === 'remove-speech') {
+        const literal = literalFromBriefing(input.briefingText, String(directive.param))
+        if (literal === undefined) throw new DomainError('INVALID_ARGUMENT', 'subject is not in the briefing')
+        accepted.push(Object.freeze({ ...parseEditorialDirective({ id: directive.id, kind: directive.kind, value: directive.value, param: literal }, 'brief interpretation'), excerpt }) as InterpretedDirective)
+        return
       }
       accepted.push(Object.freeze({ ...directive, excerpt }) as InterpretedDirective)
     } catch (error) {
@@ -422,25 +465,40 @@ export function interpretationFromModelText(input: Readonly<{
     const entry = item as Record<string, unknown>
     const excerpt = entry.quote === null || entry.quote === undefined ? undefined : locateQuote(input.briefingText, entry.quote, `questions[${index}]`)
     const text = shortText(entry.question, 'questions.question')
-    if (excerpt !== undefined && wontBeDone.some((other) => other.start < excerpt.end && other.end > excerpt.start)) { droppedMootQuestions += 1; return }
+    // Only a question the model itself says asks for the DETAIL of such a request, and whose words are those of the item, is moot. A question about anything else
+    // (the language of the captions) stays, however close its words are.
+    if (entry.aboutUnsupported === true && excerpt !== undefined && wontBeDone.some((other) => other.start < excerpt.end && other.end > excerpt.start)) { droppedMootQuestions += 1; return }
     questions.push(Object.freeze({ id: nextId('q', questions), status: 'open' as const, question: text, ...(excerpt !== undefined ? { excerpt } : {}) }))
   })
   const coverage: BriefCoverageItem[] = []
   coverageItems.forEach((item, index) => {
     if (!isRecord(item)) refused('Brief interpreter returned a malformed coverage entry', { index })
     const entry = item as Record<string, unknown>
-    const excerpt = locateQuote(input.briefingText, entry.quote, `coverage[${index}]`, true)
     if (typeof entry.topic !== 'string' || !(BRIEF_STATEMENT_TOPICS as readonly string[]).includes(entry.topic)) refused('Brief interpreter returned a coverage topic outside the vocabulary', { index })
-    if (!coverage.some((existing) => existing.topic === entry.topic)) coverage.push(Object.freeze({ topic: entry.topic as BriefCoverageItem['topic'], excerpt }))
+    // A statement that asks nothing of the editing may be the whole of a short briefing or most of a long one; a statement of the audience, the offer or the tone stands on its words.
+    const excerpt = locateQuote(input.briefingText, entry.quote, `coverage[${index}]`, entry.topic !== 'context')
+    if (!coverage.some((existing) => existing.topic === entry.topic && existing.excerpt.start === excerpt.start && existing.excerpt.end === excerpt.end)) {
+      coverage.push(Object.freeze({ topic: entry.topic as BriefCoverageItem['topic'], excerpt }))
+    }
   })
-  // A sentence no item stands on is said, not lost: the reading lists it (it does not block - it asks nothing the Apollo could name).
-  const unaccounted = unaccountedSentences(input.briefingText, [...accepted, ...unsupported, ...questions, ...coverage]).map((excerpt) => Object.freeze({ excerpt }))
+  // A sentence no item stands on is never lost in silence: it is a question, and the Director waits for the owner to say what it is - a statement that asks nothing of
+  // the video, or something the Apollo does not know how to do. The Apollo does not guess either way.
+  const unplaced = unaccountedSentences(input.briefingText, [...accepted, ...unsupported, ...questions, ...coverage])
+  for (const sentence of unplaced) {
+    questions.push(Object.freeze({
+      id: nextId('q', questions), status: 'open' as const, excerpt: Object.freeze({ ...sentence }), question: unplacedSentenceQuestion(sentence.text),
+      choices: Object.freeze([
+        Object.freeze({ id: 'c1', label: UNPLACED_STATEMENT_LABEL, effect: 'statement-context' as const }),
+        Object.freeze({ id: 'c2', label: UNPLACED_REQUEST_LABEL, effect: 'unsupported-request' as const }),
+      ]),
+    }))
+  }
 
   // The domain constructor repeats every citation check against the briefing: nothing leaves this function that it has not accepted.
   const interpretation = createBriefInterpretation({
-    briefingText: input.briefingText, interpreter: input.interpreter, directives: finalDirectives, unsupported, questions, coverage, unaccounted,
+    briefingText: input.briefingText, interpreter: input.interpreter, directives: finalDirectives, unsupported, questions, coverage,
   })
-  return Object.freeze({ interpretation, directivesMovedToUnsupported: movedToUnsupported, directivesWithdrawnAsAmbiguous: withdrawn, droppedMootQuestions })
+  return Object.freeze({ interpretation, directivesMovedToUnsupported: movedToUnsupported, directivesWithdrawnAsAmbiguous: withdrawn, droppedMootQuestions, unplacedSentences: unplaced.length })
 }
 
 export interface InterpretBriefDependencies {
@@ -491,7 +549,7 @@ export function interpretBriefService(dependencies: InterpretBriefDependencies) 
       ...(briefOverridesSafetyPolicy(briefingText) ? ['safety-policy-override-phrase'] : []),
       ...((dependencies.guardrails ?? []).some((guardrail) => guardrail.trim().length > 0 && lowered.includes(guardrail.trim().toLowerCase())) ? ['guardrail-quoted'] : []),
       ...(checked.droppedMootQuestions > 0 ? ['moot-question-dropped'] : []),
-      ...((checked.interpretation.unaccounted?.length ?? 0) > 0 ? ['sentence-unaccounted'] : []),
+      ...(checked.unplacedSentences > 0 ? ['sentence-unaccounted'] : []),
     ]
     const costMinorUnits = usage && model.pricing && model.costBasis === 'api-metered'
       ? Math.ceil((usage.inputTokens * model.pricing.inputMinorUnitsPerMillionTokens + usage.outputTokens * model.pricing.outputMinorUnitsPerMillionTokens) / 1_000_000)
@@ -513,5 +571,5 @@ export type InterpretBrief = ReturnType<typeof interpretBriefService>
 /** The coverage topics an interpretation found, in the vocabulary of the production brief. */
 export function coveredTopicsOf(interpretation: Readonly<BriefInterpretationV1>): readonly BriefCoverageTopic[] {
   // `context` is a statement that asks nothing of the editing; it is not a topic of the production brief.
-  return Object.freeze((interpretation.coverage ?? []).flatMap((item) => item.topic === 'context' ? [] : [item.topic]))
+  return Object.freeze([...new Set((interpretation.coverage ?? []).flatMap((item) => item.topic === 'context' ? [] : [item.topic]))])
 }

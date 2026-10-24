@@ -107,7 +107,7 @@ import {
   MULTICAM_LONGFORM_GATE_SCHEMA_VERSION,
 } from '../domain/multicam-longform-gate.ts'
 import { COVERAGE_AVAILABILITIES } from '../domain/track-coverage.ts'
-import { BRIEF_STATEMENT_TOPICS, EDITORIAL_DIRECTIVE_KINDS, EDITORIAL_DIRECTIVE_VOCABULARY } from '../domain/editorial-request.ts'
+import { BRIEF_CHOICE_EFFECTS, BRIEF_STATEMENT_TOPICS, EDITORIAL_DIRECTIVE_KINDS, EDITORIAL_DIRECTIVE_VOCABULARY } from '../domain/editorial-request.ts'
 import { DIRECTION_POLICY_OVERRIDE_KEYS } from '../application/multicam-direction.ts'
 import { STRATEGIC_OBJECTIVES } from '../domain/strategic-objective.ts'
 import { MULTICAM_LONGFORM_CHECK_CODES } from './multicam-longform-gate-contract.ts'
@@ -8831,9 +8831,14 @@ const batchEditorialRequestRevisedSchema = {
 }
 
 // ---- ADR-160 (coverage vocabulary). The reading knows what the Apollo already did: the outputs, the frame of one output, the words of the written call to
-// action, a spoken subject to take out, the guarantees of the product and what it never adds. It also lists the sentences of the briefing that no item
-// stands on (`unaccounted`) and states a sentence that asks nothing of the editing as a `context` statement. Every shape is a superset of the one before.
-const briefQuestionChoiceSchemaCover = { ...briefQuestionChoiceSchema, properties: { ...briefQuestionChoiceSchema.properties, directive: editorialDirectiveSchemaCover } }
+// action, a spoken subject to take out, the guarantees of the product and what it never adds. It asks, for each sentence of the briefing that no item
+// stands on, what it is, and states a sentence that asks nothing of the editing as a `context` statement. Every shape is a superset of the one before.
+// A closed answer makes a directive, or says what a sentence the Apollo could not place IS (a statement that asks nothing of the video, or something it does not do).
+const briefQuestionChoiceSchemaCover = {
+  type: 'object', additionalProperties: false, required: ['id', 'label'],
+  properties: { id: editorialDirectiveIdSchema, label: { type: 'string', minLength: 1, maxLength: 200 }, directive: editorialDirectiveSchemaCover, effect: { enum: [...BRIEF_CHOICE_EFFECTS] } },
+  oneOf: [{ required: ['directive'], properties: { directive: {} } }, { required: ['effect'], properties: { effect: {} } }],
+}
 const briefQuestionChoicesSchemaCover = { type: 'array', minItems: 2, maxItems: 8, items: briefQuestionChoiceSchemaCover }
 const briefInterpretationSchemaCover = {
   ...briefInterpretationSchemaV2,
@@ -8844,12 +8849,9 @@ const briefInterpretationSchemaCover = {
       ...briefInterpretationSchema.properties.questions.items,
       properties: { ...briefInterpretationSchema.properties.questions.items.properties, choices: briefQuestionChoicesSchemaCover },
     } },
-    coverage: { type: 'array', minItems: 1, maxItems: BRIEF_STATEMENT_TOPICS.length, items: {
+    coverage: { type: 'array', minItems: 1, maxItems: 64, items: {
       type: 'object', additionalProperties: false, required: ['topic', 'excerpt'],
       properties: { topic: { enum: [...BRIEF_STATEMENT_TOPICS] }, excerpt: briefExcerptSchema },
-    } },
-    unaccounted: { type: 'array', minItems: 1, maxItems: 64, items: {
-      type: 'object', additionalProperties: false, required: ['excerpt'], properties: { excerpt: briefExcerptSchema },
     } },
   },
 }
@@ -27393,10 +27395,18 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
   defineSchema('batch-editorial-request-response', 1, 'The editorial request of one production batch as it stands now: the briefing as written and how it was read, with what is unsupported, what is still a question (and the closed answers it offers), the revision it is at and whether it keeps the batch from being generated', successSchema(batchEditorialRequestResponseSchema)),
   defineSchema('batch-editorial-request-revise-request', 1, 'Answer the open questions of the request of a production batch, or give the batch a new briefing that is read again; the request it replaces is kept as a revision', batchEditorialRequestReviseRequestSchema),
   defineSchema('batch-editorial-request-revised', 1, 'The request of a production batch after a revision: how the briefing is read now, what changed and whether the batch can be generated', successSchema(batchEditorialRequestRevisedSchema)),
-  defineSchema('batch-editorial-request-response', 2, 'The editorial request of one production batch as it stands now, read with the coverage vocabulary: the versions asked for, the frame of one version, the words of the written call to action, a spoken subject to take out, the guarantees of the product and what the Apollo never adds, and the sentences of the briefing that no item stands on', successSchema(batchEditorialRequestResponseSchemaCover)),
+  defineSchema('confirm-speech-removal-request', 1, 'Confirm the cut the Apollo proposed for a subject the editorial request asks to take out of the speech; the words of the cut are made by the Apollo, never by the caller', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash', 'sourceTranscriptId', 'variantId', 'subject'],
+    properties: {
+      baseVersionId: idSchema, baseHash: sha256Schema, sourceTranscriptId: idSchema, variantId: idSchema,
+      subject: { type: 'string', minLength: 1, maxLength: 200, description: 'The subject exactly as a remove-speech directive of the current request states it.' },
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+  }),
+  defineSchema('batch-editorial-request-response', 2, 'The editorial request of one production batch as it stands now, read with the coverage vocabulary: the versions asked for, the frame of one version, the words of the written call to action, a spoken subject to take out, the guarantees of the product and what the Apollo never adds, and, for each sentence it could not place, a question', successSchema(batchEditorialRequestResponseSchemaCover)),
   defineSchema('batch-editorial-request-revised', 2, 'The request of a production batch after a revision, read with the coverage vocabulary', successSchema(batchEditorialRequestRevisedSchemaCover)),
   defineSchema('editorial-request-revise-request', 4, 'Replace the parts of the editorial request of a video that the body names, with the coverage vocabulary: the versions asked for, the frame of one version, the words of the written call to action, a spoken subject to take out, the guarantees of the product and what the Apollo never adds', editorialRequestReviseRequestSchemaCover),
-  defineSchema('editorial-request-response', 3, 'The editorial request of the current Version read with the coverage vocabulary: what was asked, how the briefing was read, what is unsupported, what is still a question, and the sentences of the briefing that no item stands on', successSchema(currentEditorialRequestSchemaCover)),
+  defineSchema('editorial-request-response', 3, 'The editorial request of the current Version read with the coverage vocabulary: what was asked, how the briefing was read, what is unsupported, and what is still a question (a sentence the Apollo could not place is one)', successSchema(currentEditorialRequestSchemaCover)),
   defineSchema('editorial-request-revised', 4, 'A revised editorial request read with the coverage vocabulary: the EditCommand, the new Brief Snapshot state and the deferred render impact', successSchema(editorialRequestRevisionResultSchemaCover)),
   defineSchema('editorial-request-revise-request', 3, 'Replace the parts of the editorial request of a video that the body names, including its strategic objective while the project has none or no Director run exists; a question is answered in words or by choosing one of its closed answers', editorialRequestReviseRequestSchemaV3),
   defineSchema('editorial-request-revise-request', 2, 'Replace the parts of the editorial request of a video that the body names; a question is answered in words or by choosing one of its closed answers, and a choice becomes the directive of the same revision', editorialRequestReviseRequestSchemaV2),

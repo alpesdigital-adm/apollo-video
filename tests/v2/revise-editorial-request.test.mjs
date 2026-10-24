@@ -27,10 +27,13 @@ const BRIEFING = 'alpha beta gamma delta'
 let worldPromise
 const world = () => (worldPromise ??= ingestedWorld())
 const empty = { directives: [], unsupported: [], questions: [], coverage: [] }
+const { EVERY_SENTENCE_IS_CONTEXT } = await import('./helpers/brief-interpreter-stand-in.mjs')
+// `empty` is a model that finds nothing to ask of the video: it says what each sentence is (context), because a sentence it left out would be a question for the owner.
+const answerFor = (answer, request) => answer === empty ? EVERY_SENTENCE_IS_CONTEXT(JSON.parse(request.user).briefing) : typeof answer === 'function' ? answer(request) : answer
 
 function stubModel(answer) {
   const calls = []
-  return { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', calls, async interpret(request) { calls.push(request); return { text: JSON.stringify(typeof answer === 'function' ? answer(request) : answer) } } }
+  return { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', calls, async interpret(request) { calls.push(request); return { text: JSON.stringify(answerFor(answer, request)) } } }
 }
 
 function briefDocument({ briefing, editorialRequest } = {}) {

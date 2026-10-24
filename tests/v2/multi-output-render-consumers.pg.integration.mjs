@@ -122,7 +122,8 @@ test('W66 PostgreSQL the render consumers resolve ONE output explicitly and pers
       renderer: { async render(input) { rendered.push({ operationId: input.operationId, format: input.format }); throw renderBehaviour(input) }, async cleanup() {} },
       renderElementMaps: { async persistOrReplay() { throw new Error('nothing may be mapped') } },
       perceptionTimelines: { async findLatest() { return null } },
-      luts: { async materialize() { return { selectionId: 'selection-w66mr', selectionHash: sha('selection'), lutPaths: {} } }, async cleanup() {} },
+      // The worker refuses a render whose LUT selection is not the grade its source was read with (commit 8e63d11a): the fake materializes exactly that selection.
+      luts: { async materialize() { const { id, selectionHash } = sources[wide.variantId].colorGrade.lutSelection; return { selectionId: id, selectionHash, lutPaths: {} } }, async cleanup() {} },
       sources: { async materialize(input) { return { path: `${process.cwd()}/.w66mr-not-read/${input.artifactKey}`, sha256: input.sha256, byteSize: input.byteSize } }, async cleanup() {} },
       clock: () => new Date(), leaseDurationMs: 60_000, heartbeatIntervalMs: 5_000, retryBaseDelayMs: 1, retryMaxDelayMs: 1,
     })

@@ -8969,6 +8969,32 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.projects.speech-removals.confirm": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/confirm-speech-removal-request/v1",
+      "outputSchemaRef": "apollo://schemas/project-edit-command-applied/v9",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/speech-removals"
+      },
+      "toolName": "apollo.projects.speech-removals.confirm",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.speech-segments.catalog": {
       "version": "1.0.0",
       "exposure": "public",
@@ -26673,8 +26699,7 @@
                               "additionalProperties": false,
                               "required": [
                                 "id",
-                                "label",
-                                "directive"
+                                "label"
                               ],
                               "properties": {
                                 "id": {
@@ -26774,8 +26799,32 @@
                                       ]
                                     }
                                   }
+                                },
+                                "effect": {
+                                  "enum": [
+                                    "statement-context",
+                                    "unsupported-request"
+                                  ]
                                 }
-                              }
+                              },
+                              "oneOf": [
+                                {
+                                  "required": [
+                                    "directive"
+                                  ],
+                                  "properties": {
+                                    "directive": {}
+                                  }
+                                },
+                                {
+                                  "required": [
+                                    "effect"
+                                  ],
+                                  "properties": {
+                                    "effect": {}
+                                  }
+                                }
+                              ]
                             }
                           }
                         }
@@ -26784,7 +26833,7 @@
                     "coverage": {
                       "type": "array",
                       "minItems": 1,
-                      "maxItems": 4,
+                      "maxItems": 64,
                       "items": {
                         "type": "object",
                         "additionalProperties": false,
@@ -26831,44 +26880,6 @@
                     "interpretationHash": {
                       "type": "string",
                       "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "unaccounted": {
-                      "type": "array",
-                      "minItems": 1,
-                      "maxItems": 64,
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "excerpt"
-                        ],
-                        "properties": {
-                          "excerpt": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "start",
-                              "end",
-                              "text"
-                            ],
-                            "properties": {
-                              "start": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "end": {
-                                "type": "integer",
-                                "minimum": 1
-                              },
-                              "text": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 10000
-                              }
-                            }
-                          }
-                        }
-                      }
                     }
                   }
                 }
@@ -27119,8 +27130,7 @@
                       "additionalProperties": false,
                       "required": [
                         "id",
-                        "label",
-                        "directive"
+                        "label"
                       ],
                       "properties": {
                         "id": {
@@ -27220,8 +27230,32 @@
                               ]
                             }
                           }
+                        },
+                        "effect": {
+                          "enum": [
+                            "statement-context",
+                            "unsupported-request"
+                          ]
                         }
-                      }
+                      },
+                      "oneOf": [
+                        {
+                          "required": [
+                            "directive"
+                          ],
+                          "properties": {
+                            "directive": {}
+                          }
+                        },
+                        {
+                          "required": [
+                            "effect"
+                          ],
+                          "properties": {
+                            "effect": {}
+                          }
+                        }
+                      ]
                     }
                   }
                 }
@@ -29291,8 +29325,7 @@
                               "additionalProperties": false,
                               "required": [
                                 "id",
-                                "label",
-                                "directive"
+                                "label"
                               ],
                               "properties": {
                                 "id": {
@@ -29392,8 +29425,32 @@
                                       ]
                                     }
                                   }
+                                },
+                                "effect": {
+                                  "enum": [
+                                    "statement-context",
+                                    "unsupported-request"
+                                  ]
                                 }
-                              }
+                              },
+                              "oneOf": [
+                                {
+                                  "required": [
+                                    "directive"
+                                  ],
+                                  "properties": {
+                                    "directive": {}
+                                  }
+                                },
+                                {
+                                  "required": [
+                                    "effect"
+                                  ],
+                                  "properties": {
+                                    "effect": {}
+                                  }
+                                }
+                              ]
                             }
                           }
                         }
@@ -29402,7 +29459,7 @@
                     "coverage": {
                       "type": "array",
                       "minItems": 1,
-                      "maxItems": 4,
+                      "maxItems": 64,
                       "items": {
                         "type": "object",
                         "additionalProperties": false,
@@ -29449,44 +29506,6 @@
                     "interpretationHash": {
                       "type": "string",
                       "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "unaccounted": {
-                      "type": "array",
-                      "minItems": 1,
-                      "maxItems": 64,
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "excerpt"
-                        ],
-                        "properties": {
-                          "excerpt": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "start",
-                              "end",
-                              "text"
-                            ],
-                            "properties": {
-                              "start": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "end": {
-                                "type": "integer",
-                                "minimum": 1
-                              },
-                              "text": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 10000
-                              }
-                            }
-                          }
-                        }
-                      }
                     }
                   }
                 }
@@ -29737,8 +29756,7 @@
                       "additionalProperties": false,
                       "required": [
                         "id",
-                        "label",
-                        "directive"
+                        "label"
                       ],
                       "properties": {
                         "id": {
@@ -29838,8 +29856,32 @@
                               ]
                             }
                           }
+                        },
+                        "effect": {
+                          "enum": [
+                            "statement-context",
+                            "unsupported-request"
+                          ]
                         }
-                      }
+                      },
+                      "oneOf": [
+                        {
+                          "required": [
+                            "directive"
+                          ],
+                          "properties": {
+                            "directive": {}
+                          }
+                        },
+                        {
+                          "required": [
+                            "effect"
+                          ],
+                          "properties": {
+                            "effect": {}
+                          }
+                        }
+                      ]
                     }
                   }
                 }
@@ -45545,6 +45587,49 @@
           "type": "string",
           "minLength": 2,
           "maxLength": 64
+        }
+      }
+    },
+    "apollo://schemas/confirm-speech-removal-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "baseHash",
+        "sourceTranscriptId",
+        "variantId",
+        "subject"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sourceTranscriptId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "variantId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "The subject exactly as a remove-speech directive of the current request states it."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
         }
       }
     },
@@ -72768,8 +72853,7 @@
                               "additionalProperties": false,
                               "required": [
                                 "id",
-                                "label",
-                                "directive"
+                                "label"
                               ],
                               "properties": {
                                 "id": {
@@ -72869,8 +72953,32 @@
                                       ]
                                     }
                                   }
+                                },
+                                "effect": {
+                                  "enum": [
+                                    "statement-context",
+                                    "unsupported-request"
+                                  ]
                                 }
-                              }
+                              },
+                              "oneOf": [
+                                {
+                                  "required": [
+                                    "directive"
+                                  ],
+                                  "properties": {
+                                    "directive": {}
+                                  }
+                                },
+                                {
+                                  "required": [
+                                    "effect"
+                                  ],
+                                  "properties": {
+                                    "effect": {}
+                                  }
+                                }
+                              ]
                             }
                           }
                         }
@@ -72879,7 +72987,7 @@
                     "coverage": {
                       "type": "array",
                       "minItems": 1,
-                      "maxItems": 4,
+                      "maxItems": 64,
                       "items": {
                         "type": "object",
                         "additionalProperties": false,
@@ -72926,44 +73034,6 @@
                     "interpretationHash": {
                       "type": "string",
                       "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "unaccounted": {
-                      "type": "array",
-                      "minItems": 1,
-                      "maxItems": 64,
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "excerpt"
-                        ],
-                        "properties": {
-                          "excerpt": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "start",
-                              "end",
-                              "text"
-                            ],
-                            "properties": {
-                              "start": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "end": {
-                                "type": "integer",
-                                "minimum": 1
-                              },
-                              "text": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 10000
-                              }
-                            }
-                          }
-                        }
-                      }
                     }
                   }
                 }
@@ -73214,8 +73284,7 @@
                       "additionalProperties": false,
                       "required": [
                         "id",
-                        "label",
-                        "directive"
+                        "label"
                       ],
                       "properties": {
                         "id": {
@@ -73315,8 +73384,32 @@
                               ]
                             }
                           }
+                        },
+                        "effect": {
+                          "enum": [
+                            "statement-context",
+                            "unsupported-request"
+                          ]
                         }
-                      }
+                      },
+                      "oneOf": [
+                        {
+                          "required": [
+                            "directive"
+                          ],
+                          "properties": {
+                            "directive": {}
+                          }
+                        },
+                        {
+                          "required": [
+                            "effect"
+                          ],
+                          "properties": {
+                            "effect": {}
+                          }
+                        }
+                      ]
                     }
                   }
                 }
@@ -80181,8 +80274,7 @@
                               "additionalProperties": false,
                               "required": [
                                 "id",
-                                "label",
-                                "directive"
+                                "label"
                               ],
                               "properties": {
                                 "id": {
@@ -80282,8 +80374,32 @@
                                       ]
                                     }
                                   }
+                                },
+                                "effect": {
+                                  "enum": [
+                                    "statement-context",
+                                    "unsupported-request"
+                                  ]
                                 }
-                              }
+                              },
+                              "oneOf": [
+                                {
+                                  "required": [
+                                    "directive"
+                                  ],
+                                  "properties": {
+                                    "directive": {}
+                                  }
+                                },
+                                {
+                                  "required": [
+                                    "effect"
+                                  ],
+                                  "properties": {
+                                    "effect": {}
+                                  }
+                                }
+                              ]
                             }
                           }
                         }
@@ -80292,7 +80408,7 @@
                     "coverage": {
                       "type": "array",
                       "minItems": 1,
-                      "maxItems": 4,
+                      "maxItems": 64,
                       "items": {
                         "type": "object",
                         "additionalProperties": false,
@@ -80339,44 +80455,6 @@
                     "interpretationHash": {
                       "type": "string",
                       "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "unaccounted": {
-                      "type": "array",
-                      "minItems": 1,
-                      "maxItems": 64,
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "excerpt"
-                        ],
-                        "properties": {
-                          "excerpt": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "start",
-                              "end",
-                              "text"
-                            ],
-                            "properties": {
-                              "start": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "end": {
-                                "type": "integer",
-                                "minimum": 1
-                              },
-                              "text": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 10000
-                              }
-                            }
-                          }
-                        }
-                      }
                     }
                   }
                 }
@@ -80627,8 +80705,7 @@
                       "additionalProperties": false,
                       "required": [
                         "id",
-                        "label",
-                        "directive"
+                        "label"
                       ],
                       "properties": {
                         "id": {
@@ -80728,8 +80805,32 @@
                               ]
                             }
                           }
+                        },
+                        "effect": {
+                          "enum": [
+                            "statement-context",
+                            "unsupported-request"
+                          ]
                         }
-                      }
+                      },
+                      "oneOf": [
+                        {
+                          "required": [
+                            "directive"
+                          ],
+                          "properties": {
+                            "directive": {}
+                          }
+                        },
+                        {
+                          "required": [
+                            "effect"
+                          ],
+                          "properties": {
+                            "effect": {}
+                          }
+                        }
+                      ]
                     }
                   }
                 }

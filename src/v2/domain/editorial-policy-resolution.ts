@@ -3,6 +3,7 @@ import { assertDomain, DomainError } from './errors.ts'
 import {
   createEditorialRequest,
   EDITORIAL_EXECUTABLE_VALUES,
+  REFRAME_PLAN_CONTRADICTS_LAYOUT_REASON,
   REFRAME_PLAN_REQUIRED_REASON,
   orientationOfAspect,
   outputReferenceMatches,
@@ -14,9 +15,12 @@ import {
 } from './editorial-request.ts'
 import {
   ctaTextConflictQuestion,
+  ctaTextWithoutOverlayQuestion,
   musicAlreadyInVideoSummary,
   notExecutableSummary,
+  outputNotAskedQuestion,
   variantOverrideAloneSummary,
+  variantOverrideWithoutOutputSummary,
   outputLayoutNativeMismatchQuestion,
   outputLayoutWithoutOutputQuestion,
   outputMissingQuestion,
@@ -169,6 +173,13 @@ export interface OpenQuestion {
 export interface SpeechRemovalProposal {
   /** The subject exactly as the directive states it: the proposal answers every directive with this subject. */
   subject: string
+  /** The transcript the subject was searched in (the removal Command names it). */
+  sourceTranscriptId?: string
+  /**
+   * True when the lineage already holds a removal rule with this id AND these words: the id alone confirms nothing (the same id with other words is another cut).
+   * Computed by the application, from the rules of the removal Commands the project holds.
+   */
+  confirmed?: boolean
   /** The id a `remove-spoken-content` rule must carry to answer the directive: the same subject is always the same id. */
   ruleId: string
   label: string
@@ -304,8 +315,13 @@ function select(request: Readonly<EditorialRequestV1>, outputSpec: Readonly<Edit
 }
 
 /** Every directive of one kind that states several things at once (the versions, the layouts of each, the subjects of the speech), structured fields first. */
-function selectAll(request: Readonly<EditorialRequestV1>, kind: EditorialDirectiveKind): readonly Selection[] {
+function selectAll(request: Readonly<EditorialRequestV1>, outputSpec: Readonly<EditorialOutputSpec>, kind: EditorialDirectiveKind): readonly Selection[] {
+  // A request for the one output the plan serves is a request for the plan, exactly as a structured field is. (With several outputs a request for one of
+  // them cannot be executed by a plan that is one for all, and it is listed as unsupported below: it is never dropped.)
+  const overridden = outputSpec.variantId !== undefined ? request.variantOverrides[outputSpec.variantId] ?? [] : []
   return Object.freeze([
+    ...overridden.filter((directive) => directive.kind === kind)
+      .map((directive) => Object.freeze({ directive, source: 'variant-override' as const, variantId: outputSpec.variantId! })),
     ...request.directives.filter((directive) => directive.kind === kind).map((directive) => Object.freeze({ directive, source: 'request-field' as const })),
     ...(request.interpretation?.directives ?? []).filter((directive) => directive.kind === kind)
       .map((directive) => Object.freeze({ directive, source: 'request-briefing' as const, excerpt: directive.excerpt })),
@@ -519,7 +535,7 @@ export function resolveEditorialPolicies(
   // sentence of the speech, when the speech has no call). Without a spoken call and without a closing request there is nowhere to draw it from,
   // which is a question.
   // The words of the written call may come from the request (a `cta-text` directive, structured first) or from the desired action's own visual text.
-  const ctaTextSelection = distinctSelections(selectAll(request, 'cta-text'))[0]
+  const ctaTextSelection = distinctSelections(selectAll(request, outputSpec, 'cta-text'))[0]
   const ctaTextFromRequest = ctaTextSelection ? String(ctaTextSelection.directive.param).trim() : undefined
   const actionVisualText = action?.visualCta?.trim()
   if (ctaTextFromRequest && actionVisualText && ctaTextFromRequest.normalize('NFC').toLocaleLowerCase() !== actionVisualText.normalize('NFC').toLocaleLowerCase()) {
@@ -598,6 +614,11 @@ export function resolveEditorialPolicies(
     }
   }
 
+  // The words of a written call the request also says it does not want are a contradiction, not a text to drop.
+  if (ctaTextFromRequest && ctaSelection !== undefined && (ctaSelection.directive.value === 'none' || ctaSelection.directive.value === 'verbal-only')) {
+    openQuestions.push(Object.freeze({ id: 'cta-text-without-overlay', question: ctaTextWithoutOverlayQuestion(ctaTextFromRequest, ctaSelection.directive.value), source: 'resolution' as const }))
+  }
+
   // Layout. The geometry of the source and of every output decides it unless the request does: where they have one frame shape the source is used
   // as it is; where they differ, the request decides how the frame is fitted, and silence keeps the whole frame visible over a backdrop.
   const layoutSelection = select(request, outputSpec, 'layout')
@@ -609,7 +630,7 @@ export function resolveEditorialPolicies(
   const fitWithBackdrop = { mode: 'fit-with-backdrop' as const }
   let layout: EditorialPolicies['layout']
   // The request speaks about the frame of an output (or asks every output to be filled): each output gets its own layout, and a fill is the reframe path.
-  const outputLayoutSelections = distinctSelections(selectAll(request, 'output-layout'))
+  const outputLayoutSelections = distinctSelections(selectAll(request, outputSpec, 'output-layout'))
   const fillEveryOutput = layoutSelection?.directive.value === 'fill-crop'
   if (outputLayoutSelections.length > 0 || fillEveryOutput) {
     const modeOfGlobal: Readonly<Record<string, OutputLayoutMode>> = { 'fill-crop': 'fill-following-face', 'source-native': 'source-native', 'fit-with-backdrop': 'fit-with-backdrop' }
@@ -762,7 +783,7 @@ export function resolveEditorialPolicies(
     : silent(request, 'speechRemovals', { ruleIds: Object.freeze([] as string[]) }, 'minimal-intervention', 'The request asks to remove no speech; no spoken phrase is forbidden.')
 
   // The versions the request asks for are the outputs of the project: satisfied when they exist, a question (create the output?) when they do not.
-  for (const selection of distinctSelections(selectAll(request, 'output'))) {
+  for (const selection of distinctSelections(selectAll(request, outputSpec, 'output'))) {
     const directive = selection.directive
     const matching = outputs.filter((output) => {
       const aspectRatio = output.aspectRatio ?? output.spec?.aspectRatio
@@ -779,8 +800,31 @@ export function resolveEditorialPolicies(
       openQuestions.push(Object.freeze({ id: `output-missing-${reference.replace(':', 'x')}`, question: outputMissingQuestion(reference), source: 'resolution' as const }))
     }
   }
+  // The project has an output the request, which speaks about the versions it wants, does not ask for: the Apollo neither drops it nor keeps it on its own.
+  const askedOutputs = distinctSelections(selectAll(request, outputSpec, 'output'))
+  if (askedOutputs.length > 0) {
+    for (const output of outputs) {
+      const aspectRatio = output.aspectRatio ?? output.spec?.aspectRatio
+      const asked = askedOutputs.some(({ directive }) => directive.value === 'aspect' ? aspectRatio === directive.param : orientationOfAspect(aspectRatio) === directive.value)
+      if (!asked) {
+        openQuestions.push(Object.freeze({ id: `output-not-asked-${output.variantId ?? output.id ?? aspectRatio ?? 'unknown'}`, question: outputNotAskedQuestion(aspectRatio ?? 'formato desconhecido'), source: 'resolution' as const }))
+      }
+    }
+  }
+  // A request for an output the project has not got is listed, never dropped.
+  if (outputs.length > 0 && outputs.every((output) => output.variantId !== undefined)) {
+    for (const [variantId, directives] of Object.entries(request.variantOverrides)) {
+      if (outputs.some((output) => output.variantId === variantId)) continue
+      for (const directive of directives) {
+        builder.unsupported.push(Object.freeze({
+          policyKey: 'interpretation' as const, directiveId: directive.id, kind: directive.kind, value: describe(directive), source: 'variant-override' as const,
+          reason: 'not-executable' as const, summary: variantOverrideWithoutOutputSummary(notExecutableSummary(directive.kind, directive.value, directive.param)),
+        }))
+      }
+    }
+  }
   // What the product guarantees whatever the request says, and what the Apollo never adds: satisfied, and recorded with what satisfies them.
-  for (const selection of distinctSelections(selectAll(request, 'invariant'))) {
+  for (const selection of distinctSelections(selectAll(request, outputSpec, 'invariant'))) {
     builder.satisfied.push(Object.freeze({
       directiveId: selection.directive.id, kind: selection.directive.kind, value: describe(selection.directive), source: selection.source, how: 'invariant' as const,
       origin: 'product-invariant' as const, rule: 'product-invariant' as const,
@@ -788,7 +832,7 @@ export function resolveEditorialPolicies(
       evidenceRefs: evidenceOf(request, selection, 'invariant:caption-face-clearance'),
     }))
   }
-  for (const selection of distinctSelections(selectAll(request, 'absent'))) {
+  for (const selection of distinctSelections(selectAll(request, outputSpec, 'absent'))) {
     const what = selection.directive.value
     if (what === 'music' && (mediaContext.backgroundMusicTrackCount ?? 0) > 0) {
       builder.unsupported.push(Object.freeze({
@@ -810,10 +854,10 @@ export function resolveEditorialPolicies(
   }
   // A subject the request asks to take out of the speech: the transcript is searched, the owner confirms what would go, and the confirmation is a
   // remove-spoken-content Command. Nothing is cut here, and nothing is cut without that confirmation.
-  distinctSelections(selectAll(request, 'remove-speech')).forEach((selection, index) => {
+  distinctSelections(selectAll(request, outputSpec, 'remove-speech')).forEach((selection, index) => {
     const subject = String(selection.directive.param)
     const proposal = mediaContext.speechRemovalProposals?.find((candidate) => candidate.subject === subject)
-    if (proposal !== undefined && request.requestedRemovals.includes(proposal.ruleId)) {
+    if (proposal !== undefined && proposal.confirmed === true) {
       builder.satisfied.push(Object.freeze({
         directiveId: selection.directive.id, kind: selection.directive.kind, value: describe(selection.directive), source: selection.source, how: 'confirmed-removal' as const,
         origin: 'request-field' as const, rule: 'explicit-request' as const,
@@ -935,6 +979,23 @@ export function assertResolutionPlannable(resolution: Readonly<EditorialPolicyRe
 }
 
 // ---- Consumers of the policies: the facts a plan must show for a policy to hold. Pure, so the Director and the gates read them one way.
+
+/**
+ * A reframe plan that crops the frame by itself (the automatic trajectory) on an output whose resolved layout is the source frame or the whole frame over a backdrop
+ * contradicts what the request asked for: the render is refused. (An editor's own crop is an explicit Command and stays; a resolution that said nothing about the
+ * frame of this output allows any plan.)
+ */
+export function assertReframePlanCoherentWithLayout(
+  resolution: Readonly<Pick<EditorialPolicyResolutionV1, 'policies'>> | null | undefined,
+  variantId: string,
+  reframePlan: Readonly<{ ranges: readonly Readonly<{ source: string }>[] }> | null | undefined,
+): void {
+  const mode = resolution?.policies.layout.value.perOutput?.find((entry) => entry.variantId === variantId)?.mode
+  const crops = reframePlan?.ranges.some((range) => range.source === 'plan') === true
+  assertDomain(mode === undefined || mode === 'fill-following-face' || !crops, 'PRECONDITION_REQUIRED',
+    'The request keeps the frame of this output as it is, and the reframe plan of this Version crops it by itself; the plan has to agree with the resolved layout of the output',
+    { reason: REFRAME_PLAN_CONTRADICTS_LAYOUT_REASON, variantId })
+}
 
 /**
  * A request that fills the frame of an output following the face asks for the reframe trajectory of THAT output (a persisted plan of the Version, W66r). A render

@@ -233,7 +233,11 @@ function presentEditorialRequestBlockers(details: Readonly<Record<string, unknow
       blockers.push({
         kind: 'question', id: record.id, text,
         ...(removal && typeof removal.ruleId === 'string' && /^[a-z0-9][a-z0-9-]{1,63}$/u.test(removal.ruleId) && plainSentence(removal.label, 200) && matches && alternatives
-          ? { removal: { ruleId: removal.ruleId, label: removal.label, alternatives, matches } } : {}),
+          ? { removal: {
+            ruleId: removal.ruleId, label: removal.label, alternatives, matches,
+            ...(plainSentence(removal.subject, 200) ? { subject: removal.subject } : {}),
+            ...(typeof removal.sourceTranscriptId === 'string' && BLOCKER_ID.test(removal.sourceTranscriptId) ? { sourceTranscriptId: removal.sourceTranscriptId } : {}),
+          } } : {}),
       })
     }
   }

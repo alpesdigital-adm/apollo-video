@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { proposeSpeechRemoval, speechRemovalRuleId } from '../../src/v2/application/speech-removal-proposal.ts'
+import { defineEditorialPhraseRules } from '../../src/v2/application/editorial-phrase-rules.ts'
 import { interpretBriefService } from '../../src/v2/application/interpret-brief.ts'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
 import {
-  assertReframePlanForFill, assertResolutionPlannable, overlayTextOf, parseEditorialPolicyResolution, resolveEditorialPolicies,
+  assertReframePlanCoherentWithLayout, assertReframePlanForFill, assertResolutionPlannable, overlayTextOf, parseEditorialPolicyResolution, resolveEditorialPolicies,
 } from '../../src/v2/domain/editorial-policy-resolution.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createEditorialRequest } from '../../src/v2/domain/editorial-request.ts'
@@ -19,7 +20,8 @@ const MEDIA = {
   transcriptId: 'transcript-1', transcriptLanguage: 'pt', transcriptLanguageBasis: 'detected-from-media', hasSelectedInsert: false, sourceAspectRatio: '1920:1080',
   timelineDurationSeconds: 90, spokenCta: { startSeconds: 40, endSeconds: 44 }, backgroundMusicTrackCount: 0,
 }
-const proposalsFor = (subjects) => subjects.map((subject) => proposeSpeechRemoval(subject, w70Transcript()))
+const proposalsFor = (subjects, requested = []) => subjects.map((subject) => proposeSpeechRemoval(subject, w70Transcript(), { sourceTranscriptId: 'transcript-1', requested }))
+const ruleOf = (proposal, alternatives = proposal.alternatives) => defineEditorialPhraseRules([{ id: proposal.ruleId, label: proposal.label, alternatives }])[0]
 
 async function w70Request(extra = {}) {
   const { interpretation } = await interpretBriefService({ model: model(W70_COVERAGE_MODEL_ANSWER) })({ briefing: W70_BRIEFING })
@@ -72,7 +74,10 @@ test('ADR-160 coverage W70: the briefing resolves to a policy per output, the wr
 })
 
 test('ADR-160 coverage W70: the owner confirms the cut by the removal Command, and the questions are gone; the rest of the request still decides', async () => {
-  const proposals = proposalsFor(['sorteio', 'formulário de inscrição'])
+  const asked = proposalsFor(['sorteio', 'formulário de inscrição'])
+  // The lineage holds the removal Commands whose rules are the proposed ones - the id AND the words.
+  const proposals = proposalsFor(['sorteio', 'formulário de inscrição'], asked.map((proposal) => ruleOf(proposal)))
+  assert.deepEqual(proposals.map((proposal) => proposal.confirmed), [true, true])
   const confirmed = await w70Request({ requestedRemovals: proposals.map((proposal) => proposal.ruleId) })
   const resolution = resolveEditorialPolicies(confirmed, { ...MEDIA, speechRemovalProposals: proposals }, [VERTICAL, HORIZONTAL])
   assert.deepEqual(resolution.openQuestions, [])
@@ -80,8 +85,18 @@ test('ADR-160 coverage W70: the owner confirms the cut by the removal Command, a
   assert.deepEqual(resolution.satisfied.filter((item) => item.how === 'confirmed-removal').map((item) => item.kind), ['remove-speech', 'remove-speech'])
   assert.equal(resolution.blocked, true, 'the zoom and the captions length still block: confirmation answers the cut, nothing else')
   // Confirming one of the two leaves the other asked.
-  const one = await w70Request({ requestedRemovals: [proposals[0].ruleId] })
-  assert.deepEqual(ids(resolveEditorialPolicies(one, { ...MEDIA, speechRemovalProposals: proposals }, [VERTICAL, HORIZONTAL]).openQuestions), ['speech-removal-2'])
+  const partly = proposalsFor(['sorteio', 'formulário de inscrição'], [ruleOf(asked[0])])
+  const one = await w70Request({ requestedRemovals: [asked[0].ruleId] })
+  assert.deepEqual(ids(resolveEditorialPolicies(one, { ...MEDIA, speechRemovalProposals: partly }, [VERTICAL, HORIZONTAL]).openQuestions), ['speech-removal-2'])
+  // The id alone confirms nothing: a rule with the proposed id and OTHER words is another cut, and the proposed one is still asked.
+  const forged = proposalsFor(['sorteio', 'formulário de inscrição'], asked.map((proposal) => ruleOf(proposal, ['garantia'])))
+  assert.deepEqual(forged.map((proposal) => proposal.confirmed), [undefined, undefined])
+  const stillAsked = resolveEditorialPolicies(await w70Request({ requestedRemovals: asked.map((proposal) => proposal.ruleId) }), { ...MEDIA, speechRemovalProposals: forged }, [VERTICAL, HORIZONTAL])
+  assert.deepEqual(ids(stillAsked.openQuestions), ['speech-removal-1', 'speech-removal-2'])
+  // The same words under another id confirm nothing either.
+  const other = proposalsFor(['sorteio'], [defineEditorialPhraseRules([{ id: 'another-rule', label: 'sorteio', alternatives: ['sorteio'] }])[0]])
+  assert.equal(other[0].confirmed, undefined)
+  assert.equal(asked[0].sourceTranscriptId, 'transcript-1')
 })
 
 test('ADR-160 coverage: the rule that answers a cut is the subject\'s own, and the search is the cut\'s own search', () => {
@@ -251,4 +266,89 @@ test('ADR-160 coverage: a stored resolution that names a satisfied item is read 
   const empty = structuredClone(stored)
   empty.satisfied = []
   assert.throws(() => parseEditorialPolicyResolution(empty), (error) => error.code === 'PERSISTENCE_CONFLICT')
+})
+
+test('ADR-160 coverage: a request for the one output the plan serves is read like a structured field - none of it is dropped, with one output or with two', () => {
+  const overrides = (variantId) => ({ [variantId]: [
+    { id: 'o1', kind: 'remove-speech', value: 'about', param: 'sorteio' }, { id: 'o2', kind: 'cta-text', value: 'set', param: 'Outro texto' },
+    { id: 'o3', kind: 'output', value: 'vertical' }, { id: 'o4', kind: 'absent', value: 'music' },
+    { id: 'o5', kind: 'output-layout', value: 'fill-following-face', param: 'all' },
+  ] })
+  const media = { ...MEDIA, backgroundMusicTrackCount: 1, speechRemovalProposals: proposalsFor(['sorteio']) }
+  const field = createEditorialRequest({ objective: 'warming', directives: overrides('x').x })
+  const byField = resolveEditorialPolicies(field, media, [{ variantId: 'v1', id: 'o1', aspectRatio: '16:9' }])
+  const byOverride = resolveEditorialPolicies(createEditorialRequest({ objective: 'warming', variantOverrides: overrides('v1') }), media, [{ variantId: 'v1', id: 'o1', aspectRatio: '16:9' }])
+  // One output: the same things happen, and each is attributed to the override.
+  assert.deepEqual(ids(byOverride.openQuestions), ids(byField.openQuestions))
+  assert.deepEqual(ids(byOverride.openQuestions), ['output-missing-vertical', 'output-not-asked-v1', 'speech-removal-1'])
+  assert.deepEqual(byOverride.unsupported.map((item) => item.directiveId), ['o4'])
+  assert.equal(byOverride.policies.ctaOverlay.value.text, 'Outro texto')
+  assert.equal(byOverride.policies.ctaOverlay.origin, 'request-field')
+  assert.match(byOverride.policies.ctaOverlay.reason, /Requested for output variant v1 as a structured field/)
+  assert.deepEqual(byOverride.policies.layout.value.perOutput.map((entry) => entry.mode), ['source-native'])
+  assert.equal(byOverride.blocked, true)
+  // Two outputs: a plan that is one for both cannot do what one of them alone asks, so each is listed as not executable - never dropped.
+  const two = resolveEditorialPolicies(createEditorialRequest({ objective: 'warming', variantOverrides: overrides('v1') }), media, [{ variantId: 'v1', id: 'o1', aspectRatio: '16:9' }, VERTICAL])
+  assert.deepEqual(two.unsupported.map((item) => item.directiveId), ['o1', 'o2', 'o3', 'o4', 'o5'])
+  assert.ok(two.unsupported.every((item) => item.reason === 'not-executable' && item.source === 'variant-override'))
+  assert.match(two.unsupported[0].summary, /O plano do vídeo é um só para as 2 saídas/)
+  // A request for an output the project does not have is listed too.
+  const missing = resolveEditorialPolicies(createEditorialRequest({ objective: 'warming', variantOverrides: overrides('v-other') }), media, [{ variantId: 'v1', id: 'o1', aspectRatio: '16:9' }])
+  assert.deepEqual(missing.unsupported.map((item) => item.directiveId), ['o1', 'o2', 'o3', 'o4', 'o5'])
+  assert.match(missing.unsupported[0].summary, /uma saída que este projeto não tem/)
+})
+
+test('ADR-160 coverage: the words of the written call are the briefing\'s own, with its case and accents, whatever the model gave back', async () => {
+  const briefing = 'Mostre o texto "Agende já" na tela quando ele falar da agenda.'
+  const read = (param) => interpretBriefService({ model: model({ directives: [
+    { kind: 'cta', value: 'overlay-at-spoken-cta', param: null, quote: 'quando ele falar da agenda' },
+    { kind: 'cta-text', value: 'set', param, quote: 'Mostre o texto "Agende já" na tela' },
+  ], unsupported: [], questions: [], coverage: [{ topic: 'context', quote: 'Mostre o texto "Agende já" na tela quando ele falar da agenda.' }] }) })({ briefing })
+  for (const given of ['AGENDE JA', 'agende já', '"Agende já"', ' agende  JÁ ']) {
+    const { interpretation } = await read(given)
+    assert.equal(interpretation.directives.find((item) => item.kind === 'cta-text').param, 'Agende já', given)
+    const resolved = resolveEditorialPolicies(createEditorialRequest({ briefing, objective: 'warming', interpretation }), MEDIA, [{ variantId: 'v1', id: 'o1', aspectRatio: '16:9' }])
+    assert.equal(resolved.policies.ctaOverlay.value.text, 'Agende já', given)
+  }
+  // Words the briefing does not say are not a call: the directive becomes an unsupported item.
+  const { interpretation } = await read('Compre agora')
+  assert.equal(interpretation.directives.some((item) => item.kind === 'cta-text'), false)
+  assert.equal(interpretation.unsupported.length, 1)
+  // The subject to cut is the owner's words too.
+  const cut = await interpretBriefService({ model: model({ directives: [{ kind: 'remove-speech', value: 'about', param: 'sorteio', quote: 'Tire o trecho que fala do Sorteio' }], unsupported: [], questions: [], coverage: [] }) })({ briefing: 'Tire o trecho que fala do Sorteio.' })
+  assert.equal(cut.interpretation.directives[0].param, 'Sorteio')
+})
+
+test('ADR-160 coverage: a written call asked for, together with a request for no written call, is a question - the text is never dropped in silence', () => {
+  for (const value of ['verbal-only', 'none']) {
+    const resolved = resolveEditorialPolicies(createEditorialRequest({ objective: 'warming', directives: [{ id: 'f1', kind: 'cta', value }, { id: 'f2', kind: 'cta-text', value: 'set', param: 'Trave sua agenda' }] }), MEDIA, [])
+    assert.deepEqual(ids(resolved.openQuestions), ['cta-text-without-overlay'], value)
+    assert.match(resolved.openQuestions[0].question, /O pedido quer escrever “Trave sua agenda” na tela e também pede a chamada/)
+    assert.equal(resolved.blocked, true)
+  }
+})
+
+test('ADR-160 coverage: an output the project has and a briefing that names the versions does not ask for is a question; with no versions named, nothing is asked', () => {
+  const only = createEditorialRequest({ directives: [{ id: 'a', kind: 'output', value: 'vertical' }] })
+  const resolved = resolveEditorialPolicies(only, MEDIA, [VERTICAL, HORIZONTAL])
+  assert.deepEqual(ids(resolved.openQuestions), ['output-not-asked-variant-horizontal'])
+  assert.match(resolved.openQuestions[0].question, /Este projeto tem uma saída 16:9 que o briefing não pede/)
+  assert.match(resolved.openQuestions[0].question, /O Apollo não tira nem mantém saída por conta própria/)
+  assert.deepEqual(ids(resolveEditorialPolicies(createEditorialRequest({}), MEDIA, [VERTICAL, HORIZONTAL]).openQuestions), [])
+  assert.deepEqual(ids(resolveEditorialPolicies(createEditorialRequest({ directives: [{ id: 'a', kind: 'output', value: 'vertical' }, { id: 'b', kind: 'output', value: 'horizontal' }] }), MEDIA, [VERTICAL, HORIZONTAL]).openQuestions), [])
+})
+
+test('ADR-160 coverage: a reframe plan that crops by itself an output whose layout the request keeps is refused; a manual crop and an output that is filled are not', async () => {
+  const request = await w70Request()
+  const resolution = resolveEditorialPolicies(request, { ...MEDIA, speechRemovalProposals: proposalsFor(['sorteio', 'formulário de inscrição']) }, [VERTICAL, HORIZONTAL])
+  const automatic = { ranges: [{ source: 'plan' }] }
+  assert.throws(() => assertReframePlanCoherentWithLayout(resolution, 'variant-horizontal', automatic), (error) =>
+    error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'reframe-plan-contradicts-layout' && error.details.variantId === 'variant-horizontal')
+  assert.doesNotThrow(() => assertReframePlanCoherentWithLayout(resolution, 'variant-vertical', automatic))
+  assert.doesNotThrow(() => assertReframePlanCoherentWithLayout(resolution, 'variant-horizontal', { ranges: [{ source: 'manual' }, { source: 'fallback' }] }))
+  assert.doesNotThrow(() => assertReframePlanCoherentWithLayout(resolution, 'variant-horizontal', null))
+  // A resolution that said nothing about the frames of the outputs allows any plan, as it always did.
+  const silent = resolveEditorialPolicies(createEditorialRequest({}), MEDIA, [VERTICAL, HORIZONTAL])
+  assert.doesNotThrow(() => assertReframePlanCoherentWithLayout(silent, 'variant-horizontal', automatic))
+  assert.doesNotThrow(() => assertReframePlanCoherentWithLayout(null, 'variant-horizontal', automatic))
 })

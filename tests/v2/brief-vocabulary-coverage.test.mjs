@@ -5,12 +5,13 @@ import {
   BRIEF_INTERPRETER_PROMPT_VERSION, BRIEF_INTERPRETER_SYSTEM_PROMPT, interpretBriefService, interpretationFromModelText,
 } from '../../src/v2/application/interpret-brief.ts'
 import {
-  EDITORIAL_DIRECTIVE_KINDS, EDITORIAL_DIRECTIVE_VOCABULARY, EDITORIAL_EXECUTABLE_VALUES, briefingSentences, createEditorialRequest, parseBriefInterpretation,
+  answerBriefQuestions, directivesOfChoices, EDITORIAL_DIRECTIVE_KINDS, EDITORIAL_DIRECTIVE_VOCABULARY, EDITORIAL_EXECUTABLE_VALUES, briefingSentences, createEditorialRequest, parseBriefInterpretation,
   parseEditorialDirective, unaccountedSentences,
 } from '../../src/v2/domain/editorial-request.ts'
 import { describeDirectiveLine, notExecutableSummary } from '../../src/v2/domain/editorial-request-texts.ts'
+import { describeRequestReading } from '../../src/v2/application/revise-editorial-request.ts'
 import { createBriefInterpreterModelFromEnvironment } from '../../src/v2/infrastructure/brief/brief-interpreter-factory.ts'
-import { startBriefInterpreterStandIn } from './helpers/brief-interpreter-stand-in.mjs'
+import { NOTHING_MAPPED, startBriefInterpreterStandIn } from './helpers/brief-interpreter-stand-in.mjs'
 import { W70_BRIEFING, W70_CLAUSES, W70_COVERAGE_MODEL_ANSWER, W70_RUN1_MODEL_ANSWER } from './helpers/w70-briefing-fixture.mjs'
 
 const model = (answer) => ({ provider: 'test-double', model: 'stub-1', costBasis: 'subscription', async interpret() { return { text: JSON.stringify(answer) } } })
@@ -91,7 +92,6 @@ test('ADR-160 coverage W70: the answer the real model gave under the first promp
   const { interpretation } = await interpret(W70_RUN1_MODEL_ANSWER, W70_BRIEFING)
   // It is a valid reading of the briefing, and every sentence of it ends in an item (the first prompt already accounted for them; it just could not map them).
   assert.doesNotThrow(() => parseBriefInterpretation(JSON.parse(JSON.stringify(interpretation)), W70_BRIEFING))
-  assert.deepEqual(interpretation.unaccounted, undefined)
   assert.deepEqual(interpretation.directives.map((item) => [item.kind, item.value]), [['cta', 'overlay-at-spoken-cta'], ['avoid', 'subject'], ['avoid', 'subject']])
   assert.equal(interpretation.unsupported.length, 4)
   // The frame is a choice between two things the Apollo does (the fill is no longer "not done"), so the question carries closed answers.
@@ -109,7 +109,6 @@ test('ADR-160 coverage W70: a model that follows the new prompt maps every part 
     assert.ok(start >= 0, clause)
     assert.ok(items(interpretation).some((item) => item.excerpt.start < start + clause.length && item.excerpt.end > start), `no item stands on: ${clause}`)
   }
-  assert.equal(interpretation.unaccounted, undefined)
   assert.deepEqual(audit.signals, [])
   assert.deepEqual(interpretation.questions, [], 'a request the Apollo will not do is not asked about')
   // What the briefing asks, kind by kind.
@@ -128,18 +127,39 @@ test('ADR-160 coverage W70: a model that follows the new prompt maps every part 
   assert.equal(describeDirectiveLine('movement', 'zoom'), 'Movimento de câmera: Zoom (o Apollo ainda não aplica zoom)')
 })
 
-test('ADR-160 coverage: a sentence nobody stands on is listed in the reading and signalled in the audit, and the check of coverage fails on it', async () => {
+test('ADR-160 coverage: a sentence nobody stands on is a question that blocks the Director, with closed answers that say what it is; nothing is guessed', async () => {
   const answer = { ...W70_COVERAGE_MODEL_ANSWER, directives: W70_COVERAGE_MODEL_ANSWER.directives.filter((item) => item.kind !== 'movement') }
   const { interpretation, audit } = await interpret(answer, W70_BRIEFING)
-  assert.deepEqual(interpretation.unaccounted.map((item) => item.excerpt.text), ['Pode dar um leve zoom no começo para dar energia.'])
+  const zoom = 'Pode dar um leve zoom no começo para dar energia.'
+  const [question] = interpretation.questions
+  assert.equal(interpretation.questions.length, 1)
+  assert.equal(question.excerpt.text, zoom)
+  assert.equal(question.status, 'open')
+  assert.match(question.question, /O Apollo não entendeu o que esta frase do briefing pede ao vídeo/)
+  assert.deepEqual(question.choices.map((choice) => [choice.id, choice.label, choice.effect]), [
+    ['c1', 'Isso não pede nada ao vídeo', 'statement-context'], ['c2', 'Isso pede algo que o Apollo não sabe fazer', 'unsupported-request'],
+  ])
   assert.deepEqual(audit.signals, ['sentence-unaccounted'])
-  assert.throws(() => assertEveryPartAccounted(W70_BRIEFING, interpretation), /ended in no item|no item stands on/)
-  // The reading is still sealed and valid: it states what it did not read, it does not pretend.
   assert.doesNotThrow(() => parseBriefInterpretation(JSON.parse(JSON.stringify(interpretation)), W70_BRIEFING))
-  // A model that returns nothing for a briefing with words leaves every sentence unaccounted - the case the coverage check exists for.
+  // The sentence is accounted by the question (it asks), and the Director waits for the answer.
+  const request = createEditorialRequest({ briefing: W70_BRIEFING, objective: 'warming', interpretation })
+  assert.equal(describeRequestReading(request, null).blocksDirector, true)
+  // "It asks nothing of the video": recorded as a statement, with the sentence's own words; the question is answered.
+  const statement = answerBriefQuestions(interpretation, W70_BRIEFING, [{ questionId: question.id, choiceId: 'c1' }])
+  assert.deepEqual(statement.coverage.filter((item) => item.excerpt.text === zoom).map((item) => item.topic), ['context'])
+  assert.equal(statement.questions[0].status, 'answered')
+  assert.equal(statement.questions[0].answer, 'Isso não pede nada ao vídeo')
+  assert.equal(describeRequestReading(createEditorialRequest({ briefing: W70_BRIEFING, objective: 'warming', interpretation: statement }), null).openQuestions.length, 0)
+  assert.deepEqual(directivesOfChoices(interpretation, [{ questionId: question.id, choiceId: 'c1' }]), [], 'a choice that says what a sentence is makes no directive')
+  // "It asks for something the Apollo does not do": recorded as unsupported, which keeps the Director blocked and says so.
+  const unsupported = answerBriefQuestions(interpretation, W70_BRIEFING, [{ questionId: question.id, choiceId: 'c2' }])
+  assert.deepEqual(unsupported.unsupported.filter((item) => item.excerpt.text === zoom).map((item) => item.reason), ['outside-vocabulary'])
+  assert.equal(describeRequestReading(createEditorialRequest({ briefing: W70_BRIEFING, objective: 'warming', interpretation: unsupported }), null).blocksDirector, true)
+  // A model that returns nothing for a briefing with words leaves every sentence to ask about - the case the coverage rule exists for.
   const nothing = await interpret(empty, W70_BRIEFING)
-  assert.equal(nothing.interpretation.unaccounted.length, briefingSentences(W70_BRIEFING).length)
-  assert.throws(() => assertEveryPartAccounted(W70_BRIEFING, nothing.interpretation))
+  assert.equal(nothing.interpretation.questions.length, briefingSentences(W70_BRIEFING).length)
+  assert.ok(nothing.interpretation.questions.every((item) => item.choices.length === 2))
+  assert.deepEqual(unaccountedSentences(W70_BRIEFING, items(nothing.interpretation)), [], 'every sentence is accounted: by a question')
 })
 
 test('ADR-160 coverage: sentences are read from punctuation alone, in any language, and clauses also end at a semicolon', () => {
@@ -174,16 +194,24 @@ test('ADR-160 coverage: every zoom is one zoom the Apollo does not apply - no qu
   assert.equal(choice.audit.directivesWithdrawnAsAmbiguous, 2)
 })
 
-test('ADR-160 coverage: a question the model asks about the words of a request that will not be done is dropped; the words stay accounted by the item that says so', async () => {
-  const briefing = 'dê um leve zoom no começo. Fale devagar.'
+test('ADR-160 coverage: a question the model says asks for the detail of a request that will not be done is dropped; any other question stays, however close its words are', async () => {
+  const briefing = 'dê um leve zoom no começo. Fale devagar. Legendas curtas, em inglês ou em espanhol.'
   const { interpretation, audit } = await interpret({ ...empty, directives: [{ kind: 'movement', value: 'zoom', param: null, quote: 'um leve zoom no começo' }],
-    questions: [{ question: 'O zoom aproxima ou afasta?', quote: 'leve zoom' }, { question: 'Quão devagar?', quote: 'Fale devagar' }] }, briefing)
-  assert.deepEqual(interpretation.questions.map((item) => item.question), ['Quão devagar?'])
+    unsupported: [{ summary: 'Legendas curtas.', quote: 'Legendas curtas, em inglês ou em espanhol.' }],
+    questions: [
+      { question: 'O zoom aproxima ou afasta?', quote: 'leve zoom', aboutUnsupported: true },
+      { question: 'Quão devagar?', quote: 'Fale devagar', aboutUnsupported: false },
+      // Its words are inside those of an unsupported item, and it is about something the Apollo does (the language): it is kept.
+      { question: 'Em que idioma ficam as legendas: inglês ou espanhol?', quote: 'em inglês ou em espanhol', aboutUnsupported: false },
+    ] }, briefing)
+  assert.deepEqual(interpretation.questions.map((item) => item.question), ['Quão devagar?', 'Em que idioma ficam as legendas: inglês ou espanhol?'])
   assert.deepEqual(audit.signals, ['moot-question-dropped'])
-  assert.equal(interpretation.unaccounted, undefined)
+  // A model that does not say (or says false) is not trusted to have dropped anything.
+  const silent = await interpret({ ...empty, directives: [{ kind: 'movement', value: 'zoom', param: null, quote: 'um leve zoom no começo' }], questions: [{ question: 'O zoom aproxima ou afasta?', quote: 'leve zoom' }] }, briefing)
+  assert.equal(silent.interpretation.questions.some((item) => item.question === 'O zoom aproxima ou afasta?'), true)
   // A question with no quote is kept: nothing says it is about the zoom.
-  const loose = await interpret({ ...empty, directives: [{ kind: 'movement', value: 'zoom', param: null, quote: 'um leve zoom no começo' }], questions: [{ question: 'Qual é o público?', quote: null }] }, briefing)
-  assert.equal(loose.interpretation.questions.length, 1)
+  const loose = await interpret({ ...empty, directives: [{ kind: 'movement', value: 'zoom', param: null, quote: 'um leve zoom no começo' }], questions: [{ question: 'Qual é o público?', quote: null, aboutUnsupported: true }] }, briefing)
+  assert.equal(loose.interpretation.questions.some((item) => item.question === 'Qual é o público?'), true)
 })
 
 test('ADR-160 coverage: the layout of two different outputs is two directives; the layout of one output said two ways is a question that keeps the output', async () => {
@@ -249,12 +277,17 @@ test('ADR-160 coverage: a stand-in of the provider answers the briefing through 
     assert.equal(standIn.calls.length, 1)
     // The model is shown the closed vocabulary of this prompt version and a schema that names every kind.
     const sent = JSON.stringify(standIn.calls[0].body)
-    for (const kind of ['output-layout', 'remove-speech', 'cta-text']) assert.ok(sent.includes(kind), kind)
+    for (const kind of ['output-layout', 'remove-speech', 'cta-text', 'aboutUnsupported']) assert.ok(sent.includes(kind), kind)
     assert.equal(audit.promptVersion, BRIEF_INTERPRETER_PROMPT_VERSION)
-    // An answer that maps nothing (the stand-in's fallback) is a valid reading that LISTS every sentence it left: the briefing is never silently lost.
+    // The stand-in that has nothing scripted says what each sentence is (context), so it never blocks a flow that does not test the reading.
     const other = 'Texto qualquer. Outro texto.'
     const idle = await interpretBriefService({ model: adapter })({ briefing: other })
-    assert.deepEqual(idle.interpretation.unaccounted.map((item) => item.excerpt.text), ['Texto qualquer.', 'Outro texto.'])
+    assert.deepEqual(idle.interpretation.questions, [])
+    assert.deepEqual(idle.interpretation.coverage.map((item) => [item.topic, item.excerpt.text]), [['context', 'Texto qualquer.'], ['context', 'Outro texto.']])
+    // ...whereas an answer that maps nothing asks about every sentence.
+    standIn.script.set(other, NOTHING_MAPPED)
+    const asked = await interpretBriefService({ model: adapter })({ briefing: other })
+    assert.equal(asked.interpretation.questions.length, 2)
   } finally {
     await standIn.close()
   }
@@ -269,13 +302,13 @@ test('ADR-160 coverage: the text a model answers is read by one function, and th
   assert.equal(read(W70_COVERAGE_MODEL_ANSWER).interpretation.interpretationHash, read(W70_COVERAGE_MODEL_ANSWER).interpretation.interpretationHash)
 })
 
-test('ADR-160 coverage: the screens say what a statement does (nothing), list the sentences no item stands on, and tell why the Director stopped in the Apollo\'s words', async () => {
-  const { COVERAGE_LABELS, COVERAGE_NOTE, UNACCOUNTED_NOTE, describeRequestFailure } = await import('../../src/v2/ui/editorial-request-view.ts')
+test('ADR-160 coverage: the screens say what a statement does (nothing), put the choice that says what a sentence is in words, and tell why the Director stopped in the Apollo\'s words', async () => {
+  const { COVERAGE_LABELS, COVERAGE_NOTE, describeChoice, describeRequestFailure } = await import('../../src/v2/ui/editorial-request-view.ts')
   assert.equal(COVERAGE_LABELS.context, 'Contexto')
   assert.deepEqual(Object.keys(COVERAGE_LABELS), ['audience', 'offer', 'tone', 'context'])
   assert.match(COVERAGE_NOTE, /não mudam nada/)
-  assert.match(UNACCOUNTED_NOTE, /não classificou/)
-  assert.match(UNACCOUNTED_NOTE, /nenhuma decisão foi tomada/)
+  assert.equal(describeChoice({ id: 'c1', label: 'Isso não pede nada ao vídeo', effect: 'statement-context' }), 'Isso não pede nada ao vídeo')
+  assert.equal(describeChoice({ id: 'c1', label: 'x', directive: { kind: 'layout', value: 'source-native' } }), 'Manter o enquadramento da gravação')
   const blocked = describeRequestFailure(428, { error: { code: 'PRECONDITION_REQUIRED', details: { reason: 'editorial-request-blocked', blockers: [
     { kind: 'unsupported', id: 'd1', text: 'Movimento de câmera: Zoom (o Apollo ainda não aplica zoom)' },
     { kind: 'question', id: 'speech-removal-1', text: 'Achei trechos sobre “assunto” na fala.' },
@@ -288,4 +321,22 @@ test('ADR-160 coverage: the screens say what a statement does (nothing), list th
   const reframe = describeRequestFailure(428, { error: { code: 'PRECONDITION_REQUIRED', details: { reason: 'reframe-plan-required', variantId: 'variant-1' } } })
   assert.match(reframe.message, /preenche a tela desta saída acompanhando o rosto/)
   assert.doesNotMatch(reframe.message, /reframe|variant/i)
+})
+
+test('ADR-160 coverage: the screen offers the confirmation only for a proposal that found the subject in the speech, with the transcript it was searched in', async () => {
+  const { CUT_CONFIRMATION_TEXTS, RefusedWithBlockers, cutProposalsOf } = await import('../../src/v2/ui/editorial-request-view.ts')
+  const found = { kind: 'question', id: 'speech-removal-1', text: 'Achei trechos.', removal: { subject: 'assunto', sourceTranscriptId: 'transcript-1', ruleId: 'speech-aaaaaaaaaaaa', matches: [{ startSeconds: 1, endSeconds: 2, text: 'fala' }] } }
+  assert.deepEqual(cutProposalsOf([found, { ...found, id: 'x', removal: { ...found.removal, matches: [] } }, { kind: 'unsupported', id: 'd1', text: 'x' },
+    { ...found, removal: { ...found.removal, sourceTranscriptId: undefined } }, null]),
+  [{ question: 'Achei trechos.', subject: 'assunto', sourceTranscriptId: 'transcript-1', matches: found.removal.matches }])
+  assert.equal(CUT_CONFIRMATION_TEXTS.button, 'Confirmar corte')
+  assert.match(CUT_CONFIRMATION_TEXTS.note, /Nada é cortado sem a sua confirmação/)
+  assert.deepEqual(new RefusedWithBlockers('x', [found]).blockers, [found])
+  assert.deepEqual(new RefusedWithBlockers('x', undefined).blockers, [])
+  // The page wires the component to the refusal of the Director; the component sends the subject, never the words.
+  const { readFileSync } = await import('node:fs')
+  const component = readFileSync('src/components/SpeechCutConfirmation.tsx', 'utf8')
+  assert.match(component, /speech-removals/)
+  assert.doesNotMatch(component, /alternatives|rules/)
+  assert.match(readFileSync('src/app/projects/[id]/page.tsx', 'utf8'), /<SpeechCutConfirmation/)
 })

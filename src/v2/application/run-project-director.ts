@@ -1127,10 +1127,12 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     // A briefing with text that nobody has interpreted is a request nobody read: refused here, never planned over as if it were empty.
     assertBriefingInterpreted(editorialRequest)
     // A subject the request asks to take out of the speech is searched in the transcript now, so that the owner confirms WHAT would go (nothing is cut here).
-    const removalSubjects = [...new Set([...editorialRequest.directives, ...(editorialRequest.interpretation?.directives ?? [])]
+    // The requests for one output are read too: with several outputs they are listed as unsupported, with one they are the plan's.
+    const removalSubjects = [...new Set([...editorialRequest.directives, ...Object.values(editorialRequest.variantOverrides).flat(), ...(editorialRequest.interpretation?.directives ?? [])]
       .filter((directive) => directive.kind === 'remove-speech').map((directive) => String(directive.param)))]
     const speechRemovalProposals = context.transcript.words !== undefined
-      ? removalSubjects.map((subject) => proposeSpeechRemoval(subject, { words: context.transcript.words!, ...(context.transcript.segments ? { segments: context.transcript.segments } : {}) })) : []
+      ? removalSubjects.map((subject) => proposeSpeechRemoval(subject, { words: context.transcript.words!, ...(context.transcript.segments ? { segments: context.transcript.segments } : {}) },
+        { sourceTranscriptId: context.transcript.id, requested: context.requestedSpeechRemovals })) : []
     const resolution = resolveEditorialPolicies(editorialRequest, {
       transcriptId: context.transcript.id, ...(transcriptLanguage ? { transcriptLanguage, transcriptLanguageBasis: context.transcript.languageBasis ?? 'declared-not-verified' as const } : {}),
       ...(context.project.locale ? { declaredLocale: context.project.locale } : {}),

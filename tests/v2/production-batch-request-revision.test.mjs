@@ -32,6 +32,7 @@ const actor = () => {
     clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' })
 }
 const empty = { directives: [], unsupported: [], questions: [], coverage: [] }
+const { EVERY_SENTENCE_IS_CONTEXT } = await import('./helpers/brief-interpreter-stand-in.mjs')
 // Two layouts the briefing asks for (a closed question), a movement the Apollo does not do yet (unsupported) and a question in words.
 const ASKING = {
   directives: [
@@ -47,7 +48,8 @@ function model(answerFor) {
     async interpret(request) {
       calls.push(request)
       const briefing = JSON.parse(request.user).briefing
-      const answer = typeof answerFor === 'function' ? answerFor(briefing) : answerFor
+      const given = typeof answerFor === 'function' ? answerFor(briefing) : answerFor
+      const answer = given === empty ? EVERY_SENTENCE_IS_CONTEXT(briefing) : given
       if (answer instanceof Error) throw answer
       return { text: JSON.stringify(answer) }
     } }

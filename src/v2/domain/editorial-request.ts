@@ -176,8 +176,16 @@ export interface UnsupportedBriefItem {
 export interface BriefQuestionChoice {
   id: string
   label: string
-  directive: Readonly<EditorialDirective>
+  /** The structured directive the choice makes (the common case). */
+  directive?: Readonly<EditorialDirective>
+  /**
+   * Or what the choice does to the reading itself, for a sentence the Apollo could not place: `statement-context` records it as a statement that asks nothing
+   * of the video; `unsupported-request` records it as something asked that the Apollo does not know how to do. Exactly one of the two is present.
+   */
+  effect?: BriefChoiceEffect
 }
+export const BRIEF_CHOICE_EFFECTS = Object.freeze(['statement-context', 'unsupported-request'] as const)
+export type BriefChoiceEffect = (typeof BRIEF_CHOICE_EFFECTS)[number]
 
 export interface BriefQuestion {
   id: string
@@ -213,12 +221,6 @@ export interface BriefInterpretationV1 {
   questions: readonly Readonly<BriefQuestion>[]
   /** The topics the briefing states, each with its words. Present only when the interpreter found one: absent is not 'false'. */
   coverage?: readonly Readonly<BriefCoverageItem>[]
-  /**
-   * The sentences of the briefing that no item of this reading stands on (no directive, unsupported item, question or statement cites them).
-   * Present only when there is one. It is not a block: the reading is complete about everything it cites, and this says what it does not, so
-   * a sentence is never lost in silence. The screens show it and the owner can say what it asks.
-   */
-  unaccounted?: readonly Readonly<{ excerpt: Readonly<BriefExcerpt> }>[]
   interpretationHash: string
 }
 
@@ -308,8 +310,13 @@ function parseDirectiveList(value: unknown, where: string, allowExcerpt = false)
 function parseQuestionChoices(value: unknown, questionId: string): readonly Readonly<BriefQuestionChoice>[] {
   assertDomain(Array.isArray(value) && value.length >= 2 && value.length <= 8, 'INVALID_ARGUMENT', `question ${questionId}: closed answers are 2 to 8 choices`)
   const choices = (value as unknown[]).map((item) => {
-    assertDomain(isRecord(item) && onlyKeys(item, ['id', 'label', 'directive']) && typeof item.id === 'string' && MAX_ID.test(item.id) &&
-      typeof item.label === 'string' && item.label.trim().length > 0 && item.label.length <= 200, 'INVALID_ARGUMENT', `question ${questionId}: a choice is malformed`)
+    assertDomain(isRecord(item) && onlyKeys(item, ['id', 'label', 'directive', 'effect']) && typeof item.id === 'string' && MAX_ID.test(item.id) &&
+      typeof item.label === 'string' && item.label.trim().length > 0 && item.label.length <= 200 && (item.directive === undefined) !== (item.effect === undefined),
+    'INVALID_ARGUMENT', `question ${questionId}: a choice is malformed (it makes a directive or has an effect, never both)`)
+    if (item.effect !== undefined) {
+      assertDomain((BRIEF_CHOICE_EFFECTS as readonly unknown[]).includes(item.effect), 'INVALID_ARGUMENT', `question ${questionId}: a choice has an effect outside the vocabulary`)
+      return Object.freeze({ id: item.id, label: item.label, effect: item.effect as BriefChoiceEffect })
+    }
     return Object.freeze({ id: item.id, label: item.label, directive: parseEditorialDirective(item.directive, `question ${questionId} choice ${item.id}`) })
   })
   assertDomain(new Set(choices.map((item) => item.id)).size === choices.length, 'INVALID_ARGUMENT', `question ${questionId}: choices repeat`)
@@ -374,7 +381,7 @@ export function parseBriefInterpretationAudit(value: unknown, briefingText: stri
  * the briefing's words (exact offsets and text), every directive is inside the closed vocabulary, and the hashes agree. Fail closed.
  */
 export function parseBriefInterpretation(value: unknown, briefingText: string): Readonly<BriefInterpretationV1> {
-  assertDomain(isRecord(value) && onlyKeys(value, ['schemaVersion', 'briefingSha256', 'interpreter', 'directives', 'unsupported', 'questions', 'coverage', 'unaccounted', 'interpretationHash']),
+  assertDomain(isRecord(value) && onlyKeys(value, ['schemaVersion', 'briefingSha256', 'interpreter', 'directives', 'unsupported', 'questions', 'coverage', 'interpretationHash']),
     'INVALID_ARGUMENT', 'brief interpretation is malformed')
   assertDomain(value.schemaVersion === BRIEF_INTERPRETATION_SCHEMA, 'INVALID_ARGUMENT', 'brief interpretation schema is unknown')
   assertDomain(value.briefingSha256 === sha256(briefingText), 'INVALID_ARGUMENT', 'brief interpretation was made from other text than this briefing')
@@ -414,27 +421,21 @@ export function parseBriefInterpretation(value: unknown, briefingText: string): 
   })
   const ids = [...directives.map((item) => item.id), ...unsupported.map((item) => item.id), ...questions.map((item) => item.id)]
   assertDomain(new Set(ids).size === ids.length, 'INVALID_ARGUMENT', 'brief interpretation ids repeat')
-  assertDomain(value.coverage === undefined || (Array.isArray(value.coverage) && value.coverage.length >= 1 && value.coverage.length <= BRIEF_STATEMENT_TOPICS.length),
+  assertDomain(value.coverage === undefined || (Array.isArray(value.coverage) && value.coverage.length >= 1 && value.coverage.length <= MAX_DIRECTIVES),
     'INVALID_ARGUMENT', 'brief interpretation coverage is not a bounded, non-empty list (an interpretation that found none states no coverage)')
   const coverage = value.coverage === undefined ? undefined : (value.coverage as unknown[]).map((item) => {
     assertDomain(isRecord(item) && onlyKeys(item, ['topic', 'excerpt']) && typeof item.topic === 'string' && (BRIEF_STATEMENT_TOPICS as readonly string[]).includes(item.topic),
       'INVALID_ARGUMENT', 'brief coverage item is malformed')
     return Object.freeze({ topic: item.topic as BriefStatementTopic, excerpt: parseExcerpt(item.excerpt, briefingText, `coverage ${item.topic}`) })
   })
-  assertDomain(coverage === undefined || new Set(coverage.map((item) => item.topic)).size === coverage.length, 'INVALID_ARGUMENT', 'brief coverage topics repeat')
-  assertDomain(value.unaccounted === undefined || (Array.isArray(value.unaccounted) && value.unaccounted.length >= 1 && value.unaccounted.length <= MAX_DIRECTIVES),
-    'INVALID_ARGUMENT', 'brief interpretation unaccounted list is not a bounded, non-empty list (an interpretation that left no sentence out states none)')
-  const unaccounted = value.unaccounted === undefined ? undefined : (value.unaccounted as unknown[]).map((item, index) => {
-    assertDomain(isRecord(item) && onlyKeys(item, ['excerpt']), 'INVALID_ARGUMENT', 'brief unaccounted item is malformed')
-    return Object.freeze({ excerpt: parseExcerpt(item.excerpt, briefingText, `unaccounted ${index}`) })
-  })
+  // A briefing may state several things of one topic (two sentences of context): each is its own item, with its own words. The same words twice are one.
+  assertDomain(coverage === undefined || new Set(coverage.map((item) => `${item.topic}\u0000${item.excerpt.start}\u0000${item.excerpt.end}`)).size === coverage.length, 'INVALID_ARGUMENT', 'brief coverage items repeat')
   const body = {
     schemaVersion: BRIEF_INTERPRETATION_SCHEMA, briefingSha256: value.briefingSha256 as string,
     interpreter: Object.freeze({ provider: interpreter.provider as string, model: interpreter.model as string, promptVersion: interpreter.promptVersion as string }),
     directives: Object.freeze(directives), unsupported: Object.freeze(unsupported), questions: Object.freeze(questions),
     // Present only when found: an interpretation that states no coverage hashes exactly as it did before coverage existed.
     ...(coverage !== undefined ? { coverage: Object.freeze(coverage) } : {}),
-    ...(unaccounted !== undefined ? { unaccounted: Object.freeze(unaccounted) } : {}),
   } as const
   assertDomain(value.interpretationHash === calculateCanonicalHash(body), 'INVALID_ARGUMENT', 'brief interpretation hash is inconsistent')
   return Object.freeze({ ...body, interpretationHash: value.interpretationHash as string })
@@ -448,13 +449,11 @@ export function createBriefInterpretation(input: Readonly<{
   unsupported?: readonly Readonly<UnsupportedBriefItem>[]
   questions?: readonly Readonly<BriefQuestion>[]
   coverage?: readonly Readonly<BriefCoverageItem>[]
-  unaccounted?: readonly Readonly<{ excerpt: Readonly<BriefExcerpt> }>[]
 }>): Readonly<BriefInterpretationV1> {
   const body = {
     schemaVersion: BRIEF_INTERPRETATION_SCHEMA, briefingSha256: sha256(input.briefingText), interpreter: input.interpreter,
     directives: input.directives, unsupported: input.unsupported ?? [], questions: input.questions ?? [],
     ...(input.coverage !== undefined && input.coverage.length > 0 ? { coverage: input.coverage } : {}),
-    ...(input.unaccounted !== undefined && input.unaccounted.length > 0 ? { unaccounted: input.unaccounted } : {}),
   }
   return parseBriefInterpretation({ ...JSON.parse(JSON.stringify(body)) as object, interpretationHash: calculateCanonicalHash(JSON.parse(JSON.stringify(body))) }, input.briefingText)
 }
@@ -595,8 +594,10 @@ export const BRIEF_INTERPRETATION_INVALID_REASON = 'brief-interpretation-invalid
  * instead of drawing the frame over a backdrop the request did not ask for.
  */
 export const REFRAME_PLAN_REQUIRED_REASON = 'reframe-plan-required' as const
+/** The request keeps the frame of an output as it is and the reframe plan of the Version crops it by itself: the render is refused. */
+export const REFRAME_PLAN_CONTRADICTS_LAYOUT_REASON = 'reframe-plan-contradicts-layout' as const
 /** The `reason` codes the public error envelope publishes for the editorial request (PRECONDITION_REQUIRED). */
-export const EDITORIAL_REQUEST_PUBLISHED_REASONS = Object.freeze([BRIEF_INTERPRETATION_REQUIRED_REASON, EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON, EDITORIAL_REQUEST_BLOCKED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON, BRIEF_INTERPRETATION_FAILED_REASON, DIRECTOR_OBJECTIVE_REQUIRED_REASON, OBJECTIVE_REQUIRED_REASON, BRIEF_INTERPRETATION_INVALID_REASON, REFRAME_PLAN_REQUIRED_REASON] as const)
+export const EDITORIAL_REQUEST_PUBLISHED_REASONS = Object.freeze([BRIEF_INTERPRETATION_REQUIRED_REASON, EDITORIAL_REQUEST_NEEDS_OUTPUT_REASON, EDITORIAL_REQUEST_BLOCKED_REASON, BRIEF_INTERPRETER_UNAVAILABLE_REASON, BRIEF_INTERPRETATION_FAILED_REASON, DIRECTOR_OBJECTIVE_REQUIRED_REASON, OBJECTIVE_REQUIRED_REASON, BRIEF_INTERPRETATION_INVALID_REASON, REFRAME_PLAN_REQUIRED_REASON, REFRAME_PLAN_CONTRADICTS_LAYOUT_REASON] as const)
 
 /**
  * A briefing with text and no interpretation of exactly that text is NOT an empty briefing: it is a request nobody has read. The Director
@@ -643,12 +644,31 @@ export function answerBriefQuestions(
     const question = interpretation.questions.find((item) => item.id === id)
     assertDomain(question !== undefined && question.status === 'open', 'INVALID_ARGUMENT', 'only an open question of the current interpretation can be answered', { questionId: id })
   }
+  // A choice that is not a directive says what the sentence IS: a statement that asks nothing of the video, or something the Apollo does not know how to do.
+  const coverage: BriefCoverageItem[] = [...(interpretation.coverage ?? [])]
+  const unsupported: UnsupportedBriefItem[] = [...interpretation.unsupported]
+  const taken = new Set([...interpretation.directives.map((item) => item.id), ...unsupported.map((item) => item.id), ...interpretation.questions.map((item) => item.id)])
+  for (const item of answers) {
+    if (typeof item.choiceId !== 'string') continue
+    const question = interpretation.questions.find((candidate) => candidate.id === item.questionId)!
+    const effect = question.choices?.find((candidate) => candidate.id === item.choiceId)?.effect
+    if (effect === undefined || question.excerpt === undefined) continue
+    if (effect === 'statement-context') {
+      if (!coverage.some((existing) => existing.topic === 'context' && existing.excerpt.start === question.excerpt!.start && existing.excerpt.end === question.excerpt!.end)) {
+        coverage.push(Object.freeze({ topic: 'context' as const, excerpt: question.excerpt }))
+      }
+    } else {
+      let n = unsupported.length + 1
+      while (taken.has(`u${n}`)) n += 1
+      taken.add(`u${n}`)
+      unsupported.push(Object.freeze({ id: `u${n}`, excerpt: question.excerpt, reason: 'outside-vocabulary' as const, summary: 'O briefing pede algo que o Apollo não sabe fazer.' }))
+    }
+  }
   return createBriefInterpretation({
-    briefingText, interpreter: interpretation.interpreter, directives: interpretation.directives, unsupported: interpretation.unsupported,
+    briefingText, interpreter: interpretation.interpreter, directives: interpretation.directives, unsupported,
     questions: interpretation.questions.map((question) => byId.has(question.id)
       ? Object.freeze({ ...question, status: 'answered' as const, answer: byId.get(question.id)! }) : question),
-    ...(interpretation.coverage ? { coverage: interpretation.coverage } : {}),
-    ...(interpretation.unaccounted ? { unaccounted: interpretation.unaccounted } : {}),
+    ...(coverage.length > 0 ? { coverage } : {}),
   })
 }
 
@@ -664,6 +684,7 @@ export function directivesOfChoices(
     if (typeof item.choiceId !== 'string') return []
     const choice = interpretation.questions.find((question) => question.id === item.questionId)?.choices?.find((candidate) => candidate.id === item.choiceId)
     assertDomain(choice !== undefined, 'INVALID_ARGUMENT', 'the choice is not one of the answers of this question', { questionId: item.questionId })
-    return [Object.freeze({ ...choice!.directive, id: `answer-${item.questionId}` })]
+    // A choice with an effect on the reading makes no directive.
+    return choice!.directive === undefined ? [] : [Object.freeze({ ...choice!.directive, id: `answer-${item.questionId}` })]
   }))
 }
