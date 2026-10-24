@@ -15,7 +15,9 @@ import { requirePersistedOutputConsumptionV3 } from '../../src/v2/infrastructure
 import { PrismaOperationalOutputBundleRepositoryV3 } from '../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
 import { PrismaProjectDuplicationRepository } from '../../src/v2/infrastructure/prisma/project-duplication-repository.ts'
 import { seedDirectedProject } from './helpers/dashboard-w34-35-fixtures.mjs'
-import { seedSealedProject, testActor } from './helpers/pg-output-world.mjs'
+import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
+import { insertControlledProxyRender } from './helpers/multi-output-pg-world.mjs'
+import { persistCurrentRights, RECORDING_ALLOWED_USES, seedSealedProject, testActor } from './helpers/pg-output-world.mjs'
 
 /**
  * The owner's correction of a finished project goes on a COPY of the cut project (W70 rehearsal, phase 7). Code for a SUPERVISED run
@@ -61,8 +63,20 @@ test('W70 PostgreSQL a copy of a cut project adopts the cut, takes additional cu
       exclusionOverrides: [{ sourceStartSeconds: range[0], sourceEndSeconds: range[1], ruleIds: [rule], reason: `The reviewer cuts "${rule}".` }],
       reason: `Cut ${label}.`, actor, idempotency: { clientId, key: `w70cc-${run}-cut-${label}` } })
 
-    // The project is cut, then finished: the copy forks the cut Version.
-    const own = await cut(request(world.projectId, head, 'own', 'termina', [1.1, 2.0]))
+    // The project is cut and then directed (as in the real journey: cut, Director, proxies, finals): the copy forks the Director's Version.
+    const cutOwn = await cut(request(world.projectId, head, 'own', 'termina', [1.1, 2.0]))
+    const directOwn = await runProjectDirectorService({ repository: new PrismaDirectorRunRepository(db), clock: () => new Date(), createEventId: randomUUID,
+      compileBrief: createEvidenceBoundBriefCompiler(), createId: (kind) => `w70cc-${run}-own-dir-${kind}-${++allocations}` })({
+      workspaceId, projectId: world.projectId, baseVersionId: cutOwn.version.id, baseHash: cutOwn.version.baseHash, actor, idempotency: { key: `w70cc-${run}-own-director` }, reason: 'Director over the cut project.' })
+    // The project was delivered: a render of its plan is a media link of the project, and the copy carries every link (the owner states its rights).
+    const directedRow = await db.v2ProjectVersion.findUniqueOrThrow({ where: { id: directOwn.version.id } })
+    const observed = head.state.document.entries[0].consumption.materialization.document.normalizations[0].document.source
+    const render = await insertControlledProxyRender(db, { workspaceId, clientId, projectId: world.projectId, version: directedRow,
+      source: { artifactId: observed.artifactId, manifestId: observed.manifestId }, outputVariantId: head.state.document.entries[0].variantId, label: 'delivered', run })
+    await persistCurrentRights(db, createAssetRightsSnapshot({ id: `rights-${render.artifactId}-1`, workspaceId, artifactId: render.artifactId, sequence: 1,
+      draft: { status: 'approved', allowedUses: [...RECORDING_ALLOWED_USES], prohibitedUses: [], sourceNote: 'the owner states the rights of the delivered render', consent: { status: 'not-required', allowedUses: [] } },
+      createdBy: { type: 'api-client', id: clientId }, createdAt: new Date().toISOString() }))
+    const own = { version: directOwn.version, editPlan: JSON.parse(operationalBundlePlanV3(await operational.read({ workspaceId, projectId: world.projectId, versionId: directOwn.version.id })).contentJson) }
     const planOf = (bundle) => JSON.parse(operationalBundlePlanV3(bundle).contentJson)
     const clipsOf = (plan) => plan.videoTracks.flatMap((track) => track.clips.map((clip) => [clip.sourceInFrame, clip.sourceOutFrame, clip.timelineInFrame, clip.timelineOutFrame]))
     let copyAllocations = 0

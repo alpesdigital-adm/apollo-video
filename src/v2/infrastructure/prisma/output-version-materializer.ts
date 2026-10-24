@@ -166,6 +166,9 @@ export async function readEditorialSourceBindingV1(tx:Prisma.TransactionClient,b
       if(a.currentRightsSnapshotId!==i.rightsSnapshotId||a.rightsRevision!==i.rightsRevision||
         (current?.id??null)!==i.rightsSnapshotId||(current?.snapshotHash??null)!==i.rightsHash)
         throw new DomainError('VERSION_CONFLICT','Editorial current audited rights binding changed')
+      // A render the project's plan produced (a proxy, a final) is carried by a copy as a member of its inventory, but a cut does not consume it: its binding is
+      // checked above and no use of it is decided (the cut makes it stale, as for the cut of a project itself, whose inventory leaves it out).
+      if(RENDER_OUTPUT_LINK_ROLES.includes(i.role))continue
       const use=i.role==='selected-insert'?'editorial-reuse':
         (i.role==='source-master'||i.role==='editing-proxy')&&a.mediaType==='video'||i.role==='source-audio'&&a.mediaType==='audio'?'rendering':null
       if(!use)throw new DomainError('PERSISTENCE_CONFLICT','Editorial inventory role has no authority')
