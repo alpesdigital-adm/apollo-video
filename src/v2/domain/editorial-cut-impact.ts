@@ -75,6 +75,8 @@ export function readEditorialMaterializedPlanV3(input:OutputJson):EditorialMater
 export function materializeEditorialCutPlanV3(input:Readonly<{
   before:Readonly<Record<string,unknown>>;versionId:string;planId:string;commandId:string;createdAt:string;
   sourceBinding:EditorialSourceBindingV1;exclusions:EditorialCutPayloadV3['exclusions']
+  /** A copy of a cut project owns no authority until a cut binds it: that cut may remove nothing more than the parent plan's own cut already removed. */
+  adoptsAppliedCut?:boolean
 }>):EditorialMaterializedPlanV3 {
   const p=structuredClone(input.before) as Record<string,any>,b=input.sourceBinding.document,fps=Number(p.fps),duration=Number(p.durationFrames)
   assertDomain(p.schemaVersion===2&&p.state==='compiled'&&Number.isFinite(fps)&&fps>0&&Number.isSafeInteger(duration)&&duration>0&&
@@ -105,7 +107,7 @@ export function materializeEditorialCutPlanV3(input:Readonly<{
       if(end>start)removed.push({start:sourceFrameToTimelineFrame(start,c),end:sourceFrameToTimelineFrame(end,c)})
     }
   }
-  assertDomain(removed.length>0,'INVALID_COMMAND','Editorial rules do not intersect the actual parent source clips')
+  assertDomain(removed.length>0||(input.adoptsAppliedCut===true&&p.editorial?.retainedSourceRanges!==undefined),'INVALID_COMMAND','Editorial rules do not intersect the actual parent source clips')
   removed.sort((a,b)=>a.start-b.start||a.end-b.end)
   const merged:{start:number;end:number}[]=[]
   for(const r of removed) {

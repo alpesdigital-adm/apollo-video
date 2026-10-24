@@ -91,7 +91,7 @@ test('the answer states proxyRenders instead of operation and validates against 
   assert.deepEqual(Object.keys(presented), ['proxyRenders'])
   assert.deepEqual(presented.proxyRenders.outputs, [TALL, WIDE])
   const ajv = addFormats(new Ajv2020({ strict: false, allErrors: true }))
-  for (const ref of ['project-edit-command-applied/v10', 'project-lut-selection-applied/v4', 'project-color-plan-applied/v2']) {
+  for (const ref of ['project-edit-command-applied/v10', 'project-lut-selection-applied/v4', 'project-color-plan-applied/v2', 'review-patch-applied/v4', 'review-patch-batch-applied/v4']) {
     const definition = getPublicSchema(`apollo://schemas/${ref}`)
     const validate = ajv.compile(definition.schema)
     const examples = publicSchemaExamples(definition)
@@ -113,17 +113,19 @@ test('the capabilities publish the new response versions', () => {
   assert.equal(by.get('apollo.projects.commands.apply').outputSchemaRef, 'apollo://schemas/project-edit-command-applied/v10')
   assert.equal(by.get('apollo.projects.lut-selection.set').outputSchemaRef, 'apollo://schemas/project-lut-selection-applied/v4')
   assert.equal(by.get('apollo.projects.color-plan.set').outputSchemaRef, 'apollo://schemas/project-color-plan-applied/v2')
-  for (const id of ['apollo.projects.commands.apply', 'apollo.projects.lut-selection.set', 'apollo.projects.color-plan.set']) {
+  assert.equal(by.get('apollo.projects.review-patches.apply').outputSchemaRef, 'apollo://schemas/review-patch-applied/v4')
+  assert.equal(by.get('apollo.projects.review-patch-batches.apply').outputSchemaRef, 'apollo://schemas/review-patch-batch-applied/v4')
+  for (const id of ['apollo.projects.commands.apply', 'apollo.projects.lut-selection.set', 'apollo.projects.color-plan.set', 'apollo.projects.review-patches.apply', 'apollo.projects.review-patch-batches.apply']) {
     assert.match(by.get(id).description, /never a 428 after the commit/)
   }
 })
 
 test('the routes of the project-wide Commands answer through the after-command service and never through the plain enqueue', async () => {
-  for (const path of ['commands', 'lut-selection', 'color-plan']) {
+  for (const path of ['commands', 'lut-selection', 'color-plan', 'patch-proposals/[proposalId]/apply', 'patch-batches/[batchId]/apply']) {
     const route = await readFile(new URL(`../../src/app/v1/projects/[projectId]/${path}/route.ts`, import.meta.url), 'utf8')
     assert.match(route, /enqueueProjectProxyRenderAfterCommandService\(\{/, path)
     assert.doesNotMatch(route, /enqueueProjectProxyRenderService/, `${path} must not enqueue a single-output proxy after its commit`)
-    assert.match(route, /presentCommandProxyRender\(proxy\)/, path)
+    assert.match(route, /presentCommandProxyRender\((proxy|render)\)/, path)
   }
   // The routes that name an output (a manual edit's view, a restore's view) enqueue for that output.
   for (const path of ['manual-edits', 'version-comparisons']) {

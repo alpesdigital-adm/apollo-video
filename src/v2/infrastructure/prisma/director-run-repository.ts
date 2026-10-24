@@ -682,7 +682,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       // A copy that has not been cut owns no transcript (it is the original's, bound by the copy's own editorial cut): the Director cannot run
       // on it yet, and the answer says so - with the reason every other child Command of an uncut copy gives - instead of "project not found".
       if (project.duplicatedFromProjectId !== null) {
-        throw new DomainError('PRECONDITION_REQUIRED', 'A copy needs its own editorial cut before the Director can run on it', { reason: COPY_REQUIRES_EDITORIAL_CUT_REASON })
+        throw new DomainError('PRECONDITION_REQUIRED', 'A copy needs its own editorial cut before the Director can run on it: ask remove-spoken-content with the removals already requested (speech the copy already had removed adopts that cut), or with new ones', { reason: COPY_REQUIRES_EDITORIAL_CUT_REASON })
       }
       return null
     }

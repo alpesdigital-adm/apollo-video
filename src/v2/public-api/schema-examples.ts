@@ -15819,6 +15819,24 @@ const MULTI_OUTPUT_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>>
         return cloned
       }),
     ],
+    'apollo://schemas/review-patch-applied/v4': [
+      ...structuredClone(BASE_PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/review-patch-applied/v3'] ?? []),
+      ...structuredClone(BASE_PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/review-patch-applied/v3'] ?? []).slice(0, 1).map((example) => {
+        const cloned = structuredClone(example) as { data: Record<string, unknown> }
+        delete cloned.data.operation
+        cloned.data.proxyRenders = perOutputProxyRendersExample
+        return cloned
+      }),
+    ],
+    'apollo://schemas/review-patch-batch-applied/v4': [
+      ...structuredClone(BASE_PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/review-patch-batch-applied/v3'] ?? []),
+      ...structuredClone(BASE_PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/review-patch-batch-applied/v3'] ?? []).slice(0, 1).map((example) => {
+        const cloned = structuredClone(example) as { data: Record<string, unknown> }
+        delete cloned.data.operation
+        cloned.data.proxyRenders = perOutputProxyRendersExample
+        return cloned
+      }),
+    ],
     'apollo://schemas/project-lut-selection-applied/v4': [
       ...structuredClone(BASE_PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/project-lut-selection-applied/v3'] ?? []),
       { data: { ...projectLutSelectionExampleV3, proxyRenders: perOutputProxyRendersExample }, meta: { apiVersion: 'v1' } },

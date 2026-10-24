@@ -30368,6 +30368,25 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   }, (body) => {
     schemaNode(body, 'properties', 'data', 'properties').proxyRenders = COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA
   }),
+  // The same defect and the same answer for a confirmed review patch (single and batch): the patch committed its Version and then enqueued "the" proxy, which
+  // a project with several outputs refuses (output-variant-required). `operation` (and the render attached to the proposal or batch) exists when the project has
+  // one output; `proxyRenders` says which outputs' proxies remain to be requested otherwise.
+  derivedSchema('apollo://schemas/review-patch-applied/v3', {
+    id: 'review-patch-applied', version: 4,
+    title: 'Confirmed patch result whose proxy is enqueued for a one-output project and left to be requested per output otherwise',
+  }, (body) => {
+    const data = schemaNode(body, 'properties', 'data')
+    data.required = (data.required as string[]).filter((key) => key !== 'operation')
+    schemaNode(data, 'properties').proxyRenders = COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA
+  }),
+  derivedSchema('apollo://schemas/review-patch-batch-applied/v3', {
+    id: 'review-patch-batch-applied', version: 4,
+    title: 'Confirmed batch patch result whose proxy is enqueued for a one-output project and left to be requested per output otherwise',
+  }, (body) => {
+    const data = schemaNode(body, 'properties', 'data')
+    data.required = (data.required as string[]).filter((key) => key !== 'operation')
+    schemaNode(data, 'properties').proxyRenders = COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA
+  }),
   derivedSchema('apollo://schemas/project-color-plan-applied/v1', {
     id: 'project-color-plan-applied', version: 2,
     title: 'Applied content-addressed ColorPlan whose proxy is enqueued for a one-output project and left to be requested per output otherwise',
