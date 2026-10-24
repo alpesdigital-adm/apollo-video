@@ -4,6 +4,7 @@ import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { duplicateProjectService } from '../../src/v2/application/duplicate-project.ts'
+import { PrismaDirectorRunRepository } from '../../src/v2/infrastructure/prisma/director-run-repository.ts'
 import { PrismaOperationalOutputBundleRepositoryV3 } from '../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
 import { PrismaProjectDuplicationRepository } from '../../src/v2/infrastructure/prisma/project-duplication-repository.ts'
 import { seedTwoOutputIngestedProject } from './helpers/multi-output-pg-world.mjs'
@@ -65,6 +66,10 @@ test('W70 PostgreSQL a project with the receipt of a real master is duplicated i
     }
     console.log(`duplication of a ${(Number(n) / 1e6).toFixed(1)} MB head (${frames} frames, 2 outputs): ${durations.join('/')} ms (N=3)`)
 
+    // A copy that has not been cut cannot be directed yet, and says so with the reason of every other child Command of an uncut copy
+    // (it used to answer "project not found": the Director looked for a transcript the copy does not own until its own cut binds one).
+    await assert.rejects(new PrismaDirectorRunRepository(db).readContext({ workspaceId, projectId: copies[0].project.id }),
+      (error) => error?.code === 'PRECONDITION_REQUIRED' && error.details?.reason === 'copy-requires-editorial-cut')
     // The copy is the original's content under identities of its own; the editorial request is the original's, not a new one.
     const sourceSnapshots = await db.v2ProjectSnapshot.findMany({ where: { id: { in: Object.values(head.version.snapshotRefs) } }, orderBy: { kind: 'asc' } })
     for (const copy of copies) {
