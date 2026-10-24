@@ -440,6 +440,75 @@ async function runLocked(config, { secrets, logPath }) {
     state.pendingOperations = []
   }
 
+  /**
+   * The request asks to take a subject out of the speech: the Director refuses with the stretches of the transcript that would go. Only the owner
+   * confirms them (apollo.projects.speech-removals.confirm, a capability of its own): the driver lists the candidates and applies exactly the
+   * confirmations of decisions/speech-removal-confirm[-n].json, naming the subject, never the words.
+   */
+  async function confirmSpeechRemovals(removals, label) {
+    state.speechRemovalDecisions ??= []
+    const attempt = state.speechRemovalDecisions.length + 1
+    const candidates = removals.map((item) => ({ questionId: item.id, text: item.text, subject: item.removal.subject, ruleId: item.removal.ruleId, label: item.removal.label, alternatives: item.removal.alternatives, matches: item.removal.matches }))
+    await writeEvidence(join('speech-removal', `candidates-${attempt}.json`), { label, candidates })
+    await log('speech-removal-proposed', { label, subjects: candidates.map((item) => item.subject).join(' | '), stretches: candidates.map((item) => item.matches.length).join(',') })
+    const decision = await awaitDecision('speech-removal-confirm', attempt, { candidates: candidates.map((item) => ({ subject: item.subject, stretches: item.matches.map((match) => `${match.startSeconds}-${match.endSeconds}`) })) })
+    for (const confirmation of decision.confirmations) {
+      const current = await head()
+      const body = {
+        baseVersionId: current.versionId, baseHash: current.baseHash, sourceTranscriptId: state.transcript.id, variantId: state.variants[confirmation.variant].id,
+        subject: confirmation.subject, ...(confirmation.reason ? { reason: confirmation.reason } : {}),
+      }
+      const response = await call({ method: 'POST', path: `${projectPath()}/speech-removals`, key: keyFor('confirm-removal', confirmation.subject, current.versionId, decision.sha256), body, expect: [200, 201], allowError: true, label: `speech-removal-confirm:${confirmation.variant}` })
+      let entry
+      if (response.ok) {
+        track(response.data, 'speech-removal-confirm')
+        const editorial = response.data.editorial
+        if (!editorial || (editorial.exclusions ?? []).length === 0) throw new JourneyError('CUT_EMPTY', 'the confirmed removal took nothing out', { editorial })
+        entry = { subject: confirmation.subject, key: confirmation.variant, commandId: response.data.command.id, versionId: response.data.version.id, exclusions: editorial.exclusions, retainedSourceRanges: editorial.retainedSourceRanges, outputDurationFrames: editorial.outputDurationFrames, fps: editorial.fps }
+      } else {
+        const committed = await committedDespiteProxyRefusal(response, current.versionId)
+        if (!committed) throw new JourneyError('UNEXPECTED_RESPONSE', `confirming the removal of "${confirmation.subject}" answered ${response.status} ${response.error?.code}: ${response.error?.message}${response.error?.details?.reason ? ` (${response.error.details.reason})` : ''}`, { status: response.status, error: response.error })
+        entry = { subject: confirmation.subject, key: confirmation.variant, commandId: committed.workspace.commands.find((item) => item.resultVersionId === committed.versionId)?.id, versionId: committed.versionId, exclusions: null }
+      }
+      state.confirmedCuts ??= []
+      state.confirmedCuts.push(entry)
+      await log('cut-confirmed', { subject: confirmation.subject, commandId: entry.commandId, exclusions: entry.exclusions ? entry.exclusions.length : 'not-returned' })
+    }
+    state.speechRemovalDecisions.push({ attempt, decision: decision.name, decisionSha256: decision.sha256 })
+  }
+
+  /** The outputs whose request fills the frame following the face: the render of those refuses (reframe-plan-required) without a reframe plan of the Version. */
+  async function fillOutputKeys() {
+    const view = await readRequestView('reframe-scope')
+    const directives = [
+      ...(view.request?.directives ?? []), ...(view.interpretation?.directives ?? []),
+      ...Object.entries(view.request?.variantOverrides ?? {}).flatMap(([variantId, list]) => list.map((item) => ({ ...item, variantId }))),
+    ].filter((item) => item.kind === 'output-layout' && item.value === 'fill-following-face')
+    const keys = new Set()
+    for (const directive of directives) {
+      for (const key of outputKeys) {
+        const { width, height, id } = state.variants[key]
+        const about = String(directive.param)
+        if (directive.variantId === id || about === 'all' || about === key || (about === 'vertical' && height > width) || (about === 'horizontal' && width > height) || (about === 'square' && width === height)) keys.add(key)
+      }
+    }
+    return outputKeys.filter((key) => keys.has(key))
+  }
+
+  /** A reframe plan of the head Version for every output that fills the frame (apollo.projects.reframe-plans.create), before its proxy is asked. */
+  async function ensureReframePlans(current) {
+    const keys = await fillOutputKeys()
+    state.reframePlans ??= {}
+    for (const key of keys) {
+      const variantId = state.variants[key].id
+      const existing = await call({ path: `${projectPath()}/reframe-plans?variantId=${encodeURIComponent(variantId)}&projectVersionId=${encodeURIComponent(current.versionId)}`, allowError: true, label: `reframe-plan-read:${key}` })
+      const planned = existing.ok ? existing : await call({ method: 'POST', path: `${projectPath()}/reframe-plans`, key: keyFor('reframe', key, current.versionId), body: { baseVersionId: current.versionId, variantId }, expect: [200, 201], label: `reframe-plan:${key}` })
+      state.reframePlans[key] = { versionId: current.versionId, variantId, reused: existing.ok }
+      await log('reframe-plan', { key, versionId: current.versionId, reused: existing.ok, status: planned.status })
+    }
+    return keys
+  }
+
   /** Runs the Director; while it refuses for a reason a person can fix, waits for the revision decision and tries again. */
   async function directDirector(label) {
     for (let guard = 0; guard < config['max-revisions'] + 2; guard += 1) {
@@ -484,6 +553,12 @@ async function runLocked(config, { secrets, logPath }) {
         await writeEvidence(join('director', `${label}-${run.id}.json`), { entry, workspaceRun: run, qualityReport: report })
         await log('director-planned', { label, directorRunId: entry.id, qualityStatus: entry.qualityStatus, failedChecks: entry.hardChecks.filter((check) => !check.passed).map((check) => check.id).join(',') || 'none', via: 'workspace-read' })
         return entry
+      }
+      const blockers = Array.isArray(response.error?.details?.blockers) ? response.error.details.blockers : []
+      const removals = blockers.filter((item) => item.removal)
+      if (response.error?.code === 'PRECONDITION_REQUIRED' && reason === 'editorial-request-blocked' && removals.length > 0 && removals.length === blockers.length) {
+        await confirmSpeechRemovals(removals, label)
+        continue
       }
       if (response.error?.code === 'PRECONDITION_REQUIRED' && DECISION_REASONS.has(reason)) {
         const view = await readRequestView(`blocked:${label}`)
@@ -531,6 +606,7 @@ async function runLocked(config, { secrets, logPath }) {
 
   /** The proxy and its review of every output at the head Version: waits for what the Commands started, asks for what is missing. */
   async function ensureReviews(round, keys = outputKeys) {
+    await ensureReframePlans(await head())
     await settlePending(`proxy-round-${round}`)
     const current = await head()
     const reviews = {}
@@ -732,6 +808,11 @@ async function runLocked(config, { secrets, logPath }) {
   }
 
   async function p4SpokenCuts() {
+    if ((state.confirmedCuts ?? []).length > 0) {
+      state.cuts = { skipped: true, reason: 'the cut was made through the owner confirmation of the speech removal', confirmedCuts: state.confirmedCuts }
+      await log('cuts-skipped', { reason: 'confirmed through speech-removals.confirm' })
+      return
+    }
     const decision = await awaitDecision('remove-spoken-content', 1, { transcriptId: state.transcript.id, note: 'the closed vocabulary of the request has no removal directive: the phrases always come from this file' })
     if (decision.skip) {
       state.cuts = { skipped: true, reason: decision.reason, decision: decision.name, decisionSha256: decision.sha256 }

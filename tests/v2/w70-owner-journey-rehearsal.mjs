@@ -59,8 +59,9 @@ const masterSha = hash(masterBytes)
 
 // ---- placeholders of the scripted world
 const WORDS = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima', 'mike', 'november', 'oscar']
-const briefingFirst = 'Rehearsal briefing over synthetic media. Zoom in slowly at the start. Remove the part about the placeholder topic.'
-const briefingSecond = 'Rehearsal briefing over synthetic media. Remove the part about the placeholder topic.'
+const SUBJECT = WORDS.slice(6, 9).join(' ')
+const briefingFirst = `Zoom in slowly at the start. Make the vertical version fill the frame following the face. Remove the part that says ${SUBJECT}.`
+const briefingSecond = `Make the vertical version fill the frame following the face. Remove the part that says ${SUBJECT}.`
 await writeFile(join(inputs, 'briefing.txt'), briefingFirst)
 // The final export delivers the product's format preset geometry (a custom width/height in the variant is not what comes out: the journey's inspection catches that), so the rehearsal asks for none.
 await writeFile(join(inputs, 'output-spec.json'), JSON.stringify({ '9:16': { subtitles: { mode: 'none' } } }))
@@ -74,10 +75,16 @@ const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure
 
 const standIn = await startBriefInterpreterStandIn()
 // The model answers with the words it quotes; the Apollo finds them in the briefing and computes the offsets itself.
-standIn.script.set(briefingFirst, {
-  directives: [{ kind: 'movement', value: 'zoom-in', param: null, quote: 'Zoom in slowly at the start' }],
+const answerFor = (text) => ({
+  directives: [
+    ...(text.includes('Zoom in') ? [{ kind: 'movement', value: 'zoom-in', param: null, quote: 'Zoom in slowly at the start' }] : []),
+    { kind: 'output-layout', value: 'fill-following-face', param: 'vertical', quote: 'Make the vertical version fill the frame following the face' },
+    { kind: 'remove-speech', value: 'about', param: SUBJECT, quote: `Remove the part that says ${SUBJECT}` },
+  ],
   unsupported: [], questions: [], coverage: [],
 })
+standIn.script.set(briefingFirst, answerFor(briefingFirst))
+standIn.script.set(briefingSecond, answerFor(briefingSecond))
 
 const workspaceId = `w70-rehearsal-${suffix}`
 await factory.createWorkspaceRepository().create(createWorkspace({ id: workspaceId, slug: workspaceId, name: 'W70 journey rehearsal', status: 'active', createdAt: new Date().toISOString() }))
@@ -134,13 +141,12 @@ const workerLoop = (async () => {
 })()
 
 // ---- the human: writes the decision files when the journey asks for them
-const rules = [{ id: 'placeholder-topic', label: 'placeholder topic', alternatives: [WORDS.slice(6, 9).join(' ')] }]
 const requestsForCorrection = [{ method: 'POST', path: '/v1/projects/{{projectId}}/commands', body: { type: 'run-director', baseVersionId: '{{head.versionId}}', baseHash: '{{head.baseHash}}', reason: 'rehearsal owner correction' } }]
 const decisionContent = {
   'revise-editorial-request.json': { reason: 'The renderer executes no movement: the zoom is taken out of the request (rehearsal).', briefing: briefingSecond },
   'source-rights.json': { reason: 'rehearsal', body: { status: 'approved', allowedUses: ['editorial-reuse', 'rendering', 'editing', 'distribution', 'transcription'], prohibitedUses: [], consent: { status: 'not-required', allowedUses: [] }, sourceNote: 'synthetic rehearsal master' } },
   'derived-rights.json': { reason: 'rehearsal: the owner states the rights of the proxies and finals', body: { status: 'approved', allowedUses: ['editorial-reuse', 'rendering', 'editing', 'distribution', 'transcription'], prohibitedUses: [], consent: { status: 'not-required', allowedUses: [] }, sourceNote: 'derived from the synthetic rehearsal master' } },
-  'remove-spoken-content.json': { variant: '9:16', rules, reason: 'Remove the placeholder topic (rehearsal).' },
+  'speech-removal-confirm.json': { confirmations: [{ subject: SUBJECT, variant: '9:16', reason: 'The owner confirms the cut of the placeholder subject (rehearsal).' }] },
   'proxy-review.json': { outputs: { '9:16': { decision: 'approve', acknowledgeWarnings: true, note: 'approved in the rehearsal' }, '16:9': { decision: 'approve', acknowledgeWarnings: true } } },
   'owner-correction.json': { reason: 'The owner asks for a new pass of the Director (rehearsal).', requests: requestsForCorrection, outputs: { '9:16': { approve: true, acknowledgeWarnings: true, note: 'owner correction approved in the rehearsal' } } },
   'owner-acceptance.json': { accepted: true, by: 'rehearsal owner', note: 'accepted in the rehearsal' },

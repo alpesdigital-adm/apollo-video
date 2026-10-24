@@ -137,6 +137,19 @@ test('remove-spoken-content is either a recorded skip or rules requested through
   refused('remove-spoken-content', { variant: '16:9', rules: [{ id: 'x', label: 'y', alternatives: ['z'], extra: 1 }] }, /unknown fields/)
 })
 
+test('speech-removal-confirm names subjects and outputs, once each, and never words to cut', () => {
+  const decision = decide('speech-removal-confirm', { confirmations: [{ subject: 'subject placeholder', variant: '9:16', reason: 'r' }, { subject: 'other subject', variant: '16:9' }] })
+  assert.equal(decision.confirmations.length, 2)
+  assert.equal(decision.confirmations[1].reason, undefined)
+  refused('speech-removal-confirm', {}, /non-empty/)
+  refused('speech-removal-confirm', { confirmations: [] }, /non-empty/)
+  refused('speech-removal-confirm', { confirmations: [{ subject: 'a', variant: '1:1' }] }, /"variant"/)
+  refused('speech-removal-confirm', { confirmations: [{ variant: '9:16' }] }, /"subject"/)
+  refused('speech-removal-confirm', { confirmations: [{ subject: 'a', variant: '9:16' }, { subject: 'a', variant: '16:9' }] }, /once/)
+  refused('speech-removal-confirm', { confirmations: [{ subject: 'a', variant: '9:16', rules: [] }] }, /unknown fields/)
+  assert.equal(decisionFileName('speech-removal-confirm', 2), 'speech-removal-confirm-2.json')
+})
+
 test('requests of a decision stay inside /v1/ and use only POST or PUT', () => {
   const [request] = parseRequests('d', [{ method: 'POST', path: '/v1/projects/{{projectId}}/commands', body: { baseVersionId: '{{head.versionId}}' } }])
   assert.equal(request.method, 'POST')

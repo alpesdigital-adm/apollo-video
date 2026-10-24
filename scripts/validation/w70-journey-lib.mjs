@@ -321,6 +321,23 @@ export const DECISION_PARSERS = Object.freeze({
     if (!isRecord(record.body) || !nonEmptyString(record.body.status)) throw new JourneyError('INVALID_DECISION', `decision "${name}": "body" must be the rights document (it needs a status)`)
     return Object.freeze({ body: record.body, reason: requireReason(name, record) })
   },
+  /** speech-removal-confirm: the owner confirms the cuts the Apollo proposed for the subjects of the request (apollo.projects.speech-removals.confirm). */
+  'speech-removal-confirm': (record, name, context) => {
+    rejectUnknown(name, record, ['confirmations'])
+    if (!Array.isArray(record.confirmations) || record.confirmations.length === 0) throw new JourneyError('INVALID_DECISION', `decision "${name}": "confirmations" must be a non-empty list`)
+    const subjects = new Set()
+    const confirmations = record.confirmations.map((entry, index) => {
+      const where = `${name} confirmations[${index}]`
+      if (!isRecord(entry)) throw new JourneyError('INVALID_DECISION', `decision "${where}" must be an object`)
+      rejectUnknown(where, entry, ['subject', 'variant', 'reason'])
+      if (!nonEmptyString(entry.subject) || entry.subject.length > 200) throw new JourneyError('INVALID_DECISION', `decision "${where}": "subject" must be the subject exactly as the request states it (up to 200 characters)`)
+      if (typeof entry.variant !== 'string' || !context.outputKeys.includes(entry.variant)) throw new JourneyError('INVALID_DECISION', `decision "${where}": "variant" must name one output of the journey (${context.outputKeys.join(', ')})`)
+      if (subjects.has(entry.subject)) throw new JourneyError('INVALID_DECISION', `decision "${name}": a subject may be confirmed once`)
+      subjects.add(entry.subject)
+      return Object.freeze({ subject: entry.subject, variant: entry.variant, ...(nonEmptyString(entry.reason) ? { reason: entry.reason.trim() } : {}) })
+    })
+    return Object.freeze({ confirmations: Object.freeze(confirmations) })
+  },
   /** derived-rights: the same rights document, stated by the owner for the project's own derived media (proxies and finals) that carry none. */
   'derived-rights': (record, name) => DECISION_PARSERS['source-rights'](record, name),
   /** proxy-review: for every output, approve (with the warnings acknowledged when the review asks) or correct with requests. */
