@@ -94,6 +94,18 @@ test('W70 PostgreSQL a copy of a cut project adopts the cut, takes additional cu
     const root = await operational.read({ ...copyScope, versionId: copy.version.id })
     assert.equal(forkAuthorityPendingV3(root), true)
     assert.equal(planOf(root).durationFrames, own.editPlan.durationFrames, 'the copy carries the original\'s cut plan')
+    // The deferred guard on a link of a render output is skipped ONLY against an operational head. On this Creation v2 head (a copy never cut)
+    // the assertion still demands the exact set of links, so a render-output link is refused, as any other role is.
+    const linkOf = async (role) => {
+      const anchor = await db.v2ProjectMediaAsset.findFirst({ where: copyScope, orderBy: { createdAt: 'asc' } })
+      return db.v2ProjectMediaAsset.create({ data: { id: randomUUID(), workspaceId, projectId: copy.project.id, artifactId: anchor.artifactId, role,
+        originalFileName: 'render-output.mp4', createdAt: new Date() } })
+    }
+    const linksBefore = await db.v2ProjectMediaAsset.count({ where: copyScope })
+    for (const role of ['final-output', 'editorial-proxy', 'editing-proxy']) {
+      await assert.rejects(linkOf(role), (error) => /W66|mismatch|bijection|reciprocal/i.test(String(error?.message)), `a ${role} link on a Creation v2 head is refused`)
+    }
+    assert.equal(await db.v2ProjectMediaAsset.count({ where: copyScope }), linksBefore, 'the refused links were rolled back')
 
     const luts = new PrismaProjectLutSelectionRepository(db)
     const inherited = await luts.readEffectiveForVersion({ ...copyScope, projectVersionId: copy.version.id })
@@ -142,5 +154,9 @@ test('W70 PostgreSQL a copy of a cut project adopts the cut, takes additional cu
     assert.ok(verdict, 'the copy is admitted for a render')
     assert.ok(await requirePersistedOutputConsumptionV3(db, { ...copyScope, versionId: rerun.version.id, purpose: 'final' }), 'its own Director run is the perception authority: the final export is admitted')
     assert.ok(await db.v2ServerPerceptionSnapshot.count({ where: copyScope }) > 0)
+    // Against the operational head the render-output links are accepted: the guard that re-verifies the whole State is skipped for them.
+    await linkOf('final-output')
+    await linkOf('editorial-proxy')
+    assert.equal(await db.v2ProjectMediaAsset.count({ where: { ...copyScope, role: { in: ['final-output', 'editorial-proxy'] } } }) >= 2, true)
   } finally { await db.$disconnect() }
 })
