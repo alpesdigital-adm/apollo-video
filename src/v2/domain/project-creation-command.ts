@@ -137,7 +137,7 @@ function creationBriefMatchesIntent(contentJson: string, intent: Readonly<{ obje
     // The audit is the record of the call that read THIS text: it is checked against the text and the interpretation, not taken as handed over.
     const interpretationAudit = parseBriefInterpretationAudit(reading.interpretationAudit, briefingText, interpretation)
     return contentJson === stableSerialize({ ...base,
-      productionBrief: createProductionBrief({ ownerText: intent.briefing, interpretedCoverage: (interpretation.coverage ?? []).map((item) => item.topic) }),
+      productionBrief: createProductionBrief({ ownerText: intent.briefing, interpretedCoverage: [...new Set((interpretation.coverage ?? []).flatMap((item) => item.topic === 'context' ? [] : [item.topic]))] }),
       editorialRequest: { interpretation, interpretationAudit } })
   } catch (error) {
     if (error instanceof DomainError) return false

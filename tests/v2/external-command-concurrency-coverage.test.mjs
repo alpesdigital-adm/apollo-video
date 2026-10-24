@@ -372,6 +372,9 @@ const coverage = Object.freeze({
   'apollo.projects.commands.apply': {
     mode: 'durable-covered', evidence: 'typed Command, exact immutable base and transactional ProjectVersion persistence',
   },
+  'apollo.projects.speech-removals.confirm': {
+    mode: 'durable-covered', evidence: 'the removal Command of the Apollo-proposed rule: typed Command, exact immutable base and transactional ProjectVersion persistence, actor-bound idempotency',
+  },
   'apollo.projects.director-runs.enqueue': {
     mode: 'durable-covered', evidence: 'actor-bound idempotent enqueue reserves one immutable result ID; worker lease+attempt fences the serializable version, snapshots, Command, DirectorRun, invalidations, outbox and operation settlement commit',
   },
@@ -627,7 +630,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    186,
+    187,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

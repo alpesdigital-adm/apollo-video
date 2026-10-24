@@ -32,6 +32,7 @@ const actor = () => {
     clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' })
 }
 const empty = { directives: [], unsupported: [], questions: [], coverage: [] }
+const { EVERY_SENTENCE_IS_CONTEXT } = await import('./helpers/brief-interpreter-stand-in.mjs')
 // Two layouts the briefing asks for (a closed question), a movement the Apollo does not do yet (unsupported) and a question in words.
 const ASKING = {
   directives: [
@@ -47,7 +48,8 @@ function model(answerFor) {
     async interpret(request) {
       calls.push(request)
       const briefing = JSON.parse(request.user).briefing
-      const answer = typeof answerFor === 'function' ? answerFor(briefing) : answerFor
+      const given = typeof answerFor === 'function' ? answerFor(briefing) : answerFor
+      const answer = given === empty ? EVERY_SENTENCE_IS_CONTEXT(briefing) : given
       if (answer instanceof Error) throw answer
       return { text: JSON.stringify(answer) }
     } }
@@ -223,16 +225,16 @@ test('the contract: a command with a body that has a ref, a result that validate
   assert.equal(capability.endpoint.method, 'POST')
   assert.equal(capability.endpoint.path, '/v1/batches/{batchId}/editorial-request')
   assert.equal(capability.inputSchemaRef, 'apollo://schemas/batch-editorial-request-revise-request/v1')
-  assert.equal(capability.outputSchemaRef, 'apollo://schemas/batch-editorial-request-revised/v1')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/batch-editorial-request-revised/v2')
   assert.equal(capability.idempotency, 'required')
   assert.deepEqual(capability.requiredScopes, ['projects:write'])
   assert.equal(capability.toolName, 'apollo.batches.editorial-request.revise')
   const ajv = new Ajv2020({ strict: false, allErrors: true })
   addFormats(ajv)
   const published = JSON.parse(JSON.stringify({ data: presentProductionBatchEditorialRequestRevision(result), meta: { apiVersion: 'v1' } }))
-  const output = ajv.compile(getPublicSchema('apollo://schemas/batch-editorial-request-revised/v1').schema)
+  const output = ajv.compile(getPublicSchema('apollo://schemas/batch-editorial-request-revised/v2').schema)
   assert.equal(output(published), true, JSON.stringify(output.errors)?.slice(0, 600))
-  for (const example of publicSchemaExamples(getPublicSchema('apollo://schemas/batch-editorial-request-revised/v1'))) assert.equal(output(example), true, JSON.stringify(output.errors)?.slice(0, 600))
+  for (const example of publicSchemaExamples(getPublicSchema('apollo://schemas/batch-editorial-request-revised/v2'))) assert.equal(output(example), true, JSON.stringify(output.errors)?.slice(0, 600))
   const input = ajv.compile(getPublicSchema('apollo://schemas/batch-editorial-request-revise-request/v1').schema)
   for (const example of publicSchemaExamples(getPublicSchema('apollo://schemas/batch-editorial-request-revise-request/v1'))) assert.equal(input(example), true, JSON.stringify(input.errors)?.slice(0, 600))
   for (const wrong of [{ expectedRequestHash: null }, { expectedRequestHash: null, briefing: 'a', answers: [{ questionId: 'q1', answer: 'b' }] }, { briefing: 'a' }]) {

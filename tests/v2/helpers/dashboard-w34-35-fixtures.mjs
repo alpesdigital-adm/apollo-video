@@ -305,7 +305,7 @@ async function ensureDirectorSource(client, { workspaceId, clientId, createdAt }
  * `seedFinalExportChain` hangs its proxy and final-export rows off.
  */
 export async function seedDirectedProject(client, {
-  workspaceId, clientId, credentialId, environment = 'production', projectId, suffix, words, directed: runDirector = true,
+  workspaceId, clientId, credentialId, environment = 'production', projectId, suffix, words, segments, directed: runDirector = true,
 }) {
   const actor = testActor({ workspaceId, clientId, credentialId, environment })
   const now = Date.now()
@@ -319,7 +319,8 @@ export async function seedDirectedProject(client, {
   const transcript = createMediaTranscript({
     language: 'pt-BR', text: observedText,
     words: observedWords,
-    segments: [{ id: 0, start: observedWords[0].start, end: observedWords.at(-1).end, text: observedText }],
+    // `segments` (the segments of the same words, in order) replace the single segment that holds them all: a test about passages needs sentences.
+    segments: segments ?? [{ id: 0, start: observedWords[0].start, end: observedWords.at(-1).end, text: observedText }],
     provider: 'controlled', model: 'dashboard-fixture-v1',
   })
   await client.v2ProjectMediaAsset.create({ data: {

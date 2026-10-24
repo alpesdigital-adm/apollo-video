@@ -953,7 +953,7 @@
         },
         {
           "kind": "deployment",
-          "text": "Gate de implantação: sem o recibo de paridade em Linux do V9 (execução supervisionada das 60 imagens de desenvolvimento no runtime Linux de produção, comparadas byte a byte com os tensores da V9, sem ajuste de parâmetros) o registro não autentica Linux e o worker recusa partir. Detalhes em docs/quality/w62-v9-runtime.md."
+          "text": "Gate de implantação em Linux: a paridade do V9 foi medida (60 imagens de desenvolvimento, Windows x Linux Intel x Linux AMD EPYC) e ACEITA pelo dono em 22/10/2026 pelo critério nomeado detections-identical-max-delta-1e-6 (detecções idênticas, delta máximo 8,9e-7; tensores byte-idênticos só em 1/60, então o critério byte a byte original não foi atendido). O recibo está registrado e vale só para o interpretador, o manifesto de runtime e a ponte nomeados nele; qualquer outro byte volta a recusar. Segue aberto: a ponte do worker não foi executada em Linux e não há implantação. Detalhes em docs/quality/w62-v9-runtime.md e docs/adr/ADR-161-v9-linux-parity-criterion.md."
         },
         {
           "kind": "owner-acceptance",
@@ -1184,7 +1184,7 @@
           "role": "integration"
         }
       ],
-      "nextAction": "Fila W62: gerar o recibo de paridade Linux do V9 em execução supervisionada (60 imagens de desenvolvimento, byte a byte contra os tensores da V9, sem ajuste de parâmetros), que é gate de implantação; depois medir o V9 em vídeo real na jornada W70. Qualquer faceSafety diferente de unknown exige corpus independente; o holdout segue selado.",
+      "nextAction": "Fila W62: o recibo de paridade Linux do V9 está registrado e foi aceito pelo dono em 22/10/2026 (ADR-161); medir o V9 em vídeo real na jornada W70. Qualquer faceSafety diferente de unknown exige corpus independente; o holdout segue selado.",
       "notes": "Detector V9 aceito pelo proprietário em 17/10/2026 como decisão de qualidade com escopo primeiro plano e orador (docs/quality/w62-v9-owner-acceptance.md); não é aceite da wave. V1 a V8 e a cronologia anterior (08 a 13/10) estão nos recibos privados e em git: git show 67bb41aa:docs/quality/project-status.json."
     },
     {
@@ -1449,7 +1449,7 @@
           "role": "integration"
         }
       ],
-      "nextAction": "Calibrar as bandas v2 com produtores medidos (W63b) e, após o recibo de paridade Linux do V9, rever o teto de face; provar no master real (W70).",
+      "nextAction": "Calibrar as bandas v2 com produtores medidos (W63b) e, com o recibo de paridade Linux do V9 aceito em 22/10/2026 (ADR-161), rever o teto de face; provar no master real (W70).",
       "notes": "PR #85: rubrica de evidência (high/partial/absent), confidence-band-policy/v2, director-quality-report/v4 com tier por modalidade e evidence ids, direitos integrais no claim e no commit, snapshot gravado no commit do Diretor e GET read-only, observationSet do caller inalcançável. Design: docs/quality/w64-director-perception.md."
     },
     {
@@ -1902,7 +1902,7 @@
           "role": "integration"
         }
       ],
-      "nextAction": "Medir o reframe com o detector real após a paridade Linux do V9; publicar os motivos de recusa do override; fechar as lacunas de multi-saída; provar o final de duas saídas no PostgreSQL e na jornada W70.",
+      "nextAction": "Medir o reframe com o detector real (paridade Linux do V9 aceita em 22/10/2026, ADR-161); publicar os motivos de recusa do override; fechar as lacunas de multi-saída; provar o final de duas saídas no PostgreSQL e na jornada W70.",
       "notes": "PR #84: ROI server-owned das janelas de rosto v3 projetadas pelos clipes, plano por variante estável selado com reframe-policy/v1, persistência content-addressed, crop reenquadrado preenche o canvas da variante (antes: faixa de ~10% sobre fundo borrado), Command apply-variant-reframe-override (set/reset). GT: cobertura ≥99,6% × 99,8%, crop a 0,86 px, velocidade 0,269/0,35, aceleração 0,713/0,8. Fundação de estado de output no main desde 16a6d04b. Design: docs/quality/w66r-reframe-trajectory.md."
     },
     {
@@ -2311,7 +2311,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Execução não iniciada. Pré-requisitos abertos: paridade Linux do detector V9 (W62), Diretor sem janelas de rosto (W64), final de duas saídas em PostgreSQL (W66), critic dos pixels finais (W67) e override com recompilação (W68). A taxa do V9 em vídeo (74,6% foi medido em JPEG) será medida nesta jornada."
+          "text": "Execução não iniciada. Pré-requisitos abertos: Diretor sem janelas de rosto (W64), final de duas saídas em PostgreSQL (W66), critic dos pixels finais (W67) e override com recompilação (W68). A taxa do V9 em vídeo (74,6% foi medido em JPEG) será medida nesta jornada."
         },
         {
           "kind": "validation",

@@ -5742,6 +5742,62 @@ const editorialRequestRevisedExample = {
   nextRequiredCapability: 'apollo.projects.commands.apply:run-director',
   replayed: false,
 }
+// The coverage vocabulary (editorial request, Cover refs): the same neutral placeholders, now one per sentence, each sentence read as one item of the vocabulary.
+const editorialRequestCoverBriefingExample = '<primeira frase do pedido>. <segunda frase do pedido>. <terceira frase do pedido>. <quarta frase do pedido>.'
+const coverExcerpt = (sentence: string) => {
+  const start = editorialRequestCoverBriefingExample.indexOf(sentence)
+  return { start, end: start + sentence.length, text: sentence }
+}
+const editorialRequestInterpretationExampleCover = createBriefInterpretation({
+  briefingText: editorialRequestCoverBriefingExample,
+  interpreter: { provider: '<provedor>', model: '<modelo>', promptVersion: 'brief-interpreter/v2' },
+  directives: [
+    { id: 'd1', kind: 'cta-text', value: 'set', param: '<texto da chamada>', excerpt: coverExcerpt('<primeira frase do pedido>') },
+    { id: 'd2', kind: 'output', value: 'vertical', excerpt: coverExcerpt('<segunda frase do pedido>') },
+    { id: 'd3', kind: 'output-layout', value: 'fill-following-face', param: 'vertical', excerpt: coverExcerpt('<segunda frase do pedido>') },
+    { id: 'd4', kind: 'remove-speech', value: 'about', param: '<assunto>', excerpt: coverExcerpt('<terceira frase do pedido>') },
+    { id: 'd5', kind: 'invariant', value: 'captions-clear-of-face', excerpt: coverExcerpt('<terceira frase do pedido>') },
+    { id: 'd6', kind: 'absent', value: 'music', excerpt: coverExcerpt('<terceira frase do pedido>') },
+  ],
+  coverage: [{ topic: 'context', excerpt: coverExcerpt('<primeira frase do pedido>') }],
+  questions: [{
+    id: 'q1', status: 'open', question: '<pergunta sobre a frase que o Apollo não soube classificar>', excerpt: coverExcerpt('<quarta frase do pedido>.'),
+    choices: [
+      { id: 'c1', label: '<primeira opção>', effect: 'statement-context' },
+      { id: 'c2', label: '<segunda opção>', effect: 'unsupported-request' },
+    ] as never,
+  }],
+})
+const editorialRequestViewExampleCover = describeEditorialRequest({
+  objective: 'discovery',
+  briefSnapshot: {
+    id: 'project-snapshot-editorial-request-example-3', contentHash: 'a'.repeat(64),
+    content: {
+      schemaVersion: 1, objective: 'discovery', desiredAction: createDesiredAction({ objective: 'discovery' }),
+      productionBrief: createProductionBrief({ ownerText: editorialRequestCoverBriefingExample, interpretedCoverage: [] }),
+      editorialRequest: { interpretation: editorialRequestInterpretationExampleCover, interpretationAudit: editorialRequestAuditExample },
+    },
+  },
+})
+const currentEditorialRequestExampleCover = {
+  ...currentEditorialRequestExample,
+  state: editorialRequestViewExampleCover.state,
+  request: {
+    schemaVersion: editorialRequestViewExampleCover.request.schemaVersion,
+    briefing: editorialRequestViewExampleCover.request.briefing,
+    objective: editorialRequestViewExampleCover.request.objective,
+    desiredAction: editorialRequestViewExampleCover.request.desiredAction,
+    directives: [{ id: 'f1', kind: 'output-layout', value: 'source-native', param: 'horizontal' }],
+    variantOverrides: editorialRequestViewExampleCover.request.variantOverrides,
+    requestHash: editorialRequestViewExampleCover.request.requestHash,
+  },
+  interpretation: editorialRequestViewExampleCover.interpretation,
+  interpretationAudit: editorialRequestViewExampleCover.interpretationAudit,
+  unsupported: editorialRequestViewExampleCover.unsupported,
+  openQuestions: editorialRequestViewExampleCover.openQuestions,
+  blocksDirector: editorialRequestViewExampleCover.blocksDirector,
+  hashes: editorialRequestViewExampleCover.hashes,
+}
 const projectLutSelectionExampleV3 = {
   ...projectLutSelectionExampleV2,
   version: {
@@ -14733,6 +14789,50 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       data: { ...editorialRequestRevisedExample, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2, blocksDirector: true },
       meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/confirm-speech-removal-request/v1': [{
+      baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-example-1', variantId: 'variant-example-1',
+      subject: '<assunto>', reason: '<motivo da confirmação>',
+    }],
+    'apollo://schemas/confirm-speech-removal-request/v2': [
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-example-1', variantId: 'variant-example-1', subject: '<assunto>', proposalHash: 'b'.repeat(64) },
+      {
+        baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-example-1', variantId: 'variant-example-1',
+        subject: '<assunto>', proposalHash: 'b'.repeat(64), adjustments: [{ passageId: 'passage-0123456789', startSeconds: 10.5, endSeconds: 42 }],
+        discardedPassageIds: ['passage-9876543210'], reason: '<motivo da confirmação>',
+      },
+    ],
+    'apollo://schemas/editorial-request-response/v3': [{ data: currentEditorialRequestExampleCover, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/editorial-request-revise-request/v4': [
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), briefing: editorialRequestCoverBriefingExample, reason: '<motivo da revisão>' },
+      {
+        baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), reason: '<motivo da revisão>',
+        directives: [
+          { id: 'f1', kind: 'output', value: 'aspect', param: '9:16' },
+          { id: 'f2', kind: 'output-layout', value: 'fill-following-face', param: '9:16' },
+          { id: 'f3', kind: 'cta-text', value: 'set', param: '<texto da chamada>' },
+        ],
+      },
+      { baseVersionId: editorialRequestImpactExample.baseVersionId, baseHash: 'a'.repeat(64), answers: [{ questionId: 'q1', choiceId: 'c1' }] },
+    ],
+    'apollo://schemas/editorial-request-revised/v4': [{
+      data: {
+        ...editorialRequestRevisedExample, ...currentEditorialRequestExampleCover, change: { ...editorialRequestRevisedExample.change, objective: 'kept' },
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/batch-editorial-request-response/v2': [{
+      data: { ...batchEditorialRequestExample, request: currentEditorialRequestExampleCover.request, interpretation: editorialRequestInterpretationExampleCover, openQuestions: [] },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/batch-editorial-request-revised/v2': [{
+      data: {
+        ...batchEditorialRequestExample, request: currentEditorialRequestExampleCover.request, interpretation: editorialRequestInterpretationExampleCover, openQuestions: [],
+        blocksGeneration: false, revision: { sequence: 1, createdAt },
+        change: { previousRequestHash: editorialRequestViewExample.hashes.requestHash, briefing: 'replaced', answeredQuestionIds: [], interpreted: true },
+        replayed: false,
+      },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/batch-editorial-request-response/v1': [{
       data: { ...batchEditorialRequestExample, interpretation: editorialRequestInterpretationExampleV2, openQuestions: editorialRequestOpenQuestionsExampleV2 },
       meta: { apiVersion: 'v1' },
@@ -15695,6 +15795,17 @@ type ExampleNode = { [key: string]: unknown }
 const clonedExamples = (ref: string): ExampleNode[] => structuredClone([...(BASE_PUBLIC_SCHEMA_EXAMPLES[ref] ?? [])]) as ExampleNode[]
 const exampleNode = (parent: ExampleNode, ...path: readonly string[]): ExampleNode =>
   path.reduce<ExampleNode>((current, key) => current[key] as ExampleNode, parent)
+// ADR-160 F4: a cut of the source applies no movement, so its opening has no window to protect.
+const editCommandAppliedExamplesV9: ExampleNode[] = clonedExamples('apollo://schemas/project-edit-command-applied/v8').map((example) => {
+  const cloned = structuredClone(example) as Record<string, unknown>
+  exampleNode(cloned, 'data', 'editorial').protectedOpeningFrames = 0
+  return cloned
+})
+// What a Command on a project with several outputs says instead of `operation`: no proxy was enqueued, these outputs' proxies are to be requested.
+const perOutputProxyRendersExample = {
+  status: 'per-output-request-required', reason: 'output-variant-required',
+  outputs: [{ variantId: EXAMPLE_VERTICAL_VARIANT_ID, aspectRatio: '9:16' }, { variantId: 'variant-example-wide', aspectRatio: '16:9' }],
+}
 const withStableFormatIds = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(withStableFormatIds)
   if (value === null || typeof value !== 'object') return value
@@ -15797,11 +15908,43 @@ const MULTI_OUTPUT_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>>
     'apollo://schemas/director-quality-report-read/v3': directorQualityReadExamplesV3,
     'apollo://schemas/director-quality-report-read/v4': directorQualityReadExamplesV4,
     // ADR-160 F4: a cut of the source applies no movement, so its opening has no window to protect.
-    'apollo://schemas/project-edit-command-applied/v9': clonedExamples('apollo://schemas/project-edit-command-applied/v8').map((example) => {
-      const cloned = structuredClone(example) as Record<string, unknown>
-      exampleNode(cloned, 'data', 'editorial').protectedOpeningFrames = 0
-      return cloned
-    }),
+    'apollo://schemas/project-edit-command-applied/v9': editCommandAppliedExamplesV9,
+    // A project with two outputs: the Command committed, no proxy was enqueued, and the answer says which outputs' proxies to request.
+    'apollo://schemas/project-edit-command-applied/v10': [
+      ...structuredClone(editCommandAppliedExamplesV9),
+      ...structuredClone(editCommandAppliedExamplesV9).filter((example) => 'operation' in ((example as { data: object }).data)).map((example) => {
+        const cloned = structuredClone(example) as { data: Record<string, unknown> }
+        delete cloned.data.operation
+        cloned.data.proxyRenders = perOutputProxyRendersExample
+        return cloned
+      }),
+    ],
+    'apollo://schemas/review-patch-applied/v4': [
+      ...structuredClone(BASE_PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/review-patch-applied/v3'] ?? []),
+      ...structuredClone(BASE_PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/review-patch-applied/v3'] ?? []).slice(0, 1).map((example) => {
+        const cloned = structuredClone(example) as { data: Record<string, unknown> }
+        delete cloned.data.operation
+        cloned.data.proxyRenders = perOutputProxyRendersExample
+        return cloned
+      }),
+    ],
+    'apollo://schemas/review-patch-batch-applied/v4': [
+      ...structuredClone(BASE_PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/review-patch-batch-applied/v3'] ?? []),
+      ...structuredClone(BASE_PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/review-patch-batch-applied/v3'] ?? []).slice(0, 1).map((example) => {
+        const cloned = structuredClone(example) as { data: Record<string, unknown> }
+        delete cloned.data.operation
+        cloned.data.proxyRenders = perOutputProxyRendersExample
+        return cloned
+      }),
+    ],
+    'apollo://schemas/project-lut-selection-applied/v4': [
+      ...structuredClone(BASE_PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/project-lut-selection-applied/v3'] ?? []),
+      { data: { ...projectLutSelectionExampleV3, proxyRenders: perOutputProxyRendersExample }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/project-color-plan-applied/v2': [
+      ...structuredClone(BASE_PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/project-color-plan-applied/v1'] ?? []),
+      { data: { ...projectColorPlanResultExample, proxyRenders: perOutputProxyRendersExample }, meta: { apiVersion: 'v1' } },
+    ],
   })
 })()
 

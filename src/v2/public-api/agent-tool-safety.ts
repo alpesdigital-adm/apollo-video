@@ -555,6 +555,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible immutable project version against an exact base version and edit-plan hash.',
     },
+    'apollo.projects.speech-removals.confirm': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Cuts the stretches of speech about one subject the owner was shown, from the rule the Apollo itself proposed for that subject, only after explicit approval; the cut is a reversible immutable version.',
+    },
     'apollo.projects.director-runs.enqueue': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Queues one lease-fenced Director run against an exact immutable base and allocates only its result version identity.',

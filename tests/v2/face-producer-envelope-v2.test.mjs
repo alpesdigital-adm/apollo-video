@@ -168,11 +168,11 @@ test('only the accepted producer on an accepted, parity-proven platform is authe
   assert.equal(authenticateFaceProducer(acceptedProducer('win32')).authenticated, true)
   assert.equal(ACCEPTED_FACE_PRODUCERS.length, 1)
   assert.equal(faceWorkerPlatformAccepted('win32'), true)
-  // Linux has no parity receipt yet: envelopes still read as data but never authenticate, and the worker may not start.
-  assert.equal(faceWorkerPlatformAccepted('linux'), false)
-  const linux = acceptedProducer('win32')
-  linux.runtime.platform = 'linux'
-  assert.deepEqual(authenticateFaceProducer(linux).reasons, ['RUNTIME_PLATFORM_NOT_PARITIED'])
+  // A platform with no receipt: envelopes still read as data but never authenticate, and the worker may not start.
+  assert.equal(faceWorkerPlatformAccepted('darwin'), false)
+  const unreceipted = acceptedProducer('win32')
+  unreceipted.runtime.platform = 'darwin'
+  assert.deepEqual(authenticateFaceProducer(unreceipted).reasons, ['RUNTIME_PLATFORM_NOT_PARITIED'])
   const mutate = (change) => { const producer = clone(acceptedProducer('win32')); change(producer); return authenticateFaceProducer(producer) }
   assert.deepEqual(mutate((p) => { p.runtime.openvinoVersion = '2026.5.0' }).reasons, ['RUNTIME_VERSION_MISMATCH'])
   assert.deepEqual(mutate((p) => { p.runtime.numpyVersion = '2.6.0' }).reasons, ['RUNTIME_VERSION_MISMATCH'])

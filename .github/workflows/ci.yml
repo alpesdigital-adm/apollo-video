@@ -378,6 +378,11 @@ jobs:
       - name: Run editorial renderer goldens
         run: npm run test:integration:editorial-renderer
 
+      # Proxy verification performance: source frames from ONE decoding pass (byte-identical to the 48-frame passes) and the master
+      # colour-normalized once per operation (the control renders read the first render's bytes). Counts ffmpeg passes and compares hashes.
+      - name: Run proxy verification performance proof
+        run: npm run test:integration:proxy-verify-perf
+
       # W70 readiness (R3): the caption text layout on the real renderer, real FFmpeg and the production W65 pixel critic, in both canvases -
       # captions drawn inside their certified band, a text that cannot fit is not cut, and a three-line 16:9 caption the critic's tolerance
       # lets through is blocked by the layout. libass draws the `Arial` style with Liberation Sans (metric-compatible) on the runner.

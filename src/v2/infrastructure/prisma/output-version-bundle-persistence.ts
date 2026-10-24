@@ -87,10 +87,12 @@ export async function persistOutputVersionBundleInTransactionV3(tx:OutputBundleT
       status:consumed}),stateJson:encode(s),stateHash:b.state.stateHash,createdAt:new Date(s.createdAt)})
   for(const e of s.entries) {
     const materialized=e.consumption.status==='materialized'?e.consumption.materialization:null
+    // One canonical text per document: the column and its hash are of the same string.
+    const entryJson=encode(e)
     await insert(tx,'project_output_state_entries',{stateId:s.id,variantId:e.variantId,projectId:v.projectId,workspaceId:v.workspaceId,
       outputSpecRevisionId:e.outputSpecRevisionId,specHash:e.specHash,canonicalPolicyVersion:e.canonicalPolicyVersion,
       geometryStatus:materialized?'materialized-v3':'blocked-v3',geometryProjectionHash:materialized?.materializationHash??null,
-      materializationId:materialized?.document.id??null,entryJson:encode(e),entryHash:sha(encode(e))})
+      materializationId:materialized?.document.id??null,entryJson,entryHash:sha(entryJson)})
   }
   await insert(tx,'project_versions',{id:v.id,workspaceId:v.workspaceId,projectId:v.projectId,sequence:v.sequence,
     parentVersionId:v.parentVersionId,briefSnapshotId:v.snapshotRefs.brief,policiesSnapshotId:v.snapshotRefs.policies,
@@ -101,10 +103,12 @@ export async function persistOutputVersionBundleInTransactionV3(tx:OutputBundleT
   // operational envelope uses the new canonical policy.
   const origin=JSON.parse(stableSerialize(b.origin))
   const body={...b,origin}
+  // Each of the three documents (the bundle is megabytes) is canonicalized once; its hash is of that very text.
+  const bundleJson=encode(body),originJson=encode(origin)
+  const producerPayloadJson=b.origin.kind==='ingest-operation'?null:encode(b.origin.kind==='create-output-variant'||b.origin.kind==='revise-output-spec'?b.origin.result.command.payload:(b.origin as Extract<typeof b.origin,{command:unknown}>).command.payload)
   await insert(tx,'output_operational_bundles',{versionId:v.id,workspaceId:v.workspaceId,projectId:v.projectId,stateId:s.id,
-    bundleJson:encode(body),bundleHash:sha(encode(body)),originJson:encode(origin),originHash:sha(encode(origin)),
-    producerPayloadJson:b.origin.kind==='ingest-operation'?null:encode(b.origin.kind==='create-output-variant'||b.origin.kind==='revise-output-spec'?b.origin.result.command.payload:(b.origin as Extract<typeof b.origin,{command:unknown}>).command.payload),
-    producerPayloadHash:b.origin.kind==='ingest-operation'?null:sha(encode(b.origin.kind==='create-output-variant'||b.origin.kind==='revise-output-spec'?b.origin.result.command.payload:(b.origin as Extract<typeof b.origin,{command:unknown}>).command.payload))})
+    bundleJson,bundleHash:sha(bundleJson),originJson,originHash:sha(originJson),
+    producerPayloadJson,producerPayloadHash:producerPayloadJson===null?null:sha(producerPayloadJson)})
 }
 
 /**
@@ -133,7 +137,13 @@ import { createMediaTranscript } from '../../domain/media-transcript.ts'
 import { mediaLibrarySearchField } from '../../domain/media-library.ts'
 /** Called only after the owner has operation/detail/Project locks. Artifacts
  * are locked in UTF8/C order before manifest/probe/receipt publication. */
-export async function persistOperationalIngestFactsInTransactionV3(tx:Prisma.TransactionClient,input:PreparedOperationalIngestV3) {
+/**
+ * Everything about prepared ingest facts that is a function of the facts alone: the receipt's validation (which recomputes the hashes of a
+ * document that embeds the master's receipt), the transcript's seal, the color probes' seals and the scopes they name. Nothing here reads
+ * the database, so a writer runs it BEFORE its transaction and hands the result in: the transaction then spends its 30 s on the writes and
+ * the checks that need its locks. It answers the validated receipt.
+ */
+export function validatePreparedOperationalIngestV3(input:PreparedOperationalIngestV3) {
   const n=validateOutputNormalizationV3(input.normalization),d=n.document,t=input.transcript
   if(d.kind!=='ffmpeg-video-derivative'||t.workspaceId!==d.workspaceId||t.projectId!==d.projectId||
     t.sourceArtifactId!==d.source.artifactId||t.sourceManifestId!==d.source.manifestId||
@@ -141,6 +151,15 @@ export async function persistOperationalIngestFactsInTransactionV3(tx:Prisma.Tra
     !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.sourceLinkId)||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.derivativeLinkId))
     throw new DomainError('PERSISTENCE_CONFLICT','Prepared ingest facts differ from producer')
+  for(const [probe,fact] of [[input.sourceColorProbe,d.source],[input.derivativeColorProbe,d.derivative]] as const) {
+    const {probeHash,...body}=probe,fresh=createMediaColorProbe(body)
+    if(fresh.probeHash!==probeHash||probe.workspaceId!==d.workspaceId||probe.artifactId!==fact.artifactId||probe.manifestId!==fact.manifestId)
+      throw new DomainError('PERSISTENCE_CONFLICT','Prepared ingest color scope/seal differs')
+  }
+  return n
+}
+export async function persistOperationalIngestFactsInTransactionV3(tx:Prisma.TransactionClient,input:PreparedOperationalIngestV3,validated?:ReturnType<typeof validatePreparedOperationalIngestV3>) {
+  const n=validated??validatePreparedOperationalIngestV3(input),d=n.document,t=input.transcript
   const ids=[d.source.artifactId,d.derivative.artifactId].sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b)))
   const held=await tx.$queryRawUnsafe<Array<{id:string}>>('SELECT id FROM media_artifacts WHERE "workspaceId"=$1 AND id IN ($2,$3) ORDER BY id COLLATE "C" FOR UPDATE',d.workspaceId,...ids)
   if(held.length!==2)throw new DomainError('PERSISTENCE_CONFLICT','Ingest referenced artifacts missing')
@@ -149,9 +168,7 @@ export async function persistOperationalIngestFactsInTransactionV3(tx:Prisma.Tra
   if(!upload)throw new DomainError('PERSISTENCE_CONFLICT','Prepared ingest upload is not verified/usable')
   for(const fact of [d.source,d.derivative])await tx.$queryRawUnsafe('SELECT 1 AS verified FROM w66_assert_artifact_fact_v3($1::jsonb,$2)',encode(fact),d.workspaceId)
   for(const [probe,fact] of [[input.sourceColorProbe,d.source],[input.derivativeColorProbe,d.derivative]] as const) {
-    const {probeHash,...body}=probe,fresh=createMediaColorProbe(body)
-    if(fresh.probeHash!==probeHash||probe.workspaceId!==d.workspaceId||probe.artifactId!==fact.artifactId||probe.manifestId!==fact.manifestId)
-      throw new DomainError('PERSISTENCE_CONFLICT','Prepared ingest color scope/seal differs')
+    const {probeHash}=probe
     const data={id:probe.id,workspaceId:probe.workspaceId,artifactId:probe.artifactId,manifestId:probe.manifestId,
       schemaVersion:probe.schemaVersion,state:probe.detection.state,
       metadataJson:stableSerialize(probe.detection.state==='ready'?probe.detection.metadata:null),

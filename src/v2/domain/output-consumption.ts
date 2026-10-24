@@ -31,10 +31,13 @@ export type OutputConsumptionVerdictV3 = Readonly<
  * reasons their State records.
  *
  * Policy for a cut copy (an editorial-derived materialization that still carries the fork lineage): its transcript and geometry
- * are sealed by the cut, so it is consumable to render and to critique; the target owns no perception (face) authority of its own
- * yet, so the final export stays blocked with `derived-source-perception-authority-required` until it does.
+ * are sealed by the cut, so it is consumable to render and to critique; the final export stays blocked with
+ * `derived-source-perception-authority-required` until the target owns a perception (face) authority of its own: its own Director run, which
+ * writes the server perception snapshot of a Version of the TARGET project (`targetPerceptionAuthority`, read by the caller from the target
+ * project's own rows; the source's perception is never adopted implicitly).
  */
-export function outputConsumptionVerdictV3(state: OutputConsumptionState, variantId: string | undefined, purpose: OutputConsumptionPurpose): OutputConsumptionVerdictV3 {
+export function outputConsumptionVerdictV3(state: OutputConsumptionState, variantId: string | undefined, purpose: OutputConsumptionPurpose,
+  targetPerceptionAuthority = false): OutputConsumptionVerdictV3 {
   if (!(OUTPUT_CONSUMPTION_PURPOSES as readonly string[]).includes(purpose)) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Unknown output consumption purpose')
   }
@@ -55,7 +58,7 @@ export function outputConsumptionVerdictV3(state: OutputConsumptionState, varian
   }
   if (entry!.consumption.status === 'blocked') return Object.freeze({ status: 'blocked', reasons: Object.freeze([...entry!.consumption.reasons]) })
   if (purpose === 'final' && entry!.consumption.materialization.document.schemaVersion === 'editorial-derived-materialization/v1' &&
-    document.sourceDependencies !== null) {
+    document.sourceDependencies !== null && !targetPerceptionAuthority) {
     return Object.freeze({ status: 'blocked', reasons: Object.freeze(['derived-source-perception-authority-required']) })
   }
   const ratio = outputEntryAspectRatio(entry!)

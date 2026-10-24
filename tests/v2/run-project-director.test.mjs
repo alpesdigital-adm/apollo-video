@@ -2089,3 +2089,103 @@ test('a Director context that does not state the speech the project asked to rem
   await assert.rejects(service(request()), (error) => error.code === 'PERSISTENCE_CONFLICT' && /asked to remove/.test(error.message))
   assert.equal(repository.lastBundle, undefined)
 })
+
+test('ADR-160 coverage: a request that fills the frame of an output is resolved per output, and the plan is composed for the outputs that are not filled', async () => {
+  const filled = fixture({ editorialRequest: { directives: [{ id: 'fill', kind: 'output-layout', value: 'fill-following-face', param: 'all' }] } })
+  const ratio = filled.repository.parent.state.document.entries[0].spec.output.aspectRatio
+  const [w, h] = ratio.split(':').map(Number)
+  // A source of the other shape: there is a frame to fill.
+  filled.repository.sourceDimensions = { width: h * 100, height: w * 100 }
+  const { run } = await filled.service(request({ idempotency: { key: 'coverage-fill' } }))
+  const layout = run.policyResolution.policies.layout
+  assert.deepEqual(layout.value.perOutput.map((entry) => [entry.aspectRatio, entry.mode]), [[ratio, 'fill-following-face']])
+  assert.equal(layout.origin, 'request-field')
+  assert.equal(layout.value.mode, 'fit-with-backdrop')
+  assert.equal(run.editPlan.composition.layout, 'landscape-inset')
+  const decision = run.decisions.find((item) => item.id === 'decision-layout-inset')
+  assert.match(decision.reason, /reframe trajectory of that output/)
+  assert.doesNotMatch(decision.reason, /applies no face-driven crop/)
+  // The sealed resolution is read back exactly as it was sealed.
+  const { parseEditorialPolicyResolution } = await import('../../src/v2/domain/editorial-policy-resolution.ts')
+  assert.equal(parseEditorialPolicyResolution(JSON.parse(JSON.stringify(run.policyResolution))).policyResolutionHash, run.policyResolution.policyResolutionHash)
+  // The same request over a source that already has the frame of the output has nothing to fill: the source is used as it is.
+  const native = fixture({ editorialRequest: { directives: [{ id: 'fill', kind: 'output-layout', value: 'fill-following-face', param: 'all' }] } })
+  native.repository.sourceDimensions = { width: w * 100, height: h * 100 }
+  const same = await native.service(request({ idempotency: { key: 'coverage-fill-native' } }))
+  assert.deepEqual(same.run.policyResolution.policies.layout.value.perOutput.map((entry) => entry.mode), ['source-native'])
+  assert.equal(same.run.editPlan.composition.layout, 'source-native')
+})
+
+test('ADR-160 coverage: the words of the written call belong to the request - the plan draws them, not the text of the desired action', async () => {
+  const directives = [{ id: 'words', kind: 'cta-text', value: 'set', param: 'Texto do pedido' }, { id: 'where', kind: 'cta', value: 'overlay-at-spoken-cta' }]
+  const { run } = await fixture({ projectObjective: 'sale', ctaText: 'Compre', editorialRequest: { directives } }).service(request({
+    objective: 'sale', desiredAction: { destination: { type: 'url', value: 'https://checkout.example/oferta' }, verbalCta: 'Compre' },
+    idempotency: { key: 'coverage-cta-text' },
+  }))
+  const [overlay] = run.editPlan.overlayTracks
+  assert.equal(overlay.text, 'Texto do pedido')
+  assert.equal(run.policyResolution.policies.ctaOverlay.value.text, 'Texto do pedido')
+  assert.equal(run.policyResolution.policies.ctaOverlay.origin, 'request-field')
+  // Said twice and differently, the Director stops and asks which one holds.
+  const conflict = fixture({ projectObjective: 'sale', ctaText: 'Compre', editorialRequest: { directives } })
+  await assert.rejects(conflict.service(request({
+    objective: 'sale', desiredAction: { destination: { type: 'url', value: 'https://checkout.example/oferta' }, verbalCta: 'Compre', visualCta: 'Outro texto' },
+    idempotency: { key: 'coverage-cta-text-conflict' },
+  })), (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.openQuestions.some((question) => question.id === 'cta-text-conflict'))
+  assert.equal(conflict.repository.lastBundle, undefined)
+})
+
+test('ADR-160 coverage: a subject the request takes out of the speech is searched in the transcript and asked to be confirmed; the confirmation is the removal Command, and the Director cuts nothing', async () => {
+  const sentence = 'A promoção relâmpago termina hoje à noite.'
+  const words = sentence.split(' ').map((word, index) => ({ word, start: 20 + index * 0.5, end: 20 + index * 0.5 + 0.4 }))
+  const transcript = {
+    id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'pt-BR', provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64),
+    words, segments: [{ id: 0, start: 20, end: 24, text: sentence }],
+  }
+  const editorialRequest = { directives: [{ id: 'cut', kind: 'remove-speech', value: 'about', param: 'relâmpago' }] }
+  const asked = fixture({ transcript, editorialRequest })
+  let refusal
+  await asked.service(request({ idempotency: { key: 'coverage-removal-ask' } })).catch((error) => { refusal = error })
+  assert.equal(refusal.code, 'PRECONDITION_REQUIRED')
+  assert.equal(refusal.details.reason, 'editorial-request-blocked')
+  const [question] = refusal.details.openQuestions
+  assert.equal(question.id, 'speech-removal-1')
+  assert.deepEqual(question.removal.matches, [{ startSeconds: 20, endSeconds: 24, text: sentence }])
+  assert.match(question.question, /Achei um trecho sobre “relâmpago” na fala/)
+  assert.equal(asked.repository.lastBundle, undefined, 'nothing is persisted, nothing is cut')
+  // The owner confirms with the removal Command carrying the proposed rule: the lineage now holds it, and the Director plans.
+  const [proposedRule] = defineEditorialPhraseRules([{ id: question.removal.ruleId, label: question.removal.label, alternatives: question.removal.alternatives }])
+  // The same cut sent through the general Command (no confirmation) is a valid cut that answers nothing: the Director still asks.
+  const explicit = fixture({ transcript, editorialRequest, requestedSpeechRemovals: [proposedRule] })
+  await assert.rejects(explicit.service(request({ idempotency: { key: 'coverage-removal-explicit' } })), (error) => error.details.openQuestions[0].id === 'speech-removal-1')
+  const requestedSpeechRemovals = [{ ...proposedRule, confirmation: { subject: 'relâmpago', medium: 'ui-session' } }]
+  const confirmed = fixture({ transcript, editorialRequest, requestedSpeechRemovals })
+  const { run } = await confirmed.service(request({ idempotency: { key: 'coverage-removal-confirmed' } }))
+  assert.deepEqual(run.policyResolution.policies.speechRemovals.value.ruleIds, [question.removal.ruleId])
+  assert.deepEqual(run.policyResolution.satisfied.map((item) => [item.kind, item.how]), [['remove-speech', 'confirmed-removal']])
+  assert.equal(hardCheck(run.qualityReport, 'forbiddenSpeechAbsent'), true)
+  // A transcript without words cannot be searched: the request says so instead of guessing.
+  const unsearchable = fixture({ editorialRequest })
+  await assert.rejects(unsearchable.service(request({ idempotency: { key: 'coverage-removal-no-words' } })), (error) =>
+    error.details.openQuestions[0].question.includes('ainda não tem transcrição'))
+})
+
+test('ADR-160 coverage: what the product guarantees and what it never adds are satisfied with their origin; a version the project does not have is asked, not invented', async () => {
+  const directives = [{ id: 'g', kind: 'invariant', value: 'captions-clear-of-face' }, { id: 'm', kind: 'absent', value: 'music' }, { id: 'e', kind: 'absent', value: 'transitions' }]
+  const { run } = await fixture({ editorialRequest: { directives } }).service(request({ idempotency: { key: 'coverage-satisfied' } }))
+  assert.deepEqual(run.policyResolution.satisfied.map((item) => [item.directiveId, item.how, item.origin, item.rule]), [
+    ['g', 'invariant', 'product-invariant', 'product-invariant'], ['m', 'default', 'silence-rule', 'minimal-intervention'], ['e', 'default', 'silence-rule', 'minimal-intervention'],
+  ])
+  assert.ok(run.policyResolution.satisfied.every((item) => item.reason.length > 40 && item.evidenceRefs.length > 0))
+  assert.equal(run.editPlan.audioTracks.length, 0, 'no music was added')
+  // The version of the output the project has is satisfied; one it has not is a question that blocks, in plain words.
+  const own = fixture().repository.parent.state.document.entries[0].spec.output.aspectRatio
+  const orientation = { '9:16': 'vertical', '4:5': 'vertical', '16:9': 'horizontal', '21:9': 'horizontal', '1:1': 'square' }[own]
+  const other = orientation === 'square' ? 'vertical' : 'square'
+  const have = await fixture({ editorialRequest: { directives: [{ id: 'o', kind: 'output', value: orientation }] } }).service(request({ idempotency: { key: 'coverage-output-have' } }))
+  assert.deepEqual(have.run.policyResolution.satisfied.map((item) => [item.kind, item.how]), [['output', 'project-outputs']])
+  const lacking = fixture({ editorialRequest: { directives: [{ id: 'o', kind: 'output', value: other }] } })
+  await assert.rejects(lacking.service(request({ idempotency: { key: 'coverage-output-lack' } })), (error) =>
+    error.details.openQuestions[0].id === `output-missing-${other}` && /Quer criar essa saída\?/.test(error.details.openQuestions[0].question))
+  assert.equal(lacking.repository.lastBundle, undefined)
+})

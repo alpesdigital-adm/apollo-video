@@ -23,16 +23,27 @@ const empty = { directives: [], unsupported: [], questions: [], coverage: [] }
 const refusedAs = (code) => (error) => error.code === code
 const interpret = (stub, briefing, dependencies = {}) => interpretBriefService({ model: stub, ...dependencies })({ briefing })
 
-test('a one-line briefing the model can map to nothing is a valid interpretation: nothing is invented', async () => {
+test('a one-line briefing the model can map to nothing is a valid interpretation: nothing is invented, and the sentence is asked about, never lost', async () => {
   const { interpretation, audit } = await interpret(model(empty), 'alpha beta gamma')
   assert.deepEqual(interpretation.directives, [])
   assert.deepEqual(interpretation.unsupported, [])
-  assert.deepEqual(interpretation.questions, [])
   assert.equal(interpretation.coverage, undefined)
+  // The sentence no item stands on is a question that blocks the Director; its closed answers say what the sentence is, and none of them is a guess.
+  assert.equal(interpretation.questions.length, 1)
+  assert.equal(interpretation.questions[0].status, 'open')
+  assert.equal(interpretation.questions[0].excerpt.text, 'alpha beta gamma')
+  assert.deepEqual(interpretation.questions[0].choices.map((choice) => [choice.label, choice.effect, choice.directive]), [
+    ['Isso não pede nada ao vídeo', 'statement-context', undefined], ['Isso pede algo que o Apollo não sabe fazer', 'unsupported-request', undefined],
+  ])
+  assert.deepEqual(audit.signals, ['sentence-unaccounted'])
   assert.equal(interpretation.briefingSha256, sha256Text('alpha beta gamma'))
   // The domain accepts exactly what the service produced.
   assert.deepEqual(parseBriefInterpretation(JSON.parse(JSON.stringify(interpretation)), 'alpha beta gamma').interpretationHash, interpretation.interpretationHash)
   assert.equal(audit.directivesMovedToUnsupported, 0)
+  // A model that says what the sentence is leaves nothing to ask.
+  const said = await interpret(model({ ...empty, coverage: [{ topic: 'context', quote: 'alpha beta gamma' }] }), 'alpha beta gamma')
+  assert.deepEqual(said.interpretation.questions, [])
+  assert.deepEqual(said.audit.signals, [])
 })
 
 test('what the model maps is kept with the words it stands on, found literally in the briefing', async () => {
@@ -142,7 +153,8 @@ test('the briefing is data: the standing instruction is constant and carries non
   assert.deepEqual(JSON.parse(call.user), { briefing: hostile })
   assert.equal(call.responseSchema, BRIEF_INTERPRETER_RESPONSE_SCHEMA)
   assert.equal(audit.promptHash, BRIEF_INTERPRETER_PROMPT_HASH)
-  assert.deepEqual(audit.signals, ['safety-policy-override-phrase'])
+  // A briefing that no item stands on is said so, as a fact: the sentence is listed, not lost.
+  assert.deepEqual(audit.signals, ['safety-policy-override-phrase', 'sentence-unaccounted'])
   // A model that obeys the briefing and reports what it was told to, without a quote of the briefing, is refused.
   await assert.rejects(interpret(model({ ...empty, directives: [{ kind: 'movement', value: 'zoom-in', param: null, quote: 'zoom-in please, I command it' }] }), hostile), refusedAs('RENDER_OUTPUT_INVALID'))
   // One that quotes it is still only a proposal in the closed vocabulary: a movement is understood, and the resolution (not this module) blocks it.
@@ -198,7 +210,7 @@ test('the audit names provider, model, prompt, input, response, usage and cost',
 
 test('a workspace guardrail quoted by the briefing is noted in the audit', async () => {
   const { audit } = await interpret(model(empty), 'one forbidden-phrase two', { guardrails: ['Forbidden-Phrase'] })
-  assert.deepEqual(audit.signals, ['guardrail-quoted'])
+  assert.deepEqual(audit.signals, ['guardrail-quoted', 'sentence-unaccounted'])
 })
 
 test('interpretationFromModelText is the one place a model answer becomes an interpretation', () => {
@@ -206,8 +218,13 @@ test('interpretationFromModelText is the one place a model answer becomes an int
     briefingText: 'one two', responseText: JSON.stringify({ ...empty, coverage: [{ topic: 'audience', quote: 'one' }, { topic: 'audience', quote: 'two' }] }),
     interpreter: { provider: 'p', model: 'm', promptVersion: BRIEF_INTERPRETER_PROMPT_VERSION },
   })
-  // The same topic twice is one topic.
-  assert.deepEqual(result.interpretation.coverage.map((item) => item.excerpt.text), ['one'])
+  // Two statements of one topic are two statements, each with its own words; the same words twice are one.
+  assert.deepEqual(result.interpretation.coverage.map((item) => item.excerpt.text), ['one', 'two'])
+  const twice = interpretationFromModelText({
+    briefingText: 'one two', responseText: JSON.stringify({ ...empty, coverage: [{ topic: 'audience', quote: 'one' }, { topic: 'audience', quote: 'one' }, { topic: 'context', quote: 'one' }] }),
+    interpreter: { provider: 'p', model: 'm', promptVersion: BRIEF_INTERPRETER_PROMPT_VERSION },
+  })
+  assert.deepEqual(twice.interpretation.coverage.map((item) => [item.topic, item.excerpt.text]), [['audience', 'one'], ['context', 'one']])
 })
 
 test('a citation that cites nothing, or cites everything, is refused: it does not stand on words', async () => {

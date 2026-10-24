@@ -1001,6 +1001,18 @@ export function retryOrFailPublicOperation(
   })
 }
 
+/**
+ * The instant a cancellation takes effect, given the operation row as the cancelling transaction just read it. A cancel stamps the instant
+ * it was requested BEFORE it opens its transaction; a worker heartbeat (or any other write) that commits in between carries a later
+ * `updatedAt`, and rejecting the cancel for that would refuse a legitimate request because someone else wrote first. What was read is by
+ * definition earlier than the cancel that follows it, so the cancel is recorded no earlier than the row it supersedes. Every other
+ * transition keeps `transitionDate`'s refusal of a backwards clock.
+ */
+export function cancellationInstant(operation: Readonly<Pick<PublicOperation, 'updatedAt'>>, requestedAt: string): string {
+  const requested = Date.parse(validateDate(requestedAt, 'canceledAt'))
+  return new Date(Math.max(requested, Date.parse(operation.updatedAt))).toISOString()
+}
+
 export function cancelPublicOperation(
   operation: PublicOperation,
   updatedAtValue: string,

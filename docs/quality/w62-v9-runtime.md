@@ -10,6 +10,9 @@ O runtime V9 existe, é testado contra stand-ins e contra vetores gerados pelo p
 falha fechado em todos os pontos de confiança. **Nada foi executado contra um banco PostgreSQL, contra o
 OpenVINO real nesta árvore, em Linux, nem em vídeo real.** Por isso não há implantação.
 
+*Atualização de 22/10/2026:* a paridade do detector em Linux foi medida em outra frente e **aceita pelo dono** (bloqueio 1 abaixo;
+`docs/adr/ADR-161-v9-linux-parity-criterion.md`). As demais lacunas deste parágrafo seguem valendo.
+
 ## Decisão de proprietário e escopo
 
 Aceite do proprietário (Brain #3677): rostos em primeiro plano e, em especial, o orador; 74,6% dos
@@ -99,17 +102,32 @@ Executado nesta árvore, sem banco, sem OpenVINO real:
    valor legado por construção, mas isso é raciocínio, não execução.
 2. **Composição sob tsx.** `npm run test:integration:face-window-composition` passa localmente (e passou no harness acima), mas não é passo de CI.
 3. **Runtime real.** O pipeline completo com OpenVINO real, FFmpeg real e vídeo real não foi executado nesta árvore.
-4. **Paridade em Linux** (abaixo).
+4. **Paridade em Linux**: executada e aceita pelo dono em 22/10/2026 (abaixo); o worker agora parte em Linux só com os bytes do recibo.
 5. **Medição em vídeo real** (abaixo).
 6. Regressão completa (`node --test` inteiro) e CI integral.
 
 ## Bloqueios de implantação
 
-1. **Execução supervisionada de paridade em Linux (obrigatória).** Rodas de produção em Linux fixadas por hash +
-   manifesto de runtime; as 60 imagens de desenvolvimento passam pelo detector no runtime Linux e as saídas são
+1. **Execução supervisionada de paridade em Linux (obrigatória) — ACEITO pelo dono em 22/10/2026** (Brain #3803;
+   recibo `docs/quality/w62-v9-linux-parity-receipt.json`; critério nomeado e limites em
+   `docs/adr/ADR-161-v9-linux-parity-criterion.md`). Resultado nas 60 imagens, Windows × Linux Intel × Linux AMD EPYC 9555P
+   (OpenVINO 2026.4.0): detecções com score >= 0,5 idênticas (V9 61/61, retail-0004 52/52), delta máximo de caixa/score
+   3,6e-7 e 8,9e-7; tensores brutos byte-idênticos em apenas 1/60 (V9) e 53/60 (retail), dependentes da CPU. **O critério
+   original (byte a byte) NÃO foi atendido**; o dono aceitou o critério `detections-identical-max-delta-1e-6`. O recibo vale
+   só para o interpretador, o manifesto de runtime e a ponte nomeados nele (qualquer outro byte volta a recusar). A medição
+   rodou a ponte do oráculo de pixels; o registro fixa a ponte do worker (no Windows ela reproduziu os tensores V9 do
+   oráculo em 60/60, uma corrida). **Fechado em 23/10/2026:** a ponte do worker (`36be4b38…`) rodou as mesmas 60 imagens no
+   droplet Linux AMD EPYC 9555P (ric1): 60/60 `observed`, 61 detecções com score >= 0,5 na mesma ordem, delta máximo
+   8,94e-7 contra o oráculo Windows e 8,34e-7 contra o Linux Intel, e tensores V9 byte-idênticos em 60/60 contra o oráculo
+   na mesma CPU. Os hashes calculados no droplet (interpretador `e50d468e…`, manifesto de runtime `5d5fbba5…` pelo hash
+   canônico `faceRuntimeManifestSha256` sobre 2028 arquivos, ponte `36be4b38…`) batem com os pinos do recibo; a composição
+   real de `createFaceWindowWorker` em Linux foi aceita, e com a ponte trocada recusou com `BRIDGE_PIN_MISMATCH`. Evidência
+   fora do repositório: `Documents/Apollo/w61-70-20261008/do-test-env/v9-linux-parity-20261022/worker-bridge-rerun/`.
+   Texto original do gate, mantido como histórico: rodas de
+   produção em Linux fixadas por hash + manifesto de runtime; as 60 imagens de desenvolvimento passam pelo detector no runtime Linux e as saídas são
    comparadas byte a byte com os tensores da V9, **sem ajustar nenhum parâmetro**. O recibo dessa execução entra
-   no registro (`ACCEPTED_FACE_PRODUCERS`) como uma nova plataforma; até lá o worker recusa partir em Linux e um
-   envelope Linux não é autenticado. A mesma execução conta quantos quadros caem na regra mais estrita desta
+   no registro (`ACCEPTED_FACE_PRODUCERS`) como uma nova plataforma; antes dele o worker recusava partir em Linux e um
+   envelope Linux não era autenticado. A mesma execução conta quantos quadros caem na regra mais estrita desta
    implementação (linha inválida com score entre 0,20 e 0,50 derruba o quadro, a V9 literal a descartava).
 2. **Execução supervisionada das suítes PostgreSQL** e da migração (item 1 acima).
 3. **Medição em vídeo real.** Os 74,6% são de JPEG parado; o produto decodifica quadros de vídeo. A taxa real

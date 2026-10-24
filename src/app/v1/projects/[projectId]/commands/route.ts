@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
-import { applyEditorialCutCommandService, type EditorialCutEditPlan } from '@/v2/application/apply-editorial-cut-command'
+import { applyEditorialCutCommandService } from '@/v2/application/apply-editorial-cut-command'
 import {
   requireScope,
 } from '@/v2/application/authenticate-api-client'
-import { enqueueProjectProxyRenderService } from '@/v2/application/enqueue-project-proxy-render'
+import { enqueueProjectProxyRenderAfterCommandService } from '@/v2/application/enqueue-project-proxy-render'
 import { replaceSourceTranscriptService } from '@/v2/application/replace-source-transcript'
 import { runProjectDirectorService } from '@/v2/application/run-project-director'
 import { DomainError } from '@/v2/domain/errors'
@@ -23,15 +23,16 @@ import {
   assertExternalMutationOrigin,
   authenticateExternalRequest,
 } from '@/v2/public-api/authentication'
+import { presentEditorialCutApplied } from '@/v2/public-api/editorial-cut-contract'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import type { StrategicObjectiveId } from '@/v2/domain/strategic-objective'
 import { parseDesiredActionInput } from '@/v2/domain/desired-action'
 import { createEvidenceBoundBriefCompiler } from '@/v2/infrastructure/brief/evidence-bound-brief-compiler-model'
 import {
   presentProjectVersionV2,
-  presentPublicOperation,
   presentSuccess,
 } from '@/v2/public-api/presenters'
+import { commandProxyRenderReplayed, presentCommandProxyRender } from '@/v2/public-api/command-proxy-render-contract'
 
 export const dynamic = 'force-dynamic'
 
@@ -134,7 +135,7 @@ export async function POST(
           : {}),
         ...(body.reason?.trim() ? { reason: body.reason.trim() } : {}),
       })
-      const proxy = await enqueueProjectProxyRenderService({
+      const proxy = await enqueueProjectProxyRenderAfterCommandService({
         projects: createProjectProxyRenderRepository(),
         operations: createPublicOperationRepository(),
         colorPipelines: createColorPipelineCompilationRepository(),
@@ -197,8 +198,8 @@ export async function POST(
           invalidations: result.invalidations,
           createdAt: result.run.createdAt,
         },
-        operation: presentPublicOperation(proxy.operation),
-        replayed: result.replayed && proxy.replayed,
+        ...presentCommandProxyRender(proxy),
+        replayed: result.replayed && commandProxyRenderReplayed(proxy),
       }), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
     }
     if (body.type === 'replace-source-transcript') {
@@ -278,9 +279,7 @@ export async function POST(
       actor,
       idempotency: { clientId: actor.clientId, key: idempotencyKey },
     })
-    // The sealed Command3 plan only promises validated fields; the response reads the compiled editorial plan fields.
-    const editPlan = result.editPlan as unknown as Readonly<EditorialCutEditPlan>
-    const proxy = await enqueueProjectProxyRenderService({
+    const proxy = await enqueueProjectProxyRenderAfterCommandService({
       projects: createProjectProxyRenderRepository(),
       operations: createPublicOperationRepository(),
       colorPipelines: createColorPipelineCompilationRepository(),
@@ -294,44 +293,7 @@ export async function POST(
       idempotencyKey: `${idempotencyKey}:proxy`,
       traceId: requestId,
     })
-    return NextResponse.json(
-      presentSuccess({
-        command: {
-          id: result.command.id,
-          type: result.command.type,
-          baseVersionId: result.command.baseVersionId,
-          resultVersionId: result.version.id,
-          createdAt: result.command.createdAt,
-        },
-        version: presentProjectVersionV2({
-          id: result.version.id,
-          sequence: result.version.sequence,
-          parentVersionId: result.version.parentVersionId,
-          baseHash: result.version.baseHash,
-          snapshotRefs: result.version.snapshotRefs,
-          createdAt: result.version.createdAt,
-        }, { current: true, previewAvailable: false }),
-        editorial: {
-          sourceTranscriptId: editPlan.retimedTranscript.sourceTranscriptId,
-          sourceArtifactId: editPlan.sources[0]!.artifactId,
-          // Only what the Command seals and validates is stated: range and the rules that matched it.
-          exclusions: result.exclusions.map(({ sourceStartSeconds, sourceEndSeconds, ruleIds }) => ({
-            sourceStartSeconds, sourceEndSeconds, ruleIds: [...ruleIds],
-          })),
-          retainedSourceRanges: result.retainedSourceRanges,
-          outputDurationFrames: editPlan.durationFrames,
-          fps: editPlan.fps,
-          automaticZoom: editPlan.movementPolicy.automaticZoom,
-          protectedOpeningFrames: editPlan.movementPolicy.protectedOpeningFrames,
-          subtitleFaceProtection: editPlan.subtitlePolicy.faceProtection,
-          impact: result.impact,
-          invalidations: result.invalidations,
-        },
-        operation: presentPublicOperation(proxy.operation),
-        replayed: result.replayed && proxy.replayed,
-      }),
-      { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) },
-    )
+    return NextResponse.json(presentSuccess(presentEditorialCutApplied(result, proxy)), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
   } catch (error) {
     return respondPublicError(error, requestId)
   }

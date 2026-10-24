@@ -138,8 +138,11 @@ test('coverage is part of the interpretation only when the interpreter found a t
   assert.deepEqual(parseBriefInterpretation(JSON.parse(JSON.stringify(covered)), BRIEFING), covered)
   assert.throws(() => createBriefInterpretation({ briefingText: BRIEFING, interpreter, directives: [], coverage: [{ topic: 'tone', excerpt: { start: 0, end: 4, text: 'beta' } }] }),
     (error) => error.code === 'INVALID_ARGUMENT')
+  // Two statements of one topic are two items; the very same words under the same topic twice are refused.
+  assert.doesNotThrow(() => createBriefInterpretation({ briefingText: BRIEFING, interpreter, directives: [],
+    coverage: [{ topic: 'tone', excerpt: excerptOf(BRIEFING, 'beta') }, { topic: 'tone', excerpt: excerptOf(BRIEFING, 'gamma') }] }))
   assert.throws(() => createBriefInterpretation({ briefingText: BRIEFING, interpreter, directives: [],
-    coverage: [{ topic: 'tone', excerpt: excerptOf(BRIEFING, 'beta') }, { topic: 'tone', excerpt: excerptOf(BRIEFING, 'gamma') }] }), (error) => error.code === 'INVALID_ARGUMENT')
+    coverage: [{ topic: 'tone', excerpt: excerptOf(BRIEFING, 'beta') }, { topic: 'tone', excerpt: excerptOf(BRIEFING, 'beta') }] }), (error) => error.code === 'INVALID_ARGUMENT')
   assert.throws(() => createBriefInterpretation({ briefingText: BRIEFING, interpreter, directives: [], coverage: [{ topic: 'budget', excerpt: excerptOf(BRIEFING, 'beta') }] }),
     (error) => error.code === 'INVALID_ARGUMENT')
   // Coverage found changes the request: the Director plans from the request it sealed.

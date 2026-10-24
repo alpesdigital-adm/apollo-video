@@ -35,6 +35,7 @@ import {
   advancePublicOperationPhase,
   assertPublicOperation,
   cancelPublicOperation,
+  cancellationInstant,
   isTerminalPublicOperation,
   rehydratePublicOperation,
   retryPublicOperation,
@@ -1248,7 +1249,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       throw new DomainError('INVALID_PUBLIC_OPERATION', 'Cancellation target is invalid')
     }
     const audit = assertAuthenticationAudit(input.authenticationAudit, input.workspaceId)
-    const canceledAt = parseCommandDate(input.canceledAt, 'canceledAt')
+    const requestedAt = parseCommandDate(input.canceledAt, 'canceledAt')
     return this.client.$transaction(async (transaction) => {
       const stored = await transaction.v2PublicOperation.findFirst({
         where: { id: input.operationId, workspaceId: input.workspaceId },
@@ -1256,6 +1257,8 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       })
       if (!stored) return null
       const current = hydratePublicOperationRecord(stored)
+      // A heartbeat committed after the request was stamped must not turn the cancel into a "time moved backwards" refusal.
+      const canceledAt = new Date(cancellationInstant(current.operation, requestedAt.toISOString()))
       const canceled = cancelPublicOperation(current.operation, canceledAt.toISOString())
       if (canceled.status !== 'canceled' || stored.status === 'canceled') return current
 
@@ -2856,19 +2859,25 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     if (!ID_PATTERN.test(input.leaseOwner) || leaseUntil.getTime() <= now.getTime()) {
       throw new DomainError('INVALID_PUBLIC_OPERATION', 'Heartbeat lease input is invalid')
     }
-    const updated = await this.client.v2PublicOperation.updateMany({
-      where: {
-        id: input.operationId,
-        status: 'running',
-        leaseOwner: input.leaseOwner,
-        attempt: input.attempt,
-        leaseExpiresAt: { gt: now },
-        heartbeatAt: { lte: now },
-        updatedAt: { lte: now },
-      },
-      data: { heartbeatAt: now, leaseExpiresAt: leaseUntil, updatedAt: now },
-    })
-    return updated.count === 1
+    const holds = {
+      id: input.operationId,
+      status: 'running',
+      leaseOwner: input.leaseOwner,
+      attempt: input.attempt,
+      leaseExpiresAt: { gt: now },
+      heartbeatAt: { lte: now },
+      updatedAt: { lte: now },
+    } as const
+    // The row is locked for the whole of the owner's persistence transaction (the Version, the State and the receipt it writes are
+    // megabytes): a heartbeat that waited for that lock waited seconds and then lost the race, failing an operation that was
+    // persisting. The renewal takes the row only if nobody holds it (SKIP LOCKED); when somebody does, the lease is read without a
+    // lock and, if it is still ours and unexpired, the heartbeat is answered as alive - the holder is the owner's own persistence
+    // (which fences on the lease itself when it commits) or a transition that will show on the next beat.
+    const renewed = await this.client.$executeRaw`UPDATE public_operations SET "heartbeatAt" = ${now}, "leaseExpiresAt" = ${leaseUntil}, "updatedAt" = ${now}
+      WHERE id IN (SELECT id FROM public_operations WHERE id = ${input.operationId} AND status = 'running' AND "leaseOwner" = ${input.leaseOwner}
+        AND attempt = ${input.attempt} AND "leaseExpiresAt" > ${now} AND "heartbeatAt" <= ${now} AND "updatedAt" <= ${now} FOR UPDATE SKIP LOCKED)`
+    if (renewed === 1) return true
+    return (await this.client.v2PublicOperation.count({ where: holds })) === 1
   }
 
   private async transitionRunning(

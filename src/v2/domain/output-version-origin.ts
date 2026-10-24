@@ -321,7 +321,7 @@ import type { ProjectOutputStateV2, ProjectOutputStateV3 } from './project-outpu
 import { createEditorialSourceBindingV1 } from './output-materialization.ts'
 import { CHILD_COMMAND_TRANSITIONS, type ChildCommandOriginV3 } from './output-child-command.ts'
 import { validateRenderableCompileOriginV3, type RenderableCompileOriginV3 } from './renderable-compile-command.ts'
-import type { EditorialCutPayloadV3 } from './editorial-cut-impact.ts'
+import { isSpeechRemovalConfirmationRecord, type EditorialCutPayloadV3 } from './editorial-cut-impact.ts'
 export type OperationalOutputOriginV3 = Readonly<
   { kind:'create-output-variant'|'revise-output-spec'; result:ReturnType<typeof createOutputVariantCommand> } |
   { kind:'ingest-operation'; operation:PublicOperation; requestFingerprint:string; leaseOwner:string;
@@ -419,7 +419,8 @@ export function validateOperationalOutputOriginV3(input: OperationalOutputOrigin
       exact(input,['kind','command','audit','requestFingerprint'])
       const c=input.command,p=c.payload,b=createEditorialSourceBindingV1(p.sourceBinding.document)
       exact(p,['schemaVersion','sourceTranscriptId','sourceArtifactId','variantId','rules','exclusions','sourceBinding','editPlanHash','audioProjection','impact',
-        ...(p.exclusionOverrides===undefined?[]:['exclusionOverrides'])])
+        ...(p.exclusionOverrides===undefined?[]:['exclusionOverrides']),...(p.confirmation===undefined?[]:['confirmation'])])
+      assertDomain(p.confirmation===undefined||isSpeechRemovalConfirmationRecord(p.confirmation),'INVALID_COMMAND','Editorial confirmation is malformed')
       const d=b.document
       requireOutputHash(p.editPlanHash,'editorial plan seal')
       assertDomain(c.type==='remove-spoken-content'&&p.schemaVersion===3&&c.author.type==='api-client'&&
@@ -431,7 +432,7 @@ export function validateOperationalOutputOriginV3(input: OperationalOutputOrigin
         base.state.document.entries.some(e=>e.variantId===p.variantId)&&stableSerialize(c.scope)===stableSerialize({project:true})&&
         input.requestFingerprint===calculateCanonicalHash({type:'remove-spoken-content',workspaceId:c.workspaceId,projectId:c.projectId,
           baseVersionId:c.baseVersionId,baseHash:c.baseHash,sourceTranscriptId:p.sourceTranscriptId,variantId:p.variantId,rules:p.rules,
-          exclusionOverrides:p.exclusionOverrides??null,reason:c.reason?.trim()||null,actorContextHash:input.audit.contextHash}),
+          exclusionOverrides:p.exclusionOverrides??null,...(p.confirmation?{confirmation:p.confirmation}:{}),reason:c.reason?.trim()||null,actorContextHash:input.audit.contextHash}),
         'INVALID_COMMAND','Editorial source binding, actor, intent or exact parent differs')
       assertDomain(p.rules.length>0&&p.exclusions.length>0&&p.exclusions.every((x,i)=>Number.isFinite(x.sourceStartSeconds)&&
         Number.isFinite(x.sourceEndSeconds)&&x.sourceStartSeconds>=0&&x.sourceEndSeconds>x.sourceStartSeconds&&

@@ -369,7 +369,7 @@ export class PrismaProjectColorPlanRepository implements ProjectColorPlanReposit
     return hydrate(row, false)
   }
 
-  async readEffectiveForVersion(input: { workspaceId: string; projectId: string; projectVersionId: string }) {
+  async readEffectiveForVersion(input: { workspaceId: string; projectId: string; projectVersionId: string }): ReturnType<ProjectColorPlanRepository['readEffectiveForVersion']> {
     const lineage = await this.client.$queryRaw<Array<{ colorPlanId: string }>>(Prisma.sql`
       WITH RECURSIVE lineage AS (
         SELECT "id", "parentVersionId", 0 AS depth
@@ -391,7 +391,15 @@ export class PrismaProjectColorPlanRepository implements ProjectColorPlanReposit
       LIMIT 1
     `)
     const colorPlanId = lineage[0]?.colorPlanId
-    if (!colorPlanId) return null
+    if (!colorPlanId) {
+      // A copy carries the ColorPlan its source had at the Version it was copied from, by reference, until one is made on it.
+      const root = await this.client.v2ProjectVersion.findFirst({ where: { workspaceId: input.workspaceId, projectId: input.projectId, parentVersionId: null },
+        select: { forkedFromProjectId: true, forkedFromVersionId: true } })
+      if (root?.forkedFromProjectId && root.forkedFromVersionId) {
+        return this.readEffectiveForVersion({ workspaceId: input.workspaceId, projectId: root.forkedFromProjectId, projectVersionId: root.forkedFromVersionId })
+      }
+      return null
+    }
     const row = await this.client.v2ProjectColorPlan.findUnique({ where: { id: colorPlanId }, include: colorPlanInclude })
     if (!row || row.workspaceId !== input.workspaceId || row.projectId !== input.projectId) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Effective project ColorPlan disappeared')

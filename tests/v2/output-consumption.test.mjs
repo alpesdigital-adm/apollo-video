@@ -44,6 +44,9 @@ test('policy: a cut copy is consumable to render and critic, and its final expor
   assert.equal(outputConsumptionVerdictV3(bundle, 'variant-1', 'render').status, 'allowed')
   assert.equal(outputConsumptionVerdictV3(bundle, 'variant-1', 'critic').status, 'allowed')
   assert.deepEqual(outputConsumptionVerdictV3(bundle, 'variant-1', 'final'), { status: 'blocked', reasons: ['derived-source-perception-authority-required'] })
+  // The target's own perception authority (its own Director run) lifts the block for the final, and only for it.
+  assert.equal(outputConsumptionVerdictV3(bundle, 'variant-1', 'final', true).status, 'allowed')
+  assert.equal(outputConsumptionVerdictV3(bundle, 'variant-1', 'final', false).status, 'blocked')
   // The block belongs to the fork lineage, not to the editorial materialization alone: a derived materialization without it is final-consumable.
   assert.equal(outputConsumptionVerdictV3(state3([materialized('variant-1', 'editorial-derived-materialization/v1')]), 'variant-1', 'final').status, 'allowed')
 })

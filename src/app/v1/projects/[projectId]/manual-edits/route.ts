@@ -205,6 +205,8 @@ export async function POST(
       workspaceId: actor.workspaceId,
       projectId,
       expectedProjectVersionId: result.version.id,
+      // The output the edit was made on is the one whose proxy is asked for; the other outputs are requested by their own variantId.
+      variantId: body.variantId,
       actor,
       idempotencyKey: `${idempotencyKey}:proxy`,
       traceId: requestId,

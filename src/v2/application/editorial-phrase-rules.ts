@@ -1,10 +1,22 @@
+import type { SpeechRemovalConfirmationRecord } from '../domain/editorial-cut-impact.ts'
 import { assertDomain } from '../domain/errors.ts'
 import type { MediaTranscript, TranscriptWord } from '../domain/media-transcript.ts'
+
+/**
+ * How a removal Command was confirmed when it confirms a cut the Apollo proposed (see `confirm-speech-removal.ts`): the subject it answers, the means of the
+ * verified human and, for a cut confirmed as passages, the bounds that were cut and whether the person moved them.
+ */
+export type SpeechRemovalConfirmation = SpeechRemovalConfirmationRecord
 
 export interface EditorialPhraseRule {
   id: string
   label: string
   alternatives: readonly (readonly string[])[]
+  /**
+   * Present only on a rule read back from a removal Command that CONFIRMED a proposal. A rule without it came from an explicit Command of the client: a valid cut,
+   * asked for explicitly, that is not the confirmation of any proposal (the id and the words of a proposal can be computed by anyone).
+   */
+  confirmation?: Readonly<SpeechRemovalConfirmation>
 }
 
 export interface SourceTimeRange {
@@ -114,6 +126,9 @@ export function editorialRulesMatchingSpeech(
   const tokens = editorialSpeechTokens(text)
   const found: string[] = []
   for (const rule of rules) {
+    // A rule whose confirmation recorded passages the person chose NOT to cut leaves the subject in the video on purpose, where the person kept it: the text of the
+    // captions cannot tell that stretch from a stretch that should be gone, so it is not judged by the words (the Command records which passages were kept).
+    if (rule.confirmation?.discarded !== undefined && rule.confirmation.discarded.length > 0) continue
     const present = rule.alternatives.some((phrase) => {
       for (let start = 0; start + phrase.length <= tokens.length; start += 1) {
         if (phrase.every((token, offset) => tokens[start + offset] === token)) return true

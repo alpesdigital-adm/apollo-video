@@ -55,8 +55,9 @@ export function acceptedProducer(platform = 'win32') {
     outputPolicy: { id: FACE0204_OUTPUT_POLICY_ID, sha256: FACE0204_OUTPUT_POLICY_SHA256 },
     runtime: { platform, pythonVersion: entry.pythonVersion, openvinoVersion: entry.openvinoVersion,
       openvinoPackageVersion: entry.openvinoPackageVersion, opencvVersion: entry.opencvVersion,
-      numpyVersion: entry.numpyVersion, runtimeManifestSha256: sha('5') },
-    adapterSha256: sha('1'), bridgeSha256: sha('2'), pythonExecutableSha256: sha('3'),
+      numpyVersion: entry.numpyVersion, runtimeManifestSha256: entry.pins?.runtimeManifestSha256 ?? sha('5') },
+    // A platform whose receipt names exact bytes (linux) is built from those bytes; the others keep arbitrary ones.
+    adapterSha256: sha('1'), bridgeSha256: entry.pins?.bridgeSha256 ?? sha('2'), pythonExecutableSha256: entry.pins?.pythonExecutableSha256 ?? sha('3'),
     ffmpegSha256: sha('4'), ffprobeSha256: sha('6'),
     assessment: { status: 'owner-accepted-scoped', scope: 'foreground-faces-and-speaker',
       ownerAcceptanceSha256: FACE_V9_OWNER_ACCEPTANCE_SHA256,

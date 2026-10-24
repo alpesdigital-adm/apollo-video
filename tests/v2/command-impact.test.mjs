@@ -132,9 +132,9 @@ function impactActor() {
 
 test('T-FR-236 exposes the resulting Command version as the current project head', () => {
   const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.commands.apply')
-  assert.equal(capability.version, '11.0.0')
+  assert.equal(capability.version, '12.0.0')
   assert.equal(capability.inputSchemaRef, 'apollo://schemas/apply-project-edit-command-request/v7')
-  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-edit-command-applied/v9')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-edit-command-applied/v10')
   for (const previousRef of [
     'apollo://schemas/project-edit-command-applied/v3',
     'apollo://schemas/project-edit-command-applied/v4',
@@ -147,8 +147,8 @@ test('T-FR-236 exposes the resulting Command version as the current project head
   }
 
   const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
-    .compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v9').schema)
-  for (const example of publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v9'))) {
+    .compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v10').schema)
+  for (const example of publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v10'))) {
     const body = structuredClone(example)
     body.data.version = presentProjectVersionV2(
       body.data.version,
@@ -172,8 +172,8 @@ test('apollo.projects.commands.apply 10.0.0 names the output variant a spoken-co
   assert.equal(request({ ...replacement, variantId: removal.variantId }), false, 'only the removal edits a variant')
   assert.equal(request({ ...direction, variantId: removal.variantId }), false, 'only the removal edits a variant')
 
-  const response = ajv().compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v9').schema)
-  const [editorial] = publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v9'))
+  const response = ajv().compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v10').schema)
+  const [editorial] = publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v10'))
   assert.equal(editorial.data.command.type, 'remove-spoken-content')
   const present = (body) => {
     const copy = structuredClone(body)
@@ -221,11 +221,11 @@ test('T-FR-236 exposes individual and batch patch result versions as current', (
     ['apollo.projects.review-patch-batches.apply', 'review-patch-batch-applied'],
   ]
   for (const [capabilityId, schemaName] of cases) {
-    assert.equal(capabilities.get(capabilityId).version, '3.0.0')
-    assert.equal(capabilities.get(capabilityId).outputSchemaRef, `apollo://schemas/${schemaName}/v3`)
+    assert.equal(capabilities.get(capabilityId).version, '4.0.0')
+    assert.equal(capabilities.get(capabilityId).outputSchemaRef, `apollo://schemas/${schemaName}/v4`)
     assert.equal(getPublicSchema(`apollo://schemas/${schemaName}/v2`).ref, `apollo://schemas/${schemaName}/v2`)
     const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
-      .compile(getPublicSchema(`apollo://schemas/${schemaName}/v3`).schema)
+      .compile(getPublicSchema(`apollo://schemas/${schemaName}/v4`).schema)
     const body = structuredClone(publicSchemaExamples(getPublicSchema(`apollo://schemas/${schemaName}/v2`))[0])
     body.data.version = presentProjectVersionV2(
       body.data.version,
@@ -497,7 +497,7 @@ test('T-FR-233 a manual Command result reuses proxy ranges or the unchanged prox
   const reusableProxyFixture = controlledReusableProxyFixture({
     onOperationLookup: (query) => { proxyLookup = query },
   })
-  const reusableProxyRepository = new PrismaProjectProxyRenderRepository({ async $queryRaw() { return [] }, v2VariantReframePlan: { async findFirst() { return null } }, v2SubtitleSegmentOverrideHead: { async findMany() { return [] } }, $queryRawUnsafe: resultWorld.queryRawUnsafe,
+  const reusableProxyRepository = new PrismaProjectProxyRenderRepository({ async $queryRaw() { return [] }, v2ProjectVersion: { async findFirst() { return null } }, v2VariantReframePlan: { async findFirst() { return null } }, v2SubtitleSegmentOverrideHead: { async findMany() { return [] } }, $queryRawUnsafe: resultWorld.queryRawUnsafe,
     v2Project: { async findFirst() { return {
       id: projectId, workspaceId, format: null, currentVersionId: resultVersionId,
       versions: [{
@@ -547,7 +547,7 @@ test('T-FR-233 a manual Command result reuses proxy ranges or the unchanged prox
     operation: { kind: 'select', clipId: 'clip-1' },
   })
   const selectionFixture = controlledReusableProxyFixture()
-  const selectionRepository = new PrismaProjectProxyRenderRepository({ async $queryRaw() { return [] }, v2VariantReframePlan: { async findFirst() { return null } }, v2SubtitleSegmentOverrideHead: { async findMany() { return [] } }, $queryRawUnsafe: resultWorld.queryRawUnsafe,
+  const selectionRepository = new PrismaProjectProxyRenderRepository({ async $queryRaw() { return [] }, v2ProjectVersion: { async findFirst() { return null } }, v2VariantReframePlan: { async findFirst() { return null } }, v2SubtitleSegmentOverrideHead: { async findMany() { return [] } }, $queryRawUnsafe: resultWorld.queryRawUnsafe,
     v2Project: { async findFirst() { return {
       id: projectId, workspaceId, format: null, currentVersionId: resultVersionId,
       versions: [{
@@ -674,7 +674,7 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
     draft: { status: 'approved', allowedUses: ['rendering'], prohibitedUses: [],
       consent: { status: 'not-required', allowedUses: [] } },
     createdBy: { type: 'user', id: 'owner-proxy-2' }, createdAt })
-  const repository = new PrismaProjectProxyRenderRepository({ async $queryRaw() { return [] }, v2VariantReframePlan: { async findFirst() { return null } }, v2SubtitleSegmentOverrideHead: { async findMany() { return [] } }, async $queryRawUnsafe() { return [] },
+  const repository = new PrismaProjectProxyRenderRepository({ async $queryRaw() { return [] }, v2ProjectVersion: { async findFirst() { return null } }, v2VariantReframePlan: { async findFirst() { return null } }, v2SubtitleSegmentOverrideHead: { async findMany() { return [] } }, async $queryRawUnsafe() { return [] },
     async $transaction(callback) {
       return callback({
         v2ProjectProxyRenderOperation: { async findFirst() { return {
@@ -770,7 +770,7 @@ test('W65 renderable snapshot attachment accepts only its own sealed null-OCR re
       execution: { tool: { id: 'ffmpeg', version: 'static', digest: 'f'.repeat(64) } } }],
   })
   let attached = 0
-  const repository = new PrismaProjectProxyRenderRepository({ async $queryRaw() { return [] }, v2VariantReframePlan: { async findFirst() { return null } }, v2SubtitleSegmentOverrideHead: { async findMany() { return [] } }, async $queryRawUnsafe() { return [] },
+  const repository = new PrismaProjectProxyRenderRepository({ async $queryRaw() { return [] }, v2ProjectVersion: { async findFirst() { return null } }, v2VariantReframePlan: { async findFirst() { return null } }, v2SubtitleSegmentOverrideHead: { async findMany() { return [] } }, async $queryRawUnsafe() { return [] },
     async $transaction(callback) {
       return callback({
         v2ProjectProxyRenderOperation: { async findFirst() { return {
@@ -1161,7 +1161,7 @@ test('T-FR-233 a review patch result reuses proxy ranges only with the attested 
     operationId: 'operation-review-base-1', manifestId: 'manifest-review-base-1',
     artifactKey: 'editorial-proxies/review-base.mp4',
   })
-  const rangeRepository = new PrismaProjectProxyRenderRepository({ async $queryRaw() { return [] }, v2VariantReframePlan: { async findFirst() { return null } }, v2SubtitleSegmentOverrideHead: { async findMany() { return [] } }, $queryRawUnsafe: resultWorld.queryRawUnsafe,
+  const rangeRepository = new PrismaProjectProxyRenderRepository({ async $queryRaw() { return [] }, v2ProjectVersion: { async findFirst() { return null } }, v2VariantReframePlan: { async findFirst() { return null } }, v2SubtitleSegmentOverrideHead: { async findMany() { return [] } }, $queryRawUnsafe: resultWorld.queryRawUnsafe,
     v2Project: { async findFirst() { return {
       id: projectId, workspaceId, format: null, currentVersionId: resultVersionId,
       versions: [{

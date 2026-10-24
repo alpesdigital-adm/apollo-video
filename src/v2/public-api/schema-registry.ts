@@ -22,6 +22,7 @@ import { ACCEPTED_FACE_PRODUCERS } from '../domain/face-producer-registry.ts'
 import { createProjectOutputVariantRequestSchema, outputBoundVersionSchemaFields,
   outputConsumptionSummarySchema } from './project-output-variant-contract.ts'
 import { PUBLIC_DATE_TIME_SCHEMA, PUBLIC_ID_SCHEMA } from './conventions.ts'
+import { COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA } from './command-proxy-render-contract.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import { PROJECT_DASHBOARD_EVENT_TYPES } from '../domain/public-event-feed.ts'
 import { PUBLIC_ERROR_CODES } from './public-error-catalog.ts'
@@ -107,7 +108,7 @@ import {
   MULTICAM_LONGFORM_GATE_SCHEMA_VERSION,
 } from '../domain/multicam-longform-gate.ts'
 import { COVERAGE_AVAILABILITIES } from '../domain/track-coverage.ts'
-import { EDITORIAL_DIRECTIVE_KINDS, EDITORIAL_DIRECTIVE_VOCABULARY } from '../domain/editorial-request.ts'
+import { BRIEF_CHOICE_EFFECTS, BRIEF_STATEMENT_TOPICS, EDITORIAL_DIRECTIVE_KINDS, EDITORIAL_DIRECTIVE_VOCABULARY } from '../domain/editorial-request.ts'
 import { DIRECTION_POLICY_OVERRIDE_KEYS } from '../application/multicam-direction.ts'
 import { STRATEGIC_OBJECTIVES } from '../domain/strategic-objective.ts'
 import { MULTICAM_LONGFORM_CHECK_CODES } from './multicam-longform-gate-contract.ts'
@@ -8543,13 +8544,26 @@ const projectPolicyOverridesResultSchema = {
 
 // ---- ADR-160 F6. The editorial request of a video: what the owner asked, how a model read the briefing, and what blocks the Director.
 const editorialDirectiveIdSchema = { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' }
+// The vocabulary of the first reading, frozen: a published ref describes exactly what it described when it was published. The vocabulary grew
+// (ADR-160, "vocabulário de cobertura") and the refs that carry the grown one are the Cover refs below.
+const EDITORIAL_DIRECTIVE_KINDS_V1 = ['movement', 'opening', 'structure', 'cta', 'layout', 'caption-language', 'caption-style', 'keep', 'avoid'] as const
 const editorialDirectiveSchema = {
+  type: 'object', additionalProperties: false, required: ['id', 'kind', 'value'],
+  properties: {
+    id: editorialDirectiveIdSchema,
+    kind: { enum: [...EDITORIAL_DIRECTIVE_KINDS_V1] },
+    value: { enum: [...new Set(EDITORIAL_DIRECTIVE_KINDS_V1.flatMap((kind) => EDITORIAL_DIRECTIVE_VOCABULARY[kind].values.filter((value) => !(kind === 'movement' && value === 'zoom'))))] },
+    param: { anyOf: [{ type: 'string', minLength: 1, maxLength: 200 }, { type: 'number', exclusiveMinimum: 0, maximum: 30 }] },
+  },
+}
+// The closed vocabulary as it stands now: every kind and value of the domain table, and the seconds a call to action may start at.
+const editorialDirectiveSchemaCover = {
   type: 'object', additionalProperties: false, required: ['id', 'kind', 'value'],
   properties: {
     id: editorialDirectiveIdSchema,
     kind: { enum: [...EDITORIAL_DIRECTIVE_KINDS] },
     value: { enum: [...new Set(EDITORIAL_DIRECTIVE_KINDS.flatMap((kind) => EDITORIAL_DIRECTIVE_VOCABULARY[kind].values))] },
-    param: { anyOf: [{ type: 'string', minLength: 1, maxLength: 200 }, { type: 'number', exclusiveMinimum: 0, maximum: 30 }] },
+    param: { anyOf: [{ type: 'string', minLength: 1, maxLength: 200 }, { type: 'number', exclusiveMinimum: 0, maximum: 3600 }] },
   },
 }
 const briefExcerptSchema = {
@@ -8817,6 +8831,86 @@ const batchEditorialRequestRevisedSchema = {
   },
 }
 
+// ---- ADR-160 (coverage vocabulary). The reading knows what the Apollo already did: the outputs, the frame of one output, the words of the written call to
+// action, a spoken subject to take out, the guarantees of the product and what it never adds. It asks, for each sentence of the briefing that no item
+// stands on, what it is, and states a sentence that asks nothing of the editing as a `context` statement. Every shape is a superset of the one before.
+// A closed answer makes a directive, or says what a sentence the Apollo could not place IS (a statement that asks nothing of the video, or something it does not do).
+const briefQuestionChoiceSchemaCover = {
+  type: 'object', additionalProperties: false, required: ['id', 'label'],
+  properties: { id: editorialDirectiveIdSchema, label: { type: 'string', minLength: 1, maxLength: 200 }, directive: editorialDirectiveSchemaCover, effect: { enum: [...BRIEF_CHOICE_EFFECTS] } },
+  oneOf: [{ required: ['directive'], properties: { directive: {} } }, { required: ['effect'], properties: { effect: {} } }],
+}
+const briefQuestionChoicesSchemaCover = { type: 'array', minItems: 2, maxItems: 8, items: briefQuestionChoiceSchemaCover }
+const briefInterpretationSchemaCover = {
+  ...briefInterpretationSchemaV2,
+  properties: {
+    ...briefInterpretationSchemaV2.properties,
+    directives: { type: 'array', maxItems: 64, items: { ...editorialDirectiveSchemaCover, required: [...editorialDirectiveSchemaCover.required, 'excerpt'], properties: { ...editorialDirectiveSchemaCover.properties, excerpt: briefExcerptSchema } } },
+    questions: { type: 'array', maxItems: 64, items: {
+      ...briefInterpretationSchema.properties.questions.items,
+      properties: { ...briefInterpretationSchema.properties.questions.items.properties, choices: briefQuestionChoicesSchemaCover },
+    } },
+    coverage: { type: 'array', minItems: 1, maxItems: 64, items: {
+      type: 'object', additionalProperties: false, required: ['topic', 'excerpt'],
+      properties: { topic: { enum: [...BRIEF_STATEMENT_TOPICS] }, excerpt: briefExcerptSchema },
+    } },
+  },
+}
+const editorialRequestBodySchemaCover = {
+  ...currentEditorialRequestSchema.properties.request,
+  properties: {
+    ...currentEditorialRequestSchema.properties.request.properties,
+    directives: { type: 'array', maxItems: 64, items: editorialDirectiveSchemaCover },
+    variantOverrides: { type: 'object', additionalProperties: { type: 'array', maxItems: 64, items: editorialDirectiveSchemaCover } },
+  },
+}
+const currentEditorialRequestSchemaCover = {
+  ...currentEditorialRequestSchemaV2,
+  properties: {
+    ...currentEditorialRequestSchemaV2.properties,
+    request: editorialRequestBodySchemaCover,
+    interpretation: { anyOf: [{ type: 'null' }, briefInterpretationSchemaCover] },
+    openQuestions: { type: 'array', maxItems: 64, items: {
+      ...currentEditorialRequestSchema.properties.openQuestions.items,
+      properties: { ...currentEditorialRequestSchema.properties.openQuestions.items.properties, choices: briefQuestionChoicesSchemaCover },
+    } },
+  },
+}
+const editorialRequestRevisionResultSchemaCover = {
+  ...editorialRequestRevisionResultSchemaV3,
+  properties: {
+    ...editorialRequestRevisionResultSchemaV3.properties,
+    request: currentEditorialRequestSchemaCover.properties.request,
+    interpretation: currentEditorialRequestSchemaCover.properties.interpretation,
+    openQuestions: currentEditorialRequestSchemaCover.properties.openQuestions,
+  },
+}
+const editorialRequestReviseRequestSchemaCover = {
+  ...editorialRequestReviseRequestSchemaV3,
+  properties: {
+    ...editorialRequestReviseRequestSchemaV3.properties,
+    directives: { type: 'array', maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'kind', 'value'], properties: editorialDirectiveSchemaCover.properties } },
+    variantOverrides: { type: 'object', maxProperties: 64, additionalProperties: { type: 'array', maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'kind', 'value'], properties: editorialDirectiveSchemaCover.properties } } },
+  },
+}
+const batchEditorialRequestResponseSchemaCover = {
+  ...batchEditorialRequestResponseSchema,
+  properties: {
+    ...batchEditorialRequestResponseSchema.properties,
+    request: { anyOf: [{ type: 'null' }, currentEditorialRequestSchemaCover.properties.request] },
+    interpretation: currentEditorialRequestSchemaCover.properties.interpretation,
+    openQuestions: currentEditorialRequestSchemaCover.properties.openQuestions,
+  },
+}
+const batchEditorialRequestRevisedSchemaCover = {
+  ...batchEditorialRequestRevisedSchema,
+  properties: {
+    ...batchEditorialRequestRevisedSchema.properties,
+    request: batchEditorialRequestResponseSchemaCover.properties.request,
+    interpretation: batchEditorialRequestResponseSchemaCover.properties.interpretation,
+    openQuestions: batchEditorialRequestResponseSchemaCover.properties.openQuestions,
+  },
+}
 function currentProjectVersionResultSchema(snapshotRefNames: readonly string[]) {
   return {
     type: 'object',
@@ -27302,6 +27396,44 @@ const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] 
   defineSchema('batch-editorial-request-response', 1, 'The editorial request of one production batch as it stands now: the briefing as written and how it was read, with what is unsupported, what is still a question (and the closed answers it offers), the revision it is at and whether it keeps the batch from being generated', successSchema(batchEditorialRequestResponseSchema)),
   defineSchema('batch-editorial-request-revise-request', 1, 'Answer the open questions of the request of a production batch, or give the batch a new briefing that is read again; the request it replaces is kept as a revision', batchEditorialRequestReviseRequestSchema),
   defineSchema('batch-editorial-request-revised', 1, 'The request of a production batch after a revision: how the briefing is read now, what changed and whether the batch can be generated', successSchema(batchEditorialRequestRevisedSchema)),
+  defineSchema('confirm-speech-removal-request', 1, 'Confirm the cut the Apollo proposed for a subject the editorial request asks to take out of the speech; the words of the cut are made by the Apollo, never by the caller', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash', 'sourceTranscriptId', 'variantId', 'subject'],
+    properties: {
+      baseVersionId: idSchema, baseHash: sha256Schema, sourceTranscriptId: idSchema, variantId: idSchema,
+      subject: { type: 'string', minLength: 1, maxLength: 200, description: 'The subject exactly as a remove-speech directive of the current request states it.' },
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+  }),
+  defineSchema('confirm-speech-removal-request', 2, 'Confirm the cut the Apollo proposed for a subject the editorial request asks to take out of the speech, as PASSAGES (a block of speech from the first sentence that mentions the subject to the last); the person may move where each passage starts and ends, within the limits the proposal gave, or choose not to cut a passage. The request carries the seal of what the person was shown. The words and the passages of the cut are made by the Apollo, never by the caller', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash', 'sourceTranscriptId', 'variantId', 'subject', 'proposalHash'],
+    properties: {
+      baseVersionId: idSchema, baseHash: sha256Schema, sourceTranscriptId: idSchema, variantId: idSchema,
+      subject: { type: 'string', minLength: 1, maxLength: 200, description: 'The subject exactly as a remove-speech directive of the current request states it.' },
+      proposalHash: { ...sha256Schema, description: 'The proposalHash of the proposal the person was shown (in the question of the Director). The Apollo searches the transcript again and refuses the confirmation when what it finds is not what the person saw: nothing is cut that was not seen.' },
+      discardedPassageIds: {
+        type: 'array', maxItems: 64, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 64 },
+        description: 'Optional. The passages of the proposal the person chose NOT to cut. They stay in the video and the Command records that they were offered and kept. At least one passage must be cut, and a discarded passage cannot be adjusted.',
+      },
+      adjustments: {
+        type: 'array', maxItems: 64,
+        description: 'Optional. The passages of the proposal whose start or end the person moved. A passage that is not named is cut as proposed. A start must be the start of a word or of a segment of the transcript and an end the end of one, inside the limits of the passage (not into the neighbouring passage, not beyond the speech), and the passage must still hold every mention that anchors it. Anything else refuses the whole confirmation: nothing is cut.',
+        items: {
+          type: 'object', additionalProperties: false, required: ['passageId', 'startSeconds', 'endSeconds'],
+          properties: {
+            passageId: { type: 'string', minLength: 1, maxLength: 64, description: 'The id of a passage of the proposal.' },
+            startSeconds: { type: 'number', minimum: 0, description: 'Where the passage starts instead, in seconds of the source.' },
+            endSeconds: { type: 'number', minimum: 0, description: 'Where the passage ends instead, in seconds of the source.' },
+          },
+        },
+      },
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+  }),
+  defineSchema('batch-editorial-request-response', 2, 'The editorial request of one production batch as it stands now, read with the coverage vocabulary: the versions asked for, the frame of one version, the words of the written call to action, a spoken subject to take out, the guarantees of the product and what the Apollo never adds, and, for each sentence it could not place, a question', successSchema(batchEditorialRequestResponseSchemaCover)),
+  defineSchema('batch-editorial-request-revised', 2, 'The request of a production batch after a revision, read with the coverage vocabulary', successSchema(batchEditorialRequestRevisedSchemaCover)),
+  defineSchema('editorial-request-revise-request', 4, 'Replace the parts of the editorial request of a video that the body names, with the coverage vocabulary: the versions asked for, the frame of one version, the words of the written call to action, a spoken subject to take out, the guarantees of the product and what the Apollo never adds', editorialRequestReviseRequestSchemaCover),
+  defineSchema('editorial-request-response', 3, 'The editorial request of the current Version read with the coverage vocabulary: what was asked, how the briefing was read, what is unsupported, and what is still a question (a sentence the Apollo could not place is one)', successSchema(currentEditorialRequestSchemaCover)),
+  defineSchema('editorial-request-revised', 4, 'A revised editorial request read with the coverage vocabulary: the EditCommand, the new Brief Snapshot state and the deferred render impact', successSchema(editorialRequestRevisionResultSchemaCover)),
   defineSchema('editorial-request-revise-request', 3, 'Replace the parts of the editorial request of a video that the body names, including its strategic objective while the project has none or no Director run exists; a question is answered in words or by choosing one of its closed answers', editorialRequestReviseRequestSchemaV3),
   defineSchema('editorial-request-revise-request', 2, 'Replace the parts of the editorial request of a video that the body names; a question is answered in words or by choosing one of its closed answers, and a choice becomes the directive of the same revision', editorialRequestReviseRequestSchemaV2),
   defineSchema('editorial-request-response', 2, 'The editorial request of the current Version: what was asked, how the briefing was read, what is unsupported and what is still a question, with the closed answers a question offers', successSchema(currentEditorialRequestSchemaV2)),
@@ -30208,18 +30340,20 @@ const PROJECT_WORKSPACE_V15 = derivedSchema('apollo://schemas/project-workspace/
   uncertainty.enum = [...(uncertainty.enum as string[]), 'crop', 'caption', 'insert']
 }, [PROJECT_WORKSPACE_V14])
 
+// ADR-160 F4: the opening window of an EditPlan is the one the editorial policy resolved - none when no movement is applied and the request
+// names no window - so `protectedOpeningFrames` may be 0. The refs before this one keep the minimum of 1 they were published with.
+const PROJECT_EDIT_COMMAND_APPLIED_V9 = derivedSchema('apollo://schemas/project-edit-command-applied/v8', {
+  id: 'project-edit-command-applied', version: 9,
+  title: 'Applied edit command response whose opening window is the one the editorial policy resolved (possibly none)',
+}, (body) => {
+  const data = schemaNode(body, 'properties', 'data')
+  const branches = data.oneOf as SchemaNode[]
+  schemaNode(branches[0]!, 'properties', 'editorial', 'properties').protectedOpeningFrames = { type: 'integer', minimum: 0 }
+})
+
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   ...PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS,
-  // ADR-160 F4: the opening window of an EditPlan is the one the editorial policy resolved - none when no movement is applied and the request
-  // names no window - so `protectedOpeningFrames` may be 0. The refs before this one keep the minimum of 1 they were published with.
-  derivedSchema('apollo://schemas/project-edit-command-applied/v8', {
-    id: 'project-edit-command-applied', version: 9,
-    title: 'Applied edit command response whose opening window is the one the editorial policy resolved (possibly none)',
-  }, (body) => {
-    const data = schemaNode(body, 'properties', 'data')
-    const branches = data.oneOf as SchemaNode[]
-    schemaNode(branches[0]!, 'properties', 'editorial', 'properties').protectedOpeningFrames = { type: 'integer', minimum: 0 }
-  }),
+  PROJECT_EDIT_COMMAND_APPLIED_V9,
   derivedSchema('apollo://schemas/project-subtitle-configuration-set-request/v1', {
     id: 'project-subtitle-configuration-set-request', version: 2,
     title: 'Set one closed subtitle mode for ONE output of the project (named by its stable variant id), or revert it',
@@ -30343,6 +30477,52 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     title: 'Count, filter, rank and bound the variant space before any paid job is created, against the objective of the batch or the one the request names',
   }, (body) => {
     schemaNode(body, 'properties').objective = { ...strategicObjectiveSchema, description: 'The objective the portfolio is judged against. Required when the batch was created with none (refused with the reason objective-required); never different from the batch objective when it has one.' }
+  }),
+  // Found by the W70 rehearsal: a project-wide Command on a project with SEVERAL outputs committed and then answered
+  // 428 output-variant-required, because the proxy it enqueues is rendered for one output and no Command chooses. It now answers
+  // success: `operation` is present when the Version has one output and absent when it has several, and `proxyRenders` then
+  // says which outputs' proxies are still to be requested. A published schema never changes under its ref: these are the versions that
+  // state it (the editorial and Director branches no longer require `operation`; LUT and ColorPlan only gain the field).
+  derivedSchema('apollo://schemas/project-edit-command-applied/v9', {
+    id: 'project-edit-command-applied', version: 10,
+    title: 'Applied edit command response whose proxy render is enqueued for a one-output project and left to be requested per output otherwise',
+  }, (body) => {
+    const branches = schemaNode(body, 'properties', 'data').oneOf as SchemaNode[]
+    for (const branch of [branches[0]!, branches[1]!]) {
+      branch.required = (branch.required as string[]).filter((key) => key !== 'operation')
+      schemaNode(branch, 'properties').proxyRenders = COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA
+    }
+  }, [PROJECT_EDIT_COMMAND_APPLIED_V9]),
+  derivedSchema('apollo://schemas/project-lut-selection-applied/v3', {
+    id: 'project-lut-selection-applied', version: 4,
+    title: 'Applied project LUT selection whose proxy is enqueued for a one-output project and left to be requested per output otherwise',
+  }, (body) => {
+    schemaNode(body, 'properties', 'data', 'properties').proxyRenders = COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA
+  }),
+  // The same defect and the same answer for a confirmed review patch (single and batch): the patch committed its Version and then enqueued "the" proxy, which
+  // a project with several outputs refuses (output-variant-required). `operation` (and the render attached to the proposal or batch) exists when the project has
+  // one output; `proxyRenders` says which outputs' proxies remain to be requested otherwise.
+  derivedSchema('apollo://schemas/review-patch-applied/v3', {
+    id: 'review-patch-applied', version: 4,
+    title: 'Confirmed patch result whose proxy is enqueued for a one-output project and left to be requested per output otherwise',
+  }, (body) => {
+    const data = schemaNode(body, 'properties', 'data')
+    data.required = (data.required as string[]).filter((key) => key !== 'operation')
+    schemaNode(data, 'properties').proxyRenders = COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA
+  }),
+  derivedSchema('apollo://schemas/review-patch-batch-applied/v3', {
+    id: 'review-patch-batch-applied', version: 4,
+    title: 'Confirmed batch patch result whose proxy is enqueued for a one-output project and left to be requested per output otherwise',
+  }, (body) => {
+    const data = schemaNode(body, 'properties', 'data')
+    data.required = (data.required as string[]).filter((key) => key !== 'operation')
+    schemaNode(data, 'properties').proxyRenders = COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA
+  }),
+  derivedSchema('apollo://schemas/project-color-plan-applied/v1', {
+    id: 'project-color-plan-applied', version: 2,
+    title: 'Applied content-addressed ColorPlan whose proxy is enqueued for a one-output project and left to be requested per output otherwise',
+  }, (body) => {
+    schemaNode(body, 'properties', 'data', 'properties').proxyRenders = COMMAND_PROXY_RENDERS_PER_OUTPUT_SCHEMA
   }),
 ])
 

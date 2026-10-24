@@ -29,9 +29,10 @@ const actor = () => {
   return Object.freeze({ ...auditContext, auditContext, scopes: new Set(['projects:write']), authenticationKind: 'bearer',
     clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' })
 }
-function stubModel(answer = { directives: [], unsupported: [], questions: [], coverage: [] }) {
+const { EVERY_SENTENCE_IS_CONTEXT } = await import('./helpers/brief-interpreter-stand-in.mjs')
+function stubModel(answer) {
   const calls = []
-  return { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', calls, async interpret(request) { calls.push(request); return { text: JSON.stringify(answer) } } }
+  return { provider: 'test-double', model: 'stub-1', costBasis: 'api-metered', calls, async interpret(request) { calls.push(request); return { text: JSON.stringify(answer ?? EVERY_SENTENCE_IS_CONTEXT(JSON.parse(request.user).briefing)) } } }
 }
 function memoryRepository() {
   const stored = new Map()
@@ -133,7 +134,7 @@ test('the published batch does not carry its stored request, and the contract as
 
 test('the request of a batch is read through its own capability: briefing, reading, unsupported items and questions, and a batch without a request says so', async () => {
   const model = stubModel({
-    directives: [{ kind: 'movement', value: 'zoom-in', quote: 'pedido' }], unsupported: [], questions: [{ question: 'Qual é o idioma?', quote: 'pedido' }], coverage: [{ topic: 'audience', quote: 'pedido' }],
+    directives: [{ kind: 'movement', value: 'zoom-in', quote: 'texto' }], unsupported: [], questions: [{ question: 'Qual é o idioma?', quote: 'pedido' }], coverage: [{ topic: 'audience', quote: 'pedido' }],
   })
   const { batch } = await service(memoryRepository(), model)(request())
   const { readProductionBatchEditorialRequestService } = await import('../../src/v2/application/production-batches.ts')
@@ -156,9 +157,9 @@ test('the request of a batch is read through its own capability: briefing, readi
   // The contract: a query with an immutable ref, an example of placeholders, and a response schema that accepts what is published.
   const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.batches.editorial-request.read')
   assert.equal(capability.endpoint.path, '/v1/batches/{batchId}/editorial-request')
-  assert.equal(capability.outputSchemaRef, 'apollo://schemas/batch-editorial-request-response/v1')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/batch-editorial-request-response/v2')
   assert.equal(capability.toolName, 'apollo.batches.editorial-request.read')
-  const schema = getPublicSchema('apollo://schemas/batch-editorial-request-response/v1')
+  const schema = getPublicSchema('apollo://schemas/batch-editorial-request-response/v2')
   const ajv = new Ajv2020({ strict: false, allErrors: true })
   addFormats(ajv)
   const validate = ajv.compile(schema.schema)

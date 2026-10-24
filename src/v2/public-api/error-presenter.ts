@@ -198,10 +198,114 @@ function presentDirectorInheritanceRefusal(details: Readonly<Record<string, unkn
   return presented
 }
 
+/** A sentence the Apollo wrote for the owner: plain text of bounded length, with nothing a control character could carry. */
+function plainSentence(value: unknown, max = 600): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= max && !/[\u0000-\u0008\u000e-\u001f\u007f]/u.test(value) ? value : undefined
+}
+
+const BLOCKER_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
+
+const second = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
+
+/**
+ * The passages of a cut to confirm, as the owner is shown them: the whole text, the mentions that anchor each, the limits within which its start and end may be
+ * moved and the segments around it to move them by. Anything out of shape is left out (a passage that cannot be shown whole is not offered).
+ */
+function presentRemovalPassages(value: unknown) {
+  if (!Array.isArray(value)) return undefined
+  const passages = value.slice(0, 64).flatMap((item) => {
+    const passage = item as Record<string, unknown> | null
+    const limits = passage?.limits as Record<string, unknown> | undefined
+    if (!passage || typeof passage.id !== 'string' || !BLOCKER_ID.test(passage.id) || !second(passage.startSeconds) || !second(passage.endSeconds) ||
+      !plainSentence(passage.text, 20_000) || !limits || !second(limits.earliestStartSeconds) || !second(limits.latestEndSeconds) ||
+      !Array.isArray(passage.mentions) || !Array.isArray(passage.segments) || !['sentence', 'segment', 'word'].includes(passage.boundary as string)) return []
+    const mentions = passage.mentions.slice(0, 256).flatMap((mention) => {
+      const entry = mention as Record<string, unknown> | null
+      return entry && second(entry.startSeconds) && second(entry.endSeconds) && plainSentence(entry.text, 300)
+        ? [{ startSeconds: entry.startSeconds, endSeconds: entry.endSeconds, text: entry.text }] : []
+    })
+    const segments = passage.segments.slice(0, 512).flatMap((segment) => {
+      const entry = segment as Record<string, unknown> | null
+      return entry && Number.isSafeInteger(entry.id) && second(entry.startSeconds) && second(entry.endSeconds) && plainSentence(entry.text, 2_000) && typeof entry.inPassage === 'boolean'
+        ? [{ id: entry.id, startSeconds: entry.startSeconds, endSeconds: entry.endSeconds, text: entry.text, inPassage: entry.inPassage }] : []
+    })
+    return [{
+      id: passage.id, startSeconds: passage.startSeconds, endSeconds: passage.endSeconds, text: passage.text, mentions, boundary: passage.boundary,
+      limits: { earliestStartSeconds: limits.earliestStartSeconds, latestEndSeconds: limits.latestEndSeconds }, segments,
+    }]
+  })
+  return passages.length === value.length ? passages : undefined
+}
+
+function presentRemovalSearch(value: unknown) {
+  const search = value as Record<string, unknown> | null | undefined
+  const policy = search?.policy as Record<string, unknown> | undefined
+  if (!search || (search.matching !== 'stem' && search.matching !== 'literal') || !policy || !plainSentence(policy.name, 100) || !second(policy.maxGapSeconds) ||
+    !second(policy.maxGapSentences) || !second(policy.maxSentenceSeconds) || !second(policy.maxPassageSeconds) || !second(policy.maxMentions)) return undefined
+  return {
+    matching: search.matching,
+    language: plainSentence(search.language, 35) ?? null,
+    lexicon: plainSentence(search.lexicon, 60) ?? null,
+    ...(plainSentence(search.notice, 600) ? { notice: search.notice } : {}),
+    policy: {
+      name: policy.name, maxGapSeconds: policy.maxGapSeconds, maxGapSentences: policy.maxGapSentences, maxSentenceSeconds: policy.maxSentenceSeconds,
+      maxPassageSeconds: policy.maxPassageSeconds, maxMentions: policy.maxMentions, origin: 'technical-search-parameter',
+    },
+  }
+}
+
+/**
+ * Why the Director refused a request, in the words the Apollo wrote for the owner: what it does not do, and what it still needs to ask (the cut to
+ * confirm comes with the exact rule and the stretches it would take out). Only these fields cross; anything else a domain throw carried stays internal.
+ */
+function presentEditorialRequestBlockers(details: Readonly<Record<string, unknown>>) {
+  const blockers: Record<string, unknown>[] = []
+  if (Array.isArray(details.unsupported)) {
+    for (const item of details.unsupported.slice(0, 64)) {
+      const record = item as Record<string, unknown> | null
+      const text = plainSentence(record?.summary)
+      if (record && typeof record.directiveId === 'string' && BLOCKER_ID.test(record.directiveId) && text) blockers.push({ kind: 'unsupported', id: record.directiveId, text })
+    }
+  }
+  if (Array.isArray(details.openQuestions)) {
+    for (const item of details.openQuestions.slice(0, 64)) {
+      const record = item as Record<string, unknown> | null
+      const text = plainSentence(record?.question, 2_000)
+      if (!record || typeof record.id !== 'string' || !BLOCKER_ID.test(record.id) || !text) continue
+      const removal = record.removal as Record<string, unknown> | undefined
+      const matches = Array.isArray(removal?.matches) ? (removal!.matches as unknown[]).slice(0, 64).flatMap((match) => {
+        const entry = match as Record<string, unknown> | null
+        return entry && Number.isFinite(entry.startSeconds) && Number.isFinite(entry.endSeconds) && plainSentence(entry.text, 300)
+          ? [{ startSeconds: entry.startSeconds, endSeconds: entry.endSeconds, text: entry.text }] : []
+      }) : undefined
+      const alternatives = Array.isArray(removal?.alternatives) ? (removal!.alternatives as unknown[]).slice(0, 8).flatMap((word) => plainSentence(word, 200) ? [word] : []) : undefined
+      blockers.push({
+        kind: 'question', id: record.id, text,
+        ...(removal && typeof removal.ruleId === 'string' && /^[a-z0-9][a-z0-9-]{1,63}$/u.test(removal.ruleId) && plainSentence(removal.label, 200) && matches && alternatives
+          ? { removal: {
+            ruleId: removal.ruleId, label: removal.label, alternatives, matches,
+            ...(typeof removal.proposalHash === 'string' && /^[a-f0-9]{64}$/u.test(removal.proposalHash) ? { proposalHash: removal.proposalHash } : {}),
+            ...(presentRemovalPassages(removal.passages) ? { passages: presentRemovalPassages(removal.passages) } : {}),
+            ...(presentRemovalSearch(removal.search) ? { search: presentRemovalSearch(removal.search) } : {}),
+            ...(plainSentence(removal.subject, 200) ? { subject: removal.subject } : {}),
+            ...(typeof removal.sourceTranscriptId === 'string' && BLOCKER_ID.test(removal.sourceTranscriptId) ? { sourceTranscriptId: removal.sourceTranscriptId } : {}),
+          } } : {}),
+      })
+    }
+  }
+  return blockers.length > 0 ? blockers : undefined
+}
+
 function presentPreconditionReason(details: Readonly<Record<string, unknown>>) {
-  return typeof details.reason === 'string' && PUBLISHED_PRECONDITION_REASONS.has(details.reason)
-    ? { reason: details.reason }
-    : undefined
+  if (typeof details.reason !== 'string' || !PUBLISHED_PRECONDITION_REASONS.has(details.reason)) return undefined
+  if (details.reason === 'editorial-request-blocked') {
+    const blockers = presentEditorialRequestBlockers(details)
+    return blockers ? { reason: details.reason, blockers } : { reason: details.reason }
+  }
+  if ((details.reason === 'reframe-plan-required' || details.reason === 'output-not-produced') && typeof details.variantId === 'string' && BLOCKER_ID.test(details.variantId)) {
+    return { reason: details.reason, variantId: details.variantId }
+  }
+  return { reason: details.reason }
 }
 
 export function presentPublicDomainError(error: DomainError, requestId: string) {
