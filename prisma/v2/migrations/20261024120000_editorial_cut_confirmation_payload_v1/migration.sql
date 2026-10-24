@@ -2,7 +2,36 @@
 -- payload.confirmation: { subject, medium } and, for a cut confirmed as passages, { passages, search } (the bounds that were cut, the bounds proposed,
 -- whether the person moved them, and how the speech was searched). The seal constraint of the remove-spoken-content payload listed an exact set of keys
 -- and so refused the Command that carries it: the same constraint, byte for byte, with the one optional key and its shape (the application validates the
--- rest; the Version origin verifier refuses a confirmation that is not exactly what the capability writes). A payload without the key is judged as before.
+-- rest; the Version origin verifier refuses a confirmation that is not exactly what the capability writes). The shape of the confirmation, passage by passage, is
+-- w66_editorial_confirmation_v1 (a CHECK cannot hold a subquery). A payload without the key is judged as before.
+CREATE FUNCTION w66_editorial_confirmation_v1(p_confirmation jsonb) RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE passage jsonb; search jsonb; policy jsonb;
+BEGIN
+ IF jsonb_typeof(p_confirmation) IS DISTINCT FROM 'object' THEN RETURN false; END IF;
+ IF NOT w66_v2_exact_json(p_confirmation, ARRAY['subject','medium'] || CASE WHEN p_confirmation ? 'passages' THEN ARRAY['passages','search'] ELSE ARRAY[]::text[] END) THEN RETURN false; END IF;
+ IF jsonb_typeof(p_confirmation -> 'subject') IS DISTINCT FROM 'string' OR (p_confirmation ->> 'subject') = ''
+ OR (p_confirmation ->> 'medium') NOT IN ('ui-session','api-key-scope') THEN RETURN false; END IF;
+ IF NOT (p_confirmation ? 'passages') THEN RETURN true; END IF;
+ IF jsonb_typeof(p_confirmation -> 'passages') IS DISTINCT FROM 'array' OR jsonb_array_length(p_confirmation -> 'passages') = 0 THEN RETURN false; END IF;
+ FOR passage IN SELECT e.element FROM jsonb_array_elements(p_confirmation -> 'passages') AS e(element) LOOP
+  IF NOT w66_v2_exact_json(passage, ARRAY['id','startSeconds','endSeconds','proposedStartSeconds','proposedEndSeconds','adjusted']) THEN RETURN false; END IF;
+  IF jsonb_typeof(passage -> 'id') IS DISTINCT FROM 'string' OR jsonb_typeof(passage -> 'adjusted') IS DISTINCT FROM 'boolean'
+  OR jsonb_typeof(passage -> 'startSeconds') IS DISTINCT FROM 'number' OR jsonb_typeof(passage -> 'endSeconds') IS DISTINCT FROM 'number'
+  OR jsonb_typeof(passage -> 'proposedStartSeconds') IS DISTINCT FROM 'number' OR jsonb_typeof(passage -> 'proposedEndSeconds') IS DISTINCT FROM 'number' THEN RETURN false; END IF;
+  IF (passage ->> 'startSeconds')::numeric < 0 OR (passage ->> 'endSeconds')::numeric <= (passage ->> 'startSeconds')::numeric
+  OR (passage ->> 'proposedStartSeconds')::numeric < 0 OR (passage ->> 'proposedEndSeconds')::numeric <= (passage ->> 'proposedStartSeconds')::numeric THEN RETURN false; END IF;
+  -- "adjusted" says whether the bounds that were cut are the bounds that were proposed.
+  IF (passage ->> 'adjusted')::boolean IS DISTINCT FROM ((passage ->> 'startSeconds')::numeric <> (passage ->> 'proposedStartSeconds')::numeric
+    OR (passage ->> 'endSeconds')::numeric <> (passage ->> 'proposedEndSeconds')::numeric) THEN RETURN false; END IF;
+ END LOOP;
+ search := p_confirmation -> 'search';
+ IF NOT w66_v2_exact_json(search, ARRAY['matching','language','lexicon','policy']) THEN RETURN false; END IF;
+ IF (search ->> 'matching') NOT IN ('stem','literal') OR jsonb_typeof(search -> 'language') NOT IN ('string','null') OR jsonb_typeof(search -> 'lexicon') NOT IN ('string','null') THEN RETURN false; END IF;
+ policy := search -> 'policy';
+ RETURN w66_v2_exact_json(policy, ARRAY['name','maxGapSeconds','maxGapSentences','maxSentenceSeconds'])
+  AND jsonb_typeof(policy -> 'name') IS NOT DISTINCT FROM 'string' AND jsonb_typeof(policy -> 'maxGapSeconds') IS NOT DISTINCT FROM 'number'
+  AND jsonb_typeof(policy -> 'maxGapSentences') IS NOT DISTINCT FROM 'number' AND jsonb_typeof(policy -> 'maxSentenceSeconds') IS NOT DISTINCT FROM 'number';
+END $$;
 ALTER TABLE "edit_commands" DROP CONSTRAINT "edit_commands_output_payload_seal_check";
 ALTER TABLE "edit_commands" ADD CONSTRAINT "edit_commands_output_payload_seal_check" CHECK (
   ("type" NOT IN ('create-output-variant', 'revise-output-spec') AND "outputPayloadJson" IS NULL AND "outputPayloadHash" IS NULL
@@ -25,16 +54,7 @@ ALTER TABLE "edit_commands" ADD CONSTRAINT "edit_commands_output_payload_seal_ch
     AND jsonb_typeof("outputPayloadJson"::jsonb -> 'rules') IS NOT DISTINCT FROM 'array'
     AND jsonb_typeof("outputPayloadJson"::jsonb -> 'exclusions') IS NOT DISTINCT FROM 'array'
     AND (NOT ("outputPayloadJson"::jsonb ? 'exclusionOverrides') OR jsonb_typeof("outputPayloadJson"::jsonb -> 'exclusionOverrides') IS NOT DISTINCT FROM 'array')
-    AND (NOT ("outputPayloadJson"::jsonb ? 'confirmation') OR (
-      w66_v2_exact_json("outputPayloadJson"::jsonb -> 'confirmation',ARRAY['subject','medium'] ||
-        CASE WHEN ("outputPayloadJson"::jsonb -> 'confirmation') ? 'passages' THEN ARRAY['passages','search'] ELSE ARRAY[]::text[] END)
-      AND jsonb_typeof("outputPayloadJson"::jsonb #> '{confirmation,subject}') IS NOT DISTINCT FROM 'string'
-      AND ("outputPayloadJson"::jsonb #>> '{confirmation,subject}') <> ''
-      AND ("outputPayloadJson"::jsonb #>> '{confirmation,medium}') IN ('ui-session','api-key-scope')
-      AND (NOT (("outputPayloadJson"::jsonb -> 'confirmation') ? 'passages') OR (
-        jsonb_typeof("outputPayloadJson"::jsonb #> '{confirmation,passages}') IS NOT DISTINCT FROM 'array'
-        AND jsonb_array_length("outputPayloadJson"::jsonb #> '{confirmation,passages}') > 0
-        AND jsonb_typeof("outputPayloadJson"::jsonb #> '{confirmation,search}') IS NOT DISTINCT FROM 'object'))))
+    AND (NOT ("outputPayloadJson"::jsonb ? 'confirmation') OR w66_editorial_confirmation_v1("outputPayloadJson"::jsonb -> 'confirmation'))
     AND jsonb_typeof("outputPayloadJson"::jsonb -> 'sourceBinding') IS NOT DISTINCT FROM 'object'
     AND jsonb_typeof("outputPayloadJson"::jsonb -> 'impact') IS NOT DISTINCT FROM 'object'
     AND jsonb_typeof("outputPayloadJson"::jsonb -> 'audioProjection') IN ('null','object')
