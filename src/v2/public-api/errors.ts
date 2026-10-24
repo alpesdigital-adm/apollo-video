@@ -21,6 +21,7 @@ export function publicApiHeaders(requestId: string): Record<string, string> {
 
 export function respondPublicError(error: unknown, requestId: string) {
   if (error instanceof DomainError) {
+    if (process.env.APOLLO_DEBUG_DOMAIN_ERRORS === '1') console.error('APOLLO_DEBUG_DOMAIN_ERROR', JSON.stringify({ requestId, code: error.code, message: error.message, details: error.details }))
     const status = PUBLIC_ERROR_CATALOG[error.code].status
     return NextResponse.json(
       presentPublicDomainError(error, requestId),

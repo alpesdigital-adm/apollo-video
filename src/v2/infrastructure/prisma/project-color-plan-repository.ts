@@ -369,7 +369,7 @@ export class PrismaProjectColorPlanRepository implements ProjectColorPlanReposit
     return hydrate(row, false)
   }
 
-  async readEffectiveForVersion(input: { workspaceId: string; projectId: string; projectVersionId: string }) {
+  async readEffectiveForVersion(input: { workspaceId: string; projectId: string; projectVersionId: string }): ReturnType<ProjectColorPlanRepository['readEffectiveForVersion']> {
     const lineage = await this.client.$queryRaw<Array<{ colorPlanId: string }>>(Prisma.sql`
       WITH RECURSIVE lineage AS (
         SELECT "id", "parentVersionId", 0 AS depth

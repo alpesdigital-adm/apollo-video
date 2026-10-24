@@ -300,7 +300,7 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
     return hydrate(row, false)
   }
 
-  async readEffectiveForVersion(input: { workspaceId: string; projectId: string; projectVersionId: string }) {
+  async readEffectiveForVersion(input: { workspaceId: string; projectId: string; projectVersionId: string }): ReturnType<ProjectLutSelectionRepository['readEffectiveForVersion']> {
     const lineage = await this.client.$queryRaw<Array<{ selectionId: string }>>(Prisma.sql`
       WITH RECURSIVE lineage AS (
         SELECT "id", "parentVersionId", 0 AS depth
